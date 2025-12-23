@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Statistics - Haven Watcher{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Live Extraction Overview</span>
+        <button class="btn btn-secondary" onclick="location.reload()">Refresh</button>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-item">
+            <div class="stat-value">{{ watcher_stats.get('live_extractions', 0) }}</div>
+            <div class="stat-label">Extractions This Session</div>
+        </div>
+        <div class="stat-item success">
+            <div class="stat-value">{{ db_stats.get('by_status', {}).get('submitted', 0) + db_stats.get('by_status', {}).get('success', 0) }}</div>
+            <div class="stat-label">Submitted</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value">{{ db_stats.total_processed }}</div>
+            <div class="stat-label">Total Processed</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value">{{ db_stats.total_planets }}</div>
+            <div class="stat-label">Planets Found</div>
+        </div>
+    </div>
+</div>
+
+{% if latest_extraction %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Latest Extraction</span>
+        <span class="badge badge-info">{{ latest_extraction.extraction_time[:16] if latest_extraction.extraction_time else 'Unknown' }}</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div>
+            <h3 style="color: var(--accent-blue); margin-bottom: 10px;">{{ latest_extraction.system_name }}</h3>
+            <table>
+                <tr><td>Star Type</td><td>{{ latest_extraction.star_type }}</td></tr>
+                <tr><td>Economy</td><td>{{ latest_extraction.economy_type }}</td></tr>
+                <tr><td>Conflict</td><td>{{ latest_extraction.conflict_level }}</td></tr>
+                <tr><td>Dominant Race</td><td>{{ latest_extraction.dominant_lifeform }}</td></tr>
+                <tr><td>Planets</td><td>{{ latest_extraction.planet_count }}</td></tr>
+            </table>
+        </div>
+        <div>
+            <h4 style="color: var(--text-secondary); margin-bottom: 10px;">Planets</h4>
+            {% for planet in latest_extraction.get('planets', []) %}
+            <div style="background: var(--bg-secondary); padding: 8px 12px; border-radius: 6px; margin-bottom: 8px;">
+                <div style="color: var(--text-primary);">{{ planet.planet_name }}</div>
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ planet.biome }} | {{ planet.weather }} | Sentinels: {{ planet.sentinel_level }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--accent-purple);">
+                    Flora: {{ planet.flora_level }} | Fauna: {{ planet.fauna_level }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Discoveries by Galaxy</span>
+        </div>
+        {% if db_stats.by_galaxy %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Galaxy</th>
+                    <th>Systems</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for galaxy, count in db_stats.by_galaxy.items() %}
+                <tr>
+                    <td>{{ galaxy }}</td>
+                    <td>{{ count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: var(--text-secondary); padding: 20px;">No galaxy data yet</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Submission Status</span>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-item success">
+                <div class="stat-value">{{ db_stats.get('by_status', {}).get('submitted', 0) }}</div>
+                <div class="stat-label">Submitted</div>
+            </div>
+            <div class="stat-item" style="--stat-color: var(--accent-purple);">
+                <div class="stat-value" style="color: var(--accent-purple);">{{ db_stats.get('by_status', {}).get('duplicate', 0) }}</div>
+                <div class="stat-label">Duplicates</div>
+            </div>
+            <div class="stat-item warning">
+                <div class="stat-value">{{ db_stats.get('by_status', {}).get('queued', 0) }}</div>
+                <div class="stat-label">Queued</div>
+            </div>
+            <div class="stat-item error">
+                <div class="stat-value">{{ db_stats.get('by_status', {}).get('error', 0) }}</div>
+                <div class="stat-label">Errors</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Recent Activity</span>
+    </div>
+    <div class="stats-grid">
+        <div class="stat-item">
+            <div class="stat-value">{{ db_stats.submissions_last_hour }}</div>
+            <div class="stat-label">Last Hour</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value">{{ db_stats.submissions_last_24h }}</div>
+            <div class="stat-label">Last 24 Hours</div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Session Info</span>
+    </div>
+    <table>
+        <tr>
+            <td>Watcher Status</td>
+            <td>
+                <span class="badge {{ 'badge-success' if watcher_running else 'badge-error' }}">
+                    {{ 'Active' if watcher_running else 'Stopped' }}
+                </span>
+            </td>
+        </tr>
+        <tr>
+            <td>Output Directory</td>
+            <td>{{ watcher_stats.get('output_dir', 'Not configured') }}</td>
+        </tr>
+        <tr>
+            <td>Poll Interval</td>
+            <td>{{ watcher_stats.get('poll_interval', 2.0) }}s</td>
+        </tr>
+    </table>
+</div>
+{% endblock %}

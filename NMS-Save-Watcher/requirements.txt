@@ -1,0 +1,22 @@
+# NMS Save Watcher Companion App - Dependencies
+
+# File watching
+watchdog>=3.0.0
+
+# LZ4 decompression for NMS save files
+lz4>=4.3.0
+
+# HTTP client
+requests>=2.31.0
+
+# Web dashboard
+fastapi>=0.104.0
+uvicorn>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# Windows notifications
+win10toast>=0.9
+
+# For packaging (optional, install with pip install pyinstaller)
+# pyinstaller>=6.0.0

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Haven Watcher{% endblock %}
+
+{% block content %}
+{% if message %}
+<div class="alert alert-{{ 'success' if message_type == 'success' else 'error' }}">
+    {{ message }}
+</div>
+{% endif %}
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">API Configuration</span>
+        </div>
+        <form action="/settings/api" method="POST">
+            <div class="form-group">
+                <label for="api_url">Haven Control Room URL</label>
+                <input type="text" id="api_url" name="base_url" value="{{ config.api.base_url }}" placeholder="http://localhost:8005">
+            </div>
+            <div class="form-group">
+                <label for="api_key">API Key</label>
+                <input type="password" id="api_key" name="key" value="{{ config.api.key }}" placeholder="vh_live_xxxxx">
+                <small style="color: var(--text-secondary); font-size: 0.8rem;">Get an API key from Voyagers Haven dashboard</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save API Settings</button>
+            <button type="button" class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+        </form>
+        <div id="connectionResult" style="margin-top: 15px;"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Live Extraction Configuration</span>
+        </div>
+        <form action="/settings/live_extraction" method="POST">
+            <div class="form-group">
+                <label for="output_dir">Extraction Output Directory</label>
+                <input type="text" id="output_dir" name="output_dir" value="{{ config.get('live_extraction', {}).get('output_dir') or '' }}" placeholder="Leave empty for default">
+                <small style="color: var(--text-secondary); font-size: 0.8rem;">Default: ~/Documents/Haven-Extractor</small>
+            </div>
+            <div class="form-group">
+                <label for="poll_interval">Poll Interval (seconds)</label>
+                <input type="number" id="poll_interval" name="poll_interval" value="{{ config.get('live_extraction', {}).get('poll_interval', 2.0) }}" min="0.5" max="30" step="0.5">
+                <small style="color: var(--text-secondary); font-size: 0.8rem;">How often to check for new extractions</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Extraction Settings</button>
+        </form>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Notifications</span>
+    </div>
+    <form action="/settings/notifications" method="POST">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" name="enabled" {{ 'checked' if config.notifications.enabled }}>
+                <span>Enable Notifications</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" name="on_success" {{ 'checked' if config.notifications.on_success }}>
+                <span>On Success</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" name="on_duplicate" {{ 'checked' if config.notifications.on_duplicate }}>
+                <span>On Duplicate</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" name="on_error" {{ 'checked' if config.notifications.on_error }}>
+                <span>On Error</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" name="on_offline_queue" {{ 'checked' if config.notifications.on_offline_queue }}>
+                <span>On Offline Queue</span>
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Save Notification Settings</button>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Dashboard Settings</span>
+    </div>
+    <form action="/settings/dashboard" method="POST">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div class="form-group">
+                <label for="dash_host">Host</label>
+                <input type="text" id="dash_host" name="host" value="{{ config.dashboard.host }}">
+            </div>
+            <div class="form-group">
+                <label for="dash_port">Port</label>
+                <input type="number" id="dash_port" name="port" value="{{ config.dashboard.port }}" min="1024" max="65535">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Dashboard Settings</button>
+        <small style="display: block; margin-top: 10px; color: var(--text-secondary);">Requires restart to take effect</small>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Debug</span>
+    </div>
+    <form action="/settings/debug" method="POST">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 15px;">
+            <input type="checkbox" name="enabled" {{ 'checked' if config.debug.enabled }}>
+            <span>Enable Debug Logging</span>
+        </label>
+        <div class="form-group">
+            <label for="log_level">Log Level</label>
+            <select id="log_level" name="log_level">
+                {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR'] %}
+                <option value="{{ level }}" {{ 'selected' if config.debug.log_level == level }}>{{ level }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Debug Settings</button>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 20px; border-color: var(--accent-red);">
+    <div class="card-header">
+        <span class="card-title" style="color: var(--accent-red);">Danger Zone</span>
+    </div>
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <form action="/settings/clear_history" method="POST" onsubmit="return confirm('Clear all submission history? This cannot be undone.');">
+            <button type="submit" class="btn btn-danger">Clear History</button>
+        </form>
+        <form action="/settings/reset" method="POST" onsubmit="return confirm('Reset all settings to defaults? This cannot be undone.');">
+            <button type="submit" class="btn btn-danger">Reset Settings</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function testConnection() {
+        const resultDiv = document.getElementById('connectionResult');
+        resultDiv.innerHTML = '<span style="color: var(--text-secondary);">Testing connection...</span>';
+
+        fetch('/api/test_connection', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    resultDiv.innerHTML = '<span style="color: var(--accent-green);">&#10003; ' + data.message + '</span>';
+                } else {
+                    resultDiv.innerHTML = '<span style="color: var(--accent-red);">&#10007; ' + data.message + '</span>';
+                }
+            })
+            .catch(err => {
+                resultDiv.innerHTML = '<span style="color: var(--accent-red);">&#10007; Request failed</span>';
+            });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,7 @@
+# This file ensures the data folder exists in the repository
+# User databases and cached data will be stored here
+# Database files are excluded from version control via .gitignore
+#
+# On first run, the application will create:
+# - haven_ui.db (SQLite database for discoveries)
+# - data.json (cached discovery data)

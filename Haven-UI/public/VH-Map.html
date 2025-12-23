@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven Galaxy Map - 3D Visualization</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #map-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 27, 61, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 300px;
+            z-index: 100;
+        }
+        #info-panel h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #00C2B3;
+        }
+        #info-panel .stat {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        #info-panel .stat span {
+            color: #00C2B3;
+            font-weight: bold;
+        }
+        #system-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 350px;
+            display: none;
+            z-index: 100;
+        }
+        #system-info h3 {
+            color: #00C2B3;
+            margin-bottom: 8px;
+        }
+        #system-info p {
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        .close-btn {
+            float: right;
+            cursor: pointer;
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+        #canvas-3d {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            z-index: 100;
+        }
+        #controls button {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px;
+            background: #00C2B3;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #controls button:hover {
+            background: #00a89a;
+        }
+        /* Direction HUD labels */
+        .direction-label {
+            position: absolute;
+            color: #00C2B3;
+            font-size: 16px;
+            font-weight: bold;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0.4;
+            text-shadow: 0 0 10px rgba(0, 194, 179, 0.3);
+        }
+        /* Mobile control buttons */
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        #mobile-controls .control-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        #mobile-controls button {
+            width: 44px;
+            height: 44px;
+            background: rgba(80, 80, 80, 0.8);
+            border: 2px solid rgba(100, 100, 100, 0.6);
+            border-radius: 10px;
+            color: #888;
+            font-size: 16px;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        #mobile-controls button.active {
+            background: rgba(0, 194, 179, 0.8);
+            border-color: #00C2B3;
+            color: white;
+        }
+        /* Mobile settings panel */
+        #mobile-settings {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        #mobile-settings-toggle {
+            width: 40px;
+            height: 40px;
+            background: rgba(20, 27, 61, 0.95);
+            border: 1px solid rgba(0, 194, 179, 0.5);
+            border-radius: 10px;
+            color: #00C2B3;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        #mobile-settings-toggle.active {
+            background: rgba(0, 194, 179, 0.3);
+        }
+        #mobile-settings-panel {
+            display: none;
+            position: absolute;
+            bottom: 48px;
+            left: 0;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            width: 130px;
+        }
+        #mobile-settings-panel.expanded {
+            display: block;
+        }
+        #mobile-settings-panel .setting-row {
+            margin-bottom: 8px;
+        }
+        #mobile-settings-panel .setting-row:last-child {
+            margin-bottom: 0;
+        }
+        #mobile-settings-panel .setting-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: #00C2B3;
+            margin-bottom: 3px;
+        }
+        #mobile-settings-panel input[type="range"] {
+            width: 100%;
+            height: 16px;
+            accent-color: #00C2B3;
+        }
+        #mobile-settings-panel label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
+            color: #888;
+        }
+        /* Mobile-friendly adjustments */
+        @media (max-width: 768px) {
+            #info-panel {
+                top: 10px;
+                left: 10px;
+                padding: 10px;
+                max-width: 150px;
+                font-size: 11px;
+            }
+            #info-panel h1 {
+                font-size: 14px;
+            }
+            #controls {
+                display: none;
+            }
+            #view-controls {
+                display: none;
+            }
+            #mobile-controls {
+                display: block;
+            }
+            #mobile-settings {
+                display: block;
+            }
+            #back-to-haven {
+                top: auto !important;
+                bottom: 70px !important;
+                left: 70px !important;
+                right: 70px !important;
+                transform: none !important;
+            }
+            #back-to-haven a {
+                width: 100%;
+                justify-content: center;
+                padding: 10px 14px !important;
+                font-size: 11px !important;
+            }
+            #back-to-haven a span {
+                font-size: 14px !important;
+            }
+        }
+
+        /* Cluster Panel for Galaxy Map */
+        #cluster-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(157, 78, 221, 0.5);
+            max-width: 280px;
+            max-height: 350px;
+            overflow-y: auto;
+            display: none;
+            z-index: 100;
+        }
+        #cluster-panel h3 {
+            color: #9d4edd;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        #cluster-panel .close-btn {
+            position: absolute;
+            top: 8px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .cluster-system-item {
+            padding: 8px;
+            margin: 4px 0;
+            background: rgba(0, 194, 179, 0.1);
+            border: 1px solid rgba(0, 194, 179, 0.2);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .cluster-system-item:hover {
+            background: rgba(0, 194, 179, 0.25);
+        }
+        .cluster-system-item .name {
+            color: #00C2B3;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .cluster-system-item .info {
+            color: #888;
+            font-size: 10px;
+        }
+
+        /* View Controls */
+        #view-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            z-index: 100;
+        }
+        #view-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #888;
+            cursor: pointer;
+            margin: 4px 0;
+        }
+        #view-controls input[type="checkbox"] {
+            accent-color: #00C2B3;
+        }
+        #view-controls .slider-row {
+            margin-top: 8px;
+        }
+        #view-controls input[type="range"] {
+            width: 100%;
+            accent-color: #00C2B3;
+        }
+
+        /* Zoom indicator */
+        #zoom-indicator {
+            position: absolute;
+            bottom: 60px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.8);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #00C2B3;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-container">
+        <canvas id="canvas-3d"></canvas>
+
+        <div id="info-panel">
+            <h1>Galaxy Map</h1>
+            <div class="stat">Systems: <span id="system-count">0</span></div>
+            <div class="stat">Discoveries: <span id="discovery-count">0</span></div>
+            <div class="stat">Regions: <span id="region-count">0</span></div>
+        </div>
+
+        <!-- Back to Haven Control Room Button -->
+        <div id="back-to-haven" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 150;">
+            <a href="/" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: rgba(157, 78, 221, 0.9); border: 1px solid #9d4edd; border-radius: 8px; color: white; text-decoration: none; font-size: 14px; font-weight: bold; transition: all 0.2s;">
+                <span style="font-size: 18px;">🏠</span> Haven Control Room
+            </a>
+        </div>
+
+        <div id="controls">
+            <button onclick="resetView()">Reset View</button>
+            <button onclick="toggleRotation()">Toggle Rotation</button>
+            <button onclick="zoomIn()">Zoom In</button>
+            <button onclick="zoomOut()">Zoom Out</button>
+        </div>
+
+        <div id="system-info">
+            <span class="close-btn" onclick="closeSystemInfo()">×</span>
+            <h3 id="system-name"></h3>
+            <p><strong>Region:</strong> <span id="system-region"></span></p>
+            <p><strong>Coordinates:</strong> <span id="system-coords"></span></p>
+            <p><strong>Planets:</strong> <span id="system-planets"></span></p>
+            <p id="system-description"></p>
+        </div>
+
+        <!-- Direction HUD Labels -->
+        <div id="dir-north" class="direction-label">North</div>
+        <div id="dir-south" class="direction-label">South</div>
+        <div id="dir-east" class="direction-label">East</div>
+        <div id="dir-west" class="direction-label">West</div>
+        <div id="dir-up" class="direction-label">Up</div>
+        <div id="dir-down" class="direction-label">Down</div>
+
+        <!-- Cluster Panel -->
+        <div id="cluster-panel">
+            <button class="close-btn" onclick="closeClusterPanel()">×</button>
+            <h3>Clustered Systems (<span id="cluster-count">0</span>)</h3>
+            <div id="cluster-list"></div>
+        </div>
+
+        <!-- View Controls -->
+        <div id="view-controls">
+            <label>
+                <input type="checkbox" id="toggle-clustering" checked onchange="toggleClustering()">
+                Smart Clustering
+            </label>
+            <label>
+                <input type="checkbox" id="toggle-labels" onchange="toggleLabels()">
+                Show Labels
+            </label>
+            <div class="slider-row">
+                <label style="margin-bottom: 2px;">Point Size: <span id="size-value">1.0x</span></label>
+                <input type="range" id="point-size-slider" min="0.5" max="3" step="0.1" value="1" onchange="updatePointSize()">
+            </div>
+        </div>
+
+        <!-- Mobile Control Buttons -->
+        <div id="mobile-controls">
+            <div class="control-row">
+                <button id="mobile-btn-rotate" onclick="toggleRotation(); updateMobileRotateBtn()" title="Auto Rotate">⟳</button>
+                <button onclick="resetView()" title="Reset View">🏠</button>
+                <button onclick="zoomIn()" title="Zoom In">➕</button>
+                <button onclick="zoomOut()" title="Zoom Out">➖</button>
+            </div>
+        </div>
+
+        <!-- Mobile Settings Panel -->
+        <div id="mobile-settings">
+            <button id="mobile-settings-toggle" onclick="toggleMobileSettings()" title="Settings">⚙️</button>
+            <div id="mobile-settings-panel">
+                <div class="setting-row">
+                    <div class="setting-label">
+                        <span>Point Size</span>
+                        <span id="mobile-size-value">1.0x</span>
+                    </div>
+                    <input type="range" id="mobile-point-size-slider" min="0.5" max="3" step="0.1" value="1"
+                        onchange="updatePointSizeFromMobile(this.value)"
+                        oninput="document.getElementById('mobile-size-value').textContent = parseFloat(this.value).toFixed(1) + 'x'">
+                </div>
+                <div class="setting-row">
+                    <label>
+                        <input type="checkbox" id="mobile-toggle-clustering" checked onchange="toggleClustering(); syncMobileCheckboxes()">
+                        Clustering
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <label>
+                        <input type="checkbox" id="mobile-toggle-labels" onchange="toggleLabels(); syncMobileCheckboxes()">
+                        Labels
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zoom Indicator -->
+        <div id="zoom-indicator">Zoom: 1.0x</div>
+    </div>
+
+    <script>
+        // Data injection points - will be replaced by backend
+        window.SYSTEMS_DATA = [];
+        window.DISCOVERIES_DATA = [];
+
+        // Canvas setup
+        const canvas = document.getElementById('canvas-3d');
+        const ctx = canvas.getContext('2d');
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        // Camera settings
+        let camera = {
+            x: 0,
+            y: 0,
+            z: 500,
+            rotX: 0,
+            rotY: 0,
+            zoom: 1
+        };
+
+        let autoRotate = true;
+        let mouseDown = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        // Clustering and view state
+        let clusteringEnabled = true;
+        let labelsEnabled = false;
+        let pointSizeMultiplier = 1.0;
+        let clusters = [];
+        const CLUSTER_DISTANCE_THRESHOLD = 20; // Screen pixels
+        const MIN_CLUSTER_SIZE = 2;
+        const FIXED_POINT_SIZE = 24; // Fixed size - match Region view's baseSize for visibility
+
+        // localStorage key for syncing slider between Galaxy and Region views
+        const SLIDER_STORAGE_KEY = 'haven-map-point-size';
+
+        // Load saved slider value from localStorage
+        function loadSliderValue() {
+            const saved = localStorage.getItem(SLIDER_STORAGE_KEY);
+            if (saved) {
+                pointSizeMultiplier = parseFloat(saved);
+                const slider = document.getElementById('point-size-slider');
+                if (slider) {
+                    slider.value = pointSizeMultiplier;
+                    document.getElementById('size-value').textContent = pointSizeMultiplier.toFixed(1) + 'x';
+                }
+            }
+        }
+
+        // Listen for storage changes from other tabs/windows (Region view)
+        window.addEventListener('storage', (e) => {
+            if (e.key === SLIDER_STORAGE_KEY && e.newValue) {
+                pointSizeMultiplier = parseFloat(e.newValue);
+                const slider = document.getElementById('point-size-slider');
+                if (slider) {
+                    slider.value = pointSizeMultiplier;
+                    document.getElementById('size-value').textContent = pointSizeMultiplier.toFixed(1) + 'x';
+                }
+            }
+        });
+
+        // Helper to convert hex color to rgba for reliable canvas rendering
+        function hexToRgba(hex, alpha, brightnessBoost = 2.0) {
+            // Boost the color brightness significantly for visibility (2x boost like Region shader)
+            const r = Math.min(255, parseInt(hex.slice(1, 3), 16) * brightnessBoost);
+            const g = Math.min(255, parseInt(hex.slice(3, 5), 16) * brightnessBoost);
+            const b = Math.min(255, parseInt(hex.slice(5, 7), 16) * brightnessBoost);
+            return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha})`;
+        }
+
+        // Check if a point is reasonably on screen (with some margin for glow)
+        function isOnScreen(x, y, margin = 100) {
+            return x >= -margin && x <= width + margin && y >= -margin && y <= height + margin;
+        }
+
+        // Direction reference points in 3D space (far from origin)
+        const DIRECTION_POINTS = {
+            north: { x: 0, y: 0, z: -5000 },
+            south: { x: 0, y: 0, z: 5000 },
+            east: { x: 5000, y: 0, z: 0 },
+            west: { x: -5000, y: 0, z: 0 },
+            up: { x: 0, y: 5000, z: 0 },
+            down: { x: 0, y: -5000, z: 0 }
+        };
+
+        // Initialize
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        // Mouse controls
+        canvas.addEventListener('mousedown', (e) => {
+            mouseDown = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        canvas.addEventListener('mouseup', () => mouseDown = false);
+        canvas.addEventListener('mouseleave', () => mouseDown = false);
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (mouseDown) {
+                const deltaX = e.clientX - lastMouseX;
+                const deltaY = e.clientY - lastMouseY;
+                camera.rotY += deltaX * 0.005;
+                camera.rotX += deltaY * 0.005;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            }
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            // Move camera closer/farther instead of just scaling - keeps points visible
+            const zoomFactor = (1 - e.deltaY * 0.001);
+            camera.z /= zoomFactor;  // Move camera in/out
+            camera.z = Math.max(150, Math.min(2000, camera.z));  // Clamp distance (min 150 to prevent stars disappearing)
+            // Also update logical zoom for UI indicator
+            camera.zoom = 500 / camera.z;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            checkSystemClick(x, y);
+        });
+
+        // 3D projection
+        function project3D(x, y, z) {
+            // Apply rotation
+            let cosX = Math.cos(camera.rotX);
+            let sinX = Math.sin(camera.rotX);
+            let cosY = Math.cos(camera.rotY);
+            let sinY = Math.sin(camera.rotY);
+
+            let y1 = y * cosX - z * sinX;
+            let z1 = y * sinX + z * cosX;
+            let x1 = x * cosY - z1 * sinY;
+            let z2 = x * sinY + z1 * cosY;
+
+            // Apply perspective - camera.z now controls distance (lower = closer = larger scale)
+            const distance = z2 + camera.z;
+            // Prevent divide by zero and behind-camera issues
+            if (distance < 10) {
+                return { x: -10000, y: -10000, z: z2, scale: 0 }; // Off screen
+            }
+            const scale = 300 / distance;
+            return {
+                x: width / 2 + x1 * scale,
+                y: height / 2 + y1 * scale,
+                z: z2,
+                scale: scale
+            };
+        }
+
+        // Draw functions - FIXED SIZE for consistent visibility at all zoom levels
+        function drawStar(x, y, size, color, isCluster = false, clusterCount = 0) {
+            // Skip if way off screen - no point rendering
+            if (!isOnScreen(x, y, 150)) return;
+
+            // FIXED SIZE with slider multiplier - match Region view behavior
+            // Slider affects BOTH size and brightness for dramatic effect
+            const pointSize = FIXED_POINT_SIZE * pointSizeMultiplier;
+            const brightnessMultiplier = 1.5 + (pointSizeMultiplier - 1) * 0.5; // Slider boosts brightness too
+
+            // Draw large outer glow for visibility (bigger than before)
+            const glowSize = pointSize * 3.5;
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowSize);
+            gradient.addColorStop(0, hexToRgba(color, 1.0, 2.0 * brightnessMultiplier));
+            gradient.addColorStop(0.2, hexToRgba(color, 0.9, 2.0 * brightnessMultiplier));
+            gradient.addColorStop(0.4, hexToRgba(color, 0.6, 1.8));
+            gradient.addColorStop(0.6, hexToRgba(color, 0.3, 1.5));
+            gradient.addColorStop(0.8, hexToRgba(color, 0.1, 1.2));
+            gradient.addColorStop(1, hexToRgba(color, 0, 1.0));
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, glowSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw solid bright core on top - boosted brightness
+            ctx.fillStyle = hexToRgba(color, 1.0, 2.5);
+            ctx.beginPath();
+            ctx.arc(x, y, pointSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Add white outline for visibility against any background
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, pointSize, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Add bright white highlight at center for maximum visibility
+            ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+            ctx.beginPath();
+            ctx.arc(x, y, pointSize * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw cluster badge if this is a cluster
+            if (isCluster && clusterCount > 1) {
+                const badgeSize = Math.max(14, pointSize);
+                const badgeX = x + pointSize;
+                const badgeY = y - pointSize;
+
+                // Badge background
+                ctx.fillStyle = 'rgba(157, 78, 221, 0.95)';
+                ctx.beginPath();
+                ctx.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Badge border
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Badge text
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${Math.max(10, badgeSize * 0.65)}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(clusterCount.toString(), badgeX, badgeY);
+            }
+        }
+
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(0, 194, 179, 0.1)';
+            ctx.lineWidth = 1;
+
+            for (let i = -500; i <= 500; i += 100) {
+                const p1 = project3D(-500, 0, i);
+                const p2 = project3D(500, 0, i);
+                const p3 = project3D(i, 0, -500);
+                const p4 = project3D(i, 0, 500);
+
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(p3.x, p3.y);
+                ctx.lineTo(p4.x, p4.y);
+                ctx.stroke();
+            }
+        }
+
+        // Update direction HUD labels based on camera orientation
+        // Uses camera rotation to position labels at screen edges like a compass
+        function updateDirectionLabels() {
+            const margin = 50;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            // Calculate camera's forward direction from rotation angles
+            const cosX = Math.cos(camera.rotX);
+            const sinX = Math.sin(camera.rotX);
+            const cosY = Math.cos(camera.rotY);
+            const sinY = Math.sin(camera.rotY);
+
+            // Camera forward direction (where it's looking)
+            const camDirX = -sinY * cosX;
+            const camDirY = sinX;
+            const camDirZ = cosY * cosX;
+
+            // Camera right direction
+            const camRightX = cosY;
+            const camRightY = 0;
+            const camRightZ = sinY;
+
+            // Camera up direction (cross product of right and forward, simplified)
+            const camUpX = sinY * sinX;
+            const camUpY = cosX;
+            const camUpZ = -cosY * sinX;
+
+            // World direction vectors
+            const directions = {
+                north: { x: 0, y: 0, z: -1 },
+                south: { x: 0, y: 0, z: 1 },
+                east: { x: 1, y: 0, z: 0 },
+                west: { x: -1, y: 0, z: 0 },
+                up: { x: 0, y: 1, z: 0 },
+                down: { x: 0, y: -1, z: 0 }
+            };
+
+            // Calculate radius for label placement
+            const radius = Math.min(centerX, centerY) - margin;
+
+            Object.keys(directions).forEach(dir => {
+                const element = document.getElementById('dir-' + dir);
+                if (!element) return;
+
+                const worldDir = directions[dir];
+
+                // Dot product with camera forward (check if behind)
+                const dotForward = worldDir.x * camDirX + worldDir.y * camDirY + worldDir.z * camDirZ;
+
+                if (dotForward > 0.1) {
+                    element.style.display = 'none';
+                    return;
+                }
+
+                // Project onto camera's view plane
+                const screenX = worldDir.x * camRightX + worldDir.y * camRightY + worldDir.z * camRightZ;
+                const screenY = -(worldDir.x * camUpX + worldDir.y * camUpY + worldDir.z * camUpZ);
+
+                const len = Math.sqrt(screenX * screenX + screenY * screenY);
+
+                if (len < 0.01) {
+                    element.style.display = 'none';
+                    return;
+                }
+
+                element.style.display = 'block';
+
+                // Position at edge of screen
+                let x = centerX + (screenX / len) * radius;
+                let y = centerY + (screenY / len) * radius;
+
+                // Clamp to screen
+                if (x < margin) x = margin;
+                if (x > width - margin) x = width - margin;
+                if (y < margin) y = margin;
+                if (y > height - margin) y = height - margin;
+
+                element.style.left = x + 'px';
+                element.style.top = y + 'px';
+                element.style.bottom = 'auto';
+                element.style.transform = 'translate(-50%, -50%)';
+            });
+        }
+
+        let systems3D = [];
+
+        function updateStats() {
+            document.getElementById('system-count').textContent = window.SYSTEMS_DATA.length;
+            document.getElementById('discovery-count').textContent = window.DISCOVERIES_DATA.length;
+            const regions = [...new Set(window.SYSTEMS_DATA.map(s => s.region))];
+            document.getElementById('region-count').textContent = regions.length;
+        }
+
+        function prepareSystemsFor3D() {
+            systems3D = window.SYSTEMS_DATA.map(system => {
+                const scale = 2;
+                return {
+                    ...system,
+                    x3d: (system.x || 0) * scale,
+                    y3d: (system.y || 0) * scale,
+                    z3d: (system.z || 0) * scale,
+                    color: getRegionColor(system.region),
+                    projected: null
+                };
+            });
+        }
+
+        function getRegionColor(region) {
+            const colors = {
+                'Euclid': '#00C2B3',
+                'Hilbert': '#9d4edd',
+                'Calypso': '#ff6b6b',
+                'Eissentam': '#4ecdc4',
+                'Elkupalos': '#ffd93d'
+            };
+            return colors[region] || '#ffffff';
+        }
+
+        function checkSystemClick(mouseX, mouseY) {
+            for (let system of systems3D) {
+                if (!system.projected) continue;
+                const dx = mouseX - system.projected.x;
+                const dy = mouseY - system.projected.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < 10 * system.projected.scale) {
+                    showSystemInfo(system);
+                    return;
+                }
+            }
+        }
+
+        function showSystemInfo(system) {
+            document.getElementById('system-name').textContent = system.name || 'Unknown';
+            document.getElementById('system-region').textContent = system.region || 'Unknown';
+            document.getElementById('system-coords').textContent = `${system.x || 0}, ${system.y || 0}, ${system.z || 0}`;
+            document.getElementById('system-planets').textContent = (system.planets?.length || 0);
+            document.getElementById('system-description').textContent = system.description || 'No description available';
+            document.getElementById('system-info').style.display = 'block';
+        }
+
+        function closeSystemInfo() {
+            document.getElementById('system-info').style.display = 'none';
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, width, height);
+
+            drawGrid();
+            updateDirectionLabels();
+            updateZoomIndicator();
+
+            // Project all systems first
+            systems3D.forEach(system => {
+                system.projected = project3D(system.x3d, system.y3d, system.z3d);
+            });
+
+            // Calculate clusters if enabled
+            if (clusteringEnabled) {
+                calculateClusters();
+            }
+
+            // Sort systems by distance for proper rendering (furthest first)
+            systems3D.sort((a, b) => {
+                const distA = Math.sqrt(a.x3d * a.x3d + a.y3d * a.y3d + a.z3d * a.z3d);
+                const distB = Math.sqrt(b.x3d * b.x3d + b.y3d * b.y3d + b.z3d * b.z3d);
+                return distB - distA;
+            });
+
+            // Track which systems are in clusters (to avoid double-drawing)
+            const clusteredIndices = new Set();
+            if (clusteringEnabled) {
+                clusters.forEach(cluster => {
+                    cluster.members.forEach(member => {
+                        clusteredIndices.add(member.index);
+                    });
+                });
+            }
+
+            // Draw non-clustered systems
+            for (let i = 0; i < systems3D.length; i++) {
+                const system = systems3D[i];
+                if (clusteredIndices.has(i)) continue; // Skip clustered systems
+
+                const projected = system.projected;
+                if (projected.z > -camera.z) {
+                    // Use FIXED size - same brightness/size at all zoom levels
+                    drawStar(projected.x, projected.y, FIXED_POINT_SIZE, system.color);
+
+                    // Draw system name if labels enabled or zoomed in enough
+                    if (labelsEnabled || camera.zoom > 2) {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                        ctx.font = '12px Arial';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        const pointSize = FIXED_POINT_SIZE * pointSizeMultiplier;
+                        ctx.fillText(system.name, projected.x + pointSize + 8, projected.y);
+                    }
+                }
+            }
+
+            // Draw clusters
+            if (clusteringEnabled) {
+                clusters.forEach(cluster => {
+                    // Use the first member's color as the cluster color
+                    const color = cluster.members[0].system.color;
+                    drawStar(cluster.centerX, cluster.centerY, FIXED_POINT_SIZE, color, true, cluster.members.length);
+                });
+            }
+
+            if (autoRotate) {
+                camera.rotY += 0.002;
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        // Control functions
+        function resetView() {
+            camera.rotX = 0;
+            camera.rotY = 0;
+            camera.z = 500;  // Default distance
+            camera.zoom = 1;  // Visual indicator
+        }
+
+        function toggleRotation() {
+            autoRotate = !autoRotate;
+        }
+
+        function zoomIn() {
+            camera.z = Math.max(150, camera.z / 1.2);  // Move closer (min 150 to prevent stars disappearing)
+            camera.zoom = 500 / camera.z;
+        }
+
+        function zoomOut() {
+            camera.z = Math.min(2000, camera.z * 1.2);  // Move farther
+            camera.zoom = 500 / camera.z;
+        }
+
+        // ========== CLUSTERING SYSTEM ==========
+
+        function calculateClusters() {
+            if (!clusteringEnabled || systems3D.length === 0) {
+                clusters = [];
+                return;
+            }
+
+            // Get visible systems with their screen positions
+            const visibleSystems = systems3D.map((system, index) => {
+                const projected = system.projected;
+                if (!projected || projected.z <= -camera.z) return null;
+                return {
+                    index: index,
+                    system: system,
+                    screenX: projected.x,
+                    screenY: projected.y,
+                    scale: projected.scale,
+                    clustered: false
+                };
+            }).filter(s => s !== null);
+
+            clusters = [];
+            // Threshold scales with camera distance - closer camera = more spread out = smaller threshold
+            const threshold = CLUSTER_DISTANCE_THRESHOLD * (camera.z / 500);
+
+            for (let i = 0; i < visibleSystems.length; i++) {
+                if (visibleSystems[i].clustered) continue;
+
+                const cluster = {
+                    members: [visibleSystems[i]],
+                    centerX: visibleSystems[i].screenX,
+                    centerY: visibleSystems[i].screenY,
+                    avgScale: visibleSystems[i].scale
+                };
+
+                for (let j = i + 1; j < visibleSystems.length; j++) {
+                    if (visibleSystems[j].clustered) continue;
+
+                    const dx = visibleSystems[j].screenX - cluster.centerX;
+                    const dy = visibleSystems[j].screenY - cluster.centerY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < threshold) {
+                        cluster.members.push(visibleSystems[j]);
+                        visibleSystems[j].clustered = true;
+
+                        // Update cluster center
+                        const n = cluster.members.length;
+                        cluster.centerX = cluster.members.reduce((sum, m) => sum + m.screenX, 0) / n;
+                        cluster.centerY = cluster.members.reduce((sum, m) => sum + m.screenY, 0) / n;
+                        cluster.avgScale = cluster.members.reduce((sum, m) => sum + m.scale, 0) / n;
+                    }
+                }
+
+                visibleSystems[i].clustered = true;
+
+                if (cluster.members.length >= MIN_CLUSTER_SIZE) {
+                    clusters.push(cluster);
+                }
+            }
+        }
+
+        function showClusterPanel(cluster) {
+            const panel = document.getElementById('cluster-panel');
+            const countEl = document.getElementById('cluster-count');
+            const listEl = document.getElementById('cluster-list');
+
+            countEl.textContent = cluster.members.length;
+            listEl.innerHTML = '';
+
+            cluster.members.forEach(member => {
+                const system = member.system;
+                const item = document.createElement('div');
+                item.className = 'cluster-system-item';
+                item.innerHTML = `
+                    <div class="name">${system.name || 'Unknown System'}</div>
+                    <div class="info">${system.planets?.length || 0} planets · ${system.region || 'Unknown'}</div>
+                `;
+                item.onclick = () => showSystemInfo(system);
+                listEl.appendChild(item);
+            });
+
+            panel.style.display = 'block';
+        }
+
+        function closeClusterPanel() {
+            document.getElementById('cluster-panel').style.display = 'none';
+        }
+
+        // ========== VIEW CONTROLS ==========
+
+        function toggleClustering() {
+            clusteringEnabled = document.getElementById('toggle-clustering').checked;
+            clusters = [];
+        }
+
+        function toggleLabels() {
+            labelsEnabled = document.getElementById('toggle-labels').checked;
+        }
+
+        function updatePointSize() {
+            const slider = document.getElementById('point-size-slider');
+            pointSizeMultiplier = parseFloat(slider.value);
+            document.getElementById('size-value').textContent = pointSizeMultiplier.toFixed(1) + 'x';
+            // Save to localStorage for syncing with Region view
+            localStorage.setItem(SLIDER_STORAGE_KEY, pointSizeMultiplier.toString());
+            // Sync mobile slider
+            syncMobileControls();
+        }
+
+        function updateZoomIndicator() {
+            document.getElementById('zoom-indicator').textContent = 'Zoom: ' + camera.zoom.toFixed(1) + 'x';
+        }
+
+        // ========== MOBILE CONTROLS ==========
+
+        function toggleMobileSettings() {
+            const panel = document.getElementById('mobile-settings-panel');
+            const toggle = document.getElementById('mobile-settings-toggle');
+            if (panel && toggle) {
+                panel.classList.toggle('expanded');
+                toggle.classList.toggle('active');
+            }
+        }
+
+        function updateMobileRotateBtn() {
+            const btn = document.getElementById('mobile-btn-rotate');
+            if (btn) {
+                if (autoRotate) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            }
+        }
+
+        function updatePointSizeFromMobile(value) {
+            pointSizeMultiplier = parseFloat(value);
+            document.getElementById('size-value').textContent = pointSizeMultiplier.toFixed(1) + 'x';
+            document.getElementById('point-size-slider').value = value;
+            localStorage.setItem(SLIDER_STORAGE_KEY, pointSizeMultiplier.toString());
+        }
+
+        function syncMobileControls() {
+            // Sync point size slider
+            const mobileSlider = document.getElementById('mobile-point-size-slider');
+            const mobileSizeValue = document.getElementById('mobile-size-value');
+            if (mobileSlider) mobileSlider.value = pointSizeMultiplier;
+            if (mobileSizeValue) mobileSizeValue.textContent = pointSizeMultiplier.toFixed(1) + 'x';
+            // Sync checkboxes
+            syncMobileCheckboxes();
+        }
+
+        function syncMobileCheckboxes() {
+            const mobileClustering = document.getElementById('mobile-toggle-clustering');
+            const mobileLabels = document.getElementById('mobile-toggle-labels');
+            const desktopClustering = document.getElementById('toggle-clustering');
+            const desktopLabels = document.getElementById('toggle-labels');
+
+            if (mobileClustering && desktopClustering) {
+                mobileClustering.checked = desktopClustering.checked;
+            }
+            if (mobileLabels && desktopLabels) {
+                mobileLabels.checked = desktopLabels.checked;
+            }
+        }
+
+        // Enhanced click handling for clusters - using FIXED sizes
+        const originalCheckSystemClick = checkSystemClick;
+        checkSystemClick = function(mouseX, mouseY) {
+            const clickRadius = FIXED_POINT_SIZE * pointSizeMultiplier * 2;  // Fixed click radius
+
+            // First check if clicking on a cluster
+            if (clusteringEnabled) {
+                for (let cluster of clusters) {
+                    const dx = mouseX - cluster.centerX;
+                    const dy = mouseY - cluster.centerY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < clickRadius + 10) {
+                        showClusterPanel(cluster);
+                        return;
+                    }
+                }
+            }
+
+            // Fall back to original single system click
+            for (let system of systems3D) {
+                if (!system.projected) continue;
+                const dx = mouseX - system.projected.x;
+                const dy = mouseY - system.projected.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < clickRadius) {
+                    showSystemInfo(system);
+                    return;
+                }
+            }
+        };
+
+        // Initialize on load
+        loadSliderValue();  // Load synced slider value from localStorage
+        syncMobileControls();  // Sync mobile controls with loaded values
+        updateStats();
+        prepareSystemsFor3D();
+        render();
+    </script>
+</body>
+</html>

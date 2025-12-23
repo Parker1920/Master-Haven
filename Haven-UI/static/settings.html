@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Haven - Settings</title>
+  <link rel="stylesheet" href="/haven-ui/assets/style.css" />
+  <link rel="manifest" href="/haven-ui/manifest.webmanifest">
+  <meta name="theme-color" content="#00C2B3">
+</head>
+<body>
+  <div class="app container">
+    <header>
+      <h1>Settings</h1>
+      <nav><a href="index.html">Back</a></nav>
+    </header>
+    <main>
+      <div class="card">
+          <h3>Theme</h3>
+          <label>Background: <input id="bgInput" type="color" value="#f8fafc" /></label>
+          <label>Text: <input id="textInput" type="color" value="#111827" /></label>
+          <label>Primary: <input id="primaryInput" type="color" value="#06b6d4" /></label>
+          <label>Card: <input id="cardInput" type="color" value="#ffffff" /></label>
+          <input id="adminToken" placeholder="Admin token (optional)" />
+          <button onclick="saveSettings()">Save</button>
+        </div>
+      <div class="card">
+        <h3>Data Provider</h3>
+        <div id="status"></div>
+        <button onclick="reloadStatus()">Refresh</button>
+      </div>
+    </main>
+  </div>
+<script>
+  async function reloadStatus(){ const r = await fetch('/api/status'); const j = await r.json(); document.getElementById('status').innerText = JSON.stringify(j); }
+  async function saveSettings(){
+    const bg = document.getElementById('bgInput').value
+    const text = document.getElementById('textInput').value
+    const primary = document.getElementById('primaryInput').value
+    const card = document.getElementById('cardInput').value
+    const token = document.getElementById('adminToken').value
+    const body = { theme: { bg, text, primary, card } }
+    const headers = { 'Content-Type': 'application/json' }
+    if (token) headers['X-HAVEN-ADMIN'] = token
+    const res = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) })
+    if (!res.ok) {
+      const txt = await res.text()
+      alert('Failed to save settings: ' + txt)
+      return
+    }
+    alert('Saved settings. Reloading...')
+    window.location.reload()
+  }
+  window.onload = ()=>{ 
+    reloadStatus(); 
+    // Fetch current settings and apply to page inputs
+    fetch('/api/settings').then(r => r.json()).then(s => {
+      if (s && s.theme) {
+        document.getElementById('bgInput').value = s.theme.bg || '#f8fafc'
+        document.getElementById('textInput').value = s.theme.text || '#111827'
+        document.getElementById('primaryInput').value = s.theme.primary || '#06b6d4'
+        document.getElementById('cardInput').value = s.theme.card || '#ffffff'
+        document.documentElement.style.setProperty('--app-bg', s.theme.bg || '#f8fafc')
+        document.documentElement.style.setProperty('--app-text', s.theme.text || '#111827')
+        document.documentElement.style.setProperty('--app-primary', s.theme.primary || '#06b6d4')
+        document.documentElement.style.setProperty('--app-card', s.theme.card || '#ffffff')
+      }
+    }).catch(()=>{})
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/haven-ui/sw.js').catch(()=>{}); } };
+</script>
+</body>
+</html>

@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Queue - Haven Watcher{% endblock %}
+
+{% block content %}
+{% if message %}
+<div class="alert alert-{{ message_type or 'success' }}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Live Extraction Queue (Primary) -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Live Extraction Queue</span>
+        <div style="display: flex; gap: 10px;">
+            {% if pending_extractions %}
+            <form action="/api/queue/upload_all" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-primary">Upload All to Haven</button>
+            </form>
+            {% endif %}
+            {% if queue_counts and queue_counts.uploaded > 0 %}
+            <form action="/api/queue/clear_uploaded" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-secondary">Clear Uploaded</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Queue Stats -->
+    {% if queue_counts %}
+    <div class="stats-grid" style="margin-bottom: 20px;">
+        <div class="stat-item">
+            <div class="stat-value" style="color: var(--accent-orange);">{{ queue_counts.pending or 0 }}</div>
+            <div class="stat-label">Pending Upload</div>
+        </div>
+        <div class="stat-item success">
+            <div class="stat-value">{{ queue_counts.uploaded or 0 }}</div>
+            <div class="stat-label">Uploaded</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" style="color: var(--accent-blue);">{{ queue_counts.total or 0 }}</div>
+            <div class="stat-label">Total in Queue</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if pending_extractions %}
+    <p style="margin-bottom: 15px; color: var(--text-secondary);">
+        {{ pending_extractions|length }} system(s) waiting to be uploaded to Haven Control Room.
+        <br><small>Extractions are queued until you manually upload them, allowing you to scan all planets first.</small>
+    </p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>System Name</th>
+                <th>Glyph Code</th>
+                <th>Galaxy</th>
+                <th>Planets</th>
+                <th>Queued At</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in pending_extractions %}
+            <tr>
+                <td>{{ item.system_name or 'Unknown' }}</td>
+                <td class="glyph-code">{{ item.glyph_code }}</td>
+                <td>{{ item.galaxy }}</td>
+                <td>
+                    <span class="badge badge-info">{{ item.planet_count or 0 }} planets</span>
+                </td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ item.queued_at[:19].replace('T', ' ') if item.queued_at else 'Unknown' }}
+                </td>
+                <td>
+                    <form action="/api/queue/upload/{{ item.glyph_code }}?galaxy={{ item.galaxy }}" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">Upload</button>
+                    </form>
+                    <form action="/api/queue/remove/{{ item.glyph_code }}?galaxy={{ item.galaxy }}" method="POST" style="display: inline;" onsubmit="return confirm('Remove this extraction without uploading?');">
+                        <button type="submit" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+        <div style="font-size: 3rem; margin-bottom: 15px;">&#128640;</div>
+        <p>No pending extractions in the queue.</p>
+        <p style="font-size: 0.85rem; margin-top: 10px;">
+            When you visit a new system in-game with Haven Extractor running,<br>
+            the system data will be queued here for manual upload.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Recently Uploaded -->
+{% if uploaded_extractions %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Recently Uploaded</span>
+        <form action="/api/queue/clear_uploaded" method="POST" style="display: inline;">
+            <button type="submit" class="btn btn-secondary">Clear All</button>
+        </form>
+    </div>
+    <p style="margin-bottom: 15px; color: var(--text-secondary);">
+        These extractions have been successfully uploaded to Haven Control Room.
+    </p>
+    <table>
+        <thead>
+            <tr>
+                <th>System Name</th>
+                <th>Glyph Code</th>
+                <th>Galaxy</th>
+                <th>Planets</th>
+                <th>Uploaded</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in uploaded_extractions[:10] %}
+            <tr>
+                <td>{{ item.system_name or 'Unknown' }}</td>
+                <td class="glyph-code">{{ item.glyph_code }}</td>
+                <td>{{ item.galaxy }}</td>
+                <td>
+                    <span class="badge badge-success">{{ item.planet_count or 0 }} planets</span>
+                </td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ item.updated_at[:19].replace('T', ' ') if item.updated_at else 'Unknown' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if uploaded_extractions|length > 10 %}
+    <p style="text-align: center; color: var(--text-secondary); margin-top: 15px;">
+        ... and {{ uploaded_extractions|length - 10 }} more
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Legacy Offline Queue (if any) -->
+{% if queue_items %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Offline Upload Queue (Legacy)</span>
+        <div style="display: flex; gap: 10px;">
+            <form action="/api/process_queue" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-primary">Process All</button>
+            </form>
+            <form action="/api/clear_queue" method="POST" style="display: inline;" onsubmit="return confirm('Clear all queued items? They will not be uploaded.');">
+                <button type="submit" class="btn btn-danger">Clear Queue</button>
+            </form>
+        </div>
+    </div>
+
+    <p style="margin-bottom: 15px; color: var(--text-secondary);">
+        {{ queue_items|length }} item(s) waiting to be uploaded when the server is available.
+    </p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>System Name</th>
+                <th>Glyph Code</th>
+                <th>Galaxy</th>
+                <th>Queued At</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in queue_items %}
+            <tr>
+                <td>{{ item.system.name or 'Unknown' }}</td>
+                <td class="glyph-code">{{ item.system.glyph_code }}</td>
+                <td>{{ item.system.galaxy }}</td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ item.timestamp[:19].replace('T', ' ') if item.timestamp else 'Unknown' }}
+                </td>
+                <td>
+                    <form action="/api/queue/{{ loop.index0 }}/retry" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.8rem;">Retry</button>
+                    </form>
+                    <form action="/api/queue/{{ loop.index0 }}/remove" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Unsubmitted Systems from Save File -->
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Unsubmitted Systems (from Save)</span>
+        <div style="display: flex; gap: 10px;">
+            {% if unsubmitted %}
+            <form action="/api/reset_failed" method="POST" style="display: inline;" onsubmit="return confirm('Reset all failed submissions? They will be re-attempted on the next save change.');">
+                <button type="submit" class="btn btn-primary">Reset All Failed for Retry</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+    {% if unsubmitted %}
+    <p style="margin-bottom: 15px; color: var(--text-secondary);">
+        These systems were found in your save but haven't been submitted yet.
+        Systems with "error" status can be reset to retry submission.
+    </p>
+    <table>
+        <thead>
+            <tr>
+                <th>System Name</th>
+                <th>Glyph Code</th>
+                <th>Galaxy</th>
+                <th>First Seen</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for system in unsubmitted[:20] %}
+            <tr>
+                <td>{{ system.system_name or 'Unknown' }}</td>
+                <td class="glyph-code">{{ system.glyph_code }}</td>
+                <td>{{ system.galaxy }}</td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ system.first_seen[:19].replace('T', ' ') if system.first_seen else 'Unknown' }}
+                </td>
+                <td>
+                    {% if system.submission_status == 'error' %}
+                    <span class="badge badge-error">{{ system.submission_status }}</span>
+                    {% else %}
+                    <span class="badge badge-warning">{{ system.submission_status }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if system.submission_status == 'error' %}
+                    <form action="/api/unsubmitted/{{ system.id }}/reset" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.8rem;">Reset</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if unsubmitted|length > 20 %}
+    <p style="text-align: center; color: var(--text-secondary); margin-top: 15px;">
+        ... and {{ unsubmitted|length - 20 }} more
+    </p>
+    {% endif %}
+    {% else %}
+    <p style="text-align: center; color: var(--text-secondary); padding: 30px;">
+        All discovered systems have been submitted or are duplicates.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Auto-refresh queue page every 15 seconds
+    setTimeout(function() {
+        location.reload();
+    }, 15000);
+</script>
+{% endblock %}

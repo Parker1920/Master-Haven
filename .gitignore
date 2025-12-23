@@ -1,0 +1,192 @@
+# ===========================================
+# Master Haven - GitHub .gitignore
+# ===========================================
+
+# -----------------
+# EXCLUDED FOLDERS
+# -----------------
+# Keeper Discord Bot - maintained separately
+keeper-discord-bot-main/
+
+# Round Table AI - private/internal
+roundtable_ai/
+
+# -----------------
+# ENVIRONMENT & SECRETS
+# -----------------
+.env
+*.env.local
+.env.*.local
+secrets/
+credentials/
+
+# -----------------
+# PYTHON
+# -----------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+# Note: NOT excluding dist/ globally - Haven-UI/dist/ contains production build
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytest_cache/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# -----------------
+# NODE.JS / REACT
+# -----------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs (keep dist for production, but not during dev)
+# Haven-UI/dist/  # Uncomment if you don't want to track production builds
+
+# -----------------
+# IDE & EDITORS
+# -----------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Claude Code
+.claude/
+
+# -----------------
+# OS FILES
+# -----------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# -----------------
+# LOGS
+# -----------------
+*.log
+logs/
+Haven-UI/logs/
+NMS-Save-Watcher/logs/
+
+# -----------------
+# DATABASE & USER DATA FILES
+# -----------------
+# Exclude user databases (contain personal discovery data)
+# Be specific to avoid excluding required data files
+Haven-UI/data/*.db
+Haven-UI/data/*.db.backup
+Haven-UI/data/data.json
+NMS-Save-Watcher/data/watcher.db
+!Haven-UI/data/.gitkeep
+
+# Keep schema/example data files
+!**/schema.sql
+!**/example_data.json
+
+# IMPORTANT: NMS-Save-Watcher/data/*.json files ARE required (galaxy names, mappings)
+# They are NOT excluded - only watcher.db is excluded
+
+# -----------------
+# CACHE & TEMP
+# -----------------
+*.tmp
+*.temp
+.cache/
+*.bak
+
+# -----------------
+# PHOTOS & UPLOADS
+# -----------------
+# User-uploaded discovery photos
+Haven-UI/photos/*
+!Haven-UI/photos/.gitkeep
+
+# -----------------
+# NMS GAME DATA
+# -----------------
+# NMS save files (should never be committed)
+*.hg
+save*.hg
+
+# Extraction outputs
+Documents/Haven-Extractor/
+
+# -----------------
+# CONFIG FILES WITH SECRETS
+# -----------------
+# Keep example configs, exclude real ones with secrets
+config.json
+!config.example.json
+NMS-Save-Watcher/config.json
+
+# -----------------
+# MISC
+# -----------------
+*.map
+.netlify/
+.vercel/
+"Haven-UI/.env.backup" 

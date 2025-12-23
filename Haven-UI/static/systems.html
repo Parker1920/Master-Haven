@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Haven - Systems</title>
+  <link rel="stylesheet" href="/haven-ui/assets/style.css" />
+  <link rel="manifest" href="/haven-ui/manifest.webmanifest">
+  <meta name="theme-color" content="#00C2B3">
+</head>
+<body>
+  <div class="app container">
+    <header>
+      <h1>Systems</h1>
+      <nav><a href="index.html">Back</a></nav>
+    </header>
+    <main>
+      <div id="systemsList"></div>
+    </main>
+  </div>
+<script>
+  async function loadSystems() {
+    const r = await fetch('/api/systems');
+    const j = await r.json();
+    const list = j.systems || j;
+    const el = document.getElementById('systemsList');
+    el.innerHTML = '';
+    list.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'card';
+      row.innerHTML = `<h3>${s.name}</h3><div>Region: ${s.region || ''}</div>
+        <div>${s.x || ''}, ${s.y || ''}, ${s.z || ''}</div>
+        <button onclick="editSystem('${encodeURIComponent(s.name)}')">Edit</button>
+        <button onclick="deleteSystem('${encodeURIComponent(s.name)}')">Delete</button>`;
+      el.appendChild(row);
+    });
+  }
+
+  async function deleteSystem(name) {
+    if (!confirm('Delete system?')) return;
+    const r = await fetch('/api/systems/' + decodeURIComponent(name), { method: 'DELETE' });
+    if (r.ok) { alert('Deleted'); loadSystems(); } else { alert('Failed to delete'); }
+  }
+
+  function editSystem(name) {
+    // Open wizard for editing
+    window.location.href = `wizard.html?edit=${name}`;
+  }
+
+  window.onload = loadSystems;
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/haven-ui/sw.js').catch(()=>{});
+  }
+</script>
+</body>
+</html>

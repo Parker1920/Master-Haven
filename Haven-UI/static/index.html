@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Haven Control Room - Web (Haven-UI)</title>
+  <link rel="stylesheet" href="/haven-ui/assets/style.css" />
+  <link rel="manifest" href="/haven-ui/manifest.webmanifest">
+  <meta name="theme-color" content="#0ea5e9">
+</head>
+<body>
+  <div class="app container">
+    <header>
+      <h1>Haven Control Room (Web)</h1>
+      <nav>
+        <a href="#/">Dashboard</a> |
+        <a href="#/systems">Systems</a> |
+        <a href="#/wizard">Create System</a> |
+        <a href="#/logs">Logs</a>
+      </nav>
+    </header>
+
+    <main style="text-align: center; padding: 2rem;">
+      <h2>Loading Haven Control Room...</h2>
+      <p>Initializing systems...</p>
+    </main>
+
+    <footer>
+      <small>Haven-UI Web (local). Built for Pi 5 & Dual GPU training setups.</small>
+    </footer>
+  </div>
+
+<script src="/haven-ui/spa.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/haven-ui/sw.js').then(()=>console.log('SW registered')).catch(()=>console.log('SW register failed'));
+  }
+</script>
+</body>
+</html>

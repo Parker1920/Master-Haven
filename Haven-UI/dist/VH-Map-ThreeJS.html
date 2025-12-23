@@ -1,0 +1,2343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven Galaxy Map - WebGL 3D</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #map-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 320px;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        #info-panel h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #00C2B3;
+        }
+        #info-panel .stat {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        #info-panel .stat span {
+            color: #00C2B3;
+            font-weight: bold;
+        }
+        #fps-counter {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 27, 61, 0.8);
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        #system-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 400px;
+            display: none;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        #system-info h3 {
+            color: #00C2B3;
+            margin-bottom: 8px;
+            font-size: 18px;
+        }
+        #system-info p {
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        #system-info .glyph-code {
+            font-family: monospace;
+            background: rgba(0, 194, 179, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        /* Portal Glyph Display in system info */
+        .glyph-display-container {
+            margin: 8px 0;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(157, 78, 221, 0.4);
+            border-radius: 6px;
+        }
+        .glyph-display-label {
+            font-size: 10px;
+            color: #9d4edd;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+        .glyph-images {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 3px;
+            justify-items: center;
+            margin-bottom: 6px;
+        }
+        .glyph-img {
+            width: 32px;
+            height: 32px;
+            border-radius: 3px;
+            border: 1px solid rgba(157, 78, 221, 0.4);
+            background: rgba(0, 0, 0, 0.5);
+            object-fit: contain;
+        }
+        .glyph-hex {
+            font-family: monospace;
+            font-size: 11px;
+            color: #ffd93d;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+        .close-btn {
+            float: right;
+            cursor: pointer;
+            color: #ff6b6b;
+            font-weight: bold;
+            font-size: 20px;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        #controls button {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 10px;
+            background: #00C2B3;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        #controls button:hover {
+            background: #00a89a;
+        }
+        #controls .slider-container {
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+        #controls .slider-label {
+            font-size: 11px;
+            color: #00C2B3;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+        #controls input[type="range"] {
+            width: 100%;
+            height: 6px;
+            background: rgba(0, 194, 179, 0.3);
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        #controls input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #00C2B3;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        #controls input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #00C2B3;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+        /* Collapsible Search Panel - Center Left to avoid overlap */
+        #search-panel {
+            position: absolute;
+            top: 50%;
+            left: 20px;
+            transform: translateY(-50%);
+            width: 320px;
+            background: rgba(20, 27, 61, 0.95);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            z-index: 100;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        #search-panel.collapsed {
+            transform: translateY(-50%) translateX(-280px);
+        }
+        #search-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(0, 194, 179, 0.2);
+            cursor: pointer;
+        }
+        #search-panel-header h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #00C2B3;
+        }
+        #search-panel-toggle {
+            background: none;
+            border: none;
+            color: #00C2B3;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 5px;
+            transition: transform 0.3s ease;
+        }
+        #search-panel.collapsed #search-panel-toggle {
+            transform: rotate(180deg);
+        }
+        #search-panel-content {
+            padding: 15px;
+        }
+        #search-panel.collapsed #search-panel-content {
+            display: none;
+        }
+        #search-input-container {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        #system-search-input {
+            flex: 1;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(0, 194, 179, 0.5);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+        }
+        #system-search-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        #search-btn {
+            padding: 10px 16px;
+            background: #00C2B3;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+        #search-btn:hover {
+            background: #00a89a;
+        }
+        /* Search results */
+        #search-results {
+            max-height: 350px;
+            overflow-y: auto;
+            border-radius: 6px;
+        }
+        #search-results::-webkit-scrollbar {
+            width: 6px;
+        }
+        #search-results::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        #search-results::-webkit-scrollbar-thumb {
+            background: rgba(0, 194, 179, 0.5);
+            border-radius: 3px;
+        }
+        .search-result-item {
+            padding: 12px;
+            background: rgba(30, 30, 50, 0.8);
+            border-bottom: 1px solid rgba(0, 194, 179, 0.15);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .search-result-item:hover {
+            background: rgba(0, 194, 179, 0.2);
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        .search-result-name {
+            font-weight: bold;
+            color: #00C2B3;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+        .search-result-subinfo {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.4;
+        }
+        .search-no-results {
+            padding: 20px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+        }
+        /* Pagination controls */
+        #search-pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-top: 1px solid rgba(0, 194, 179, 0.2);
+            margin-top: 10px;
+        }
+        #search-pagination button {
+            padding: 6px 12px;
+            background: rgba(0, 194, 179, 0.2);
+            border: 1px solid rgba(0, 194, 179, 0.4);
+            border-radius: 4px;
+            color: #00C2B3;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        #search-pagination button:hover:not(:disabled) {
+            background: rgba(0, 194, 179, 0.4);
+        }
+        #search-pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        #search-pagination .page-info {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        /* Highlight effect for selected star */
+        .star-highlight {
+            animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+        #tooltip {
+            position: absolute;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(0, 194, 179, 0.5);
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 200;
+        }
+        /* Direction HUD labels */
+        .direction-label {
+            position: absolute;
+            color: #00C2B3;
+            font-size: 18px;
+            font-weight: bold;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0.4;
+            text-shadow: 0 0 10px rgba(0, 194, 179, 0.3);
+        }
+        /* Mobile control buttons - right side */
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        #mobile-controls .control-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        #mobile-controls button {
+            width: 44px;
+            height: 44px;
+            background: rgba(80, 80, 80, 0.8);
+            border: 2px solid rgba(100, 100, 100, 0.6);
+            border-radius: 10px;
+            color: #888;
+            font-size: 16px;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.2s ease;
+        }
+        #mobile-controls button.active {
+            background: rgba(0, 194, 179, 0.8);
+            border-color: #00C2B3;
+            color: white;
+            box-shadow: 0 0 10px rgba(0, 194, 179, 0.5);
+        }
+        #mobile-controls button:active {
+            transform: scale(0.95);
+        }
+        /* Mobile settings panel - collapsible, bottom left */
+        #mobile-settings {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        #mobile-settings-toggle {
+            width: 40px;
+            height: 40px;
+            background: rgba(20, 27, 61, 0.95);
+            border: 1px solid rgba(0, 194, 179, 0.5);
+            border-radius: 10px;
+            color: #00C2B3;
+            font-size: 18px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+        }
+        #mobile-settings-toggle.active {
+            background: rgba(0, 194, 179, 0.3);
+        }
+        #mobile-settings-panel {
+            display: none;
+            position: absolute;
+            bottom: 48px;
+            left: 0;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            backdrop-filter: blur(10px);
+            width: 130px;
+        }
+        #mobile-settings-panel.expanded {
+            display: block;
+        }
+        #mobile-settings-panel .setting-row {
+            margin-bottom: 8px;
+        }
+        #mobile-settings-panel .setting-row:last-child {
+            margin-bottom: 0;
+        }
+        #mobile-settings-panel .setting-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: #00C2B3;
+            margin-bottom: 3px;
+        }
+        #mobile-settings-panel input[type="range"] {
+            width: 100%;
+            height: 16px;
+            accent-color: #00C2B3;
+        }
+        @media (max-width: 768px) {
+            #mobile-controls {
+                display: block;
+            }
+            #mobile-settings {
+                display: block;
+            }
+        }
+        /* Mobile-friendly adjustments */
+        @media (max-width: 768px) {
+            #info-panel {
+                top: 10px;
+                left: 10px;
+                padding: 10px;
+                max-width: 160px;
+                font-size: 11px;
+            }
+            #info-panel h1 {
+                font-size: 14px;
+            }
+            #info-panel .stat {
+                font-size: 10px;
+                margin: 4px 0;
+            }
+            #controls {
+                display: none; /* Hide desktop controls on mobile */
+            }
+            #glyph-search {
+                top: 10px;
+                left: auto;
+                right: 10px;
+                bottom: auto;
+                padding: 10px;
+            }
+            #glyph-search input {
+                width: 120px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            #glyph-search button {
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+            #system-info {
+                bottom: 100px;
+                right: 70px; /* Leave space for mobile control buttons */
+                left: 10px;
+                max-width: none;
+                font-size: 12px;
+            }
+            #touch-controls {
+                display: none !important; /* Remove old d-pad controls */
+            }
+            .direction-label {
+                font-size: 12px;
+            }
+            #back-to-haven {
+                top: auto !important;
+                bottom: 20px !important;
+                left: 160px !important;
+                right: 70px !important;
+                transform: none !important;
+            }
+            #back-to-haven a {
+                width: 100%;
+                justify-content: center;
+                padding: 12px 10px !important;
+                font-size: 11px !important;
+                box-sizing: border-box;
+            }
+            #back-to-haven a span {
+                font-size: 14px !important;
+            }
+        }
+        #dir-north { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        #dir-south { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        #dir-east { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        #dir-west { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        #dir-up { top: 80px; left: 50%; transform: translateX(-50%); }
+        #dir-down { bottom: 80px; left: 50%; transform: translateX(-50%); }
+    </style>
+</head>
+<body>
+    <div id="map-container"></div>
+
+    <div id="info-panel">
+        <h1>🌌 Galaxy Map</h1>
+        <div class="stat">Systems: <span id="system-count">0</span></div>
+        <div class="stat">Discoveries: <span id="discovery-count">0</span></div>
+        <div class="stat">Galaxy: <span id="galaxy-name">Euclid</span></div>
+        <div class="stat">FPS: <span id="fps-display">60</span></div>
+    </div>
+
+    <!-- Back to Haven Control Room Button -->
+    <div id="back-to-haven" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 150;">
+        <a href="/" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: rgba(157, 78, 221, 0.9); border: 1px solid #9d4edd; border-radius: 8px; color: white; text-decoration: none; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px); transition: all 0.2s;">
+            <span style="font-size: 18px;">🏠</span> Haven Control Room
+        </a>
+    </div>
+
+    <div id="controls">
+        <button onclick="resetView()">🔄 Reset View</button>
+        <button onclick="toggleRotation()">⟳ Toggle Rotation</button>
+        <button onclick="zoomIn()">➕ Zoom In</button>
+        <button onclick="zoomOut()">➖ Zoom Out</button>
+        <button onclick="centerOnGalaxy()">🎯 Center Galaxy</button>
+        <div class="slider-container">
+            <div class="slider-label">
+                <span>⭐ Point Size</span>
+                <span id="point-size-value">1.0x</span>
+            </div>
+            <input type="range" id="point-size-slider" min="0.5" max="4" step="0.1" value="1" onchange="updatePointSize(this.value)" oninput="updatePointSizeDisplay(this.value)">
+        </div>
+        <div class="slider-container">
+            <div class="slider-label">
+                <span>💡 Brightness</span>
+                <span id="brightness-value">1.0x</span>
+            </div>
+            <input type="range" id="brightness-slider" min="0.5" max="3" step="0.1" value="1" onchange="updateBrightness(this.value)" oninput="updateBrightnessDisplay(this.value)">
+        </div>
+        <div class="slider-container" id="scroll-speed-container">
+            <div class="slider-label">
+                <span>🖱️ Scroll Speed</span>
+                <span id="scroll-speed-value">1.0x</span>
+            </div>
+            <input type="range" id="scroll-speed" min="0.1" max="3" step="0.1" value="1" onchange="updateScrollSpeed(this.value)" oninput="updateScrollSpeedDisplay(this.value)">
+        </div>
+        <div class="slider-container" id="pinch-speed-container" style="display: none;">
+            <div class="slider-label">
+                <span>📱 Pinch Speed</span>
+                <span id="pinch-speed-value">1.0x</span>
+            </div>
+            <input type="range" id="pinch-speed" min="0.1" max="3" step="0.1" value="1" onchange="updatePinchSpeed(this.value)" oninput="updatePinchSpeedDisplay(this.value)">
+        </div>
+    </div>
+
+    <!-- Collapsible Search Panel - Left Side -->
+    <div id="search-panel">
+        <div id="search-panel-header" onclick="toggleSearchPanel()">
+            <h3>🔍 Search Systems</h3>
+            <button id="search-panel-toggle">◀</button>
+        </div>
+        <div id="search-panel-content">
+            <div id="search-input-container">
+                <input type="text" id="system-search-input" placeholder="System or planet name..." onkeydown="if(event.key==='Enter')performSearch()">
+                <button id="search-btn" onclick="performSearch()">Search</button>
+            </div>
+            <div id="search-results"></div>
+            <div id="search-pagination" style="display: none;">
+                <button id="prev-page-btn" onclick="prevSearchPage()" disabled>← Prev</button>
+                <span class="page-info"><span id="current-page">1</span> / <span id="total-pages">1</span></span>
+                <button id="next-page-btn" onclick="nextSearchPage()" disabled>Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="system-info">
+        <span class="close-btn" onclick="closeSystemInfo()">×</span>
+        <h3 id="system-name"></h3>
+        <p><strong>Galaxy:</strong> <span id="system-galaxy"></span></p>
+        <div id="glyph-display-container" class="glyph-display-container" style="display: none;">
+            <div class="glyph-display-label">Portal Glyphs</div>
+            <div class="glyph-images" id="glyph-images"></div>
+            <div class="glyph-hex" id="glyph-hex"></div>
+        </div>
+        <p><strong>Coordinates:</strong> <span id="system-coords"></span></p>
+        <p><strong>Planets:</strong> <span id="system-planets"></span></p>
+        <p id="system-description"></p>
+        <p style="margin-top: 10px;">
+            <button onclick="refocusSelectedSystem()" style="background: #00C2B3; border: none; border-radius: 4px; color: white; padding: 6px 12px; cursor: pointer; margin-right: 8px; font-size: 12px;">🎯 Focus</button>
+            <a href="#" id="view-system-link" style="color: #00C2B3;">View System Details →</a>
+        </p>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <!-- Mobile Control Buttons - Right Side -->
+    <div id="mobile-controls">
+        <div class="control-row">
+            <button id="mobile-btn-rotate" onclick="toggleRotationMobile()" title="Auto Rotate">⟳</button>
+            <button id="mobile-btn-reset" onclick="resetView()" title="Reset View">🏠</button>
+            <button id="mobile-btn-center" onclick="centerOnGalaxy()" title="Center Galaxy">🎯</button>
+            <button id="mobile-btn-zoomin" onclick="zoomIn()" title="Zoom In">➕</button>
+            <button id="mobile-btn-zoomout" onclick="zoomOut()" title="Zoom Out">➖</button>
+        </div>
+    </div>
+
+    <!-- Mobile Settings Panel - Collapsible, Bottom Left -->
+    <div id="mobile-settings">
+        <button id="mobile-settings-toggle" onclick="toggleMobileSettings()" title="Settings">⚙️</button>
+        <div id="mobile-settings-panel">
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Point Size</span>
+                    <span id="mobile-point-size-value">1.0x</span>
+                </div>
+                <input type="range" id="mobile-point-size" min="0.5" max="4" step="0.1" value="1"
+                    onchange="updatePointSize(this.value); document.getElementById('point-size-slider').value = this.value;"
+                    oninput="updatePointSizeDisplay(this.value); document.getElementById('mobile-point-size-value').textContent = parseFloat(this.value).toFixed(1) + 'x';">
+            </div>
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Brightness</span>
+                    <span id="mobile-brightness-value">1.0x</span>
+                </div>
+                <input type="range" id="mobile-brightness" min="0.5" max="3" step="0.1" value="1"
+                    onchange="updateBrightness(this.value); document.getElementById('brightness-slider').value = this.value;"
+                    oninput="updateBrightnessDisplay(this.value); document.getElementById('mobile-brightness-value').textContent = parseFloat(this.value).toFixed(1) + 'x';">
+            </div>
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Pinch Speed</span>
+                    <span id="mobile-pinch-speed-value">1.0x</span>
+                </div>
+                <input type="range" id="mobile-pinch-speed" min="0.1" max="3" step="0.1" value="1"
+                    onchange="updatePinchSpeed(this.value); document.getElementById('pinch-speed').value = this.value;"
+                    oninput="updatePinchSpeedDisplay(this.value); document.getElementById('mobile-pinch-speed-value').textContent = parseFloat(this.value).toFixed(1) + 'x';">
+            </div>
+        </div>
+    </div>
+
+    <!-- Direction HUD Labels -->
+    <div id="dir-north" class="direction-label">North</div>
+    <div id="dir-south" class="direction-label">South</div>
+    <div id="dir-east" class="direction-label">East</div>
+    <div id="dir-west" class="direction-label">West</div>
+    <div id="dir-up" class="direction-label">Up</div>
+    <div id="dir-down" class="direction-label">Down</div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Data injection points - will be replaced by backend
+        window.SYSTEMS_DATA = [];
+        window.DISCOVERIES_DATA = [];
+
+        // Three.js setup
+        let scene, camera, renderer, controls;
+        let systemPoints, systemData = [];
+        let raycaster, mouse;
+        let selectedSystem = null;
+        let selectedRegionPosition = null;  // Store position for Focus button
+        let autoRotate = false;
+        let regionOutline = null; // Cyan wireframe box showing region boundaries
+
+        // Zoom speed settings (user configurable)
+        let scrollZoomSpeed = 1.0;  // Multiplier for mouse wheel zoom (PC)
+        let pinchZoomSpeed = 1.0;   // Multiplier for pinch zoom (mobile)
+
+        // Point size multiplier (user configurable, synced with Region view)
+        let pointSizeMultiplier = 1.0;
+        const POINT_SIZE_STORAGE_KEY = 'haven-map-point-size';
+
+        // Brightness multiplier (user configurable)
+        let brightnessMultiplier = 1.0;
+        const BRIGHTNESS_STORAGE_KEY = 'haven-map-brightness';
+
+        // Embed mode detection (for dashboard iframe preview)
+        const urlParams = new URLSearchParams(window.location.search);
+        const isEmbedMode = urlParams.get('embed') === 'true';
+
+        // Apply embed mode settings - hide UI and set defaults
+        function applyEmbedMode() {
+            if (!isEmbedMode) return;
+
+            // Hide all UI panels
+            const elementsToHide = [
+                'info-panel', 'controls', 'fps-counter', 'system-info',
+                'mobile-settings', 'back-to-haven', 'search-panel'
+            ];
+            elementsToHide.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+
+            // Hide direction labels
+            document.querySelectorAll('.direction-label').forEach(el => {
+                el.style.display = 'none';
+            });
+
+            // Enable auto-rotation for embed mode
+            autoRotate = true;
+            if (controls) {
+                controls.autoRotate = true;
+                controls.autoRotateSpeed = 0.3; // Slower rotation for preview
+            }
+
+            // Set visible defaults for point size and brightness (ignore localStorage in embed)
+            pointSizeMultiplier = 1.5;
+            brightnessMultiplier = 1.5;
+
+            // Update shader uniforms if material exists
+            if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                systemPoints.material.uniforms.sizeMultiplier.value = pointSizeMultiplier;
+                systemPoints.material.uniforms.brightness.value = brightnessMultiplier;
+            }
+        }
+
+        // Direction reference points in 3D space (far from origin)
+        const DIRECTION_POINTS = {
+            north: new THREE.Vector3(0, 0, -10000),
+            south: new THREE.Vector3(0, 0, 10000),
+            east: new THREE.Vector3(10000, 0, 0),
+            west: new THREE.Vector3(-10000, 0, 0),
+            up: new THREE.Vector3(0, 10000, 0),
+            down: new THREE.Vector3(0, -10000, 0)
+        };
+
+        // Performance tracking
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let fps = 60;
+
+        // Camera animation state
+        let cameraAnimation = null;
+        const FOCUS_DISTANCE = 400; // Distance from system when focused (scaled 5x for larger map)
+        const ANIMATION_DURATION = 1000; // Animation duration in ms
+
+        // Display scale factor (1:1 for full-size galaxy map)
+        // This ensures each coordinate unit = 1 display unit, preventing region overlap
+        const DISPLAY_SCALE = 1.0;
+
+        // Region size in coordinate units (matches NMS 128-unit regions)
+        const REGION_SIZE = 128;
+
+        // Galaxy colors by type
+        const GALAXY_COLORS = {
+            'Euclid': 0x00C2B3,
+            'Hilbert': 0x9d4edd,
+            'Calypso': 0xff6b6b,
+            'Eissentam': 0x4ecdc4,
+            'Elkupalos': 0xffd93d
+        };
+
+        function init() {
+            console.log('Init starting... [v2 with focus]');
+            console.log('SYSTEMS_DATA length:', window.SYSTEMS_DATA.length);
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0e27);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                60,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                10000
+            );
+            camera.position.set(0, 1000, 2500);  // Scaled 5x for larger map
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.getElementById('map-container').appendChild(renderer.domElement);
+
+            // Controls - scaled for larger map with smooth movement
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;  // Keep same damping for smooth feel
+            controls.minDistance = 1;       // Allow microscopic zoom for region separation
+            controls.maxDistance = 10000;   // Scaled 5x to see entire larger map
+            controls.target.set(0, 0, 0);
+            controls.autoRotate = autoRotate;
+            controls.autoRotateSpeed = 0.5;
+            controls.zoomSpeed = scrollZoomSpeed;  // Apply initial zoom speed
+
+            // Custom scroll wheel handler for adjustable zoom speed
+            renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+
+            // Raycaster for mouse interaction
+            raycaster = new THREE.Raycaster();
+            raycaster.params.Points.threshold = getHoverThreshold();  // Dynamic based on point size
+            mouse = new THREE.Vector2();
+
+            // Add grid
+            createGrid();
+            console.log('Grid created');
+
+            // Add galaxy center marker
+            createGalaxyCenter();
+            console.log('Galaxy center created');
+
+            // Load and create systems
+            createSystems();
+            console.log('Systems created, scene children:', scene.children.length);
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            renderer.domElement.addEventListener('click', onClick);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+
+            // Touch event listeners for mobile
+            renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+            renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+            renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
+
+            // Update stats
+            updateStats();
+
+            // Load saved zoom speed settings
+            loadZoomSettings();
+
+            // Load saved point size from localStorage (synced with Region view)
+            loadPointSizeFromStorage();
+
+            // Load saved brightness from localStorage
+            loadBrightnessFromStorage();
+
+            // Initialize mobile button states and sync sliders
+            updateMobileButtonStates();
+            syncMobileSliders();
+
+            // Apply embed mode if active (hides UI, enables rotation, sets defaults)
+            applyEmbedMode();
+
+            // Start animation
+            animate();
+            console.log('Init complete');
+        }
+
+        function createGrid() {
+            // XZ plane grid - represents the full galaxy COORDINATE space at 1:5 scale
+            //
+            // NMS Galaxy Structure:
+            // - Coordinate space: 4096 x 256 x 4096 units (-2048 to +2047 on X/Z, -128 to +127 on Y)
+            // - Region grid: 4096 x 256 x 4096 regions (each region = 128 coordinate units)
+            // - Total regions: 4096 x 4096 x 256 = 4.29 BILLION regions
+            // - Core void: 3.5 regions (450 coordinate units / 128 units per region)
+            // - Core void proportion: 3.5 / 4096 = 0.000854 (0.085% of one dimension!)
+            //
+            // This grid shows coordinate space so systems align properly
+            const DISPLAY_SCALE = 1.0;  // 1:1 scale for full-size map
+            const GALAXY_SIZE = 4096;   // Full NMS galaxy width in coordinates
+            const gridSize = GALAXY_SIZE * DISPLAY_SCALE;  // 4096 display units
+            const gridDivisions = 40;
+
+            const gridHelper = new THREE.GridHelper(
+                gridSize,
+                gridDivisions,
+                0x00C2B3,  // Cyan grid lines
+                0x1a2040   // Dark blue grid
+            );
+            gridHelper.material.opacity = 0.3;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+
+        }
+
+        // Update direction HUD labels based on camera orientation
+        // Uses camera view direction to position labels at screen edges like a compass
+        function updateDirectionLabels() {
+            if (!camera || !controls) return;
+
+            const margin = 50;
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            const centerX = screenW / 2;
+            const centerY = screenH / 2;
+
+            // Get camera's forward direction (where it's looking)
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldDirection(cameraDir);
+
+            // Get camera's right and up vectors
+            const cameraRight = new THREE.Vector3();
+            const cameraUp = new THREE.Vector3();
+            cameraRight.crossVectors(cameraDir, camera.up).normalize();
+            cameraUp.crossVectors(cameraRight, cameraDir).normalize();
+
+            // World direction vectors
+            const worldNorth = new THREE.Vector3(0, 0, -1);
+            const worldSouth = new THREE.Vector3(0, 0, 1);
+            const worldEast = new THREE.Vector3(1, 0, 0);
+            const worldWest = new THREE.Vector3(-1, 0, 0);
+            const worldUp = new THREE.Vector3(0, 1, 0);
+            const worldDown = new THREE.Vector3(0, -1, 0);
+
+            const directions = {
+                north: worldNorth,
+                south: worldSouth,
+                east: worldEast,
+                west: worldWest,
+                up: worldUp,
+                down: worldDown
+            };
+
+            // Calculate radius for label placement (distance from center to edge)
+            const radius = Math.min(centerX, centerY) - margin;
+
+            Object.keys(directions).forEach(dir => {
+                const element = document.getElementById('dir-' + dir);
+                if (!element) return;
+
+                const worldDir = directions[dir];
+
+                // Check if direction is behind camera (dot product with camera forward)
+                const dotForward = worldDir.dot(cameraDir);
+
+                if (dotForward > 0.1) {
+                    // Direction is mostly behind camera, hide it
+                    element.style.display = 'none';
+                    return;
+                }
+
+                element.style.display = 'block';
+
+                // Project world direction onto camera's view plane
+                // Get the component in camera's right direction (screen X)
+                const screenX = worldDir.dot(cameraRight);
+                // Get the component in camera's up direction (screen Y, inverted)
+                const screenY = -worldDir.dot(cameraUp);
+
+                // Normalize to get direction on screen, then scale by radius
+                const len = Math.sqrt(screenX * screenX + screenY * screenY);
+                let x, y;
+
+                if (len < 0.01) {
+                    // Direction is directly in front or behind - hide
+                    element.style.display = 'none';
+                    return;
+                }
+
+                // Position at edge of screen in the direction
+                x = centerX + (screenX / len) * radius;
+                y = centerY + (screenY / len) * radius;
+
+                // Final clamping to keep on screen
+                if (x < margin) x = margin;
+                if (x > screenW - margin) x = screenW - margin;
+                if (y < margin) y = margin;
+                if (y > screenH - margin) y = screenH - margin;
+
+                element.style.left = x + 'px';
+                element.style.top = y + 'px';
+                element.style.bottom = 'auto';
+                element.style.transform = 'translate(-50%, -50%)';
+            });
+        }
+
+        function createGalaxyCenter() {
+            // Galactic core - bright center of light (NMS galaxy center portal)
+            //
+            // ACCURATE SCALE REPRESENTATION:
+            // - Total regions: 4096 x 4096 x 256 = 4.29 billion regions
+            // - Core void: 450 coordinate units = 3.5 regions (450 / 128)
+            // - Proportion: 3.5 / 4096 = 0.000854 of galaxy width
+            //
+            // The core void is TINY compared to the galaxy - this is intentional!
+            // It's only 3.5 regions out of 4.29 BILLION total regions
+            const CORE_VOID_COORDS = 450;    // Core void in coordinate units
+            const DISPLAY_SCALE = 1.0;        // 1:1 display scale for full-size map
+            const REGION_SIZE = 128;          // Coordinate units per region
+            const REGION_COUNT = 4096;        // Regions per dimension
+
+            // Core void in regions
+            const coreVoidRegions = CORE_VOID_COORDS / REGION_SIZE;  // 3.5 regions
+
+            // Core void as proportion of galaxy (in region space)
+            const coreVoidProportion = coreVoidRegions / REGION_COUNT;  // 0.000854
+
+            // Grid size represents coordinate space
+            const gridSize = REGION_COUNT * DISPLAY_SCALE;  // 4096 units
+
+            // Core void display radius (as proportion of region grid)
+            const coreVoidDisplayRadius = coreVoidProportion * gridSize;
+            // Result: 0.000854 * 819.2 = 0.7 display units (VERY SMALL - this is correct!)
+
+            // Bright inner core (white) - intentionally tiny!
+            const coreGeometry = new THREE.SphereGeometry(coreVoidDisplayRadius, 24, 24);
+            const coreMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFFFFFF,  // Bright white
+                transparent: true,
+                opacity: 0.95
+            });
+            const galacticCore = new THREE.Mesh(coreGeometry, coreMaterial);
+            scene.add(galacticCore);
+
+            // Glowing aura (cyan) - slightly larger but still tiny
+            const glowGeometry = new THREE.SphereGeometry(coreVoidDisplayRadius * 2, 24, 24);
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: 0x00C2B3,  // Cyan glow
+                transparent: true,
+                opacity: 0.6
+            });
+            const coreGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+            scene.add(coreGlow);
+        }
+
+        function createSystems() {
+            if (window.SYSTEMS_DATA.length === 0) {
+                console.log('No systems data available - no populated regions to display');
+                document.getElementById('system-count').textContent = '0 (no systems discovered yet)';
+                return;
+            }
+
+            // Aggregate systems by region to show regions as clickable points
+            // Each region with at least one system will be visible on the map
+            const regionMap = new Map();
+
+            window.SYSTEMS_DATA.forEach(system => {
+                // Get region coordinates (from glyph hex values)
+                const rx = system.region_x !== null && system.region_x !== undefined ? system.region_x : 0;
+                const ry = system.region_y !== null && system.region_y !== undefined ? system.region_y : 0;
+                const rz = system.region_z !== null && system.region_z !== undefined ? system.region_z : 0;
+
+                // Get signed coordinates for display (centered at 0)
+                const sx = system.x !== null && system.x !== undefined ? system.x : 0;
+                const sy = system.y !== null && system.y !== undefined ? system.y : 0;
+                const sz = system.z !== null && system.z !== undefined ? system.z : 0;
+
+                const regionKey = `${rx},${ry},${rz}`;
+
+                if (!regionMap.has(regionKey)) {
+                    regionMap.set(regionKey, {
+                        region_x: rx,
+                        region_y: ry,
+                        region_z: rz,
+                        // Use signed coords for display (first system in region sets the position)
+                        display_x: sx,
+                        display_y: sy,
+                        display_z: sz,
+                        systems: [],
+                        galaxies: new Set()
+                    });
+                }
+
+                const region = regionMap.get(regionKey);
+                region.systems.push(system);
+                region.galaxies.add(system.galaxy || 'Euclid');
+            });
+
+            console.log(`Aggregated ${window.SYSTEMS_DATA.length} systems into ${regionMap.size} populated regions`);
+
+            // Prepare data for rendering regions as clickable points
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+
+            let index = 0;
+            regionMap.forEach((region, regionKey) => {
+                // Use signed coordinates for display (already centered at 0)
+                // Galaxy coords: X/Z range -2048 to +2047, Y range -128 to +127
+                const x = region.display_x * DISPLAY_SCALE;
+                const y = region.display_y * DISPLAY_SCALE;
+                const z = region.display_z * DISPLAY_SCALE;
+
+                console.log(`Region [${region.region_x}, ${region.region_y}, ${region.region_z}] coords (${region.display_x}, ${region.display_y}, ${region.display_z}) -> Display (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
+
+                positions.push(x, y, z);
+
+                // Color based on dominant galaxy in region - brighter for visibility
+                const dominantGalaxy = Array.from(region.galaxies)[0] || 'Euclid';
+                const color = new THREE.Color(
+                    GALAXY_COLORS[dominantGalaxy] || 0x00C2B3
+                );
+                colors.push(color.r, color.g, color.b);
+
+                // Size based on number of systems in region (more systems = larger)
+                // Increased base size for better visibility and clickability
+                const systemCount = region.systems.length;
+                const size = 8 + Math.min(systemCount * 3, 15);  // Larger points for visibility
+                sizes.push(size);
+
+                // Store region data for raycasting
+                systemData.push({
+                    index: index,
+                    isRegion: true,
+                    region: region,
+                    systems: region.systems,
+                    position: new THREE.Vector3(x, y, z)
+                });
+                index++;
+            });
+
+            // Update stats to show regions
+            document.getElementById('system-count').textContent = `${window.SYSTEMS_DATA.length} systems in ${regionMap.size} regions`;
+
+            // Create geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute(
+                'position',
+                new THREE.Float32BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+                'color',
+                new THREE.Float32BufferAttribute(colors, 3)
+            );
+            geometry.setAttribute(
+                'size',
+                new THREE.Float32BufferAttribute(sizes, 1)
+            );
+
+            // Custom shader material for region points
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    pointTexture: { value: createStarTexture() },
+                    sizeMultiplier: { value: pointSizeMultiplier },
+                    brightness: { value: brightnessMultiplier }
+                },
+                vertexShader: `
+                    attribute float size;
+                    uniform float sizeMultiplier;
+                    varying vec3 vColor;
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        float dist = -mvPosition.z;
+                        float crossover = 500.0;
+                        float pointSize;
+                        float scaledSize = size * sizeMultiplier;
+                        if (dist > crossover) {
+                            // Normal behavior: grow as camera approaches
+                            pointSize = scaledSize * (300.0 / dist);
+                        } else {
+                            // Microscopic zoom: shrink as camera gets closer
+                            float maxSize = scaledSize * (300.0 / crossover);
+                            float shrinkFactor = dist / crossover;
+                            pointSize = maxSize * shrinkFactor;
+                        }
+                        gl_PointSize = max(pointSize, 2.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D pointTexture;
+                    uniform float brightness;
+                    varying vec3 vColor;
+                    void main() {
+                        // Apply brightness multiplier to color (clamped to prevent overflow)
+                        vec3 brightColor = min(vColor * brightness, vec3(1.0));
+                        gl_FragColor = vec4(brightColor, 1.0);
+                        gl_FragColor = gl_FragColor * texture2D(pointTexture, gl_PointCoord);
+                        // Boost alpha based on brightness for more visible glow
+                        gl_FragColor.a = min(gl_FragColor.a * brightness, 1.0);
+                        if (gl_FragColor.a < 0.05) discard;
+                    }
+                `,
+                blending: THREE.AdditiveBlending,
+                depthTest: false,
+                transparent: true,
+                vertexColors: true
+            });
+
+            systemPoints = new THREE.Points(geometry, material);
+            scene.add(systemPoints);
+        }
+
+        function createStarTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+
+            // Create radial gradient for star
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        function updateStats() {
+            document.getElementById('system-count').textContent = window.SYSTEMS_DATA.length;
+            document.getElementById('discovery-count').textContent = window.DISCOVERIES_DATA.length;
+
+            // Get unique galaxies
+            const galaxies = [...new Set(window.SYSTEMS_DATA.map(s => s.galaxy))];
+            document.getElementById('galaxy-name').textContent = galaxies.join(', ') || 'Euclid';
+        }
+
+        // Track mouse down position to distinguish clicks from drags
+        let mouseDownPos = { x: 0, y: 0 };
+        let isDragging = false;
+
+        function onMouseDown(event) {
+            mouseDownPos.x = event.clientX;
+            mouseDownPos.y = event.clientY;
+            isDragging = false;
+        }
+
+        function onMouseUp(event) {
+            // Check if mouse moved significantly (drag vs click)
+            const dx = event.clientX - mouseDownPos.x;
+            const dy = event.clientY - mouseDownPos.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // If moved less than 5 pixels, treat as click
+            if (distance < 5) {
+                handleSystemClick(event.clientX, event.clientY);
+            }
+        }
+
+        function handleSystemClick(clientX, clientY) {
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+
+                if (intersects.length > 0) {
+                    const index = intersects[0].index;
+                    const data = systemData[index];
+                    if (data && data.isRegion) {
+                        // Region clicked - show region info and navigate to Region View
+                        const region = data.region;
+                        console.log('Region clicked:', `[${region.region_x}, ${region.region_y}, ${region.region_z}]`, 'Systems:', region.systems.length);
+                        showRegionInfo(data);
+                    }
+                }
+            }
+        }
+
+        function onClick(event) {
+            // Fallback click handler (may not fire if OrbitControls consumes event)
+            handleSystemClick(event.clientX, event.clientY);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+                const tooltip = document.getElementById('tooltip');
+
+                if (intersects.length > 0) {
+                    const index = intersects[0].index;
+                    const data = systemData[index];
+                    if (data && data.isRegion) {
+                        const region = data.region;
+                        const systemCount = region.systems.length;
+                        const systemNames = region.systems.slice(0, 3).map(s => s.name).join(', ');
+                        const moreText = systemCount > 3 ? ` +${systemCount - 3} more` : '';
+                        tooltip.innerHTML = `<strong>Region [${region.region_x}, ${region.region_y}, ${region.region_z}]</strong><br>` +
+                            `${systemCount} system${systemCount !== 1 ? 's' : ''}<br>` +
+                            `<span style="color: #888; font-size: 10px;">${systemNames}${moreText}</span>`;
+                        tooltip.style.left = event.clientX + 15 + 'px';
+                        tooltip.style.top = event.clientY + 15 + 'px';
+                        tooltip.style.display = 'block';
+                        document.body.style.cursor = 'pointer';
+                        return;
+                    }
+                }
+
+                tooltip.style.display = 'none';
+                document.body.style.cursor = 'default';
+            }
+        }
+
+        function showRegionInfo(regionData) {
+            const region = regionData.region;
+            const systems = regionData.systems;
+
+            // Update system info panel to show region info
+            document.getElementById('system-name').textContent = `Region [${region.region_x}, ${region.region_y}, ${region.region_z}]`;
+            document.getElementById('system-galaxy').textContent = Array.from(region.galaxies).join(', ') || 'Euclid';
+
+            // Hide glyph display for regions
+            document.getElementById('glyph-display-container').style.display = 'none';
+
+            // Show region coordinates
+            document.getElementById('system-coords').textContent =
+                `Region X: ${region.region_x}, Y: ${region.region_y}, Z: ${region.region_z}`;
+            document.getElementById('system-planets').textContent =
+                `${systems.length} star system${systems.length !== 1 ? 's' : ''}`;
+
+            // List first few systems
+            const systemList = systems.slice(0, 5).map(s => s.name).join(', ');
+            const moreText = systems.length > 5 ? ` ... and ${systems.length - 5} more` : '';
+            document.getElementById('system-description').textContent = systemList + moreText;
+
+            // Update link to go to Region View
+            const systemLink = document.getElementById('view-system-link');
+            systemLink.href = `/map/region?rx=${region.region_x}&ry=${region.region_y}&rz=${region.region_z}`;
+            systemLink.textContent = 'Enter Region →';
+
+            document.getElementById('system-info').style.display = 'block';
+
+            // Store position for Focus button (don't auto-focus - let user decide)
+            selectedRegionPosition = regionData.position;
+            selectedSystem = null;  // Clear system selection since we selected a region
+        }
+
+        function showSystemInfo(system, autoFocus = true) {
+            selectedSystem = system;
+            selectedRegionPosition = null;  // Clear region selection
+
+            // Auto-focus on the system when showing info using star position (actual 3D location)
+            // Falls back to region coordinates if star position not available
+            const starX = system.star_x !== null && system.star_x !== undefined ? system.star_x : (system.x || 0);
+            const starY = system.star_y !== null && system.star_y !== undefined ? system.star_y : (system.y || 0);
+            const starZ = system.star_z !== null && system.star_z !== undefined ? system.star_z : (system.z || 0);
+
+            if (autoFocus) {
+                const targetX = starX * DISPLAY_SCALE;
+                const targetY = starY * DISPLAY_SCALE;
+                const targetZ = starZ * DISPLAY_SCALE;
+
+                console.log('Auto-focusing on system:', system.name, 'at star position', targetX, targetY, targetZ);
+                const targetPosition = new THREE.Vector3(targetX, targetY, targetZ);
+                focusOnSystem(targetPosition);
+            }
+
+            document.getElementById('system-name').textContent = system.name || 'Unknown';
+            document.getElementById('system-galaxy').textContent = system.galaxy || 'Euclid';
+
+            // Render glyph display with images
+            renderGlyphDisplay(system.glyph_code);
+
+            // Display region coordinates (from glyph) - this is what players use for navigation
+            document.getElementById('system-coords').textContent =
+                `X: ${system.x || 0}, Y: ${system.y || 0}, Z: ${system.z || 0}`;
+            document.getElementById('system-planets').textContent =
+                (system.planets?.length || 0) + ' planets';
+            document.getElementById('system-description').textContent =
+                system.description || '';
+
+            // Set link to 3D system view
+            const systemLink = document.getElementById('view-system-link');
+            const systemId = system.id || system.name;
+            systemLink.href = `/map/system/${encodeURIComponent(systemId)}`;
+            systemLink.textContent = 'View System →';
+
+            // Show glyph display (may have been hidden by region info)
+            document.getElementById('glyph-display-container').style.display = 'block';
+
+            document.getElementById('system-info').style.display = 'block';
+
+            // Show region outline around the selected system
+            showRegionOutline(system);
+        }
+
+        function formatGlyph(glyph) {
+            if (!glyph || glyph.length !== 12) return glyph;
+            return `${glyph[0]}-${glyph.slice(1,4)}-${glyph.slice(4,6)}-${glyph.slice(6,9)}-${glyph.slice(9,12)}`;
+        }
+
+        // Glyph image filenames mapping (hex digit -> image file)
+        const GLYPH_IMAGES = {
+            '0': 'IMG_9202.jpg',
+            '1': 'IMG_9203.jpg',
+            '2': 'IMG_9204.jpg',
+            '3': 'IMG_9205.jpg',
+            '4': 'IMG_9206.jpg',
+            '5': 'IMG_9207.jpg',
+            '6': 'IMG_9208.png',
+            '7': 'IMG_9209.jpg',
+            '8': 'IMG_9210.jpg',
+            '9': 'IMG_9211.jpg',
+            'A': 'IMG_9212.jpg',
+            'B': 'IMG_9213.jpg',
+            'C': 'IMG_9214.jpg',
+            'D': 'IMG_9215.jpg',
+            'E': 'IMG_9216.jpg',
+            'F': 'IMG_9217.jpg'
+        };
+
+        function renderGlyphDisplay(glyphCode) {
+            const container = document.getElementById('glyph-display-container');
+            const imagesEl = document.getElementById('glyph-images');
+            const hexEl = document.getElementById('glyph-hex');
+
+            if (!glyphCode || glyphCode.length !== 12) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+
+            // Build glyph images HTML
+            let imagesHtml = '';
+            for (let i = 0; i < glyphCode.length; i++) {
+                const digit = glyphCode[i].toUpperCase();
+                const imageFile = GLYPH_IMAGES[digit];
+                if (imageFile) {
+                    imagesHtml += `<img src="/haven-ui-photos/${imageFile}" alt="${digit}" class="glyph-img" title="Glyph ${digit}">`;
+                } else {
+                    imagesHtml += `<span class="glyph-img" style="display:flex;align-items:center;justify-content:center;font-size:10px;color:#9d4edd;">${digit}</span>`;
+                }
+            }
+            imagesEl.innerHTML = imagesHtml;
+            hexEl.textContent = formatGlyph(glyphCode);
+        }
+
+        function closeSystemInfo() {
+            document.getElementById('system-info').style.display = 'none';
+            selectedSystem = null;
+            // Remove region outline when closing info panel
+            hideRegionOutline();
+        }
+
+        function showRegionOutline(system) {
+            // Remove existing outline if any
+            hideRegionOutline();
+
+            // Calculate region boundaries from the system's region coordinates
+            // Region coords are 0-31 range, we need to convert to world coordinates
+            const regionX = system.region_x !== undefined ? system.region_x : Math.floor((system.x + 2048) / REGION_SIZE);
+            const regionY = system.region_y !== undefined ? system.region_y : Math.floor((system.y + 128) / REGION_SIZE);
+            const regionZ = system.region_z !== undefined ? system.region_z : Math.floor((system.z + 2048) / REGION_SIZE);
+
+            // Calculate the center of the region in world coordinates
+            // Region spans from (regionCoord * REGION_SIZE) to ((regionCoord + 1) * REGION_SIZE)
+            // Then subtract the offset to get centered coordinates
+            const regionCenterX = ((regionX * REGION_SIZE) + (REGION_SIZE / 2) - 2048) * DISPLAY_SCALE;
+            const regionCenterY = ((regionY * REGION_SIZE) + (REGION_SIZE / 2) - 128) * DISPLAY_SCALE;
+            const regionCenterZ = ((regionZ * REGION_SIZE) + (REGION_SIZE / 2) - 2048) * DISPLAY_SCALE;
+
+            // Region size in display coordinates
+            const displayRegionSize = REGION_SIZE * DISPLAY_SCALE;
+
+            // Create a wireframe box geometry
+            const geometry = new THREE.BoxGeometry(displayRegionSize, displayRegionSize, displayRegionSize);
+            const edges = new THREE.EdgesGeometry(geometry);
+
+            // Cyan color with transparency effect through line material
+            const material = new THREE.LineBasicMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.4,
+                linewidth: 1
+            });
+
+            regionOutline = new THREE.LineSegments(edges, material);
+            regionOutline.position.set(regionCenterX, regionCenterY, regionCenterZ);
+
+            scene.add(regionOutline);
+            console.log(`Region outline shown at [${regionX}, ${regionY}, ${regionZ}] - center: (${regionCenterX.toFixed(2)}, ${regionCenterY.toFixed(2)}, ${regionCenterZ.toFixed(2)})`);
+        }
+
+        function hideRegionOutline() {
+            if (regionOutline) {
+                scene.remove(regionOutline);
+                regionOutline.geometry.dispose();
+                regionOutline.material.dispose();
+                regionOutline = null;
+            }
+        }
+
+        function refocusSelectedSystem() {
+            // First check if we have a region position (from clicking on a region)
+            if (selectedRegionPosition) {
+                console.log('Focusing on region at:', selectedRegionPosition);
+                focusOnSystem(selectedRegionPosition);
+                return;
+            }
+
+            // Otherwise check for a selected system
+            if (selectedSystem) {
+                // Use star position for actual 3D location
+                const starX = selectedSystem.star_x !== null && selectedSystem.star_x !== undefined
+                    ? selectedSystem.star_x : (selectedSystem.x || 0);
+                const starY = selectedSystem.star_y !== null && selectedSystem.star_y !== undefined
+                    ? selectedSystem.star_y : (selectedSystem.y || 0);
+                const starZ = selectedSystem.star_z !== null && selectedSystem.star_z !== undefined
+                    ? selectedSystem.star_z : (selectedSystem.z || 0);
+
+                const targetX = starX * DISPLAY_SCALE;
+                const targetY = starY * DISPLAY_SCALE;
+                const targetZ = starZ * DISPLAY_SCALE;
+
+                console.log('Refocusing on:', selectedSystem.name);
+                const targetPosition = new THREE.Vector3(targetX, targetY, targetZ);
+                focusOnSystem(targetPosition);
+            }
+        }
+
+        // ========== SEARCH PANEL FUNCTIONALITY ==========
+
+        let searchPanelCollapsed = false;
+        let currentSearchQuery = '';
+        let currentSearchPage = 1;
+        let totalSearchPages = 1;
+        let searchResultsData = [];
+        let highlightedMesh = null;
+
+        function toggleSearchPanel() {
+            searchPanelCollapsed = !searchPanelCollapsed;
+            const panel = document.getElementById('search-panel');
+            const content = document.getElementById('search-panel-content');
+            const toggle = document.getElementById('search-panel-toggle');
+
+            if (searchPanelCollapsed) {
+                panel.classList.add('collapsed');
+                content.style.display = 'none';
+                toggle.textContent = '▶';
+            } else {
+                panel.classList.remove('collapsed');
+                content.style.display = 'block';
+                toggle.textContent = '◀';
+            }
+        }
+
+        function performSearch() {
+            const query = document.getElementById('system-search-input').value.trim();
+            if (!query) {
+                document.getElementById('search-results').innerHTML = '<div class="search-no-results">Enter a system or planet name</div>';
+                document.getElementById('search-pagination').style.display = 'none';
+                return;
+            }
+
+            currentSearchQuery = query;
+            currentSearchPage = 1;
+            executeSearch();
+        }
+
+        function executeSearch() {
+            const resultsContainer = document.getElementById('search-results');
+            resultsContainer.innerHTML = '<div class="search-loading">Searching...</div>';
+
+            fetch(`/api/systems/search?q=${encodeURIComponent(currentSearchQuery)}&page=${currentSearchPage}&limit=10&include_planets=true`)
+                .then(response => response.json())
+                .then(data => {
+                    searchResultsData = data.results || [];
+                    totalSearchPages = data.total_pages || 1;
+
+                    renderSearchResults();
+                    updatePagination(data.total, data.page, data.total_pages);
+                })
+                .catch(error => {
+                    console.error('Search failed:', error);
+                    resultsContainer.innerHTML = '<div class="search-no-results">Search failed. Please try again.</div>';
+                    document.getElementById('search-pagination').style.display = 'none';
+                });
+        }
+
+        function renderSearchResults() {
+            const resultsContainer = document.getElementById('search-results');
+
+            if (searchResultsData.length === 0) {
+                resultsContainer.innerHTML = `<div class="search-no-results">No systems found matching "${currentSearchQuery}"</div>`;
+                document.getElementById('search-pagination').style.display = 'none';
+                return;
+            }
+
+            resultsContainer.innerHTML = searchResultsData.map((system, index) => `
+                <div class="search-result-item" onclick="selectSearchResult(${index})">
+                    <div class="search-result-name">${escapeHtml(system.name)}</div>
+                    <div class="search-result-subinfo">
+                        ${system.galaxy || 'Euclid'} | X: ${system.region_x ?? system.x ?? 0}, Y: ${system.region_y ?? system.y ?? 0}, Z: ${system.region_z ?? system.z ?? 0} | ${system.planet_count || 0} planets
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function updatePagination(total, page, totalPages) {
+            const paginationContainer = document.getElementById('search-pagination');
+
+            if (totalPages <= 1) {
+                paginationContainer.style.display = 'none';
+                return;
+            }
+
+            paginationContainer.style.display = 'flex';
+            document.getElementById('current-page').textContent = page;
+            document.getElementById('total-pages').textContent = totalPages;
+
+            document.getElementById('prev-page-btn').disabled = page <= 1;
+            document.getElementById('next-page-btn').disabled = page >= totalPages;
+        }
+
+        function prevSearchPage() {
+            if (currentSearchPage > 1) {
+                currentSearchPage--;
+                executeSearch();
+            }
+        }
+
+        function nextSearchPage() {
+            if (currentSearchPage < totalSearchPages) {
+                currentSearchPage++;
+                executeSearch();
+            }
+        }
+
+        function selectSearchResult(index) {
+            const system = searchResultsData[index];
+            if (!system) return;
+
+            // Use REGION coordinates (x, y, z) for the visible point position
+            // These are what's displayed on the map, not star_x/star_y/star_z
+            const regionX = (system.x !== null && system.x !== undefined) ? system.x : 0;
+            const regionY = (system.y !== null && system.y !== undefined) ? system.y : 0;
+            const regionZ = (system.z !== null && system.z !== undefined) ? system.z : 0;
+
+            const targetX = regionX * DISPLAY_SCALE;
+            const targetY = regionY * DISPLAY_SCALE;
+            const targetZ = regionZ * DISPLAY_SCALE;
+
+            console.log('Flying to system:', system.name, 'at region coords', targetX, targetY, targetZ);
+
+            // Remove previous highlight
+            removeHighlight();
+
+            // Fly to the system (using region coordinates where the point is visible)
+            const targetPosition = new THREE.Vector3(targetX, targetY, targetZ);
+            focusOnSystem(targetPosition);
+
+            // Add highlight after a delay to let camera settle
+            // Highlight uses region coordinates so it appears over the visible point
+            setTimeout(() => {
+                highlightSystem(targetX, targetY, targetZ, system.name);
+            }, 1500);
+        }
+
+        function highlightSystem(x, y, z, name) {
+            // Remove any existing highlight
+            removeHighlight();
+
+            // Create a pulsing highlight ring
+            const geometry = new THREE.RingGeometry(3, 4.5, 32);
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x00ff00,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            highlightedMesh = new THREE.Mesh(geometry, material);
+            highlightedMesh.position.set(x, y, z);
+            highlightedMesh.lookAt(camera.position);
+            scene.add(highlightedMesh);
+
+            // Animate the highlight
+            let pulse = 0;
+            const animateHighlight = () => {
+                if (!highlightedMesh) return;
+
+                pulse += 0.05;
+                const scale = 1 + Math.sin(pulse) * 0.3;
+                highlightedMesh.scale.set(scale, scale, scale);
+                highlightedMesh.material.opacity = 0.5 + Math.sin(pulse) * 0.3;
+                highlightedMesh.lookAt(camera.position);
+
+                highlightedMesh.animationFrame = requestAnimationFrame(animateHighlight);
+            };
+            animateHighlight();
+
+            console.log('Highlighted system:', name);
+        }
+
+        function removeHighlight() {
+            if (highlightedMesh) {
+                if (highlightedMesh.animationFrame) {
+                    cancelAnimationFrame(highlightedMesh.animationFrame);
+                }
+                scene.remove(highlightedMesh);
+                highlightedMesh.geometry.dispose();
+                highlightedMesh.material.dispose();
+                highlightedMesh = null;
+            }
+        }
+
+        function resetView() {
+            camera.position.set(0, 1000, 2500);  // Scaled for larger map
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        function toggleRotation() {
+            autoRotate = !autoRotate;
+            controls.autoRotate = autoRotate;
+            updateMobileButtonStates();
+        }
+
+        function toggleRotationMobile() {
+            toggleRotation();
+        }
+
+        // Update mobile button visual states
+        function updateMobileButtonStates() {
+            const rotateBtn = document.getElementById('mobile-btn-rotate');
+            if (rotateBtn) {
+                if (autoRotate) {
+                    rotateBtn.classList.add('active');
+                } else {
+                    rotateBtn.classList.remove('active');
+                }
+            }
+        }
+
+        // Toggle mobile settings panel
+        function toggleMobileSettings() {
+            const panel = document.getElementById('mobile-settings-panel');
+            const toggle = document.getElementById('mobile-settings-toggle');
+            if (panel && toggle) {
+                panel.classList.toggle('expanded');
+                toggle.classList.toggle('active');
+            }
+        }
+
+        // Sync mobile sliders with current values
+        function syncMobileSliders() {
+            const mobilePointSize = document.getElementById('mobile-point-size');
+            const mobilePointSizeValue = document.getElementById('mobile-point-size-value');
+            const mobileBrightness = document.getElementById('mobile-brightness');
+            const mobileBrightnessValue = document.getElementById('mobile-brightness-value');
+            const mobilePinchSpeed = document.getElementById('mobile-pinch-speed');
+            const mobilePinchSpeedValue = document.getElementById('mobile-pinch-speed-value');
+
+            if (mobilePointSize) {
+                mobilePointSize.value = pointSizeMultiplier;
+                if (mobilePointSizeValue) mobilePointSizeValue.textContent = pointSizeMultiplier.toFixed(1) + 'x';
+            }
+            if (mobileBrightness) {
+                mobileBrightness.value = brightnessMultiplier;
+                if (mobileBrightnessValue) mobileBrightnessValue.textContent = brightnessMultiplier.toFixed(1) + 'x';
+            }
+            if (mobilePinchSpeed) {
+                mobilePinchSpeed.value = pinchZoomSpeed;
+                if (mobilePinchSpeedValue) mobilePinchSpeedValue.textContent = pinchZoomSpeed.toFixed(1) + 'x';
+            }
+        }
+
+        function zoomIn() {
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            camera.position.addScaledVector(direction, 250 * scrollZoomSpeed);  // Scaled 5x for larger map
+        }
+
+        function zoomOut() {
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            camera.position.addScaledVector(direction, -250 * scrollZoomSpeed);  // Scaled 5x for larger map
+        }
+
+        function centerOnGalaxy() {
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        // ========== ZOOM SPEED CONTROLS ==========
+
+        // Custom mouse wheel handler for adjustable zoom speed
+        function onMouseWheel(event) {
+            event.preventDefault();
+
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+
+            // Calculate zoom amount based on scroll delta and speed multiplier
+            // Scaled 5x (0.5 instead of 0.1) for larger map to maintain smooth feel
+            const zoomAmount = -event.deltaY * 0.5 * scrollZoomSpeed;
+
+            // Move camera along view direction
+            camera.position.addScaledVector(direction, zoomAmount);
+
+            // Clamp distance from target
+            const distanceToTarget = camera.position.distanceTo(controls.target);
+            if (distanceToTarget < controls.minDistance) {
+                camera.position.copy(controls.target).add(
+                    direction.multiplyScalar(-controls.minDistance)
+                );
+            } else if (distanceToTarget > controls.maxDistance) {
+                camera.position.copy(controls.target).add(
+                    direction.multiplyScalar(-controls.maxDistance)
+                );
+            }
+        }
+
+        // Update scroll wheel zoom speed
+        function updateScrollSpeed(value) {
+            scrollZoomSpeed = parseFloat(value);
+            controls.zoomSpeed = scrollZoomSpeed;
+            localStorage.setItem('vh-map-scroll-speed', scrollZoomSpeed);
+        }
+
+        function updateScrollSpeedDisplay(value) {
+            document.getElementById('scroll-speed-value').textContent = parseFloat(value).toFixed(1) + 'x';
+        }
+
+        // Update pinch zoom speed
+        function updatePinchSpeed(value) {
+            pinchZoomSpeed = parseFloat(value);
+            localStorage.setItem('vh-map-pinch-speed', pinchZoomSpeed);
+        }
+
+        function updatePinchSpeedDisplay(value) {
+            document.getElementById('pinch-speed-value').textContent = parseFloat(value).toFixed(1) + 'x';
+        }
+
+        // ========== POINT SIZE CONTROLS ==========
+
+        // Calculate hover threshold dynamically based on point size AND camera distance
+        // This ensures hover detection scales with zoom level
+        function getHoverThreshold() {
+            if (!camera || !controls) {
+                return 15 * pointSizeMultiplier;
+            }
+            // Get camera distance from target
+            const cameraDistance = camera.position.distanceTo(controls.target);
+            // Base threshold scales with distance - closer = smaller threshold
+            // At distance 2500 (default), base threshold is 15
+            // At distance 500 (zoomed in), threshold is 3
+            // At distance 5000 (zoomed out), threshold is 30
+            const distanceScale = cameraDistance / 2500;
+            return 15 * pointSizeMultiplier * distanceScale;
+        }
+
+        // Update raycaster threshold - call this on every frame or zoom change
+        function updateRaycasterThreshold() {
+            if (raycaster && raycaster.params && raycaster.params.Points) {
+                raycaster.params.Points.threshold = getHoverThreshold();
+            }
+        }
+
+        // Update point size multiplier
+        function updatePointSize(value) {
+            pointSizeMultiplier = parseFloat(value);
+
+            // Update shader uniform
+            if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                systemPoints.material.uniforms.sizeMultiplier.value = pointSizeMultiplier;
+            }
+
+            // Update raycaster threshold to match point size
+            updateRaycasterThreshold();
+
+            // Save to localStorage (synced with Region view)
+            localStorage.setItem(POINT_SIZE_STORAGE_KEY, pointSizeMultiplier.toString());
+        }
+
+        function updatePointSizeDisplay(value) {
+            document.getElementById('point-size-value').textContent = parseFloat(value).toFixed(1) + 'x';
+        }
+
+        // Load saved point size from localStorage
+        function loadPointSizeFromStorage() {
+            if (isEmbedMode) return; // Skip localStorage in embed mode
+            const saved = localStorage.getItem(POINT_SIZE_STORAGE_KEY);
+            if (saved) {
+                pointSizeMultiplier = parseFloat(saved);
+                const slider = document.getElementById('point-size-slider');
+                if (slider) {
+                    slider.value = pointSizeMultiplier;
+                    updatePointSizeDisplay(pointSizeMultiplier);
+                }
+                // Update shader if already initialized
+                if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                    systemPoints.material.uniforms.sizeMultiplier.value = pointSizeMultiplier;
+                }
+                // Update raycaster threshold
+                updateRaycasterThreshold();
+            }
+        }
+
+        // Listen for localStorage changes from other tabs (Region view sync)
+        window.addEventListener('storage', function(e) {
+            if (e.key === POINT_SIZE_STORAGE_KEY && e.newValue) {
+                pointSizeMultiplier = parseFloat(e.newValue);
+                const slider = document.getElementById('point-size-slider');
+                if (slider) {
+                    slider.value = pointSizeMultiplier;
+                    updatePointSizeDisplay(pointSizeMultiplier);
+                }
+                if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                    systemPoints.material.uniforms.sizeMultiplier.value = pointSizeMultiplier;
+                }
+                // Update raycaster threshold to match new point size
+                updateRaycasterThreshold();
+                // Sync mobile slider
+                syncMobileSliders();
+            }
+            // Also listen for brightness changes
+            if (e.key === BRIGHTNESS_STORAGE_KEY && e.newValue) {
+                brightnessMultiplier = parseFloat(e.newValue);
+                const slider = document.getElementById('brightness-slider');
+                if (slider) {
+                    slider.value = brightnessMultiplier;
+                    updateBrightnessDisplay(brightnessMultiplier);
+                }
+                if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                    systemPoints.material.uniforms.brightness.value = brightnessMultiplier;
+                }
+                // Sync mobile slider
+                syncMobileSliders();
+            }
+        });
+
+        // ========== BRIGHTNESS CONTROLS ==========
+
+        // Update brightness multiplier
+        function updateBrightness(value) {
+            brightnessMultiplier = parseFloat(value);
+
+            // Update shader uniform
+            if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                systemPoints.material.uniforms.brightness.value = brightnessMultiplier;
+            }
+
+            // Save to localStorage
+            localStorage.setItem(BRIGHTNESS_STORAGE_KEY, brightnessMultiplier.toString());
+        }
+
+        function updateBrightnessDisplay(value) {
+            document.getElementById('brightness-value').textContent = parseFloat(value).toFixed(1) + 'x';
+        }
+
+        // Load saved brightness from localStorage
+        function loadBrightnessFromStorage() {
+            if (isEmbedMode) return; // Skip localStorage in embed mode
+            const saved = localStorage.getItem(BRIGHTNESS_STORAGE_KEY);
+            if (saved) {
+                brightnessMultiplier = parseFloat(saved);
+                const slider = document.getElementById('brightness-slider');
+                if (slider) {
+                    slider.value = brightnessMultiplier;
+                    updateBrightnessDisplay(brightnessMultiplier);
+                }
+                // Update shader if already initialized
+                if (systemPoints && systemPoints.material && systemPoints.material.uniforms) {
+                    systemPoints.material.uniforms.brightness.value = brightnessMultiplier;
+                }
+            }
+        }
+
+        // Detect if device is primarily touch-based (mobile/tablet)
+        // Note: Many desktop PCs report touch capability, so we use multiple signals
+        function isTouchDevice() {
+            // Check if primary input is coarse (touch) rather than fine (mouse)
+            const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+            // Check if device has no fine pointer (mouse)
+            const hasNoFinePointer = !window.matchMedia('(pointer: fine)').matches;
+            // Check for small screen (mobile viewport)
+            const isSmallScreen = window.matchMedia('(max-width: 768px)').matches;
+
+            // Only treat as touch device if:
+            // 1. Has coarse pointer AND no fine pointer (true mobile/tablet), OR
+            // 2. Small screen width (mobile viewport)
+            return (hasCoarsePointer && hasNoFinePointer) || isSmallScreen;
+        }
+
+        // Show appropriate zoom speed control based on device type
+        function setupZoomSpeedControls() {
+            const scrollContainer = document.getElementById('scroll-speed-container');
+            const pinchContainer = document.getElementById('pinch-speed-container');
+
+            if (isTouchDevice()) {
+                // Mobile/tablet: show pinch speed, hide scroll speed
+                if (scrollContainer) scrollContainer.style.display = 'none';
+                if (pinchContainer) pinchContainer.style.display = 'block';
+            } else {
+                // Desktop: show scroll speed, hide pinch speed
+                if (scrollContainer) scrollContainer.style.display = 'block';
+                if (pinchContainer) pinchContainer.style.display = 'none';
+            }
+        }
+
+        // Load saved zoom speed settings
+        function loadZoomSettings() {
+            const savedScrollSpeed = localStorage.getItem('vh-map-scroll-speed');
+            const savedPinchSpeed = localStorage.getItem('vh-map-pinch-speed');
+
+            if (savedScrollSpeed) {
+                scrollZoomSpeed = parseFloat(savedScrollSpeed);
+                document.getElementById('scroll-speed').value = scrollZoomSpeed;
+                updateScrollSpeedDisplay(scrollZoomSpeed);
+                if (controls) controls.zoomSpeed = scrollZoomSpeed;
+            }
+
+            if (savedPinchSpeed) {
+                pinchZoomSpeed = parseFloat(savedPinchSpeed);
+                document.getElementById('pinch-speed').value = pinchZoomSpeed;
+                updatePinchSpeedDisplay(pinchZoomSpeed);
+                // Also sync mobile slider
+                const mobilePinchSlider = document.getElementById('mobile-pinch-speed');
+                const mobilePinchValue = document.getElementById('mobile-pinch-speed-value');
+                if (mobilePinchSlider) mobilePinchSlider.value = pinchZoomSpeed;
+                if (mobilePinchValue) mobilePinchValue.textContent = pinchZoomSpeed.toFixed(1) + 'x';
+            }
+
+            // Setup device-appropriate controls
+            setupZoomSpeedControls();
+        }
+
+        // Smooth camera focus animation using easing
+        function focusOnSystem(systemPosition) {
+            console.log('focusOnSystem called with:', systemPosition);
+
+            // Stop auto-rotate during animation
+            const wasAutoRotating = controls.autoRotate;
+            controls.autoRotate = false;
+
+            // Calculate camera target position (the system we're focusing on)
+            const targetPos = systemPosition.clone();
+
+            // Galaxy center is at origin
+            const galaxyCenter = new THREE.Vector3(0, 0, 0);
+
+            // Calculate camera position - position camera so it's looking toward the galaxy center
+            // Direction from galaxy center to the system (outward)
+            const outwardDir = targetPos.clone().sub(galaxyCenter).normalize();
+
+            // If system is at or very close to center, use a default viewing direction
+            if (outwardDir.length() < 0.001) {
+                outwardDir.set(0, 0, 1);
+            }
+
+            // Position camera behind the system (on the opposite side from galaxy center)
+            // This ensures we're always looking inward toward the center
+            const cameraOffset = outwardDir.clone().multiplyScalar(FOCUS_DISTANCE);
+            // Add some height for a better viewing angle
+            cameraOffset.y += FOCUS_DISTANCE * 0.3;
+
+            const cameraTargetPos = targetPos.clone().add(cameraOffset);
+
+            // Store animation start state
+            const startCameraPos = camera.position.clone();
+            const startTargetPos = controls.target.clone();
+            const startTime = performance.now();
+
+            // Cancel any existing animation
+            if (cameraAnimation) {
+                cancelAnimationFrame(cameraAnimation);
+            }
+
+            // Easing function (ease-out cubic for smooth deceleration)
+            function easeOutCubic(t) {
+                return 1 - Math.pow(1 - t, 3);
+            }
+
+            // Animation loop
+            function animateCamera() {
+                const elapsed = performance.now() - startTime;
+                const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+                const eased = easeOutCubic(progress);
+
+                // Interpolate camera position
+                camera.position.lerpVectors(startCameraPos, cameraTargetPos, eased);
+
+                // Interpolate target (what camera looks at)
+                controls.target.lerpVectors(startTargetPos, targetPos, eased);
+
+                controls.update();
+
+                if (progress < 1) {
+                    cameraAnimation = requestAnimationFrame(animateCamera);
+                } else {
+                    // Animation complete
+                    cameraAnimation = null;
+                    // Optionally restore auto-rotate after a delay
+                    if (wasAutoRotating) {
+                        setTimeout(() => {
+                            controls.autoRotate = true;
+                        }, 2000);
+                    }
+                }
+            }
+
+            // Start animation
+            cameraAnimation = requestAnimationFrame(animateCamera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ========== TOUCH CONTROLS ==========
+
+        // Touch state tracking
+        let touchStartTime = 0;
+        let touchStartPos = { x: 0, y: 0 };
+        let lastTouchPos = { x: 0, y: 0 };
+        let isTouchDragging = false;
+        let touchCount = 0;
+        let initialPinchDistance = 0;
+        let lastPinchDistance = 0;
+
+        function onTouchStart(event) {
+            touchCount = event.touches.length;
+            touchStartTime = Date.now();
+
+            if (touchCount === 1) {
+                // Single finger - prepare for tap or drag
+                touchStartPos.x = event.touches[0].clientX;
+                touchStartPos.y = event.touches[0].clientY;
+                lastTouchPos.x = touchStartPos.x;
+                lastTouchPos.y = touchStartPos.y;
+                isTouchDragging = false;
+            } else if (touchCount === 2) {
+                // Two fingers - pinch zoom
+                initialPinchDistance = getPinchDistance(event.touches);
+                lastPinchDistance = initialPinchDistance;
+            }
+        }
+
+        function onTouchMove(event) {
+            event.preventDefault(); // Prevent page scroll
+
+            if (touchCount === 1 && event.touches.length === 1) {
+                // Single finger drag - orbit camera
+                const touch = event.touches[0];
+                const deltaX = touch.clientX - lastTouchPos.x;
+                const deltaY = touch.clientY - lastTouchPos.y;
+
+                // Check if we've moved enough to consider it a drag
+                const totalDeltaX = touch.clientX - touchStartPos.x;
+                const totalDeltaY = touch.clientY - touchStartPos.y;
+                if (Math.abs(totalDeltaX) > 10 || Math.abs(totalDeltaY) > 10) {
+                    isTouchDragging = true;
+                }
+
+                lastTouchPos.x = touch.clientX;
+                lastTouchPos.y = touch.clientY;
+
+            } else if (event.touches.length === 2) {
+                // Two finger pinch - zoom only (no panning)
+                const currentDistance = getPinchDistance(event.touches);
+                const delta = currentDistance - lastPinchDistance;
+
+                if (Math.abs(delta) > 2) {
+                    // Zoom in/out based on pinch with speed multiplier
+                    const direction = new THREE.Vector3();
+                    camera.getWorldDirection(direction);
+
+                    // Move camera along look direction (scaled by pinch speed)
+                    // Scaled 5x (50 instead of 10) for larger map
+                    const baseMoveAmount = delta > 0 ? 50 : -50;
+                    const moveAmount = baseMoveAmount * pinchZoomSpeed;
+                    camera.position.addScaledVector(direction, moveAmount);
+
+                    // Clamp distance from target
+                    const distanceToTarget = camera.position.distanceTo(controls.target);
+                    if (distanceToTarget < controls.minDistance) {
+                        camera.position.copy(controls.target).add(
+                            direction.clone().multiplyScalar(-controls.minDistance)
+                        );
+                    } else if (distanceToTarget > controls.maxDistance) {
+                        camera.position.copy(controls.target).add(
+                            direction.clone().multiplyScalar(-controls.maxDistance)
+                        );
+                    }
+
+                    lastPinchDistance = currentDistance;
+                }
+            }
+        }
+
+        function onTouchEnd(event) {
+            const touchDuration = Date.now() - touchStartTime;
+
+            // If it was a quick tap (not a drag), treat as a click
+            if (touchCount === 1 && !isTouchDragging && touchDuration < 300) {
+                // Simulate click for system selection
+                const touch = event.changedTouches[0];
+                handleTap(touch.clientX, touch.clientY);
+            }
+
+            // Reset touch state
+            touchCount = event.touches.length;
+            if (touchCount === 0) {
+                isTouchDragging = false;
+            }
+        }
+
+        function getPinchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function handleTap(clientX, clientY) {
+            // Convert tap position to normalized device coordinates
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+
+                if (intersects.length > 0) {
+                    const index = intersects[0].index;
+                    const data = systemData[index];
+                    if (data && data.isRegion) {
+                        // Region tapped - show region info and allow navigation to Region View
+                        showRegionInfo(data);
+                    } else if (data) {
+                        showSystemInfo(data.system);
+                        // Snap camera to focus on the system (mobile)
+                        focusOnSystem(data.position);
+                    }
+                }
+            }
+        }
+
+        // ========== PAN CONTROLS (for button controls) ==========
+        // Scaled 5x for larger map (100/150 instead of 20/30)
+
+        function panUp() {
+            controls.target.y += 100;
+            controls.update();
+        }
+
+        function panDown() {
+            controls.target.y -= 100;
+            controls.update();
+        }
+
+        function panLeft() {
+            // Pan left relative to camera view
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            const right = new THREE.Vector3();
+            right.crossVectors(direction, camera.up).normalize();
+            controls.target.addScaledVector(right, -150);
+            controls.update();
+        }
+
+        function panRight() {
+            // Pan right relative to camera view
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            const right = new THREE.Vector3();
+            right.crossVectors(direction, camera.up).normalize();
+            controls.target.addScaledVector(right, 150);
+            controls.update();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update FPS counter
+            frameCount++;
+            const currentTime = performance.now();
+            if (currentTime - lastTime >= 1000) {
+                fps = Math.round(frameCount * 1000 / (currentTime - lastTime));
+                document.getElementById('fps-display').textContent = fps;
+                frameCount = 0;
+                lastTime = currentTime;
+            }
+
+            // Update direction labels based on camera position
+            updateDirectionLabels();
+
+            // Update raycaster threshold based on current camera distance
+            updateRaycasterThreshold();
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Also handle the case where data is loaded after DOM
+        if (document.readyState === 'complete') {
+            init();
+        }
+    </script>
+</body>
+</html>

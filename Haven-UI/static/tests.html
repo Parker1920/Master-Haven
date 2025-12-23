@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Haven - Test Manager</title>
+  <link rel="stylesheet" href="/haven-ui/assets/style.css" />
+  <link rel="manifest" href="/haven-ui/manifest.webmanifest">
+  <meta name="theme-color" content="#00C2B3">
+</head>
+<body>
+  <div class="app container">
+    <header>
+      <h1>Test Manager</h1>
+      <nav><a href="index.html">Back</a></nav>
+    </header>
+    <main>
+      <div id="testsList"></div>
+    </main>
+  </div>
+<script>
+  async function loadTests(){
+    const r = await fetch('/api/tests');
+    const j = await r.json();
+    const list = j.tests || [];
+    const el = document.getElementById('testsList');
+    el.innerHTML = '';
+    list.forEach(t=>{
+      const row = document.createElement('div');
+      row.className='card';
+      row.innerHTML = `<div>${t}</div><button onclick="runTest('${encodeURIComponent(t)}')">Run</button>`;
+      el.appendChild(row);
+    })
+  }
+  async function runTest(path){
+    const r = await fetch('/api/tests/run', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ test_path: decodeURIComponent(path)}) });
+    const j = await r.json();
+    alert('Ran: ' + decodeURIComponent(path) + '\nReturn code: ' + j.returncode);
+  }
+  window.onload = ()=>{ loadTests(); if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/haven-ui/sw.js').catch(()=>{}); } };
+</script>
+</body>
+</html>

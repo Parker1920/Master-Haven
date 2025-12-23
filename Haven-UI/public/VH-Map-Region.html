@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven Region View - Star Systems</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #map-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 350px;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        #info-panel h1 {
+            font-size: 20px;
+            margin-bottom: 5px;
+            color: #00C2B3;
+        }
+        #info-panel .region-coords {
+            font-family: monospace;
+            font-size: 14px;
+            color: #00C2B3;
+            margin-bottom: 10px;
+        }
+        #info-panel .stat {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        #info-panel .stat span {
+            color: #00C2B3;
+            font-weight: bold;
+        }
+        #back-btn {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 8px 16px;
+            background: rgba(0, 194, 179, 0.2);
+            border: 1px solid #00C2B3;
+            color: #00C2B3;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #back-btn:hover {
+            background: rgba(0, 194, 179, 0.4);
+        }
+        #system-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            max-width: 400px;
+            display: none;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        #system-info h3 {
+            color: #00C2B3;
+            margin-bottom: 8px;
+            font-size: 18px;
+        }
+        #system-info p {
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        #system-info .close-btn {
+            position: absolute;
+            top: 8px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        #system-info .close-btn:hover {
+            color: #fff;
+        }
+        .view-system-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: rgba(0, 194, 179, 0.2);
+            border: 1px solid #00C2B3;
+            color: #00C2B3;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .view-system-btn:hover {
+            background: rgba(0, 194, 179, 0.4);
+        }
+        /* Glyph display */
+        .glyph-display-container {
+            margin: 8px 0;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(157, 78, 221, 0.4);
+            border-radius: 6px;
+        }
+        .glyph-display-label {
+            font-size: 10px;
+            color: #9d4edd;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+        .glyph-images {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 2px;
+            margin-bottom: 4px;
+        }
+        .glyph-img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: contain;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 2px;
+        }
+        .glyph-hex {
+            font-family: monospace;
+            font-size: 11px;
+            color: #9d4edd;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+        /* Region boundary box indicator */
+        #region-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.9);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            font-size: 12px;
+            z-index: 100;
+        }
+        #region-info .label {
+            color: #888;
+            margin-right: 5px;
+        }
+        #region-info .value {
+            color: #00C2B3;
+            font-family: monospace;
+        }
+        /* Tooltip */
+        #tooltip {
+            position: absolute;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(0, 194, 179, 0.5);
+            pointer-events: none;
+            display: none;
+            z-index: 200;
+            font-size: 13px;
+        }
+        /* Loading state */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 300;
+        }
+        #loading.hidden { display: none; }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(0, 194, 179, 0.2);
+            border-top-color: #00C2B3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Empty region notice */
+        #empty-notice {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 150;
+            display: none;
+        }
+        #empty-notice .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        #empty-notice h2 {
+            color: #00C2B3;
+            margin-bottom: 10px;
+        }
+        #empty-notice p {
+            color: #888;
+            font-size: 14px;
+        }
+
+        /* Mobile-friendly adjustments */
+        @media (max-width: 768px) {
+            #info-panel {
+                top: 10px;
+                left: 10px;
+                padding: 12px;
+                max-width: 200px;
+                font-size: 12px;
+            }
+            #info-panel h1 {
+                font-size: 16px;
+            }
+            #info-panel .stat {
+                font-size: 11px;
+                margin: 4px 0;
+            }
+            #region-info {
+                top: 10px;
+                right: 10px;
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+            #system-info {
+                bottom: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: none;
+                padding: 12px;
+                font-size: 12px;
+            }
+            #system-info h3 {
+                font-size: 15px;
+            }
+            #system-info p {
+                font-size: 11px;
+            }
+            #system-info .close-btn {
+                font-size: 24px;
+                padding: 8px;
+                min-width: 44px;
+                min-height: 44px;
+            }
+            .view-system-btn {
+                padding: 12px 20px;
+                font-size: 14px;
+                min-height: 44px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #back-btn {
+                padding: 12px 20px;
+                font-size: 14px;
+                min-height: 44px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .glyph-images {
+                gap: 1px;
+            }
+            .glyph-img {
+                width: 22px;
+                height: 22px;
+            }
+        }
+
+        /* Ensure touch targets are large enough (44x44 minimum per Apple/Google guidelines) */
+        .view-system-btn, #back-btn, #system-info .close-btn {
+            touch-action: manipulation;
+        }
+
+        /* Region Name Editing Styles */
+        #region-name-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+        .region-name-display {
+            font-size: 18px;
+            font-weight: bold;
+            color: #00C2B3;
+        }
+        .region-name-display.unnamed {
+            opacity: 0.5;
+            font-style: italic;
+        }
+        .region-name-display.pending {
+            color: #f0ad4e;
+        }
+        .edit-region-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 0.6;
+            padding: 4px;
+            transition: opacity 0.2s;
+        }
+        .edit-region-btn:hover {
+            opacity: 1;
+        }
+        #region-name-edit {
+            display: none;
+            margin-bottom: 8px;
+        }
+        #region-name-edit input {
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #00C2B3;
+            border-radius: 4px;
+            color: white;
+            width: 150px;
+            font-size: 14px;
+        }
+        #region-name-edit button {
+            padding: 6px 12px;
+            margin-left: 4px;
+            border: 1px solid #00C2B3;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        #region-name-edit .save-btn {
+            background: rgba(0, 194, 179, 0.3);
+            color: #00C2B3;
+        }
+        #region-name-edit .save-btn:hover {
+            background: rgba(0, 194, 179, 0.5);
+        }
+        #region-name-edit .cancel-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: #888;
+        }
+        #region-name-edit .cancel-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+        .pending-indicator {
+            font-size: 10px;
+            color: #f0ad4e;
+            margin-left: 4px;
+        }
+
+        /* View mode toggle */
+        #view-controls {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 194, 179, 0.3);
+            z-index: 100;
+        }
+        #view-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+            cursor: pointer;
+            margin: 4px 0;
+        }
+        #view-controls input[type="checkbox"] {
+            accent-color: #00C2B3;
+        }
+        #view-controls .slider-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 8px;
+        }
+        #view-controls input[type="range"] {
+            width: 100%;
+            accent-color: #00C2B3;
+        }
+
+        /* Zoom level indicator */
+        #zoom-indicator {
+            position: absolute;
+            bottom: 20px;
+            right: 120px;
+            background: rgba(20, 27, 61, 0.8);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: #00C2B3;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-container"></div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading Region...</div>
+    </div>
+
+    <div id="info-panel">
+        <h1>🌌 Region View</h1>
+        <!-- Region Name Display with Edit -->
+        <div id="region-name-container">
+            <span id="region-custom-name" class="region-name-display unnamed">Unnamed Region</span>
+            <button id="edit-region-btn" class="edit-region-btn" onclick="editRegionName()" title="Edit region name">✏️</button>
+        </div>
+        <!-- Edit Input (hidden by default) -->
+        <div id="region-name-edit">
+            <input type="text" id="region-name-input" placeholder="Enter region name..." maxlength="50">
+            <button class="save-btn" onclick="saveRegionName()">Save</button>
+            <button class="cancel-btn" onclick="cancelEditRegionName()">Cancel</button>
+        </div>
+        <div class="region-coords" id="region-coords">[0, 0, 0]</div>
+        <div class="stat">Star Systems: <span id="system-count">0</span></div>
+        <div class="stat">Galaxy: <span id="galaxy-name">Euclid</span></div>
+        <a href="/map/latest" id="back-btn">← Back to Galaxy Map</a>
+    </div>
+
+    <div id="empty-notice">
+        <div class="icon">🌑</div>
+        <h2>Empty Region</h2>
+        <p>No discovered star systems in this region yet.</p>
+        <p style="margin-top: 10px; font-size: 12px;">Be the first explorer to discover systems here!</p>
+    </div>
+
+    <div id="region-info">
+        <span class="label">Region Size:</span>
+        <span class="value">~400 ly³</span>
+    </div>
+
+    <div id="system-info">
+        <button class="close-btn" onclick="closeSystemInfo()">×</button>
+        <h3 id="system-name">System Name</h3>
+        <p><strong>Galaxy:</strong> <span id="system-galaxy">Euclid</span></p>
+        <div class="glyph-display-container" id="glyph-display">
+            <div class="glyph-display-label">Portal Glyphs</div>
+            <div class="glyph-images" id="glyph-images"></div>
+            <div class="glyph-hex" id="glyph-hex"></div>
+        </div>
+        <p><strong>Planets:</strong> <span id="system-planets">0</span></p>
+        <p><strong>Description:</strong> <span id="system-description"></span></p>
+        <a href="#" class="view-system-btn" id="view-system-link">View System Details →</a>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <!-- View Controls -->
+    <div id="view-controls">
+        <label>
+            <input type="checkbox" id="toggle-labels" onchange="toggleLabels()">
+            Show Labels
+        </label>
+    </div>
+
+    <!-- Zoom Indicator -->
+    <div id="zoom-indicator">Zoom: 1.0x</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Region data - will be populated by API or URL params
+        window.REGION_DATA = {
+            region_x: 0,
+            region_y: 0,
+            region_z: 0,
+            systems: []
+        };
+
+        // Three.js setup
+        let scene, camera, renderer, controls;
+        let systemPoints, systemData = [];
+        let raycaster, mouse;
+        let selectedSystem = null;
+        let regionBox = null;
+
+        // View state
+        let labelsEnabled = false;
+        const pointSizeMultiplier = 0.5;  // Hardcoded point size
+        let labelSprites = [];
+
+        // Glyph image filenames
+        const GLYPH_IMAGES = {
+            '0': 'IMG_9202.jpg', '1': 'IMG_9203.jpg', '2': 'IMG_9204.jpg', '3': 'IMG_9205.jpg',
+            '4': 'IMG_9206.jpg', '5': 'IMG_9207.jpg', '6': 'IMG_9208.png', '7': 'IMG_9209.jpg',
+            '8': 'IMG_9210.jpg', '9': 'IMG_9211.jpg', 'A': 'IMG_9212.jpg', 'B': 'IMG_9213.jpg',
+            'C': 'IMG_9214.jpg', 'D': 'IMG_9215.jpg', 'E': 'IMG_9216.jpg', 'F': 'IMG_9217.jpg'
+        };
+
+        // Region Name Editing State
+        let isAdmin = false;
+        let currentRegionName = null;
+        let hasPendingName = false;
+        let pendingName = null;
+
+        // Check admin status from cookie
+        function checkAdminStatus() {
+            isAdmin = document.cookie.includes('admin_password=');
+        }
+
+        // Load region name from API
+        async function loadRegionName() {
+            const region = getRegionFromURL();
+            try {
+                const response = await fetch(`/api/regions/${region.region_x}/${region.region_y}/${region.region_z}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    currentRegionName = data.custom_name;
+                    hasPendingName = data.has_pending_name || false;
+                    pendingName = data.pending_name || null;
+                    renderRegionName();
+                }
+            } catch (error) {
+                console.error('Failed to load region name:', error);
+            }
+        }
+
+        // Render region name display
+        function renderRegionName() {
+            const nameEl = document.getElementById('region-custom-name');
+            const editBtn = document.getElementById('edit-region-btn');
+
+            if (currentRegionName) {
+                nameEl.textContent = currentRegionName;
+                nameEl.className = 'region-name-display';
+            } else if (hasPendingName && pendingName) {
+                nameEl.textContent = pendingName;
+                nameEl.className = 'region-name-display pending';
+                nameEl.innerHTML = pendingName + '<span class="pending-indicator">(pending)</span>';
+            } else {
+                nameEl.textContent = 'Unnamed Region';
+                nameEl.className = 'region-name-display unnamed';
+            }
+
+            // Show edit button for everyone (they can submit for approval)
+            editBtn.style.display = 'inline-block';
+        }
+
+        // Open edit mode
+        function editRegionName() {
+            document.getElementById('region-name-container').style.display = 'none';
+            document.getElementById('region-name-edit').style.display = 'block';
+            const input = document.getElementById('region-name-input');
+            input.value = currentRegionName || '';
+            input.focus();
+        }
+
+        // Save region name
+        async function saveRegionName() {
+            const newName = document.getElementById('region-name-input').value.trim();
+            if (!newName) {
+                alert('Please enter a region name');
+                return;
+            }
+
+            const region = getRegionFromURL();
+
+            // If admin, directly save. Otherwise, submit for approval.
+            if (isAdmin) {
+                const response = await fetch(`/api/regions/${region.region_x}/${region.region_y}/${region.region_z}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ custom_name: newName })
+                });
+
+                if (response.ok) {
+                    currentRegionName = newName;
+                    hasPendingName = false;
+                    pendingName = null;
+                    cancelEditRegionName();
+                    renderRegionName();
+                } else {
+                    const error = await response.json();
+                    alert(error.detail || 'Failed to save region name');
+                }
+            } else {
+                // Submit for approval
+                const response = await fetch(`/api/regions/${region.region_x}/${region.region_y}/${region.region_z}/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proposed_name: newName })
+                });
+
+                if (response.ok) {
+                    hasPendingName = true;
+                    pendingName = newName;
+                    cancelEditRegionName();
+                    renderRegionName();
+                    alert('Your region name has been submitted for admin approval.');
+                } else {
+                    const error = await response.json();
+                    alert(error.detail || 'Failed to submit region name');
+                }
+            }
+        }
+
+        // Cancel edit mode
+        function cancelEditRegionName() {
+            document.getElementById('region-name-edit').style.display = 'none';
+            document.getElementById('region-name-container').style.display = 'flex';
+        }
+
+        // Parse URL parameters for region coordinates and highlight system
+        function getRegionFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                region_x: parseInt(params.get('rx')) || 0,
+                region_y: parseInt(params.get('ry')) || 0,
+                region_z: parseInt(params.get('rz')) || 0,
+                highlightSystemId: params.get('highlight') || null,
+                glyphCode: params.get('glyph') || null
+            };
+        }
+
+        // Load region data from API
+        async function loadRegionData() {
+            const region = getRegionFromURL();
+            window.REGION_DATA.region_x = region.region_x;
+            window.REGION_DATA.region_y = region.region_y;
+            window.REGION_DATA.region_z = region.region_z;
+
+            document.getElementById('region-coords').textContent =
+                `[${region.region_x}, ${region.region_y}, ${region.region_z}]`;
+
+            try {
+                const response = await fetch(`/api/systems_by_region?rx=${region.region_x}&ry=${region.region_y}&rz=${region.region_z}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    window.REGION_DATA.systems = data.systems || [];
+                    document.getElementById('system-count').textContent = window.REGION_DATA.systems.length;
+                    if (data.systems.length > 0) {
+                        document.getElementById('galaxy-name').textContent = data.systems[0].galaxy || 'Euclid';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load region data:', error);
+            }
+
+            document.getElementById('loading').classList.add('hidden');
+            return window.REGION_DATA;
+        }
+
+        function init() {
+            console.log('Initializing Region View...');
+
+            // Check admin status and load region name
+            checkAdminStatus();
+            loadRegionName();
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050810);
+
+            // Camera - closer for region view
+            camera = new THREE.PerspectiveCamera(
+                60,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                2000
+            );
+            camera.position.set(100, 80, 150);
+
+            // Renderer
+            const container = document.getElementById('map-container');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 20;
+            controls.maxDistance = 500;
+
+            // Raycaster for interaction
+            raycaster = new THREE.Raycaster();
+            raycaster.params.Points.threshold = 5;
+            mouse = new THREE.Vector2();
+
+            // Create region boundary box
+            createRegionBoundary();
+
+            // Create starfield background for galaxy feel
+            createStarfield();
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+
+            // Add point light at center
+            const pointLight = new THREE.PointLight(0x00C2B3, 0.5, 500);
+            pointLight.position.set(0, 0, 0);
+            scene.add(pointLight);
+
+            // Load data and create systems
+            loadRegionData().then(() => {
+                createSystems();
+                // Check if we need to highlight a specific system
+                highlightSystemFromURL();
+            });
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('click', onClick);
+
+            // Touch event listeners for mobile
+            renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+            renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+            renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
+
+            animate();
+        }
+
+        function createRegionBoundary() {
+            // Create a wireframe box representing the region boundary
+            // Region is conceptually a cube where stars are distributed
+            const size = 100; // Display size for the region
+            const geometry = new THREE.BoxGeometry(size, size, size);
+            const edges = new THREE.EdgesGeometry(geometry);
+            const material = new THREE.LineBasicMaterial({
+                color: 0x00C2B3,  // Haven teal
+                transparent: true,
+                opacity: 0.3
+            });
+            regionBox = new THREE.LineSegments(edges, material);
+            scene.add(regionBox);
+
+            // Add axis lines for reference
+            const axisLength = size * 0.6;
+            const axisGeometry = new THREE.BufferGeometry();
+            const axisPositions = new Float32Array([
+                -axisLength, 0, 0, axisLength, 0, 0,  // X axis
+                0, -axisLength, 0, 0, axisLength, 0,  // Y axis
+                0, 0, -axisLength, 0, 0, axisLength   // Z axis
+            ]);
+            axisGeometry.setAttribute('position', new THREE.BufferAttribute(axisPositions, 3));
+
+            const axisMaterial = new THREE.LineBasicMaterial({
+                color: 0x333333,
+                transparent: true,
+                opacity: 0.5
+            });
+            const axisLines = new THREE.LineSegments(axisGeometry, axisMaterial);
+            scene.add(axisLines);
+        }
+
+        function createStarfield() {
+            // Create background starfield like planetary view for immersive galaxy feel
+            const starsGeometry = new THREE.BufferGeometry();
+            const starPositions = [];
+
+            // Create 500 random stars in a large sphere around the region
+            for (let i = 0; i < 500; i++) {
+                const x = (Math.random() - 0.5) * 600;
+                const y = (Math.random() - 0.5) * 600;
+                const z = (Math.random() - 0.5) * 600;
+                starPositions.push(x, y, z);
+            }
+
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+
+            const starsMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.8,
+                transparent: true,
+                opacity: 0.6
+            });
+
+            const stars = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(stars);
+        }
+
+        function createStarTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+
+            // Clear to transparent
+            ctx.clearRect(0, 0, 64, 64);
+
+            // Draw outer glow first
+            const glowGradient = ctx.createRadialGradient(32, 32, 10, 32, 32, 32);
+            glowGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            glowGradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.7)');
+            glowGradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
+            glowGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = glowGradient;
+            ctx.fillRect(0, 0, 64, 64);
+
+            // Draw LARGE solid bright core on top - this is key for visibility
+            ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+            ctx.beginPath();
+            ctx.arc(32, 32, 16, 0, Math.PI * 2);  // Larger core (was 12)
+            ctx.fill();
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        function createSystems() {
+            const systems = window.REGION_DATA.systems;
+            console.log('createSystems called, systems count:', systems.length);
+            if (systems.length > 0) {
+                console.log('First system:', JSON.stringify(systems[0], null, 2));
+                console.log('star_x:', systems[0].star_x, 'star_y:', systems[0].star_y, 'star_z:', systems[0].star_z);
+                console.log('x:', systems[0].x, 'y:', systems[0].y, 'z:', systems[0].z);
+            }
+            if (systems.length === 0) {
+                console.log('No systems in this region');
+                document.getElementById('empty-notice').style.display = 'block';
+                return;
+            }
+
+            // Hide empty notice if we have systems
+            document.getElementById('empty-notice').style.display = 'none';
+
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+
+            // Calculate positions within the region
+            // Stars should be spread within a normalized space
+            systems.forEach((system, index) => {
+                // Use star_x/y/z for position
+                // star_x/y/z are the deterministic positions calculated from region + SSS
+                // They are already spread out within the coordinate space
+
+                let displayX, displayY, displayZ;
+                const displaySize = 100;
+
+                if (system.star_x !== null && system.star_x !== undefined) {
+                    // Use the star position relative to the system's base coords
+                    // star_x/y/z are absolute positions, system.x/y/z are the region center
+                    // The difference gives us the offset within the region
+                    const baseX = system.x || 0;
+                    const baseY = system.y || 0;
+                    const baseZ = system.z || 0;
+
+                    // Calculate offset from region center (typically within ±64 units)
+                    const offsetX = system.star_x - baseX;
+                    const offsetY = system.star_y - baseY;
+                    const offsetZ = system.star_z - baseZ;
+
+                    // Scale to display size (normalize to -50 to +50 range)
+                    displayX = (offsetX / 128) * displaySize;
+                    displayY = (offsetY / 128) * displaySize;
+                    displayZ = (offsetZ / 128) * displaySize;
+                } else {
+                    // Fallback: use SSS to generate deterministic position
+                    const sss = system.glyph_solar_system || 1;
+                    displayX = (((sss * 7919) % 1000) / 1000 - 0.5) * displaySize;
+                    displayY = (((sss * 6271) % 1000) / 1000 - 0.5) * displaySize;
+                    displayZ = (((sss * 3571) % 1000) / 1000 - 0.5) * displaySize;
+                }
+
+                const x = displayX;
+                const y = displayY;
+                const z = displayZ;
+
+                if (index === 0) {
+                    console.log('First star display position:', x, y, z);
+                }
+
+                positions.push(x, y, z);
+
+                // Color - use Haven teal for Euclid, purple for Hilbert
+                const galaxyColors = {
+                    'Euclid': 0x00C2B3,
+                    'Hilbert': 0x9d4edd,
+                    'Calypso': 0xff6b6b,
+                    'Eissentam': 0x4ecdc4,
+                    'Elkupalos': 0xffd93d
+                };
+                const color = new THREE.Color(galaxyColors[system.galaxy] || 0x00C2B3);
+                colors.push(color.r, color.g, color.b);
+
+                // Size based on planets - make them more visible
+                const planetCount = system.planets?.length || 0;
+                const size = 12 + Math.min(planetCount, 5) * 3;
+                sizes.push(size);
+
+                // Store for raycasting
+                systemData.push({
+                    index: index,
+                    system: system,
+                    position: new THREE.Vector3(x, y, z)
+                });
+            });
+
+            // Create geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+            // Shader material - FIXED SIZE approach for consistent visibility
+            const starTexture = createStarTexture();
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    pointTexture: { value: starTexture },
+                    sizeMultiplier: { value: 1.0 },
+                    baseSize: { value: 24.0 }  // Fixed base size in pixels
+                },
+                vertexShader: `
+                    attribute float size;
+                    uniform float sizeMultiplier;
+                    uniform float baseSize;
+                    varying vec3 vColor;
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+
+                        // FIXED SIZE - same visual size regardless of distance
+                        // Only slight variation based on planet count (size attribute)
+                        float finalSize = baseSize * sizeMultiplier * (0.8 + size * 0.02);
+
+                        gl_PointSize = finalSize;
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D pointTexture;
+                    varying vec3 vColor;
+                    void main() {
+                        vec4 texColor = texture2D(pointTexture, gl_PointCoord);
+
+                        // FULL BRIGHTNESS - no fading at all
+                        // Solid bright color with texture shape
+                        vec3 brightColor = vColor * 1.5;  // Boost brightness
+                        float alpha = texColor.a;
+
+                        gl_FragColor = vec4(brightColor, alpha);
+
+                        if (alpha < 0.01) discard;
+                    }
+                `,
+                blending: THREE.AdditiveBlending,
+                depthTest: false,
+                transparent: true,
+                vertexColors: true
+            });
+
+            systemPoints = new THREE.Points(geometry, material);
+            scene.add(systemPoints);
+
+            console.log(`Created ${systems.length} star systems in region view`);
+            console.log('Positions array:', positions);
+            console.log('systemPoints added to scene:', scene.children.length, 'objects in scene');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Check for hover
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+                const tooltip = document.getElementById('tooltip');
+
+                if (intersects.length > 0) {
+                    const idx = intersects[0].index;
+                    const system = systemData[idx]?.system;
+                    if (system) {
+                        tooltip.textContent = system.name || 'Unknown System';
+                        tooltip.style.left = event.clientX + 15 + 'px';
+                        tooltip.style.top = event.clientY + 15 + 'px';
+                        tooltip.style.display = 'block';
+                        document.body.style.cursor = 'pointer';
+                    }
+                } else {
+                    tooltip.style.display = 'none';
+                    document.body.style.cursor = 'default';
+                }
+            }
+        }
+
+        function onClick(event) {
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+                if (intersects.length > 0) {
+                    const idx = intersects[0].index;
+                    const system = systemData[idx]?.system;
+                    if (system) {
+                        showSystemInfo(system);
+                    }
+                }
+            }
+        }
+
+        // ========== TOUCH CONTROLS FOR MOBILE ==========
+
+        let touchStartTime = 0;
+        let touchStartPos = { x: 0, y: 0 };
+        let lastTouchPos = { x: 0, y: 0 };
+        let isTouchDragging = false;
+        let touchCount = 0;
+        let initialPinchDistance = 0;
+        let lastPinchDistance = 0;
+
+        function onTouchStart(event) {
+            touchCount = event.touches.length;
+            touchStartTime = Date.now();
+
+            if (touchCount === 1) {
+                // Single finger - prepare for tap or drag
+                touchStartPos.x = event.touches[0].clientX;
+                touchStartPos.y = event.touches[0].clientY;
+                lastTouchPos.x = touchStartPos.x;
+                lastTouchPos.y = touchStartPos.y;
+                isTouchDragging = false;
+            } else if (touchCount === 2) {
+                // Two fingers - pinch zoom
+                initialPinchDistance = getPinchDistance(event.touches);
+                lastPinchDistance = initialPinchDistance;
+            }
+        }
+
+        function onTouchMove(event) {
+            event.preventDefault(); // Prevent page scroll
+
+            if (touchCount === 1 && event.touches.length === 1) {
+                // Single finger drag - check if we've moved enough to consider it a drag
+                const touch = event.touches[0];
+                const totalDeltaX = touch.clientX - touchStartPos.x;
+                const totalDeltaY = touch.clientY - touchStartPos.y;
+                if (Math.abs(totalDeltaX) > 10 || Math.abs(totalDeltaY) > 10) {
+                    isTouchDragging = true;
+                }
+                lastTouchPos.x = touch.clientX;
+                lastTouchPos.y = touch.clientY;
+            } else if (event.touches.length === 2) {
+                // Two finger pinch - zoom
+                const currentDistance = getPinchDistance(event.touches);
+                const delta = currentDistance - lastPinchDistance;
+
+                if (Math.abs(delta) > 2) {
+                    // Zoom in/out based on pinch
+                    const direction = new THREE.Vector3();
+                    camera.getWorldDirection(direction);
+                    const moveAmount = delta > 0 ? 2 : -2;
+                    camera.position.addScaledVector(direction, moveAmount);
+                    lastPinchDistance = currentDistance;
+                }
+            }
+        }
+
+        function onTouchEnd(event) {
+            const touchDuration = Date.now() - touchStartTime;
+
+            // If it was a quick tap (not a drag), treat as a click/tap
+            if (touchCount === 1 && !isTouchDragging && touchDuration < 300) {
+                const touch = event.changedTouches[0];
+                handleTap(touch.clientX, touch.clientY);
+            }
+
+            // Reset touch state
+            touchCount = event.touches.length;
+            if (touchCount === 0) {
+                isTouchDragging = false;
+            }
+        }
+
+        function getPinchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function handleTap(clientX, clientY) {
+            // Convert tap position to normalized device coordinates
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (systemPoints) {
+                const intersects = raycaster.intersectObject(systemPoints);
+                if (intersects.length > 0) {
+                    const idx = intersects[0].index;
+                    const system = systemData[idx]?.system;
+                    if (system) {
+                        showSystemInfo(system);
+                    }
+                }
+            }
+        }
+
+        function showSystemInfo(system) {
+            selectedSystem = system;
+
+            document.getElementById('system-name').textContent = system.name || 'Unknown';
+            document.getElementById('system-galaxy').textContent = system.galaxy || 'Euclid';
+            document.getElementById('system-planets').textContent =
+                (system.planets?.length || 0) + ' planets';
+            document.getElementById('system-description').textContent =
+                system.description || 'No description available';
+
+            // Render glyph display
+            renderGlyphDisplay(system.glyph_code);
+
+            // Set link to system view
+            const systemLink = document.getElementById('view-system-link');
+            const systemId = system.id || system.name;
+            systemLink.href = `/map/system/${encodeURIComponent(systemId)}`;
+
+            document.getElementById('system-info').style.display = 'block';
+        }
+
+        function renderGlyphDisplay(glyphCode) {
+            const container = document.getElementById('glyph-display');
+            const imagesEl = document.getElementById('glyph-images');
+            const hexEl = document.getElementById('glyph-hex');
+
+            if (!glyphCode || glyphCode.length !== 12) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            let imagesHtml = '';
+            for (let i = 0; i < glyphCode.length; i++) {
+                const digit = glyphCode[i].toUpperCase();
+                const imageFile = GLYPH_IMAGES[digit];
+                if (imageFile) {
+                    imagesHtml += `<img src="/haven-ui-photos/${imageFile}" alt="${digit}" class="glyph-img">`;
+                } else {
+                    imagesHtml += `<span class="glyph-img" style="display:flex;align-items:center;justify-content:center;font-size:8px;color:#9d4edd;">${digit}</span>`;
+                }
+            }
+            imagesEl.innerHTML = imagesHtml;
+            hexEl.textContent = formatGlyph(glyphCode);
+        }
+
+        function formatGlyph(glyph) {
+            if (!glyph || glyph.length !== 12) return glyph;
+            return `${glyph[0]}-${glyph.slice(1,4)}-${glyph.slice(4,6)}-${glyph.slice(6,9)}-${glyph.slice(9,12)}`;
+        }
+
+        function closeSystemInfo() {
+            document.getElementById('system-info').style.display = 'none';
+            selectedSystem = null;
+        }
+
+        function highlightSystemFromURL() {
+            const params = getRegionFromURL();
+
+            // Try to find system by ID or glyph code
+            let targetSystem = null;
+
+            if (params.highlightSystemId) {
+                targetSystem = systemData.find(d => d.system && d.system.id == params.highlightSystemId);
+            }
+
+            if (!targetSystem && params.glyphCode) {
+                targetSystem = systemData.find(d => d.system && d.system.glyph_code === params.glyphCode);
+            }
+
+            if (targetSystem) {
+                // Show info and focus on the system
+                showSystemInfo(targetSystem.system);
+
+                // Focus camera on the system
+                const targetPosition = targetSystem.position;
+                camera.position.set(targetPosition.x + 50, targetPosition.y + 30, targetPosition.z + 80);
+                controls.target.copy(targetPosition);
+                controls.update();
+
+                console.log('Highlighted system:', targetSystem.system.name);
+            }
+        }
+
+        // ========== VIEW CONTROLS ==========
+
+        function toggleLabels() {
+            labelsEnabled = document.getElementById('toggle-labels').checked;
+            updateSystemLabels();
+        }
+
+        function updateSystemLabels() {
+            // Remove existing labels
+            labelSprites.forEach(sprite => scene.remove(sprite));
+            labelSprites = [];
+
+            if (!labelsEnabled) return;
+
+            systemData.forEach(data => {
+                const system = data.system;
+                const label = createTextSprite(system.name || 'Unknown');
+                label.position.copy(data.position);
+                label.position.y += 5; // Offset above point
+                scene.add(label);
+                labelSprites.push(label);
+            });
+        }
+
+        function createTextSprite(text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 64;
+
+            context.font = 'Bold 24px Arial';
+            context.fillStyle = 'rgba(0, 194, 179, 0.9)';
+            context.textAlign = 'center';
+            context.fillText(text, 128, 40);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true
+            });
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(20, 5, 1);
+            return sprite;
+        }
+
+        function getZoomLevel() {
+            // Calculate zoom based on camera distance from origin
+            const distance = camera.position.length();
+            const baseDistance = 200;
+            return baseDistance / distance;
+        }
+
+        function updateZoomIndicator() {
+            const zoom = getZoomLevel();
+            document.getElementById('zoom-indicator').textContent = 'Zoom: ' + zoom.toFixed(1) + 'x';
+            return zoom;
+        }
+
+        // ========== ANIMATION LOOP ==========
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Update zoom indicator
+            updateZoomIndicator();
+
+            renderer.render(scene, camera);
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

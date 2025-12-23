@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Haven Watcher{% endblock %}
+
+{% block content %}
+<div class="stats-grid" style="margin-bottom: 30px;">
+    <div class="stat-item">
+        <div class="stat-value" data-stat="live_extractions">{{ stats.live_extractions }}</div>
+        <div class="stat-label">Live Extractions</div>
+    </div>
+    <div class="stat-item success">
+        <div class="stat-value" data-stat="submissions_success">{{ stats.get('by_status', {}).get('submitted', 0) + stats.get('by_status', {}).get('success', 0) }}</div>
+        <div class="stat-label">Submitted</div>
+    </div>
+    <div class="stat-item warning">
+        <div class="stat-value" data-stat="queue_count">{{ stats.queue_count }}</div>
+        <div class="stat-label">Queued</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value" data-stat="total_planets">{{ stats.total_planets }}</div>
+        <div class="stat-label">Planets Found</div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Live Extraction Status</span>
+            {% if watcher_running %}
+            <form action="/api/stop" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-danger">Stop</button>
+            </form>
+            {% else %}
+            <form action="/api/start" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-primary">Start</button>
+            </form>
+            {% endif %}
+        </div>
+        <table>
+            <tr>
+                <td>Status</td>
+                <td>
+                    <span class="badge {{ 'badge-success' if watcher_running else 'badge-error' }}">
+                        {{ 'Live Extraction Active' if watcher_running else 'Stopped' }}
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <td>Output Directory</td>
+                <td style="font-size: 0.85rem;">{{ output_path or 'Not configured' }}</td>
+            </tr>
+            <tr>
+                <td>Uptime</td>
+                <td>{{ uptime }}</td>
+            </tr>
+            <tr>
+                <td>Extractions</td>
+                <td data-stat="live_extractions">{{ watcher_stats.get('live_extractions', 0) }}</td>
+            </tr>
+            <tr>
+                <td>API Connection</td>
+                <td>
+                    <span class="badge {{ 'badge-success' if api_connected else 'badge-error' }}">
+                        {{ 'Connected' if api_connected else 'Disconnected' }}
+                    </span>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Recent Activity</span>
+            <a href="/history" class="btn btn-secondary">View All</a>
+        </div>
+        {% if recent_submissions %}
+        <table>
+            <thead>
+                <tr>
+                    <th>System</th>
+                    <th>Status</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in recent_submissions[:5] %}
+                <tr>
+                    <td>
+                        <div>{{ item.system_name }}</div>
+                        <div class="glyph-code" style="font-size: 0.75rem;">{{ item.glyph_code }}</div>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if item.status in ['success', 'submitted'] else 'warning' if item.status == 'queued' else 'duplicate' if item.status == 'duplicate' else 'info' if item.status == 'live_extraction' else 'error' }}">
+                            {{ item.status }}
+                        </span>
+                    </td>
+                    <td style="font-size: 0.85rem; color: var(--text-secondary);">{{ item.timestamp[:16] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: var(--text-secondary); padding: 30px;">No recent activity - warp to a new system!</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if latest_extraction %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Latest Extraction</span>
+        <span class="badge badge-info">{{ latest_extraction.extraction_time[:16] if latest_extraction.extraction_time else 'Unknown' }}</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div>
+            <h3 style="color: var(--accent-blue); margin-bottom: 10px;">{{ latest_extraction.system_name }}</h3>
+            <table>
+                <tr><td>Star Type</td><td>{{ latest_extraction.star_type }}</td></tr>
+                <tr><td>Economy</td><td>{{ latest_extraction.economy_type }}</td></tr>
+                <tr><td>Conflict</td><td>{{ latest_extraction.conflict_level }}</td></tr>
+                <tr><td>Dominant Race</td><td>{{ latest_extraction.dominant_lifeform }}</td></tr>
+                <tr><td>Planets</td><td>{{ latest_extraction.planet_count }}</td></tr>
+            </table>
+        </div>
+        <div>
+            <h4 style="color: var(--text-secondary); margin-bottom: 10px;">Planets</h4>
+            {% for planet in latest_extraction.get('planets', []) %}
+            <div style="background: var(--bg-secondary); padding: 8px 12px; border-radius: 6px; margin-bottom: 8px;">
+                <div style="color: var(--text-primary);">{{ planet.planet_name }}</div>
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">{{ planet.biome }} - {{ planet.weather }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Discoveries by Galaxy</span>
+    </div>
+    {% if stats.by_galaxy %}
+    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+        {% for galaxy, count in stats.by_galaxy.items() %}
+        <div style="background: var(--bg-secondary); padding: 10px 15px; border-radius: 8px;">
+            <span style="color: var(--accent-blue);">{{ galaxy }}</span>
+            <span style="color: var(--text-secondary); margin-left: 8px;">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="text-align: center; color: var(--text-secondary); padding: 20px;">No discoveries yet - explore the universe!</p>
+    {% endif %}
+</div>
+
+{% if stats.queue_count > 0 %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Queued Submissions</span>
+        <form action="/api/process_queue" method="POST" style="display: inline;">
+            <button type="submit" class="btn btn-primary">Process Queue</button>
+        </form>
+    </div>
+    <p style="color: var(--text-secondary);">
+        {{ stats.queue_count }} submission(s) waiting to be sent when server is available.
+    </p>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top: 20px; background: linear-gradient(135deg, rgba(79, 195, 247, 0.1), rgba(186, 104, 200, 0.1));">
+    <div class="card-header">
+        <span class="card-title">How Live Extraction Works</span>
+    </div>
+    <ol style="color: var(--text-secondary); padding-left: 20px; line-height: 2;">
+        <li>Launch No Man's Sky via <code style="color: var(--accent-blue);">pymhf run nmspy</code></li>
+        <li>The Haven Extractor mod hooks into the game</li>
+        <li>Warp to a new solar system</li>
+        <li>System data is automatically extracted and saved</li>
+        <li>This watcher detects the new data and submits to Haven Control Room</li>
+        <li>Admins review and approve the submission</li>
+    </ol>
+</div>
+{% endblock %}

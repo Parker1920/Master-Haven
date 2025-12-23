@@ -1,0 +1,100 @@
+{
+  "sentinel": {
+    "0": "Low",
+    "1": "Limited",
+    "2": "Standard",
+    "3": "High",
+    "4": "Aggressive",
+    "5": "Hostile",
+    "6": "Corrupted"
+  },
+  "fauna": {
+    "0": "None",
+    "1": "Deficient",
+    "2": "Low",
+    "3": "Sparse",
+    "4": "Common",
+    "5": "Moderate",
+    "6": "Generous",
+    "7": "Abundant",
+    "8": "Full",
+    "9": "Rich",
+    "10": "Bountiful",
+    "11": "Copious"
+  },
+  "flora": {
+    "0": "None",
+    "1": "Deficient",
+    "2": "Low",
+    "3": "Sparse",
+    "4": "Common",
+    "5": "Moderate",
+    "6": "Generous",
+    "7": "Abundant",
+    "8": "Full",
+    "9": "Rich",
+    "10": "Bountiful",
+    "11": "Copious"
+  },
+  "economy": {
+    "0": "None",
+    "1": "Low",
+    "2": "Medium",
+    "3": "High"
+  },
+  "conflict": {
+    "0": "None",
+    "1": "Low",
+    "2": "Medium",
+    "3": "High"
+  },
+  "star_type": {
+    "Yellow": "Yellow Star",
+    "Green": "Green Star",
+    "Blue": "Blue Star",
+    "Red": "Red Star"
+  },
+  "economy_type": {
+    "Trading": "Trading",
+    "Advanced Materials": "Advanced Materials",
+    "Scientific": "Scientific",
+    "Mining": "Mining",
+    "Manufacturing": "Manufacturing",
+    "Technology": "Technology",
+    "Power Generation": "Power Generation",
+    "Mass Production": "Mass Production",
+    "Industrial": "Industrial",
+    "Construction": "Construction",
+    "Ore Extraction": "Ore Extraction",
+    "High Tech": "High Tech",
+    "Research": "Research",
+    "Metal Processing": "Metal Processing",
+    "Mathematical": "Mathematical",
+    "Energy Supply": "Energy Supply",
+    "Fuel Generation": "Fuel Generation",
+    "Experimental": "Experimental",
+    "Nano-construction": "Nano-construction",
+    "Commercial": "Commercial",
+    "Shipping": "Shipping",
+    "Mercantile": "Mercantile",
+    "Material Fusion": "Material Fusion",
+    "Alchemical": "Alchemical",
+    "Black Market": "Black Market",
+    "Pirate": "Pirate"
+  },
+  "biome": {
+    "Lush": "Lush",
+    "Barren": "Barren",
+    "Dead": "Dead",
+    "Toxic": "Toxic",
+    "Scorched": "Scorched",
+    "Frozen": "Frozen",
+    "Radioactive": "Radioactive",
+    "Swamp": "Swamp",
+    "Exotic": "Exotic",
+    "Marsh": "Marsh",
+    "Volcanic": "Volcanic",
+    "Infested": "Infested",
+    "Desolate": "Desolate"
+  }
+}

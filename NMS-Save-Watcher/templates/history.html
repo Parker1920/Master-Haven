@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}History - NMS Save Watcher{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Submission History</span>
+        <div style="display: flex; gap: 10px;">
+            <select id="filterStatus" class="btn btn-secondary" style="padding: 8px 12px;">
+                <option value="">All Statuses</option>
+                <option value="success">Success</option>
+                <option value="duplicate">Duplicate</option>
+                <option value="queued">Queued</option>
+                <option value="error">Error</option>
+            </select>
+        </div>
+    </div>
+
+    {% if submissions %}
+    <table id="historyTable">
+        <thead>
+            <tr>
+                <th>System Name</th>
+                <th>Glyph Code</th>
+                <th>Galaxy</th>
+                <th>Status</th>
+                <th>Message</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in submissions %}
+            <tr data-status="{{ item.status }}">
+                <td>{{ item.system_name or 'Unknown' }}</td>
+                <td class="glyph-code">{{ item.glyph_code }}</td>
+                <td>{{ item.galaxy }}</td>
+                <td>
+                    <span class="badge badge-{{ 'success' if item.status == 'success' else 'warning' if item.status == 'queued' else 'duplicate' if item.status == 'duplicate' else 'error' }}">
+                        {{ item.status }}
+                    </span>
+                </td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">{{ item.message or '-' }}</td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">{{ item.timestamp[:19].replace('T', ' ') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align: center; color: var(--text-secondary); padding: 40px;">No submission history yet. Start playing NMS and scan some systems!</p>
+    {% endif %}
+</div>
+
+<div class="stats-grid" style="margin-top: 20px;">
+    <div class="stat-item success">
+        <div class="stat-value">{{ stats.get('by_status', {}).get('success', 0) }}</div>
+        <div class="stat-label">Successful</div>
+    </div>
+    <div class="stat-item" style="--stat-color: var(--accent-purple);">
+        <div class="stat-value" style="color: var(--accent-purple);">{{ stats.get('by_status', {}).get('duplicate', 0) }}</div>
+        <div class="stat-label">Duplicates</div>
+    </div>
+    <div class="stat-item warning">
+        <div class="stat-value">{{ stats.get('by_status', {}).get('queued', 0) }}</div>
+        <div class="stat-label">Queued</div>
+    </div>
+    <div class="stat-item error">
+        <div class="stat-value">{{ stats.get('by_status', {}).get('error', 0) }}</div>
+        <div class="stat-label">Errors</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById('filterStatus').addEventListener('change', function() {
+        const status = this.value;
+        document.querySelectorAll('#historyTable tbody tr').forEach(row => {
+            if (!status || row.dataset.status === status) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    });
+</script>
+{% endblock %}

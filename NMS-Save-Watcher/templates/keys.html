@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Unknown Keys - NMS Save Watcher{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Unknown Obfuscated Keys</span>
+        <div style="display: flex; gap: 10px;">
+            {% if unknown_keys %}
+            <a href="/api/export_keys" class="btn btn-secondary">Export for Report</a>
+            <form action="/api/clear_unknown_keys" method="POST" style="display: inline;">
+                <button type="submit" class="btn btn-danger">Clear List</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if unknown_keys %}
+    <div class="alert" style="background: rgba(255, 183, 77, 0.1); border: 1px solid var(--accent-orange); color: var(--accent-orange); margin-bottom: 20px;">
+        <strong>Note:</strong> These keys were found in your save file but couldn't be mapped to known names.
+        This usually means the game was updated and the mapping file needs to be updated.
+        You can export this list and report it to help improve the mapping.
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Obfuscated Key</th>
+                <th>Possible Type</th>
+                <th>First Seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key in unknown_keys %}
+            <tr>
+                <td><code style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px;">{{ key.key }}</code></td>
+                <td style="color: var(--text-secondary);">
+                    {% if key.key|length == 3 %}
+                        Standard (3-char)
+                    {% elif '@' in key.key %}
+                        Special (@-prefixed)
+                    {% else %}
+                        Unknown
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ key.first_seen[:19].replace('T', ' ') if key.first_seen else 'Unknown' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="margin-top: 20px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+            <strong>How to help:</strong> Export this list and create an issue at the
+            <a href="https://github.com/monkeyman192/MBINCompiler" target="_blank" style="color: var(--accent-blue);">MBINCompiler</a>
+            repository, or check if a newer mapping file is available.
+        </p>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+        <div style="font-size: 3rem; margin-bottom: 15px;">✓</div>
+        <p>No unknown keys detected!</p>
+        <p style="font-size: 0.85rem; margin-top: 10px;">
+            All keys in your save file were successfully mapped.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <span class="card-title">Mapping Statistics</span>
+    </div>
+    <div class="stats-grid">
+        <div class="stat-item success">
+            <div class="stat-value">{{ mapping_stats.total_mappings }}</div>
+            <div class="stat-label">Known Mappings</div>
+        </div>
+        <div class="stat-item warning">
+            <div class="stat-value">{{ unknown_keys|length }}</div>
+            <div class="stat-label">Unknown Keys</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value">{{ mapping_stats.mapping_version or 'Unknown' }}</div>
+            <div class="stat-label">Mapping Version</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
