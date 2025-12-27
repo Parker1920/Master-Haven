@@ -190,3 +190,5 @@ NMS-Save-Watcher/config.json
 .netlify/
 .vercel/
 "Haven-UI/.env.backup" 
+nul
+Haven-UI/.env.backup

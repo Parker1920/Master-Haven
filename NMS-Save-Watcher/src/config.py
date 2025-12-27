@@ -39,6 +39,10 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "log_file": "watcher.log",
         "log_level": "INFO"
+    },
+    "discord": {
+        "tag": "",  # Discord community tag (e.g., "Haven", "IEA") or "personal"
+        "personal_username": ""  # Required if tag is "personal" (e.g., "username#1234")
     }
 }
 

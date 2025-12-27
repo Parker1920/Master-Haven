@@ -580,13 +580,19 @@ export default function PendingApprovals() {
                   <div className="space-y-3">
                     {selectedSubmission.system_data.planets.map((planet, i) => (
                       <div key={i} className="text-sm bg-cyan-700 p-3 rounded">
-                        <p className="font-semibold text-base mb-2">{planet.name}</p>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
-                          <div><span className="text-gray-400">Sentinel:</span> {planet.sentinel || 'None'}</div>
-                          <div><span className="text-gray-400">Fauna:</span> {planet.fauna || 'N/A'}{planet.fauna_count > 0 && ` (${planet.fauna_count})`}</div>
-                          <div><span className="text-gray-400">Flora:</span> {planet.flora || 'N/A'}{planet.flora_count > 0 && ` (${planet.flora_count})`}</div>
-                          {planet.climate && <div><span className="text-gray-400">Climate:</span> {planet.climate}</div>}
-                          {planet.has_water === 1 && <div><span className="text-cyan-300">Has Water</span></div>}
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <p className="font-semibold text-base">{planet.name}</p>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
+                              <div><span className="text-gray-400">Sentinel:</span> {planet.sentinel || 'None'}</div>
+                              <div><span className="text-gray-400">Fauna:</span> {planet.fauna || 'N/A'}{planet.fauna_count > 0 && ` (${planet.fauna_count})`}</div>
+                              <div><span className="text-gray-400">Flora:</span> {planet.flora || 'N/A'}{planet.flora_count > 0 && ` (${planet.flora_count})`}</div>
+                              {planet.climate && <div><span className="text-gray-400">Climate:</span> {planet.climate}</div>}
+                              {planet.has_water === 1 && <div><span className="text-cyan-300">Has Water</span></div>}
+                            </div>
+                          </div>
                         </div>
                         {planet.materials && (
                           <div className="mt-2 text-gray-300">

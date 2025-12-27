@@ -461,6 +461,15 @@ def init_database():
     add_column_if_missing('planets', 'flora_text', 'TEXT')  # Flora text description
     add_column_if_missing('planets', 'fauna_text', 'TEXT')  # Fauna text description
 
+    # v10.0.0: Visit tracking - distinguish remote enumeration vs visited data
+    # data_source: 'remote' (enumerated without visit), 'visited' (full detail), 'mixed' (has both)
+    add_column_if_missing('systems', 'data_source', "TEXT DEFAULT 'visited'")
+    add_column_if_missing('systems', 'visit_date', 'TEXT')  # ISO timestamp when fully visited
+    add_column_if_missing('systems', 'is_complete', 'INTEGER DEFAULT 0')  # 1 if all planets have full data
+
+    add_column_if_missing('planets', 'data_source', "TEXT DEFAULT 'visited'")
+    add_column_if_missing('planets', 'visit_date', 'TEXT')  # ISO timestamp when fully visited
+
     # Pending systems table migrations (for companion app source tracking)
     add_column_if_missing('pending_systems', 'source', "TEXT DEFAULT 'manual'")  # manual, companion_app, api
     add_column_if_missing('pending_systems', 'api_key_name', 'TEXT')  # Name of API key used
@@ -855,6 +864,11 @@ async def spa_discoveries():
 @app.get('/haven-ui/discoveries/{path:path}')
 async def spa_discoveries_detail(path: str):
     """Serve index.html for discovery detail routes"""
+    return await _serve_spa_index()
+
+@app.get('/haven-ui/planet/{planet_id}')
+async def spa_planet_view(planet_id: int):
+    """Serve index.html for 3D planet view route"""
     return await _serve_spa_index()
 
 
@@ -4530,18 +4544,102 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         if not system_data.get('glyph_code'):
             system_data['glyph_code'] = None
 
-        # Calculate star position from glyph if available
-        # Star position is the actual 3D location within the region (for non-overlapping rendering)
+        # Calculate star position AND region coordinates
+        # IMPORTANT: Validate that glyph_code matches X/Y/Z coordinates
+        # If they don't match, the X/Y/Z coordinates are authoritative (from in-game extraction)
         star_x, star_y, star_z = None, None, None
-        if system_data.get('glyph_code'):
+        region_x, region_y, region_z = None, None, None
+
+        submission_x = system_data.get('x')
+        submission_y = system_data.get('y')
+        submission_z = system_data.get('z')
+        original_glyph = system_data.get('glyph_code')
+
+        if original_glyph:
             try:
-                decoded = decode_glyph_to_coords(system_data['glyph_code'])
+                decoded = decode_glyph_to_coords(original_glyph)
+                glyph_x = decoded['x']
+                glyph_y = decoded['y']
+                glyph_z = decoded['z']
+
+                # Check if glyph coordinates match submission coordinates
+                # Allow some tolerance for floating point comparison
+                coords_match = True
+                if submission_x is not None and submission_y is not None and submission_z is not None:
+                    # Compare with tolerance
+                    if (abs(glyph_x - submission_x) > 1 or
+                        abs(glyph_y - submission_y) > 1 or
+                        abs(glyph_z - submission_z) > 1):
+                        coords_match = False
+                        logger.warning(f"Glyph/coordinate mismatch detected!")
+                        logger.warning(f"  Glyph {original_glyph} decodes to: ({glyph_x}, {glyph_y}, {glyph_z})")
+                        logger.warning(f"  Submission X/Y/Z: ({submission_x}, {submission_y}, {submission_z})")
+
+                if coords_match:
+                    # Glyph matches, use decoded values
+                    star_x = decoded['star_x']
+                    star_y = decoded['star_y']
+                    star_z = decoded['star_z']
+                    region_x = decoded.get('region_x')
+                    region_y = decoded.get('region_y')
+                    region_z = decoded.get('region_z')
+                    logger.info(f"Glyph validated: region ({region_x}, {region_y}, {region_z})")
+                else:
+                    # Mismatch! Recalculate glyph from submission X/Y/Z coordinates
+                    # X/Y/Z from extraction are more reliable than the glyph
+                    logger.warning(f"Recalculating glyph from submission coordinates...")
+                    planet_idx = decoded.get('planet', 0)
+                    solar_idx = decoded.get('solar_system', 1)
+
+                    corrected_glyph = encode_coords_to_glyph(
+                        int(submission_x), int(submission_y), int(submission_z),
+                        planet_idx, solar_idx
+                    )
+                    corrected_decoded = decode_glyph_to_coords(corrected_glyph)
+
+                    # Update system_data with corrected glyph
+                    system_data['glyph_code'] = corrected_glyph
+                    star_x = corrected_decoded['star_x']
+                    star_y = corrected_decoded['star_y']
+                    star_z = corrected_decoded['star_z']
+                    region_x = corrected_decoded.get('region_x')
+                    region_y = corrected_decoded.get('region_y')
+                    region_z = corrected_decoded.get('region_z')
+
+                    logger.info(f"Corrected glyph: {original_glyph} -> {corrected_glyph}")
+                    logger.info(f"Corrected region: ({region_x}, {region_y}, {region_z})")
+
+            except Exception as e:
+                logger.warning(f"Failed to validate/calculate glyph during approval: {e}")
+
+        # If we have X/Y/Z but no glyph, calculate glyph from coordinates
+        elif submission_x is not None and submission_y is not None and submission_z is not None:
+            try:
+                calculated_glyph = encode_coords_to_glyph(
+                    int(submission_x), int(submission_y), int(submission_z), 0, 1
+                )
+                decoded = decode_glyph_to_coords(calculated_glyph)
+
+                system_data['glyph_code'] = calculated_glyph
                 star_x = decoded['star_x']
                 star_y = decoded['star_y']
                 star_z = decoded['star_z']
-                logger.info(f"Calculated star position for approval: ({star_x:.2f}, {star_y:.2f}, {star_z:.2f})")
+                region_x = decoded.get('region_x')
+                region_y = decoded.get('region_y')
+                region_z = decoded.get('region_z')
+
+                logger.info(f"Calculated glyph from X/Y/Z: {calculated_glyph}")
+                logger.info(f"Calculated region: ({region_x}, {region_y}, {region_z})")
             except Exception as e:
-                logger.warning(f"Failed to calculate star position from glyph during approval: {e}")
+                logger.warning(f"Failed to calculate glyph from coordinates: {e}")
+
+        # Always update system_data with calculated region coords
+        if region_x is not None:
+            system_data['region_x'] = region_x
+        if region_y is not None:
+            system_data['region_y'] = region_y
+        if region_z is not None:
+            system_data['region_z'] = region_z
 
         # Check if this is an edit of an existing system (has an id)
         existing_system_id = system_data.get('id')

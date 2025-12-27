@@ -23,8 +23,6 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       fauna: 'N/A',
       flora: 'N/A',
       materials: '',
-      orbit_radius: 0.5,
-      orbit_speed: 0,
       notes: ''
     })
     setMoonModalOpen(true)

@@ -719,14 +719,14 @@ class ExtractionWatcher:
         self._start_time = time.time()
         self._known_glyph_codes.clear()
 
-        # Mark all existing batch files as already processed
-        # This prevents picking up old/legacy batch files on startup
+        # Mark ALL existing batch files as already processed
+        # Only files created AFTER watcher starts will be picked up
         if self.output_dir.exists():
             existing_batch_files = list(self.output_dir.glob("batch_*.json"))
             for bf in existing_batch_files:
                 self._processed_files.add(str(bf))
             if existing_batch_files:
-                logger.info(f"Marked {len(existing_batch_files)} existing batch files as already processed")
+                logger.info(f"Ignoring {len(existing_batch_files)} existing batch files - only new files will be processed")
 
         # Enter learning mode if startup_delay > 0
         if self.startup_delay > 0:

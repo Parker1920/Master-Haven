@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useContext } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -263,9 +263,14 @@ export default function SystemDetail() {
                 >
                   <div className="flex justify-between items-center">
                     <div>
-                      <h3 className="text-xl font-semibold">
+                      <h3 className="text-xl font-semibold flex items-center gap-2">
                         {planet.name}
-                        {planet.is_moon === 1 && <span className="ml-2 text-sm text-purple-400">(Moon)</span>}
+                        {planet.is_moon === 1 && <span className="text-sm text-purple-400">(Moon)</span>}
+                        {planet.data_source === 'remote' && (
+                          <span className="text-xs bg-amber-500 text-white px-1.5 py-0.5 rounded" title="Remote data - visit for full detail (weather, flora, fauna, sentinels)">
+                            📡 Remote
+                          </span>
+                        )}
                       </h3>
                       <div className="text-sm text-gray-400 mt-1 flex flex-wrap gap-x-4">
                         {planet.biome && (
@@ -289,8 +294,10 @@ export default function SystemDetail() {
                         )}
                       </div>
                     </div>
-                    <div className="text-2xl">
-                      {expandedPlanets[index] ? '−' : '+'}
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">
+                        {expandedPlanets[index] ? '−' : '+'}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -553,18 +560,6 @@ export default function SystemDetail() {
                                   <div className="col-span-2">
                                     <div className="text-xs text-gray-400">Materials</div>
                                     <div>{moon.materials}</div>
-                                  </div>
-                                )}
-                                {moon.orbit_radius !== undefined && moon.orbit_radius !== null && (
-                                  <div>
-                                    <div className="text-xs text-gray-400">Orbit Radius</div>
-                                    <div>{moon.orbit_radius}</div>
-                                  </div>
-                                )}
-                                {moon.orbit_speed !== undefined && moon.orbit_speed !== null && moon.orbit_speed !== 0 && (
-                                  <div>
-                                    <div className="text-xs text-gray-400">Orbit Speed</div>
-                                    <div>{moon.orbit_speed}</div>
                                   </div>
                                 )}
                               </div>

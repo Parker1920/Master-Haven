@@ -44,7 +44,7 @@ class PointerScanner:
         'game_state': {
             'path': 'game_state',
             'struct_type': 'cGcGameState',
-            'description': 'Overall game state',
+            'description': 'Overall game state with player ownership data',
         },
         'environment': {
             'path': 'environment',
@@ -54,7 +54,12 @@ class PointerScanner:
         'player': {
             'path': 'player',
             'struct_type': 'cGcPlayer',
-            'description': 'Player entity',
+            'description': 'Player entity with character state',
+        },
+        'player_environment': {
+            'path': 'simulation.mEnvironment.mPlayerEnvironment',
+            'struct_type': 'cGcPlayerEnvironment',
+            'description': 'Player environment (location type, distance from planet)',
         },
         'solar_system': {
             'path': 'simulation.mpSolarSystem',
@@ -65,6 +70,16 @@ class PointerScanner:
             'path': 'GcApplication',
             'struct_type': 'cGcApplication',
             'description': 'Main application object',
+        },
+        'ship_ownership': {
+            'path': 'game_state.mPlayerShipOwnership',
+            'struct_type': 'cGcPlayerShipOwnership',
+            'description': 'Player ship fleet (12 ships)',
+        },
+        'hud_manager': {
+            'path': 'GcApplication.mData.mHUDManager',
+            'struct_type': 'cGcHUDManager',
+            'description': 'HUD manager with player/ship HUD',
         },
     }
 

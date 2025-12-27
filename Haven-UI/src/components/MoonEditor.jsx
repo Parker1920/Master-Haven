@@ -56,14 +56,6 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
           <input aria-label="Moon Materials" placeholder="Comma separated" className="mt-1 p-1 rounded w-full" value={moon.materials || ''} onChange={e => setField('materials', e.target.value)} />
         </div>
         <div>
-          <label className="block text-sm">Orbit Radius</label>
-          <input aria-label="Moon Orbit Radius" placeholder="Orbit radius" className="mt-1 p-1 rounded w-full" value={moon.orbit_radius || ''} onChange={e => setField('orbit_radius', parseFloat(e.target.value || 0))} type="number" />
-        </div>
-        <div>
-          <label className="block text-sm">Orbit Speed</label>
-          <input aria-label="Moon Orbit Speed" placeholder="Orbit speed" className="mt-1 p-1 rounded w-full" value={moon.orbit_speed || ''} onChange={e => setField('orbit_speed', parseFloat(e.target.value || 0))} type="number" />
-        </div>
-        <div>
           <label className="block text-sm">Notes</label>
           <input placeholder="Optional notes" className="mt-1 p-1 rounded w-full" value={moon.notes || ''} onChange={e => setField('notes', e.target.value)} />
           {onSave && (

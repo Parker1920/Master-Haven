@@ -531,6 +531,17 @@ export default function Systems() {
                                 <div>
                                   <div className="font-semibold flex items-center gap-2">
                                     {system.name}
+                                    {/* Data Source Badge - remote vs visited */}
+                                    {system.data_source === 'remote' && (
+                                      <span className="text-xs bg-amber-500 text-white px-1.5 py-0.5 rounded" title="Remote data only - visit for full detail">
+                                        📡
+                                      </span>
+                                    )}
+                                    {system.data_source === 'mixed' && (
+                                      <span className="text-xs bg-blue-500 text-white px-1.5 py-0.5 rounded" title="Partial data - some planets need visiting">
+                                        ⚡
+                                      </span>
+                                    )}
                                     {/* Discord Tag Badge - Super Admin sees all */}
                                     {auth?.isSuperAdmin && getDiscordTagBadge(system.discord_tag, system.personal_discord_username)}
                                     {system.is_phantom && (

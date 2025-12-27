@@ -226,11 +226,23 @@ class LiveExtractionWatcher:
 
         # Update queue status based on result
         if result.status == SubmissionStatus.SUCCESS:
-            self.database.update_queued_status(glyph_code, galaxy, 'uploaded')
+            self.database.update_queued_status(
+                glyph_code, galaxy, 'uploaded',
+                system_name=result.system_name,
+                message=result.message
+            )
         elif result.status == SubmissionStatus.DUPLICATE:
-            self.database.update_queued_status(glyph_code, galaxy, 'uploaded')  # Still mark as done
+            self.database.update_queued_status(
+                glyph_code, galaxy, 'uploaded',
+                system_name=result.system_name,
+                message='Duplicate: ' + result.message
+            )  # Still mark as done
         else:
-            self.database.update_queued_status(glyph_code, galaxy, 'error')
+            self.database.update_queued_status(
+                glyph_code, galaxy, 'error',
+                system_name=result.system_name,
+                message=result.message
+            )
 
         # Notify callback
         if self.on_submission:
@@ -326,6 +338,19 @@ class LiveExtractionWatcher:
                 'source': 'live_extraction'
             }
 
+            # Add Discord tag fields from config
+            discord_config = self.config.get('discord', {})
+            discord_tag = discord_config.get('tag', '').strip()
+            if discord_tag:
+                submission['discord_tag'] = discord_tag
+                # If tag is "personal", include the personal Discord username
+                if discord_tag.lower() == 'personal':
+                    personal_username = discord_config.get('personal_username', '').strip()
+                    if personal_username:
+                        submission['personal_discord_username'] = personal_username
+                    else:
+                        logger.warning("Discord tag is 'personal' but no personal_username configured")
+
             # Submit to API
             response = self.api_client.session.post(
                 f"{self.api_client.base_url}/api/submit_system",
@@ -410,6 +435,7 @@ class LiveExtractionWatcher:
         stats['queue_pending'] = queue_counts.get('pending', 0)
         stats['queue_uploaded'] = queue_counts.get('uploaded', 0)
         stats['queue_total'] = queue_counts.get('total', 0)
+        stats['queue_count'] = queue_counts.get('pending', 0)  # Alias for dashboard compatibility
 
         stats.update(self.database.get_stats())
 

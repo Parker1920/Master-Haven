@@ -555,6 +555,41 @@ class LocalDatabase:
             ''', (glyph_code, galaxy, system_name, planet_count, extraction_json, now, now))
 
             queue_id = cursor.lastrowid
+
+            # Also record in processed_systems for Dashboard/Stats pages
+            cursor.execute('''
+                INSERT INTO processed_systems
+                (glyph_code, galaxy, system_name, submitted, submission_status, first_seen, last_seen)
+                VALUES (?, ?, ?, 0, 'queued', ?, ?)
+                ON CONFLICT(glyph_code, galaxy) DO UPDATE SET
+                    system_name = excluded.system_name,
+                    submission_status = 'queued',
+                    last_seen = excluded.last_seen
+            ''', (glyph_code, galaxy, system_name, now, now))
+
+            # Add planets to processed_planets for stats
+            for planet in extraction_data.get('planets', []):
+                planet_name = planet.get('planet_name', f"Planet {planet.get('planet_index', 0) + 1}")
+                biome = planet.get('biome', 'Unknown')
+                # Get the system_id for the planet reference
+                cursor.execute('''
+                    SELECT id FROM processed_systems WHERE glyph_code = ? AND galaxy = ?
+                ''', (glyph_code, galaxy))
+                system_row = cursor.fetchone()
+                if system_row:
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO processed_planets
+                        (system_id, planet_name, biome, first_seen)
+                        VALUES (?, ?, ?, ?)
+                    ''', (system_row['id'], planet_name, biome, now))
+
+            # Record in submission_history for Recent Activity
+            cursor.execute('''
+                INSERT INTO submission_history
+                (glyph_code, galaxy, system_name, status, message, timestamp)
+                VALUES (?, ?, ?, 'queued', 'Extraction queued for upload', ?)
+            ''', (glyph_code, galaxy, system_name, now))
+
             conn.commit()
 
             logger.info(f"Queued extraction: {system_name} [{glyph_code}] ({planet_count} planets)")
@@ -629,7 +664,8 @@ class LocalDatabase:
                 return record
             return None
 
-    def update_queued_status(self, glyph_code: str, galaxy: str, status: str) -> bool:
+    def update_queued_status(self, glyph_code: str, galaxy: str, status: str,
+                             system_name: str = None, message: str = '') -> bool:
         """
         Update the status of a queued extraction.
 
@@ -637,6 +673,8 @@ class LocalDatabase:
             glyph_code: Portal glyph code
             galaxy: Galaxy name
             status: New status ('uploaded', 'error', 'pending')
+            system_name: Optional system name for history record
+            message: Optional message for history record
 
         Returns:
             True if updated successfully
@@ -645,6 +683,17 @@ class LocalDatabase:
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
+
+            # Get system name from queue if not provided
+            if not system_name:
+                cursor.execute('''
+                    SELECT system_name FROM queued_extractions
+                    WHERE glyph_code = ? AND galaxy = ?
+                ''', (glyph_code, galaxy))
+                row = cursor.fetchone()
+                system_name = row['system_name'] if row else 'Unknown'
+
+            # Update queued_extractions status
             cursor.execute('''
                 UPDATE queued_extractions
                 SET status = ?, updated_at = ?
@@ -652,6 +701,26 @@ class LocalDatabase:
             ''', (status, now, glyph_code, galaxy))
 
             updated = cursor.rowcount > 0
+
+            # Also update processed_systems status
+            # Map queue status to processed_systems status
+            ps_status = status
+            submitted = 1 if status in ('uploaded', 'success') else 0
+
+            cursor.execute('''
+                UPDATE processed_systems
+                SET submission_status = ?, submitted = ?, submitted_at = CASE WHEN ? = 1 THEN ? ELSE submitted_at END
+                WHERE glyph_code = ? AND galaxy = ?
+            ''', (ps_status, submitted, submitted, now, glyph_code, galaxy))
+
+            # Record in submission_history for History page
+            history_status = 'success' if status == 'uploaded' else status
+            cursor.execute('''
+                INSERT INTO submission_history
+                (glyph_code, galaxy, system_name, status, message, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (glyph_code, galaxy, system_name, history_status, message or f'Status: {status}', now))
+
             conn.commit()
             return updated
 
