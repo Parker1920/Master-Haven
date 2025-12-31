@@ -4,6 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Haven Galaxy Map - WebGL 3D</title>
+
+    <!-- Open Graph Meta Tags for Discord/Social Embeds -->
+    <meta property="og:title" content="Haven Galaxy Map - 3D Explorer">
+    <meta property="og:description" content="Explore the No Man's Sky galaxy in 3D. View discovered systems, regions, and navigate the universe.">
+    <meta property="og:image" content="https://voyagers-haven-3dmap.ngrok.io/haven-ui/assets/galaxy-map-preview.png">
+    <meta property="og:url" content="https://voyagers-haven-3dmap.ngrok.io/haven-ui/VH-Map-ThreeJS.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Haven Control Room">
+
+    <!-- Twitter Card (Discord also uses this) -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Haven Galaxy Map - 3D Explorer">
+    <meta name="twitter:description" content="Explore the No Man's Sky galaxy in 3D. View discovered systems, regions, and navigate the universe.">
+    <meta name="twitter:image" content="https://voyagers-haven-3dmap.ngrok.io/haven-ui/assets/galaxy-map-preview.png">
+
+    <!-- Theme color for embeds -->
+    <meta name="theme-color" content="#00C2B3">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -800,9 +817,11 @@
             'Elkupalos': 0xffd93d
         };
 
-        function init() {
-            console.log('Init starting... [v2 with focus]');
-            console.log('SYSTEMS_DATA length:', window.SYSTEMS_DATA.length);
+        // Store fetched region data globally
+        let regionsData = [];
+
+        async function init() {
+            console.log('Init starting... [v3 with async loading]');
 
             // Scene
             scene = new THREE.Scene();
@@ -851,8 +870,8 @@
             createGalaxyCenter();
             console.log('Galaxy center created');
 
-            // Load and create systems
-            createSystems();
+            // Load and create systems asynchronously
+            await loadAndCreateSystems();
             console.log('Systems created, scene children:', scene.children.length);
 
             // Event listeners
@@ -1059,50 +1078,67 @@
             scene.add(coreGlow);
         }
 
-        function createSystems() {
-            if (window.SYSTEMS_DATA.length === 0) {
-                console.log('No systems data available - no populated regions to display');
-                document.getElementById('system-count').textContent = '0 (no systems discovered yet)';
+        async function loadAndCreateSystems() {
+            // Show loading indicator
+            document.getElementById('system-count').textContent = 'Loading...';
+
+            try {
+                // Fetch pre-aggregated region data from API (MUCH faster than loading all systems)
+                console.log('Fetching aggregated region data...');
+                const response = await fetch('/api/map/regions-aggregated');
+                const data = await response.json();
+
+                regionsData = data.regions || [];
+                const totalSystems = data.total_systems || 0;
+                const totalRegions = data.total_regions || 0;
+
+                console.log(`Loaded ${totalSystems} systems in ${totalRegions} regions from API`);
+
+                if (regionsData.length === 0) {
+                    console.log('No regions data available - no populated regions to display');
+                    document.getElementById('system-count').textContent = '0 (no systems discovered yet)';
+                    return;
+                }
+
+                // Also store in window for compatibility with legacy code
+                window.REGIONS_DATA = regionsData;
+
+            } catch (error) {
+                console.error('Failed to load region data:', error);
+                document.getElementById('system-count').textContent = 'Error loading data';
+
+                // Fallback to injected data if API fails
+                if (window.SYSTEMS_DATA && window.SYSTEMS_DATA.length > 0) {
+                    console.log('Falling back to injected SYSTEMS_DATA');
+                    createSystemsFromLegacyData();
+                    return;
+                }
                 return;
             }
 
-            // Aggregate systems by region to show regions as clickable points
-            // Each region with at least one system will be visible on the map
+            // Build regionMap from pre-aggregated data (no iteration over all systems needed!)
             const regionMap = new Map();
 
-            window.SYSTEMS_DATA.forEach(system => {
-                // Get region coordinates (from glyph hex values)
-                const rx = system.region_x !== null && system.region_x !== undefined ? system.region_x : 0;
-                const ry = system.region_y !== null && system.region_y !== undefined ? system.region_y : 0;
-                const rz = system.region_z !== null && system.region_z !== undefined ? system.region_z : 0;
-
-                // Get signed coordinates for display (centered at 0)
-                const sx = system.x !== null && system.x !== undefined ? system.x : 0;
-                const sy = system.y !== null && system.y !== undefined ? system.y : 0;
-                const sz = system.z !== null && system.z !== undefined ? system.z : 0;
-
+            regionsData.forEach(region => {
+                const rx = region.region_x;
+                const ry = region.region_y;
+                const rz = region.region_z;
                 const regionKey = `${rx},${ry},${rz}`;
 
-                if (!regionMap.has(regionKey)) {
-                    regionMap.set(regionKey, {
-                        region_x: rx,
-                        region_y: ry,
-                        region_z: rz,
-                        // Use signed coords for display (first system in region sets the position)
-                        display_x: sx,
-                        display_y: sy,
-                        display_z: sz,
-                        systems: [],
-                        galaxies: new Set()
-                    });
-                }
-
-                const region = regionMap.get(regionKey);
-                region.systems.push(system);
-                region.galaxies.add(system.galaxy || 'Euclid');
+                regionMap.set(regionKey, {
+                    region_x: rx,
+                    region_y: ry,
+                    region_z: rz,
+                    display_x: region.display_x || 0,
+                    display_y: region.display_y || 0,
+                    display_z: region.display_z || 0,
+                    system_count: region.system_count,
+                    galaxies: new Set(region.galaxies || ['Euclid']),
+                    region_name: region.region_name || null
+                });
             });
 
-            console.log(`Aggregated ${window.SYSTEMS_DATA.length} systems into ${regionMap.size} populated regions`);
+            console.log(`Using ${regionsData.length} pre-aggregated regions`);
 
             // Prepare data for rendering regions as clickable points
             const positions = [];
@@ -1130,7 +1166,7 @@
 
                 // Size based on number of systems in region (more systems = larger)
                 // Increased base size for better visibility and clickability
-                const systemCount = region.systems.length;
+                const systemCount = region.system_count || 1;
                 const size = 8 + Math.min(systemCount * 3, 15);  // Larger points for visibility
                 sizes.push(size);
 
@@ -1139,31 +1175,150 @@
                     index: index,
                     isRegion: true,
                     region: region,
-                    systems: region.systems,
+                    system_count: systemCount,  // Pre-aggregated count
                     position: new THREE.Vector3(x, y, z)
                 });
                 index++;
             });
 
-            // Update stats to show regions
-            document.getElementById('system-count').textContent = `${window.SYSTEMS_DATA.length} systems in ${regionMap.size} regions`;
+            // Update stats and create the 3D points
+            const totalSystems = regionsData.reduce((sum, r) => sum + (r.system_count || 0), 0);
+            document.getElementById('system-count').textContent = `${totalSystems} systems in ${regionMap.size} regions`;
 
-            // Create geometry
+            // Create the 3D geometry using shared function
+            createPointsGeometry(positions, colors, sizes);
+        }
+
+        function createStarTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+
+            // Create radial gradient for star
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        function updateStats() {
+            // Use pre-aggregated data when available
+            if (regionsData && regionsData.length > 0) {
+                const totalSystems = regionsData.reduce((sum, r) => sum + (r.system_count || 0), 0);
+                document.getElementById('system-count').textContent = `${totalSystems} systems in ${regionsData.length} regions`;
+                // Collect unique galaxies from all regions
+                const galaxySet = new Set();
+                regionsData.forEach(r => {
+                    (r.galaxies || ['Euclid']).forEach(g => galaxySet.add(g));
+                });
+                document.getElementById('galaxy-name').textContent = [...galaxySet].join(', ') || 'Euclid';
+            } else {
+                // Fallback to legacy data
+                document.getElementById('system-count').textContent = window.SYSTEMS_DATA ? window.SYSTEMS_DATA.length : 0;
+                const galaxies = window.SYSTEMS_DATA ? [...new Set(window.SYSTEMS_DATA.map(s => s.galaxy))] : [];
+                document.getElementById('galaxy-name').textContent = galaxies.join(', ') || 'Euclid';
+            }
+            document.getElementById('discovery-count').textContent = window.DISCOVERIES_DATA ? window.DISCOVERIES_DATA.length : 0;
+        }
+
+        // Legacy fallback function for when API fails
+        function createSystemsFromLegacyData() {
+            if (!window.SYSTEMS_DATA || window.SYSTEMS_DATA.length === 0) {
+                document.getElementById('system-count').textContent = '0 (no systems discovered yet)';
+                return;
+            }
+
+            // Aggregate systems by region (original approach)
+            const regionMap = new Map();
+
+            window.SYSTEMS_DATA.forEach(system => {
+                const rx = system.region_x !== null ? system.region_x : 0;
+                const ry = system.region_y !== null ? system.region_y : 0;
+                const rz = system.region_z !== null ? system.region_z : 0;
+                const regionKey = `${rx},${ry},${rz}`;
+
+                if (!regionMap.has(regionKey)) {
+                    regionMap.set(regionKey, {
+                        region_x: rx,
+                        region_y: ry,
+                        region_z: rz,
+                        display_x: system.x || 0,
+                        display_y: system.y || 0,
+                        display_z: system.z || 0,
+                        system_count: 0,
+                        galaxies: new Set(),
+                        region_name: system.region_name || null
+                    });
+                }
+
+                const region = regionMap.get(regionKey);
+                region.system_count++;
+                region.galaxies.add(system.galaxy || 'Euclid');
+            });
+
+            // Convert to regionsData format
+            regionsData = Array.from(regionMap.values()).map(r => ({
+                ...r,
+                galaxies: Array.from(r.galaxies)
+            }));
+
+            // Now call the regular rendering with the converted data
+            renderRegions(regionMap);
+        }
+
+        // Separated rendering function for reuse
+        function renderRegions(regionMap) {
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+            let index = 0;
+
+            regionMap.forEach((region, regionKey) => {
+                const x = region.display_x * DISPLAY_SCALE;
+                const y = region.display_y * DISPLAY_SCALE;
+                const z = region.display_z * DISPLAY_SCALE;
+
+                positions.push(x, y, z);
+
+                const dominantGalaxy = Array.from(region.galaxies)[0] || 'Euclid';
+                const color = new THREE.Color(GALAXY_COLORS[dominantGalaxy] || 0x00C2B3);
+                colors.push(color.r, color.g, color.b);
+
+                const systemCount = region.system_count || 1;
+                const size = 8 + Math.min(systemCount * 3, 15);
+                sizes.push(size);
+
+                systemData.push({
+                    index: index,
+                    isRegion: true,
+                    region: region,
+                    system_count: systemCount,
+                    position: new THREE.Vector3(x, y, z)
+                });
+                index++;
+            });
+
+            const totalSystems = regionsData.reduce((sum, r) => sum + (r.system_count || 0), 0);
+            document.getElementById('system-count').textContent = `${totalSystems} systems in ${regionMap.size} regions`;
+            createPointsGeometry(positions, colors, sizes);
+        }
+
+        // Create the Three.js geometry from arrays
+        function createPointsGeometry(positions, colors, sizes) {
             const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute(
-                'position',
-                new THREE.Float32BufferAttribute(positions, 3)
-            );
-            geometry.setAttribute(
-                'color',
-                new THREE.Float32BufferAttribute(colors, 3)
-            );
-            geometry.setAttribute(
-                'size',
-                new THREE.Float32BufferAttribute(sizes, 1)
-            );
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
 
-            // Custom shader material for region points
+            // Custom shader material with additive blending for glowing effect
             const material = new THREE.ShaderMaterial({
                 uniforms: {
                     pointTexture: { value: createStarTexture() },
@@ -1218,35 +1373,6 @@
             scene.add(systemPoints);
         }
 
-        function createStarTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64;
-            canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-
-            // Create radial gradient for star
-            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
-            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
-            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, 64, 64);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            return texture;
-        }
-
-        function updateStats() {
-            document.getElementById('system-count').textContent = window.SYSTEMS_DATA.length;
-            document.getElementById('discovery-count').textContent = window.DISCOVERIES_DATA.length;
-
-            // Get unique galaxies
-            const galaxies = [...new Set(window.SYSTEMS_DATA.map(s => s.galaxy))];
-            document.getElementById('galaxy-name').textContent = galaxies.join(', ') || 'Euclid';
-        }
-
         // Track mouse down position to distinguish clicks from drags
         let mouseDownPos = { x: 0, y: 0 };
         let isDragging = false;
@@ -1284,7 +1410,7 @@
                     if (data && data.isRegion) {
                         // Region clicked - show region info and navigate to Region View
                         const region = data.region;
-                        console.log('Region clicked:', `[${region.region_x}, ${region.region_y}, ${region.region_z}]`, 'Systems:', region.systems.length);
+                        console.log('Region clicked:', `[${region.region_x}, ${region.region_y}, ${region.region_z}]`, 'Systems:', data.system_count);
                         showRegionInfo(data);
                     }
                 }
@@ -1311,12 +1437,11 @@
                     const data = systemData[index];
                     if (data && data.isRegion) {
                         const region = data.region;
-                        const systemCount = region.systems.length;
-                        const systemNames = region.systems.slice(0, 3).map(s => s.name).join(', ');
-                        const moreText = systemCount > 3 ? ` +${systemCount - 3} more` : '';
-                        tooltip.innerHTML = `<strong>Region [${region.region_x}, ${region.region_y}, ${region.region_z}]</strong><br>` +
+                        const systemCount = data.system_count || region.system_count || 0;
+                        const regionTitle = region.region_name || `Region [${region.region_x}, ${region.region_y}, ${region.region_z}]`;
+                        tooltip.innerHTML = `<strong>${regionTitle}</strong><br>` +
                             `${systemCount} system${systemCount !== 1 ? 's' : ''}<br>` +
-                            `<span style="color: #888; font-size: 10px;">${systemNames}${moreText}</span>`;
+                            `<span style="color: #888; font-size: 10px;">Click to view region</span>`;
                         tooltip.style.left = event.clientX + 15 + 'px';
                         tooltip.style.top = event.clientY + 15 + 'px';
                         tooltip.style.display = 'block';
@@ -1332,11 +1457,24 @@
 
         function showRegionInfo(regionData) {
             const region = regionData.region;
-            const systems = regionData.systems;
+            const systemCount = regionData.system_count || region.system_count || 0;
 
             // Update system info panel to show region info
-            document.getElementById('system-name').textContent = `Region [${region.region_x}, ${region.region_y}, ${region.region_z}]`;
-            document.getElementById('system-galaxy').textContent = Array.from(region.galaxies).join(', ') || 'Euclid';
+            const regionTitle = region.region_name || `Region [${region.region_x}, ${region.region_y}, ${region.region_z}]`;
+            document.getElementById('system-name').textContent = regionTitle;
+
+            // Get galaxies from region data - handle both Set and Array formats
+            let galaxyText = 'Euclid';
+            if (region.galaxies) {
+                if (region.galaxies instanceof Set) {
+                    galaxyText = Array.from(region.galaxies).join(', ') || 'Euclid';
+                } else if (Array.isArray(region.galaxies)) {
+                    galaxyText = region.galaxies.join(', ') || 'Euclid';
+                } else {
+                    galaxyText = region.galaxies || 'Euclid';
+                }
+            }
+            document.getElementById('system-galaxy').textContent = galaxyText;
 
             // Hide glyph display for regions
             document.getElementById('glyph-display-container').style.display = 'none';
@@ -1345,12 +1483,11 @@
             document.getElementById('system-coords').textContent =
                 `Region X: ${region.region_x}, Y: ${region.region_y}, Z: ${region.region_z}`;
             document.getElementById('system-planets').textContent =
-                `${systems.length} star system${systems.length !== 1 ? 's' : ''}`;
+                `${systemCount} star system${systemCount !== 1 ? 's' : ''}`;
 
-            // List first few systems
-            const systemList = systems.slice(0, 5).map(s => s.name).join(', ');
-            const moreText = systems.length > 5 ? ` ... and ${systems.length - 5} more` : '';
-            document.getElementById('system-description').textContent = systemList + moreText;
+            // Show instruction to view region for system details
+            document.getElementById('system-description').textContent =
+                'Click "Enter Region" to view individual systems';
 
             // Update link to go to Region View
             const systemLink = document.getElementById('view-system-link');

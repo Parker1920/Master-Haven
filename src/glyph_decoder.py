@@ -563,6 +563,102 @@ def calculate_region_name(region_x: int, region_y: int, region_z: int) -> str:
     return f"Region [{region_x:02X}:{region_y:X}:{region_z:02X}]"
 
 
+def galactic_coords_to_glyph(galactic_coords: str, planet: int = 0) -> Dict:
+    """
+    Convert NMS galactic coordinate format to portal glyph code.
+
+    Galactic coordinate format: XXXX:YYYY:ZZZZ:SSSS
+    - XXXX: X voxel coordinate (hex, 0-FFF)
+    - YYYY: Y voxel coordinate (hex, 0-FF)
+    - ZZZZ: Z voxel coordinate (hex, 0-FFF)
+    - SSSS: Solar System Index (hex, last 3 digits used)
+
+    The conversion uses the formula:
+    - Glyph_X = (Voxel_X + 0x801) & 0xFFF
+    - Glyph_Y = (Voxel_Y + 0x81) & 0xFF
+    - Glyph_Z = (Voxel_Z + 0x801) & 0xFFF
+
+    Args:
+        galactic_coords: String in format "XXXX:YYYY:ZZZZ:SSSS"
+        planet: Planet index (0-15, default 0)
+
+    Returns:
+        Dictionary with:
+            - glyph: 12-digit portal glyph code
+            - glyph_formatted: Formatted glyph (P-SSS-YY-ZZZ-XXX)
+            - x, y, z: Signed coordinates for database storage
+            - solar_system: Solar system index
+            - voxel_x, voxel_y, voxel_z: Original voxel coordinates
+
+    Raises:
+        ValueError: If coordinate format is invalid
+    """
+    # Parse the galactic coordinate string
+    parts = galactic_coords.strip().split(':')
+    if len(parts) != 4:
+        raise ValueError(f"Invalid galactic coordinate format. Expected XXXX:YYYY:ZZZZ:SSSS, got: {galactic_coords}")
+
+    try:
+        voxel_x = int(parts[0], 16)
+        voxel_y = int(parts[1], 16)
+        voxel_z = int(parts[2], 16)
+        ssss = int(parts[3], 16)
+    except ValueError as e:
+        raise ValueError(f"Invalid hex value in coordinates: {e}")
+
+    # Extract solar system index (last 3 hex digits, max 0xFFF)
+    solar_system = ssss & 0xFFF
+    if solar_system == 0:
+        solar_system = 1  # SSS cannot be 000
+
+    # Convert voxel coordinates to glyph coordinates
+    # Glyph uses offset encoding: add 0x801 for X/Z (12-bit), 0x81 for Y (8-bit)
+    glyph_x = (voxel_x + 0x801) & 0xFFF
+    glyph_y = (voxel_y + 0x81) & 0xFF
+    glyph_z = (voxel_z + 0x801) & 0xFFF
+
+    # Handle forbidden values (0x80 for Y, 0x800 for X/Z)
+    if glyph_y == 0x80:
+        glyph_y = 0x81  # Shift to valid value
+    if glyph_x == 0x800:
+        glyph_x = 0x801
+    if glyph_z == 0x800:
+        glyph_z = 0x801
+
+    # Build the portal glyph code: P-SSS-YY-ZZZ-XXX
+    glyph = f"{planet:X}{solar_system:03X}{glyph_y:02X}{glyph_z:03X}{glyph_x:03X}"
+
+    # Calculate signed coordinates for database storage
+    # These are the centered coordinates used by the rest of the system
+    if glyph_x <= 0x7FF:
+        x = glyph_x
+    else:
+        x = glyph_x - 0x1000
+
+    if glyph_y <= 0x7F:
+        y = glyph_y
+    else:
+        y = glyph_y - 0x100
+
+    if glyph_z <= 0x7FF:
+        z = glyph_z
+    else:
+        z = glyph_z - 0x1000
+
+    return {
+        'glyph': glyph.upper(),
+        'glyph_formatted': format_glyph(glyph),
+        'x': x,
+        'y': y,
+        'z': z,
+        'solar_system': solar_system,
+        'voxel_x': voxel_x,
+        'voxel_y': voxel_y,
+        'voxel_z': voxel_z,
+        'planet': planet
+    }
+
+
 def get_glyph_image_path(hex_digit: str) -> str:
     """
     Get the image filename for a hex digit.

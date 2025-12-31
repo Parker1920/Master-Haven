@@ -17,7 +17,7 @@ export default function Wizard(){
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isPartner, user } = auth || {}
   const edit = query.get('edit')
-  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null })
+  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '' })
   const [planetModalOpen, setPlanetModalOpen] = useState(false)
   const [editingPlanetIndex, setEditingPlanetIndex] = useState(null)
   const [editingPlanet, setEditingPlanet] = useState(null)
@@ -60,6 +60,11 @@ export default function Wizard(){
     explicitSubmitRef.current = false;
     // Client-side validation for nested planets & moons
     if(!system.name || !system.name.trim()) { alert('System name is required'); return; }
+    if(!system.star_type) { alert('Star Color is required'); return; }
+    if(!system.economy_type) { alert('Economy Type is required'); return; }
+    if(!system.economy_level) { alert('Economy Tier is required'); return; }
+    if(!system.conflict_level) { alert('Conflict Level is required'); return; }
+    if(!system.dominant_lifeform) { alert('Dominant Lifeform is required'); return; }
     if(system.planets){
       for(const p of system.planets){
         if(!p.name || !p.name.trim()){ alert('All planets must have a name'); return; }
@@ -160,6 +165,8 @@ export default function Wizard(){
     // Initialize ALL planet fields with defaults to ensure they're saved
     setEditingPlanet({
       name: '',
+      biome: '',
+      weather: '',
       sentinel: 'None',
       fauna: 'N/A',
       flora: 'N/A',
@@ -266,6 +273,112 @@ export default function Wizard(){
 
         <label className="block mt-3">Galaxy <input placeholder="Galaxy" className="w-full mt-1" value={system.galaxy || 'Euclid'} onChange={e=>setField('galaxy', e.target.value)} /></label>
 
+        {/* System Attributes - Required */}
+        <div className="mt-4 p-4 bg-gray-800/50 rounded border border-gray-700">
+          <h3 className="text-lg font-semibold mb-3 text-cyan-300">System Attributes</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Star Color */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Star Color <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.star_type ? 'border-red-500' : 'border-gray-600'}`}
+                value={system.star_type || ''}
+                onChange={e => setField('star_type', e.target.value)}
+                required
+              >
+                <option value="">-- Select --</option>
+                <option value="Yellow">Yellow</option>
+                <option value="Red">Red</option>
+                <option value="Green">Green</option>
+                <option value="Blue">Blue</option>
+                <option value="Purple">Purple</option>
+              </select>
+            </div>
+
+            {/* Economy Type */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Economy Type <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.economy_type ? 'border-red-500' : 'border-gray-600'}`}
+                value={system.economy_type || ''}
+                onChange={e => setField('economy_type', e.target.value)}
+                required
+              >
+                <option value="">-- Select --</option>
+                <option value="Trading">Trading</option>
+                <option value="Mining">Mining</option>
+                <option value="Manufacturing">Manufacturing</option>
+                <option value="Technology">Technology</option>
+                <option value="Scientific">Scientific</option>
+                <option value="Power Generation">Power Generation</option>
+                <option value="Mass Production">Mass Production</option>
+                <option value="Pirate">Pirate</option>
+                <option value="None">None (Abandoned)</option>
+              </select>
+            </div>
+
+            {/* Economy Tier */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Economy Tier <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.economy_level ? 'border-red-500' : 'border-gray-600'}`}
+                value={system.economy_level || ''}
+                onChange={e => setField('economy_level', e.target.value)}
+                required
+              >
+                <option value="">-- Select --</option>
+                <option value="T1">T1 (Low)</option>
+                <option value="T2">T2 (Medium)</option>
+                <option value="T3">T3 (High)</option>
+                <option value="T4">T4 (Pirate)</option>
+              </select>
+            </div>
+
+            {/* Conflict Level */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Conflict Level <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.conflict_level ? 'border-red-500' : 'border-gray-600'}`}
+                value={system.conflict_level || ''}
+                onChange={e => setField('conflict_level', e.target.value)}
+                required
+              >
+                <option value="">-- Select --</option>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+              </select>
+            </div>
+
+            {/* Dominant Lifeform */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Dominant Lifeform <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.dominant_lifeform ? 'border-red-500' : 'border-gray-600'}`}
+                value={system.dominant_lifeform || ''}
+                onChange={e => setField('dominant_lifeform', e.target.value)}
+                required
+              >
+                <option value="">-- Select --</option>
+                <option value="Gek">Gek</option>
+                <option value="Vy'keen">Vy'keen</option>
+                <option value="Korvax">Korvax</option>
+                <option value="None">None (Abandoned)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         {/* Discord Tag Selection - REQUIRED for all users */}
         <div className="mt-3">
           <label className="block text-sm font-medium mb-1">
@@ -367,7 +480,7 @@ export default function Wizard(){
           </label>
 
           {hasStation && system.space_station && (
-            <div className="ml-6 p-3 bg-purple-50 rounded border border-purple-200">
+            <div className="ml-6 p-3 bg-purple-900/30 rounded border border-purple-700">
               <div className="mb-2">
                 <label className="block text-sm">Station Name</label>
                 <input
@@ -437,7 +550,7 @@ export default function Wizard(){
               </button>
 
               {system.space_station.fallback && (
-                <div className="mt-2 text-xs text-yellow-700 bg-yellow-100 p-2 rounded">
+                <div className="mt-2 text-xs text-yellow-300 bg-yellow-900/30 border border-yellow-700 p-2 rounded">
                   ⚠️ Fallback position used - couldn't find collision-free spot after 100 attempts
                 </div>
               )}
@@ -447,7 +560,7 @@ export default function Wizard(){
 
         <div className="mt-4 flex flex-col space-y-2">
           {!isAdmin && (
-            <div className="text-sm text-yellow-700 bg-yellow-100 p-2 rounded">
+            <div className="text-sm text-yellow-300 bg-yellow-900/30 border border-yellow-700 p-2 rounded">
               Note: You are not logged in as admin. Your system will be submitted for approval.
             </div>
           )}

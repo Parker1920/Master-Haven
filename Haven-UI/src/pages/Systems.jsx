@@ -1,11 +1,28 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo, useCallback, useRef } from 'react'
 import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import FormField from '../components/FormField'
-import { TrashIcon, PencilIcon, ChevronDownIcon, ChevronRightIcon, Squares2X2Icon, ListBulletIcon } from '@heroicons/react/24/outline'
+import { TrashIcon, PencilIcon, ChevronDownIcon, ChevronRightIcon, Squares2X2Icon, ListBulletIcon, GlobeAltIcon, CubeIcon } from '@heroicons/react/24/outline'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../utils/AuthContext'
+
+// Custom debounce hook for search performance
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
 
 // Helper to normalize photo paths
 function getPhotoUrl(photo) {
@@ -30,6 +47,7 @@ export default function Systems() {
   const auth = useContext(AuthContext)
   const [regions, setRegions] = useState([])
   const [q, setQ] = useState('')
+  const debouncedQuery = useDebounce(q, 300) // Debounced search for better performance
   const [loading, setLoading] = useState(true)
   const [expandedRegion, setExpandedRegion] = useState(null)
   const [expandedSystem, setExpandedSystem] = useState(null)
@@ -44,23 +62,28 @@ export default function Systems() {
   const [hideDirectional, setHideDirectional] = useState(false)
   // View mode toggle: 'list' or 'grid'
   const [viewMode, setViewMode] = useState('list')
+  // Lazy-loaded systems cache per region (key: "x,y,z" -> systems array)
+  const [regionSystems, setRegionSystems] = useState({})
+  const [loadingRegionSystems, setLoadingRegionSystems] = useState({})
 
-  // Fetch discord tags for filter dropdown (super admin only)
+  // Fetch discord tags for filter dropdown (available to all users)
   useEffect(() => {
-    if (auth?.isSuperAdmin) {
-      axios.get('/api/discord_tags').then(r => {
-        setDiscordTags(r.data.tags || [])
-      }).catch(() => {})
-    }
-  }, [auth?.isSuperAdmin])
+    axios.get('/api/discord_tags').then(r => {
+      setDiscordTags(r.data.tags || [])
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => { load() }, [])
 
+  // Load region summaries (without systems) - much faster initial load
   async function load() {
     setLoading(true)
     try {
-      const r = await axios.get('/api/regions/grouped')
+      // Use include_systems=false for fast initial load (returns region summaries only)
+      const r = await axios.get('/api/regions/grouped?include_systems=false')
       setRegions(r.data.regions || [])
+      // Clear cached systems when reloading
+      setRegionSystems({})
     } catch (e) {
       console.error('Failed to load regions:', e)
       setRegions([])
@@ -69,8 +92,37 @@ export default function Systems() {
     }
   }
 
-  // Filter regions based on search query, discord_tag, and directional toggle
-  function getFilteredRegions() {
+  // Lazy load systems for a specific region when expanded
+  const loadSystemsForRegion = useCallback(async (region) => {
+    const key = `${region.region_x},${region.region_y},${region.region_z}`
+
+    // Already loaded or loading
+    if (regionSystems[key] || loadingRegionSystems[key]) return
+
+    setLoadingRegionSystems(prev => ({ ...prev, [key]: true }))
+
+    try {
+      // Load systems with planets using the new lazy-loading endpoint
+      const r = await axios.get(
+        `/api/regions/${region.region_x}/${region.region_y}/${region.region_z}/systems?include_planets=true`
+      )
+      setRegionSystems(prev => ({ ...prev, [key]: r.data.systems || [] }))
+    } catch (e) {
+      console.error('Failed to load systems for region:', e)
+      setRegionSystems(prev => ({ ...prev, [key]: [] }))
+    } finally {
+      setLoadingRegionSystems(prev => ({ ...prev, [key]: false }))
+    }
+  }, [regionSystems, loadingRegionSystems])
+
+  // Helper to get systems for a region (from cache or original data)
+  const getRegionSystemsData = useCallback((region) => {
+    const key = `${region.region_x},${region.region_y},${region.region_z}`
+    return regionSystems[key] || region.systems || []
+  }, [regionSystems])
+
+  // Memoized filtered regions - recalculates only when dependencies change
+  const filteredRegions = useMemo(() => {
     let filtered = regions
 
     // Filter out directional/cardinal regions if toggle is enabled
@@ -81,28 +133,33 @@ export default function Systems() {
       })
     }
 
-    // Apply discord_tag filter (super admin only)
-    if (auth?.isSuperAdmin && filterTag !== 'all') {
+    // Apply discord_tag filter (available to all users)
+    // Note: This filter only works on regions with loaded systems
+    if (filterTag !== 'all') {
       filtered = filtered.map(region => {
+        const key = `${region.region_x},${region.region_y},${region.region_z}`
+        const systems = regionSystems[key] || region.systems || []
         // Filter systems within each region by discord_tag
-        const filteredSystems = region.systems?.filter(system => {
+        const filteredSystems = systems.filter(system => {
           if (filterTag === 'untagged') return !system.discord_tag
           return system.discord_tag === filterTag
-        }) || []
-        return { ...region, systems: filteredSystems, system_count: filteredSystems.length }
-      }).filter(region => region.systems.length > 0) // Remove empty regions
+        })
+        return { ...region, _filteredSystems: filteredSystems, _filteredCount: filteredSystems.length }
+      }).filter(region => region._filteredCount > 0) // Remove empty regions
     }
 
-    // Then apply text search filter
-    if (q.trim()) {
-      const query = q.toLowerCase().trim()
+    // Then apply text search filter using debounced query
+    if (debouncedQuery.trim()) {
+      const query = debouncedQuery.toLowerCase().trim()
       filtered = filtered.filter(region => {
         // Check if region name matches
         if (region.display_name?.toLowerCase().includes(query)) return true
         if (region.custom_name?.toLowerCase().includes(query)) return true
 
-        // Check if any system in the region matches
-        return region.systems?.some(system =>
+        // Check if any cached system matches (if systems are loaded)
+        const key = `${region.region_x},${region.region_y},${region.region_z}`
+        const systems = regionSystems[key] || []
+        return systems.some(system =>
           system.name?.toLowerCase().includes(query) ||
           system.galaxy?.toLowerCase().includes(query) ||
           system.glyph_code?.toLowerCase().includes(query) ||
@@ -112,10 +169,10 @@ export default function Systems() {
     }
 
     return filtered
-  }
+  }, [regions, hideDirectional, filterTag, debouncedQuery, regionSystems])
 
   // Get discord tag badge with color
-  function getDiscordTagBadge(tag, personalDiscordUsername = null) {
+  function getDiscordTagBadge(tag, personalDiscordUsername = null, showPersonalUsername = false) {
     if (!tag) {
       return (
         <span className="text-xs bg-gray-500 text-white px-1.5 py-0.5 rounded">
@@ -125,10 +182,11 @@ export default function Systems() {
     }
 
     // Special handling for "personal" tag - magenta/fuchsia color
+    // Only show username if showPersonalUsername is true (super admin only)
     if (tag === 'personal') {
       return (
         <span className="text-xs bg-fuchsia-600 text-white px-1.5 py-0.5 rounded">
-          PERSONAL {personalDiscordUsername && `(${personalDiscordUsername})`}
+          PERSONAL {showPersonalUsername && personalDiscordUsername && `(${personalDiscordUsername})`}
         </span>
       )
     }
@@ -149,21 +207,23 @@ export default function Systems() {
     )
   }
 
-  // Calculate stats for a region (planets and moons count)
+  // Calculate stats for a region (planets and moons count) - uses cached systems
   function getRegionStats(region) {
+    const key = `${region.region_x},${region.region_y},${region.region_z}`
+    const systems = regionSystems[key] || region.systems || []
     let planets = 0
     let moons = 0
-    region.systems?.forEach(system => {
+    systems.forEach(system => {
       const systemPlanets = system.planets || []
       planets += systemPlanets.length
       systemPlanets.forEach(planet => {
         moons += (planet.moons || []).length
       })
     })
-    return { systems: region.systems?.length || 0, planets, moons }
+    return { systems: systems.length || region.system_count || 0, planets, moons }
   }
 
-  function toggleRegion(regionKey) {
+  function toggleRegion(regionKey, region) {
     if (expandedRegion === regionKey) {
       setExpandedRegion(null)
       setExpandedSystem(null)
@@ -172,6 +232,10 @@ export default function Systems() {
       setExpandedRegion(regionKey)
       setExpandedSystem(null)
       setExpandedPlanets({})
+      // Lazy load systems when expanding a region
+      if (region) {
+        loadSystemsForRegion(region)
+      }
     }
   }
 
@@ -259,7 +323,18 @@ export default function Systems() {
     }
   }
 
-  const filteredRegions = getFilteredRegions()
+  // Count total systems across filtered regions (using cached data where available)
+  const totalSystemsCount = useMemo(() => {
+    return filteredRegions.reduce((sum, region) => {
+      // Use filtered count if tag filter is applied, otherwise use system_count
+      if (region._filteredCount !== undefined) {
+        return sum + region._filteredCount
+      }
+      const key = `${region.region_x},${region.region_y},${region.region_z}`
+      const cachedSystems = regionSystems[key]
+      return sum + (cachedSystems ? cachedSystems.length : (region.system_count || 0))
+    }, 0)
+  }, [filteredRegions, regionSystems])
 
   if (loading) {
     return (
@@ -297,21 +372,19 @@ export default function Systems() {
           >
             {hideDirectional ? '🧭 Showing Named Only' : '🧭 Show All'}
           </button>
-          {/* Discord Tag Filter - Super Admin Only */}
-          {auth?.isSuperAdmin && (
-            <select
-              className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
-              value={filterTag}
-              onChange={e => setFilterTag(e.target.value)}
-            >
-              <option value="all">All Tags</option>
-              <option value="untagged">Untagged Only</option>
-              <option value="personal">Personal Only</option>
-              {discordTags.map(t => (
-                <option key={t.tag} value={t.tag}>{t.name}</option>
-              ))}
-            </select>
-          )}
+          {/* Discord Tag Filter - Available to all users */}
+          <select
+            className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
+            value={filterTag}
+            onChange={e => setFilterTag(e.target.value)}
+          >
+            <option value="all">All Communities</option>
+            <option value="untagged">Untagged Only</option>
+            <option value="personal">Personal Only</option>
+            {discordTags.map(t => (
+              <option key={t.tag} value={t.tag}>{t.name}</option>
+            ))}
+          </select>
           {/* View Mode Toggle */}
           <div className="flex rounded border border-gray-600 overflow-hidden">
             <button
@@ -348,16 +421,16 @@ export default function Systems() {
       {/* Results Summary */}
       <div className="mb-4 text-sm text-gray-400">
         {filteredRegions.length} region{filteredRegions.length !== 1 ? 's' : ''}
-        {' '}({filteredRegions.reduce((sum, r) => sum + (r.systems?.length || 0), 0)} systems)
-        {q && ` matching "${q}"`}
+        {' '}({totalSystemsCount} systems)
+        {debouncedQuery && ` matching "${debouncedQuery}"`}
         {hideDirectional && (
           <span className="ml-2">
             • <span className="text-purple-400">Hiding directional regions</span>
           </span>
         )}
-        {auth?.isSuperAdmin && filterTag !== 'all' && (
+        {filterTag !== 'all' && (
           <span className="ml-2">
-            • Filtered by: <span className="text-cyan-400">{filterTag === 'untagged' ? 'Untagged' : filterTag}</span>
+            • Filtered by: <span className="text-cyan-400">{filterTag === 'untagged' ? 'Untagged' : filterTag === 'personal' ? 'Personal' : filterTag}</span>
           </span>
         )}
       </div>
@@ -383,7 +456,7 @@ export default function Systems() {
                 className="p-4 cursor-pointer hover:bg-gray-800 transition-colors border-l-4 border-l-purple-500"
                 onClick={() => {
                   setViewMode('list')
-                  setExpandedRegion(regionKey)
+                  toggleRegion(regionKey, region)
                 }}
               >
                 <div className="mb-3">
@@ -441,7 +514,7 @@ export default function Systems() {
                 {/* Region Header */}
                 <div
                   className="p-4 cursor-pointer hover:bg-gray-800 transition-colors flex items-center justify-between"
-                  onClick={() => toggleRegion(regionKey)}
+                  onClick={() => toggleRegion(regionKey, region)}
                 >
                   <div className="flex items-center gap-3">
                     {isExpanded ? (
@@ -458,9 +531,12 @@ export default function Systems() {
                         )}
                       </div>
                       <div className="text-sm text-gray-400">
-                        {region.system_count} system{region.system_count !== 1 ? 's' : ''}
+                        {region._filteredCount !== undefined ? region._filteredCount : region.system_count} system{(region._filteredCount !== undefined ? region._filteredCount : region.system_count) !== 1 ? 's' : ''}
                         {region.custom_name && (
                           <span className="ml-2">• Coords: [{region.region_x}, {region.region_y}, {region.region_z}]</span>
+                        )}
+                        {loadingRegionSystems[regionKey] && (
+                          <span className="ml-2 text-cyan-400">Loading...</span>
                         )}
                       </div>
                     </div>
@@ -498,21 +574,36 @@ export default function Systems() {
                               'No custom name set for this region'
                             )}
                           </div>
-                          <Button
-                            variant="ghost"
-                            onClick={(e) => startEditingRegionName(region, e)}
-                            className="text-sm"
-                          >
-                            <PencilIcon className="w-4 h-4 mr-1 inline" />
-                            {region.custom_name ? 'Change Name' : 'Set Name'}
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`/map/region?rx=${region.region_x}&ry=${region.region_y}&rz=${region.region_z}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Button variant="ghost" className="text-sm text-cyan-400 hover:text-cyan-300">
+                                <GlobeAltIcon className="w-4 h-4 mr-1 inline" />
+                                Region View
+                              </Button>
+                            </a>
+                            <Button
+                              variant="ghost"
+                              onClick={(e) => startEditingRegionName(region, e)}
+                              className="text-sm"
+                            >
+                              <PencilIcon className="w-4 h-4 mr-1 inline" />
+                              {region.custom_name ? 'Change Name' : 'Set Name'}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
 
                     {/* Systems in this Region */}
                     <div className="divide-y divide-gray-700">
-                      {region.systems?.map(system => {
+                      {loadingRegionSystems[regionKey] ? (
+                        <div className="p-4 text-center text-gray-400">
+                          Loading systems...
+                        </div>
+                      ) : (region._filteredSystems || regionSystems[regionKey] || region.systems || []).map(system => {
                         const isSystemExpanded = expandedSystem === system.id
 
                         return (
@@ -542,8 +633,8 @@ export default function Systems() {
                                         ⚡
                                       </span>
                                     )}
-                                    {/* Discord Tag Badge - Super Admin sees all */}
-                                    {auth?.isSuperAdmin && getDiscordTagBadge(system.discord_tag, system.personal_discord_username)}
+                                    {/* Discord Tag Badge - visible to all, but personal username only for super admin */}
+                                    {getDiscordTagBadge(system.discord_tag, system.personal_discord_username, auth?.isSuperAdmin)}
                                     {system.is_phantom && (
                                       <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded" title="Phantom Star - Not normally accessible on Galactic Map">
                                         👻
@@ -623,23 +714,35 @@ export default function Systems() {
                                       </select>
                                     </div>
                                   )}
-                                  {/* Personal Discord Username - shown if personal tag */}
-                                  {system.discord_tag === 'personal' && system.personal_discord_username && (
+                                  {/* Personal Discord Username - shown only to super admin */}
+                                  {auth?.isSuperAdmin && system.discord_tag === 'personal' && system.personal_discord_username && (
                                     <div>
                                       <div className="text-xs text-gray-400">Contact Discord</div>
                                       <div className="text-fuchsia-400">{system.personal_discord_username}</div>
                                     </div>
                                   )}
-                                  {system.economy && (
+                                  {system.star_type && (
                                     <div>
-                                      <div className="text-xs text-gray-400">Economy</div>
-                                      <div>{system.economy}</div>
+                                      <div className="text-xs text-gray-400">Star Color</div>
+                                      <div className="text-yellow-400">{system.star_type}</div>
                                     </div>
                                   )}
-                                  {system.conflict && (
+                                  {(system.economy_type || system.economy_level) && (
+                                    <div>
+                                      <div className="text-xs text-gray-400">Economy</div>
+                                      <div>{system.economy_type}{system.economy_level && ` (${system.economy_level})`}</div>
+                                    </div>
+                                  )}
+                                  {system.conflict_level && (
                                     <div>
                                       <div className="text-xs text-gray-400">Conflict</div>
-                                      <div>{system.conflict}</div>
+                                      <div>{system.conflict_level}</div>
+                                    </div>
+                                  )}
+                                  {system.dominant_lifeform && (
+                                    <div>
+                                      <div className="text-xs text-gray-400">Lifeform</div>
+                                      <div>{system.dominant_lifeform}</div>
                                     </div>
                                   )}
                                   {system.discovered_by && (
@@ -648,6 +751,16 @@ export default function Systems() {
                                       <div>{system.discovered_by}</div>
                                     </div>
                                   )}
+                                </div>
+
+                                {/* System 3D View Button */}
+                                <div className="mb-4">
+                                  <a href={`/map/system/${encodeURIComponent(system.id)}`}>
+                                    <Button variant="neutral" className="text-sm">
+                                      <CubeIcon className="w-4 h-4 mr-2 inline" />
+                                      View Star System (3D)
+                                    </Button>
+                                  </a>
                                 </div>
 
                                 {system.description && (
@@ -711,8 +824,20 @@ export default function Systems() {
                                           {expandedPlanets[planetIndex] && (
                                             <div className="p-3 bg-gray-900/50">
                                               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                                                {planet.biome && (
+                                                  <div>
+                                                    <div className="text-xs text-gray-400">Biome</div>
+                                                    <div className="text-green-400">{planet.biome}</div>
+                                                  </div>
+                                                )}
+                                                {planet.weather && (
+                                                  <div>
+                                                    <div className="text-xs text-gray-400">Weather</div>
+                                                    <div className="text-sky-400">{planet.weather}</div>
+                                                  </div>
+                                                )}
                                                 <div>
-                                                  <div className="text-xs text-gray-400">Sentinel</div>
+                                                  <div className="text-xs text-gray-400">Sentinels</div>
                                                   <div>{planet.sentinel || planet.sentinel_level || 'Unknown'}</div>
                                                 </div>
                                                 <div>
@@ -723,7 +848,7 @@ export default function Systems() {
                                                   <div className="text-xs text-gray-400">Flora</div>
                                                   <div>{planet.flora || 'N/A'}</div>
                                                 </div>
-                                                {planet.climate && (
+                                                {planet.climate && planet.climate !== planet.biome && (
                                                   <div>
                                                     <div className="text-xs text-gray-400">Climate</div>
                                                     <div>{planet.climate}</div>
@@ -771,8 +896,20 @@ export default function Systems() {
                                                       <div key={moonIdx} className="bg-gray-800 p-2 rounded border border-cyan-900/50 text-sm">
                                                         <div className="font-medium mb-1">{moon.name}</div>
                                                         <div className="grid grid-cols-3 gap-2 text-xs">
+                                                          {moon.biome && (
+                                                            <div>
+                                                              <span className="text-gray-400">Biome: </span>
+                                                              <span className="text-green-400">{moon.biome}</span>
+                                                            </div>
+                                                          )}
+                                                          {moon.weather && (
+                                                            <div>
+                                                              <span className="text-gray-400">Weather: </span>
+                                                              <span className="text-sky-400">{moon.weather}</span>
+                                                            </div>
+                                                          )}
                                                           <div>
-                                                            <span className="text-gray-400">Sentinel: </span>
+                                                            <span className="text-gray-400">Sentinels: </span>
                                                             {moon.sentinel || 'Unknown'}
                                                           </div>
                                                           <div>

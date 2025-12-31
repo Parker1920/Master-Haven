@@ -12,7 +12,8 @@ const AVAILABLE_FEATURES = [
   { id: 'system_edit', label: 'Edit Systems', description: 'Can edit systems tagged with their Discord' },
   { id: 'approvals', label: 'View Approvals', description: 'Can approve/reject pending submissions for their Discord' },
   { id: 'stats', label: 'View Statistics', description: 'Can view database statistics for their Discord' },
-  { id: 'settings', label: 'Theme Settings', description: 'Can customize their theme colors' }
+  { id: 'settings', label: 'Theme Settings', description: 'Can customize their theme colors' },
+  { id: 'csv_import', label: 'CSV Import', description: 'Can bulk import star systems from CSV files' }
 ]
 
 export default function PartnerManagement() {

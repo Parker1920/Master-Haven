@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
+import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 
 function Photo({ url, alt }){
   if(!url) return null
@@ -15,6 +16,7 @@ export default function Discoveries(){
   const [items, setItems] = useState([])
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState(null)
+  const [showSubmitModal, setShowSubmitModal] = useState(false)
 
   useEffect(()=>{ fetch(`/api/discoveries`).then(r=>r.json()).then(j=>setItems(j.results||[])) }, [])
 
@@ -54,10 +56,12 @@ export default function Discoveries(){
       }
       const full = await res.json()
       if(full.photo_url) full._photo_static = photoUrlToStatic(full.photo_url)
-      if(full.evidence_urls && typeof full.evidence_urls === 'string'){
-        full._evidence = full.evidence_urls.split(',').map(s=>s.trim()).filter(Boolean).map(u=>photoUrlToStatic(u) || u)
-      } else if(Array.isArray(full.evidence_urls)){
-        full._evidence = full.evidence_urls.map(u=>photoUrlToStatic(u) || u)
+      // Handle both evidence_url (db column) and evidence_urls (legacy)
+      const evidenceData = full.evidence_url || full.evidence_urls
+      if(evidenceData && typeof evidenceData === 'string'){
+        full._evidence = evidenceData.split(',').map(s=>s.trim()).filter(Boolean).map(u=>photoUrlToStatic(u) || u)
+      } else if(Array.isArray(evidenceData)){
+        full._evidence = evidenceData.map(u=>photoUrlToStatic(u) || u)
       } else {
         full._evidence = []
       }
@@ -77,6 +81,7 @@ export default function Discoveries(){
         <div className="flex items-center gap-2">
           <input className="p-2 rounded flex-1 sm:flex-initial" value={q} onChange={e=>setQ(e.target.value)} placeholder="search discoveries" />
           <Button onClick={search}>Search</Button>
+          <Button onClick={() => setShowSubmitModal(true)}>Submit Discovery</Button>
         </div>
       </div>
 
@@ -118,6 +123,15 @@ export default function Discoveries(){
           </div>
         </div>
       )}
+
+      <DiscoverySubmitModal
+        isOpen={showSubmitModal}
+        onClose={() => setShowSubmitModal(false)}
+        onSuccess={() => {
+          setShowSubmitModal(false)
+          fetch('/api/discoveries').then(r => r.json()).then(j => setItems(j.results || []))
+        }}
+      />
     </div>
   )
 }

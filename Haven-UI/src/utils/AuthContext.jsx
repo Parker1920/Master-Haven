@@ -11,7 +11,8 @@ export const FEATURES = {
   SYSTEM_EDIT: 'system_edit',
   APPROVALS: 'approvals',
   STATS: 'stats',
-  SETTINGS: 'settings'
+  SETTINGS: 'settings',
+  CSV_IMPORT: 'csv_import'
 }
 
 export const AuthContext = createContext({

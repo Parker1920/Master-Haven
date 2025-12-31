@@ -111,6 +111,7 @@ export default function Navbar() {
             )}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/api-keys">API Keys</Link>}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/partners">Partners</Link>}
+            {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-1 hover:underline" to="/csv-import">CSV Import</Link>}
             {!isAdmin ? (
               <button className="px-3 py-1 bg-blue-500 text-white rounded" onClick={() => setShowLogin(true)}>Login</button>
             ) : (
@@ -152,6 +153,7 @@ export default function Navbar() {
             )}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/api-keys" onClick={closeMenu}>API Keys</Link>}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/partners" onClick={closeMenu}>Partners</Link>}
+            {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/csv-import" onClick={closeMenu}>CSV Import</Link>}
             <div className="pt-2 border-t border-gray-700">
               {isAdmin && (
                 <div className="px-3 py-2 text-sm text-gray-400 mb-2">

@@ -19,11 +19,14 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
     // Initialize ALL moon fields with defaults to ensure they're saved
     setEditingMoon({
       name: '',
+      biome: '',
+      weather: '',
       sentinel: 'None',
       fauna: 'N/A',
       flora: 'N/A',
       materials: '',
-      notes: ''
+      notes: '',
+      photo: null
     })
     setMoonModalOpen(true)
   }
@@ -72,45 +75,82 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
 
   return (
     <div className="p-3 my-3 border rounded bg-white/5">
-      <div className="flex items-center justify-between">
-        <div className="w-full pr-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex-1">
           <label className="block text-sm">Planet Name</label>
           <input className="mt-1 p-1 rounded w-full" value={planet.name || ''} onChange={e => setField('name', e.target.value)} placeholder="Planet name" />
         </div>
-        <div className="w-40">
-          <label className="block text-sm">Sentinel</label>
-          <select className="w-full mt-1 p-1 rounded" value={planet.sentinel || 'None'} onChange={e => setField('sentinel', e.target.value)}>
-            <option>None</option>
-            <option>Low</option>
-            <option>Medium</option>
-            <option>High</option>
-            <option>Aggressive</option>
+        <div className="w-32">
+          <label className="block text-sm">Biome</label>
+          <select className="w-full mt-1 p-1 rounded" value={planet.biome || ''} onChange={e => setField('biome', e.target.value)}>
+            <option value="">-- Select --</option>
+            <option value="Lush">Lush</option>
+            <option value="Barren">Barren</option>
+            <option value="Dead">Dead</option>
+            <option value="Scorched">Scorched</option>
+            <option value="Frozen">Frozen</option>
+            <option value="Toxic">Toxic</option>
+            <option value="Radioactive">Radioactive</option>
+            <option value="Marsh">Marsh</option>
+            <option value="Exotic">Exotic</option>
+          </select>
+        </div>
+        <div className="w-36">
+          <label className="block text-sm">Weather</label>
+          <select className="w-full mt-1 p-1 rounded" value={planet.weather || ''} onChange={e => setField('weather', e.target.value)}>
+            <option value="">-- Select --</option>
+            <option value="Clear">Clear</option>
+            <option value="Dusty">Dusty</option>
+            <option value="Humid">Humid</option>
+            <option value="Superheated">Superheated</option>
+            <option value="Freezing">Freezing</option>
+            <option value="Toxic Rain">Toxic Rain</option>
+            <option value="Irradiated">Irradiated</option>
+            <option value="Extreme Storms">Extreme Storms</option>
+            <option value="Electric">Electric</option>
+            <option value="Blissful">Blissful</option>
           </select>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <div>
+          <label className="block text-sm">Sentinels</label>
+          <select className="w-full mt-1 p-1 rounded" value={planet.sentinel || ''} onChange={e => setField('sentinel', e.target.value)}>
+            <option value="">-- Select --</option>
+            <option value="None">None</option>
+            <option value="Limited">Limited</option>
+            <option value="Low Security">Low Security</option>
+            <option value="Normal">Normal</option>
+            <option value="High Security">High Security</option>
+            <option value="Aggressive">Aggressive</option>
+            <option value="Frenzied">Frenzied</option>
+            <option value="Corrupted">Corrupted</option>
+          </select>
+        </div>
         <div>
           <label className="block text-sm">Flora</label>
-          <select aria-label="Planet Flora" className="mt-1 p-1 rounded w-full" value={planet.flora || 'N/A'} onChange={e => setField('flora', e.target.value)}>
-            <option value="N/A">N/A</option>
+          <select aria-label="Planet Flora" className="mt-1 p-1 rounded w-full" value={planet.flora || ''} onChange={e => setField('flora', e.target.value)}>
+            <option value="">-- Select --</option>
             <option value="None">None</option>
             <option value="Sparse">Sparse</option>
             <option value="Low">Low</option>
-            <option value="Moderate">Moderate</option>
+            <option value="Average">Average</option>
+            <option value="High">High</option>
             <option value="Abundant">Abundant</option>
-            <option value="Rich">Rich</option>
+            <option value="Lush">Lush</option>
           </select>
         </div>
         <div>
           <label className="block text-sm">Fauna</label>
-          <select aria-label="Planet Fauna" className="mt-1 p-1 rounded w-full" value={planet.fauna || 'N/A'} onChange={e => setField('fauna', e.target.value)}>
-            <option value="N/A">N/A</option>
+          <select aria-label="Planet Fauna" className="mt-1 p-1 rounded w-full" value={planet.fauna || ''} onChange={e => setField('fauna', e.target.value)}>
+            <option value="">-- Select --</option>
             <option value="None">None</option>
             <option value="Sparse">Sparse</option>
             <option value="Low">Low</option>
-            <option value="Moderate">Moderate</option>
-            <option value="Abundant">Abundant</option>
-            <option value="Rich">Rich</option>
+            <option value="Ample">Ample</option>
+            <option value="Full">Full</option>
+            <option value="Bountiful">Bountiful</option>
+            <option value="Copious">Copious</option>
           </select>
         </div>
         <div>

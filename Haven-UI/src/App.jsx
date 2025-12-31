@@ -12,6 +12,7 @@ import DBStats from './pages/DBStats'
 import PendingApprovals from './pages/PendingApprovals'
 import ApiKeys from './pages/ApiKeys'
 import PartnerManagement from './pages/PartnerManagement'
+import CsvImport from './pages/CsvImport'
 import Navbar from './components/Navbar'
 import InactivityOverlay from './components/InactivityOverlay'
 import { AuthProvider, AuthContext, FEATURES } from './utils/AuthContext'
@@ -82,6 +83,7 @@ export default function App() {
             {/* Admin routes (super admin or partner with access) */}
             <Route path="/settings" element={<RequireFeature feature={FEATURES.SETTINGS}><Settings /></RequireFeature>} />
             <Route path="/pending-approvals" element={<RequireFeature feature={FEATURES.APPROVALS}><PendingApprovals /></RequireFeature>} />
+            <Route path="/csv-import" element={<RequireFeature feature={FEATURES.CSV_IMPORT}><CsvImport /></RequireFeature>} />
           </Routes>
         </main>
         <InactivityOverlay />

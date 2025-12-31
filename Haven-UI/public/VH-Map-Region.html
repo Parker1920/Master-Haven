@@ -852,45 +852,64 @@
             const positions = [];
             const colors = [];
             const sizes = [];
+            const displaySize = 100;
+            const halfSize = displaySize / 2;
 
-            // Calculate positions within the region
-            // Stars should be spread within a normalized space
-            systems.forEach((system, index) => {
-                // Use star_x/y/z for position
-                // star_x/y/z are the deterministic positions calculated from region + SSS
-                // They are already spread out within the coordinate space
+            // FIRST PASS: Calculate raw offsets and find min/max to normalize to box
+            const rawOffsets = [];
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
 
-                let displayX, displayY, displayZ;
-                const displaySize = 100;
+            systems.forEach((system) => {
+                let offsetX, offsetY, offsetZ;
 
                 if (system.star_x !== null && system.star_x !== undefined) {
-                    // Use the star position relative to the system's base coords
-                    // star_x/y/z are absolute positions, system.x/y/z are the region center
-                    // The difference gives us the offset within the region
                     const baseX = system.x || 0;
                     const baseY = system.y || 0;
                     const baseZ = system.z || 0;
 
-                    // Calculate offset from region center (typically within ±64 units)
-                    const offsetX = system.star_x - baseX;
-                    const offsetY = system.star_y - baseY;
-                    const offsetZ = system.star_z - baseZ;
-
-                    // Scale to display size (normalize to -50 to +50 range)
-                    displayX = (offsetX / 128) * displaySize;
-                    displayY = (offsetY / 128) * displaySize;
-                    displayZ = (offsetZ / 128) * displaySize;
+                    offsetX = system.star_x - baseX;
+                    offsetY = system.star_y - baseY;
+                    offsetZ = system.star_z - baseZ;
                 } else {
                     // Fallback: use SSS to generate deterministic position
                     const sss = system.glyph_solar_system || 1;
-                    displayX = (((sss * 7919) % 1000) / 1000 - 0.5) * displaySize;
-                    displayY = (((sss * 6271) % 1000) / 1000 - 0.5) * displaySize;
-                    displayZ = (((sss * 3571) % 1000) / 1000 - 0.5) * displaySize;
+                    offsetX = ((sss * 7919) % 1000) / 1000 - 0.5;
+                    offsetY = ((sss * 6271) % 1000) / 1000 - 0.5;
+                    offsetZ = ((sss * 3571) % 1000) / 1000 - 0.5;
                 }
 
-                const x = displayX;
-                const y = displayY;
-                const z = displayZ;
+                rawOffsets.push({ x: offsetX, y: offsetY, z: offsetZ });
+
+                minX = Math.min(minX, offsetX);
+                maxX = Math.max(maxX, offsetX);
+                minY = Math.min(minY, offsetY);
+                maxY = Math.max(maxY, offsetY);
+                minZ = Math.min(minZ, offsetZ);
+                maxZ = Math.max(maxZ, offsetZ);
+            });
+
+            // Calculate ranges (add small padding to avoid stars exactly on edges)
+            const padding = 0.9; // Use 90% of box to leave margin
+            const rangeX = (maxX - minX) || 1;
+            const rangeY = (maxY - minY) || 1;
+            const rangeZ = (maxZ - minZ) || 1;
+
+            console.log('Star offset ranges:', { rangeX, rangeY, rangeZ, minX, maxX, minY, maxY, minZ, maxZ });
+
+            // SECOND PASS: Normalize positions to fill the box
+            systems.forEach((system, index) => {
+                const raw = rawOffsets[index];
+
+                // Normalize to 0-1 range, then scale to box (-halfSize to +halfSize)
+                const normalizedX = (raw.x - minX) / rangeX;
+                const normalizedY = (raw.y - minY) / rangeY;
+                const normalizedZ = (raw.z - minZ) / rangeZ;
+
+                const x = (normalizedX - 0.5) * displaySize * padding;
+                const y = (normalizedY - 0.5) * displaySize * padding;
+                const z = (normalizedZ - 0.5) * displaySize * padding;
 
                 if (index === 0) {
                     console.log('First star display position:', x, y, z);
@@ -898,7 +917,14 @@
 
                 positions.push(x, y, z);
 
-                // Color - use Haven teal for Euclid, purple for Hilbert
+                // Color - prefer star_type color, fall back to galaxy color
+                const starTypeColors = {
+                    'Yellow': 0xFFD700,   // Gold/Yellow
+                    'Red': 0xFF4444,      // Red
+                    'Green': 0x44FF44,    // Green
+                    'Blue': 0x4488FF,     // Blue
+                    'Purple': 0x9d4edd    // Purple
+                };
                 const galaxyColors = {
                     'Euclid': 0x00C2B3,
                     'Hilbert': 0x9d4edd,
@@ -906,7 +932,11 @@
                     'Eissentam': 0x4ecdc4,
                     'Elkupalos': 0xffd93d
                 };
-                const color = new THREE.Color(galaxyColors[system.galaxy] || 0x00C2B3);
+                // Use star_type color if available, otherwise fall back to galaxy color
+                const starColor = system.star_type && starTypeColors[system.star_type]
+                    ? starTypeColors[system.star_type]
+                    : (galaxyColors[system.galaxy] || 0x00C2B3);
+                const color = new THREE.Color(starColor);
                 colors.push(color.r, color.g, color.b);
 
                 // Size based on planets - make them more visible

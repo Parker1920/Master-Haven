@@ -43,27 +43,32 @@ export default function Dashboard() {
   const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
 
   useEffect(() => {
-    // Fetch all stats
+    // Fetch all stats - OPTIMIZED: use lightweight endpoints, no full data loading
     const fetchData = async () => {
       try {
-        const [statsRes, dbStatsRes, systemsRes, regionsRes] = await Promise.all([
+        // Use optimized endpoints that don't load all data:
+        // - /api/stats: uses direct COUNT queries (fast)
+        // - /api/db_stats: uses COUNT queries for all tables (fast)
+        // - /api/regions/grouped?include_systems=false&limit=5: just region summaries (fast)
+        // - /api/systems/recent?limit=10: only recent systems (new fast endpoint)
+        const [statsRes, dbStatsRes, regionsRes, recentRes] = await Promise.all([
           axios.get('/api/stats').catch(() => ({ data: null })),
           axios.get('/api/db_stats').catch(() => ({ data: { stats: {} } })),
-          axios.get('/api/systems').catch(() => ({ data: { systems: [] } })),
-          axios.get('/api/regions/grouped').catch(() => ({ data: { regions: [] } }))
+          axios.get('/api/regions/grouped?include_systems=false&limit=5').catch(() => ({ data: { regions: [] } })),
+          axios.get('/api/systems/recent?limit=10').catch(() => ({ data: { systems: [] } }))
         ])
 
         setStats(statsRes.data)
         setDbStats(dbStatsRes.data?.stats || {})
 
-        const systems = systemsRes.data?.systems || []
-        setRecent(systems.slice(0, 10))
+        // Recent systems from the optimized endpoint
+        setRecent(recentRes.data?.systems || [])
 
-        // Get top 5 regions with proper names from the regions API
+        // Get top 5 regions with proper names (already limited in API call)
         const allRegions = regionsRes.data?.regions || []
-        const topRegions = allRegions.slice(0, 5).map(r => ({
+        const topRegions = allRegions.map(r => ({
           name: r.display_name || r.custom_name || `Region (${r.region_x}, ${r.region_y}, ${r.region_z})`,
-          count: r.system_count || r.systems?.length || 0,
+          count: r.system_count || 0,
           hasCustomName: !!r.custom_name
         }))
         setRegions(topRegions)

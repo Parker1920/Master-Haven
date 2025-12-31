@@ -475,11 +475,23 @@ export default function PendingApprovals() {
                     <div className="flex items-center space-x-2">
                       <h4 className="font-semibold text-lg">{submission.system_name}</h4>
                       {getStatusBadge(submission.status)}
+                      {/* Edit badge - shows when this is an edit of existing system */}
+                      {submission.edit_system_id && (
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-500 text-white">
+                          EDIT
+                        </span>
+                      )}
+                      {/* New badge - shows when this is a new system */}
+                      {!submission.edit_system_id && (
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
+                          NEW
+                        </span>
+                      )}
                       {/* Discord Tag Badge - Super Admin sees all tags */}
                       {isSuperAdmin && getDiscordTagBadge(submission.discord_tag, submission.personal_discord_username)}
-                      {submission.source === 'companion_app' && (
+                      {submission.source === 'companion_app' && submission.api_key_name && (
                         <span className="px-2 py-1 rounded text-xs font-semibold bg-cyan-200 text-cyan-800">
-                          COMPANION APP
+                          {submission.api_key_name}
                         </span>
                       )}
                     </div>
@@ -487,12 +499,6 @@ export default function PendingApprovals() {
                       <span>Galaxy: {submission.system_galaxy || 'Euclid'}</span>
                       <span className="mx-2">•</span>
                       <span>Submitted by: {submission.submitted_by || 'Anonymous'}</span>
-                      {submission.api_key_name && (
-                        <>
-                          <span className="mx-2">•</span>
-                          <span>Via: {submission.api_key_name}</span>
-                        </>
-                      )}
                       <span className="mx-2">•</span>
                       <span>Date: {new Date(submission.submission_date).toLocaleString()}</span>
                     </div>
@@ -528,6 +534,18 @@ export default function PendingApprovals() {
                     <div className="flex items-center space-x-2">
                       <h4 className="font-semibold">{submission.system_name}</h4>
                       {getStatusBadge(submission.status)}
+                      {/* Edit badge - shows when this was an edit of existing system */}
+                      {submission.edit_system_id && (
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-500 text-white">
+                          EDIT
+                        </span>
+                      )}
+                      {/* New badge - shows when this was a new system */}
+                      {!submission.edit_system_id && (
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
+                          NEW
+                        </span>
+                      )}
                       {/* Discord Tag Badge - Super Admin sees all tags */}
                       {isSuperAdmin && getDiscordTagBadge(submission.discord_tag, submission.personal_discord_username)}
                     </div>

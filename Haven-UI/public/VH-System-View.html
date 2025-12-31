@@ -669,6 +669,10 @@
             <div class="stat">Moons: <span id="moon-count">0</span></div>
             <div class="stat">Station: <span id="station-status">No</span></div>
             <div class="stat">Coords: <span id="system-coords">0, 0, 0</span></div>
+            <div id="star-type-stat" class="stat" style="display: none;">Star: <span id="star-type"></span></div>
+            <div id="economy-stat" class="stat" style="display: none;">Economy: <span id="economy-info"></span></div>
+            <div id="conflict-stat" class="stat" style="display: none;">Conflict: <span id="conflict-level"></span></div>
+            <div id="lifeform-stat" class="stat" style="display: none;">Lifeform: <span id="dominant-lifeform"></span></div>
             <div id="system-description-container" class="description" style="display: none;">
                 <span id="system-description"></span>
             </div>
@@ -1046,6 +1050,27 @@
                 document.getElementById('system-description').textContent = system.description;
                 document.getElementById('system-description-container').style.display = 'block';
             }
+
+            // Show system attributes if available
+            if (system.star_type) {
+                document.getElementById('star-type').textContent = system.star_type;
+                document.getElementById('star-type-stat').style.display = 'block';
+            }
+            if (system.economy_type || system.economy_level) {
+                let economyText = '';
+                if (system.economy_type) economyText = system.economy_type;
+                if (system.economy_level) economyText += (economyText ? ' (' + system.economy_level + ')' : system.economy_level);
+                document.getElementById('economy-info').textContent = economyText;
+                document.getElementById('economy-stat').style.display = 'block';
+            }
+            if (system.conflict_level) {
+                document.getElementById('conflict-level').textContent = system.conflict_level;
+                document.getElementById('conflict-stat').style.display = 'block';
+            }
+            if (system.dominant_lifeform) {
+                document.getElementById('dominant-lifeform').textContent = system.dominant_lifeform;
+                document.getElementById('lifeform-stat').style.display = 'block';
+            }
         }
 
         function renderGlyphDisplay(glyphCode) {
@@ -1174,7 +1199,24 @@
                 html = buildStationInfo(data);
             } else if (userData.type === 'sun') {
                 html = '<p><span class="label">Type:</span> <span class="value">Star</span></p>';
-                html += '<p><span class="label">Description:</span> <span class="value">The central star of this system</span></p>';
+                const sys = window.SYSTEM_DATA || {};
+                if (sys.star_type) {
+                    html += '<p><span class="label">Star Color:</span> <span class="value">' + escapeHtml(sys.star_type) + '</span></p>';
+                }
+                if (sys.economy_type || sys.economy_level) {
+                    let economyText = sys.economy_type || '';
+                    if (sys.economy_level) economyText += (economyText ? ' (' + sys.economy_level + ')' : sys.economy_level);
+                    html += '<p><span class="label">Economy:</span> <span class="value">' + escapeHtml(economyText) + '</span></p>';
+                }
+                if (sys.conflict_level) {
+                    html += '<p><span class="label">Conflict:</span> <span class="value">' + escapeHtml(sys.conflict_level) + '</span></p>';
+                }
+                if (sys.dominant_lifeform) {
+                    html += '<p><span class="label">Dominant Lifeform:</span> <span class="value">' + escapeHtml(sys.dominant_lifeform) + '</span></p>';
+                }
+                if (!sys.star_type && !sys.economy_type && !sys.conflict_level && !sys.dominant_lifeform) {
+                    html += '<p><span class="label">Description:</span> <span class="value">The central star of this system</span></p>';
+                }
             }
 
             detailsDiv.innerHTML = html;
@@ -1192,11 +1234,12 @@
                         '🌍 View 3D Planet</a>';
             }
 
-            // Climate and Weather
-            if (data.climate || data.weather) {
+            // Biome, Climate and Weather
+            if (data.biome || data.climate || data.weather) {
                 html += '<div class="section-title">Environment</div>';
                 html += '<div class="info-grid">';
-                if (data.climate) html += buildInfoItem('Climate', data.climate);
+                if (data.biome) html += buildInfoItem('Biome', data.biome);
+                if (data.climate && data.climate !== data.biome) html += buildInfoItem('Climate', data.climate);
                 if (data.weather) html += buildInfoItem('Weather', data.weather);
                 if (data.storm_frequency) html += buildInfoItem('Storms', data.storm_frequency);
                 if (data.weather_intensity) html += buildInfoItem('Intensity', data.weather_intensity);
@@ -1297,8 +1340,18 @@
                         '🌙 View 3D Moon</a>';
             }
 
+            // Biome and Weather
+            if (data.biome || data.weather) {
+                html += '<div class="section-title">Environment</div>';
+                html += '<div class="info-grid">';
+                if (data.biome) html += buildInfoItem('Biome', data.biome);
+                if (data.weather) html += buildInfoItem('Weather', data.weather);
+                html += '</div>';
+            }
+
+            html += '<div class="section-title">Life & Activity</div>';
             html += '<div class="info-grid">';
-            html += buildInfoItem('Sentinel', data.sentinel || 'N/A');
+            html += buildInfoItem('Sentinels', data.sentinel || 'N/A');
             html += buildInfoItem('Flora', data.flora || 'N/A');
             html += buildInfoItem('Fauna', data.fauna || 'N/A');
             if (data.orbit_radius) {

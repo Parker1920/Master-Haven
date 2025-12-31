@@ -13,6 +13,8 @@ import asyncio
 import logging
 import sys
 import hashlib
+import csv
+import io
 from fastapi.staticfiles import StaticFiles
 
 # Add Master-Haven root to path for config imports
@@ -35,6 +37,7 @@ try:
         is_in_core_void,
         is_phantom_star,
         get_system_classification,
+        galactic_coords_to_glyph,
         GLYPH_IMAGES
     )
 except ImportError:
@@ -46,6 +49,7 @@ except ImportError:
         is_phantom_star,
         get_system_classification,
         format_glyph,
+        galactic_coords_to_glyph,
         GLYPH_IMAGES
     )
 
@@ -295,6 +299,7 @@ def init_database():
             materials TEXT,
             notes TEXT,
             description TEXT,
+            photo TEXT,
             FOREIGN KEY (planet_id) REFERENCES planets(id) ON DELETE CASCADE
         )
     ''')
@@ -377,7 +382,8 @@ def init_database():
             permissions TEXT DEFAULT '["submit"]',
             rate_limit INTEGER DEFAULT 200,
             is_active INTEGER DEFAULT 1,
-            created_by TEXT
+            created_by TEXT,
+            discord_tag TEXT
         )
     ''')
 
@@ -406,6 +412,12 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs(timestamp DESC)')
 
+    # Critical indexes for systems table - needed for efficient region queries and search
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_region ON systems(region_x, region_y, region_z)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_glyph_code ON systems(glyph_code)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_name ON systems(name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_created_at ON systems(created_at DESC)')
+
     # Migration: add new columns to existing planets table
     def add_column_if_missing(table, column, coltype):
         cursor.execute(f"PRAGMA table_info({table})")
@@ -428,6 +440,7 @@ def init_database():
     add_column_if_missing('moons', 'flora', "TEXT DEFAULT 'N/A'")
     add_column_if_missing('moons', 'materials', 'TEXT')
     add_column_if_missing('moons', 'notes', 'TEXT')
+    add_column_if_missing('moons', 'photo', 'TEXT')
 
     # Systems table migrations (for NMS Save Watcher companion app)
     add_column_if_missing('systems', 'star_type', 'TEXT')  # Yellow, Red, Green, Blue, Purple
@@ -485,6 +498,10 @@ def init_database():
     add_column_if_missing('pending_systems', 'raw_json', 'TEXT')  # Full raw extraction JSON
     add_column_if_missing('pending_systems', 'rejection_reason', 'TEXT')  # Reason if rejected
     add_column_if_missing('pending_systems', 'personal_discord_username', 'TEXT')  # Discord username for personal (non-community) submissions
+    add_column_if_missing('pending_systems', 'edit_system_id', 'TEXT')  # If set, this submission is an EDIT of existing system with this ID
+
+    # API keys table migrations (for discord tag association)
+    add_column_if_missing('api_keys', 'discord_tag', 'TEXT')  # Discord community tag for auto-tagging submissions
 
     # =========================================================================
     # Partner Login System Tables and Migrations
@@ -541,6 +558,15 @@ def init_database():
     # Create indexes for discord_tag filtering
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_discord_tag ON systems(discord_tag)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_regions_discord_tag ON regions(discord_tag)')
+
+    # Create super_admin_settings table for storing changeable super admin password
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS super_admin_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -617,8 +643,12 @@ def load_systems_from_db() -> list:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Read all systems
-        cursor.execute('SELECT * FROM systems')
+        # Read all systems with region custom names
+        cursor.execute('''
+            SELECT s.*, r.custom_name as region_name
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+        ''')
         systems_rows = cursor.fetchall()
         systems = [dict(row) for row in systems_rows]
 
@@ -878,19 +908,102 @@ async def api_status():
 
 @app.get('/api/stats')
 async def api_stats():
-    # Query DB directly to get real-time counts (don't use cache)
+    """Get system stats using efficient COUNT queries (no full data loading)."""
+    conn = None
     try:
         db_path = get_db_path()
-        if db_path.exists():
-            systems = load_systems_from_db()
-        else:
-            async with _systems_lock:
-                systems = list(_systems_cache.values())
-    except Exception:
-        async with _systems_lock:
-            systems = list(_systems_cache.values())
-    galaxies = sorted(list({s.get('galaxy') for s in systems if s.get('galaxy')}))
-    return {'total': len(systems), 'galaxies': galaxies}
+        if not db_path.exists():
+            return {'total': 0, 'galaxies': []}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Direct COUNT query - O(1) with index, no data loading
+        cursor.execute('SELECT COUNT(*) FROM systems')
+        total = cursor.fetchone()[0]
+
+        # Get distinct galaxies - O(n) but only returns unique values
+        cursor.execute('SELECT DISTINCT galaxy FROM systems WHERE galaxy IS NOT NULL ORDER BY galaxy')
+        galaxies = [row[0] for row in cursor.fetchall()]
+
+        return {'total': total, 'galaxies': galaxies}
+    except Exception as e:
+        logger.error(f"Stats query error: {e}")
+        return {'total': 0, 'galaxies': []}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/map/regions-aggregated')
+async def api_map_regions_aggregated():
+    """Get pre-aggregated region data for the 3D galaxy map.
+
+    Returns one data point per region with:
+    - Region coordinates (region_x, region_y, region_z)
+    - Display coordinates (x, y, z) from the first system
+    - System count
+    - Custom region name if set
+    - List of galaxies present
+
+    This is MUCH faster than loading all individual systems,
+    as it uses SQL aggregation instead of Python-side processing.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'regions': [], 'total_systems': 0, 'total_regions': 0}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Single aggregated query - returns one row per populated region
+        cursor.execute('''
+            SELECT
+                s.region_x,
+                s.region_y,
+                s.region_z,
+                r.custom_name as region_name,
+                COUNT(*) as system_count,
+                MIN(s.x) as display_x,
+                MIN(s.y) as display_y,
+                MIN(s.z) as display_z,
+                GROUP_CONCAT(DISTINCT s.galaxy) as galaxies
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+            WHERE s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL
+            GROUP BY s.region_x, s.region_y, s.region_z
+            ORDER BY system_count DESC
+        ''')
+
+        rows = cursor.fetchall()
+        total_systems = 0
+        regions = []
+
+        for row in rows:
+            region = dict(row)
+            total_systems += region['system_count']
+            # Parse galaxies string into list
+            if region['galaxies']:
+                region['galaxies'] = region['galaxies'].split(',')
+            else:
+                region['galaxies'] = ['Euclid']
+            regions.append(region)
+
+        return {
+            'regions': regions,
+            'total_systems': total_systems,
+            'total_regions': len(regions)
+        }
+
+    except Exception as e:
+        logger.error(f"Map aggregation error: {e}")
+        return {'regions': [], 'total_systems': 0, 'total_regions': 0}
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get('/api/activity_logs')
@@ -920,6 +1033,54 @@ async def api_activity_logs(limit: int = 50):
     except Exception as e:
         logger.error(f"Failed to fetch activity logs: {e}")
         return {'logs': []}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/systems/recent')
+async def api_recent_systems(limit: int = 10):
+    """Get most recently added/modified systems for dashboard display.
+
+    This is a lightweight endpoint that returns only basic system info
+    without loading planets, moons, or discoveries. Uses index on created_at.
+
+    Args:
+        limit: Maximum number of systems to return (default 10, max 50)
+    """
+    limit = min(limit, 50)  # Cap at 50
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'systems': []}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Fast query using index on created_at, returns only essential fields
+        cursor.execute('''
+            SELECT id, name, galaxy, glyph_code, region_x, region_y, region_z,
+                   created_at, star_type,
+                   (SELECT COUNT(*) FROM planets WHERE system_id = systems.id) as planet_count
+            FROM systems
+            ORDER BY created_at DESC NULLS LAST, id DESC
+            LIMIT ?
+        ''', (limit,))
+
+        rows = cursor.fetchall()
+        systems = []
+        for row in rows:
+            system = dict(row)
+            # Add planets as empty list with just the count for display
+            system['planets'] = [None] * system.get('planet_count', 0)
+            systems.append(system)
+
+        return {'systems': systems}
+
+    except Exception as e:
+        logger.error(f"Failed to fetch recent systems: {e}")
+        return {'systems': []}
     finally:
         if conn:
             conn.close()
@@ -1031,9 +1192,45 @@ import secrets
 # Multi-Tenant Authentication System
 # ============================================================================
 
-# Super admin credentials (hardcoded as per user request)
+# Super admin credentials
 SUPER_ADMIN_USERNAME = "Haven"
-SUPER_ADMIN_PASSWORD_HASH = hashlib.sha256("WhrStrsG".encode()).hexdigest()
+DEFAULT_SUPER_ADMIN_PASSWORD_HASH = hashlib.sha256("WhrStrsG".encode()).hexdigest()
+
+def get_super_admin_password_hash() -> str:
+    """Get super admin password hash from database, or return default if not set"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM super_admin_settings WHERE key = 'password_hash'")
+        row = cursor.fetchone()
+        if row:
+            return row['value']
+    except Exception as e:
+        logger.warning(f"Failed to get super admin password from DB: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return DEFAULT_SUPER_ADMIN_PASSWORD_HASH
+
+def set_super_admin_password_hash(password_hash: str) -> bool:
+    """Store super admin password hash in database"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO super_admin_settings (key, value, updated_at)
+            VALUES ('password_hash', ?, ?)
+        ''', (password_hash, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set super admin password: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
 
 # Session storage: session_token -> session_data
 # Session data structure: {
@@ -1145,7 +1342,7 @@ async def admin_login(credentials: dict, response: Response):
 
     # Check super admin
     if username == SUPER_ADMIN_USERNAME:
-        if hash_password(password) == SUPER_ADMIN_PASSWORD_HASH:
+        if hash_password(password) == get_super_admin_password_hash():
             session_token = generate_session_token()
             _sessions[session_token] = {
                 'user_type': 'super_admin',
@@ -1154,13 +1351,13 @@ async def admin_login(credentials: dict, response: Response):
                 'partner_id': None,
                 'display_name': 'Super Admin',
                 'enabled_features': ['all'],
-                'expires_at': datetime.now(timezone.utc) + timedelta(hours=24)
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
             }
             response.set_cookie(
                 key='session',
                 value=session_token,
                 httponly=True,
-                max_age=86400,
+                max_age=600,  # 10 minutes
                 samesite='lax'
             )
             return {
@@ -1208,14 +1405,14 @@ async def admin_login(credentials: dict, response: Response):
             'partner_id': row['id'],
             'display_name': row['display_name'] or username,
             'enabled_features': enabled_features,
-            'expires_at': datetime.now(timezone.utc) + timedelta(hours=24)
+            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
         }
 
         response.set_cookie(
             key='session',
             value=session_token,
             httponly=True,
-            max_age=86400,
+            max_age=600,  # 10 minutes
             samesite='lax'
         )
 
@@ -1239,6 +1436,82 @@ async def admin_logout(response: Response, session: Optional[str] = Cookie(None)
         del _sessions[session]
     response.delete_cookie('session')
     return {'status': 'ok'}
+
+
+@app.post('/api/change_password')
+async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Change password for the currently logged-in user.
+    Works for both super admin and partner accounts.
+    Requires current password for verification.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    current_password = payload.get('current_password', '')
+    new_password = payload.get('new_password', '')
+
+    if not current_password:
+        raise HTTPException(status_code=400, detail='Current password is required')
+
+    if not new_password or len(new_password) < 4:
+        raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
+
+    user_type = session_data.get('user_type')
+
+    if user_type == 'super_admin':
+        # Verify current password
+        if hash_password(current_password) != get_super_admin_password_hash():
+            raise HTTPException(status_code=401, detail='Current password is incorrect')
+
+        # Set new password
+        if set_super_admin_password_hash(hash_password(new_password)):
+            logger.info("Super admin password changed successfully")
+            return {'status': 'ok', 'message': 'Password changed successfully'}
+        else:
+            raise HTTPException(status_code=500, detail='Failed to save new password')
+
+    elif user_type == 'partner':
+        partner_id = session_data.get('partner_id')
+        if not partner_id:
+            raise HTTPException(status_code=400, detail='Invalid session')
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Get current password hash
+            cursor.execute('SELECT password_hash FROM partner_accounts WHERE id = ?', (partner_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Account not found')
+
+            # Verify current password
+            if hash_password(current_password) != row['password_hash']:
+                raise HTTPException(status_code=401, detail='Current password is incorrect')
+
+            # Update password
+            cursor.execute(
+                'UPDATE partner_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
+                (hash_password(new_password), datetime.now(timezone.utc).isoformat(), partner_id)
+            )
+            conn.commit()
+
+            logger.info(f"Partner {session_data.get('username')} changed their password")
+            return {'status': 'ok', 'message': 'Password changed successfully'}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to change partner password: {e}")
+            raise HTTPException(status_code=500, detail=f'Failed to change password: {str(e)}')
+        finally:
+            if conn:
+                conn.close()
+    else:
+        raise HTTPException(status_code=400, detail='Unknown user type')
 
 
 # ============================================================================
@@ -1714,7 +1987,7 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, name, permissions, rate_limit, is_active, created_by
+            SELECT id, name, permissions, rate_limit, is_active, created_by, discord_tag
             FROM api_keys WHERE key_hash = ?
         ''', (key_hash,))
         row = cursor.fetchone()
@@ -1732,7 +2005,8 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
                 'name': row['name'],
                 'permissions': json.loads(row['permissions'] or '["submit"]'),
                 'rate_limit': row['rate_limit'],
-                'created_by': row['created_by']
+                'created_by': row['created_by'],
+                'discord_tag': row['discord_tag']
             }
         return None
     except Exception as e:
@@ -1789,6 +2063,7 @@ async def create_api_key(payload: dict, session: Optional[str] = Cookie(None)):
 
     rate_limit = payload.get('rate_limit', 200)
     permissions = payload.get('permissions', ['submit', 'check_duplicate'])
+    discord_tag = payload.get('discord_tag', '').strip() or None
 
     # Generate the key
     api_key = generate_api_key()
@@ -1806,8 +2081,8 @@ async def create_api_key(payload: dict, session: Optional[str] = Cookie(None)):
             raise HTTPException(status_code=409, detail=f"API key with name '{name}' already exists")
 
         cursor.execute('''
-            INSERT INTO api_keys (key_hash, key_prefix, name, created_at, permissions, rate_limit, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO api_keys (key_hash, key_prefix, name, created_at, permissions, rate_limit, created_by, discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             key_hash,
             key_prefix,
@@ -1815,13 +2090,14 @@ async def create_api_key(payload: dict, session: Optional[str] = Cookie(None)):
             datetime.now(timezone.utc).isoformat(),
             json.dumps(permissions),
             rate_limit,
-            'admin'
+            'admin',
+            discord_tag
         ))
 
         key_id = cursor.lastrowid
         conn.commit()
 
-        logger.info(f"Created API key: {name} (ID: {key_id})")
+        logger.info(f"Created API key: {name} (ID: {key_id}) with discord_tag: {discord_tag}")
 
         return {
             'id': key_id,
@@ -1830,6 +2106,7 @@ async def create_api_key(payload: dict, session: Optional[str] = Cookie(None)):
             'key_prefix': key_prefix,
             'rate_limit': rate_limit,
             'permissions': permissions,
+            'discord_tag': discord_tag,
             'created_at': datetime.now(timezone.utc).isoformat(),
             'warning': 'Save this key now - it cannot be retrieved later!'
         }
@@ -1858,7 +2135,7 @@ async def list_api_keys(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, key_prefix, name, created_at, last_used_at, permissions, rate_limit, is_active
+            SELECT id, key_prefix, name, created_at, last_used_at, permissions, rate_limit, is_active, discord_tag
             FROM api_keys
             ORDER BY created_at DESC
         ''')
@@ -1874,7 +2151,8 @@ async def list_api_keys(session: Optional[str] = Cookie(None)):
                 'last_used_at': row['last_used_at'],
                 'permissions': json.loads(row['permissions'] or '[]'),
                 'rate_limit': row['rate_limit'],
-                'is_active': bool(row['is_active'])
+                'is_active': bool(row['is_active']),
+                'discord_tag': row['discord_tag']
             })
 
         return {'keys': keys}
@@ -1927,7 +2205,7 @@ async def revoke_api_key(key_id: int, session: Optional[str] = Cookie(None)):
 async def update_api_key(key_id: int, payload: dict, session: Optional[str] = Cookie(None)):
     """
     Update an API key's settings (admin only).
-    Can update: name, rate_limit, permissions, is_active
+    Can update: name, rate_limit, permissions, is_active, discord_tag
     """
     if not verify_session(session):
         raise HTTPException(status_code=401, detail="Admin authentication required")
@@ -1958,6 +2236,11 @@ async def update_api_key(key_id: int, payload: dict, session: Optional[str] = Co
         if 'is_active' in payload:
             updates.append('is_active = ?')
             params.append(1 if payload['is_active'] else 0)
+        if 'discord_tag' in payload:
+            updates.append('discord_tag = ?')
+            # Allow setting to None by passing empty string or null
+            discord_tag = payload['discord_tag']
+            params.append(discord_tag if discord_tag else None)
 
         if updates:
             params.append(key_id)
@@ -2239,39 +2522,41 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
 
 
 @app.get('/api/regions/grouped')
-async def api_regions_grouped():
+async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0):
     """Return all regions with their systems grouped together.
+
+    Performance-optimized version:
+    - Uses JOINs instead of N+1 queries
+    - Optional pagination with page/limit params
+    - include_systems=false returns just region summaries (much faster)
 
     Returns regions ordered by:
     1. "Sea of Gidzenuf" (home system) always first
-    2. Named regions (purple) sorted by system count descending
-    3. Unnamed regions sorted by oldest system submission date first
-
-    Each region includes its custom name (if any), coordinates, and all systems within it.
-    Systems within each region include their planets, moons, and discoveries.
+    2. Named regions sorted by system count descending
+    3. Unnamed regions sorted by system count descending
     """
     conn = None
     try:
         db_path = get_db_path()
         if not db_path.exists():
-            return {'regions': []}
+            return {'regions': [], 'total_regions': 0}
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get all unique regions from systems with custom sorting:
-        # 1. "Sea of Gidzenuf" (home system) always first
-        # 2. Named regions sorted by system count (most systems first)
-        # 3. Unnamed regions sorted by system count (most systems first)
+        # STEP 1: Get all regions with aggregated counts in a SINGLE query
+        # This replaces the N+1 pattern with one efficient GROUP BY query
         cursor.execute('''
-            SELECT DISTINCT s.region_x, s.region_y, s.region_z,
-                   r.custom_name,
-                   r.id as region_id,
-                   MIN(s.created_at) as first_system_date,
-                   MIN(s.id) as first_system_id,
-                   COUNT(s.id) as system_count
+            SELECT
+                s.region_x, s.region_y, s.region_z,
+                r.custom_name,
+                r.id as region_id,
+                MIN(s.created_at) as first_system_date,
+                MIN(s.id) as first_system_id,
+                COUNT(DISTINCT s.id) as system_count
             FROM systems s
-            LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
             WHERE s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL
             GROUP BY s.region_x, s.region_y, s.region_z
             ORDER BY
@@ -2280,61 +2565,140 @@ async def api_regions_grouped():
                     WHEN r.custom_name IS NOT NULL THEN 1
                     ELSE 2
                 END ASC,
-                COUNT(s.id) DESC,
+                COUNT(DISTINCT s.id) DESC,
                 first_system_date ASC NULLS FIRST,
                 first_system_id ASC
         ''')
 
         region_rows = cursor.fetchall()
+        total_regions = len(region_rows)
+
+        # Apply pagination if requested
+        if limit > 0:
+            offset = page * limit
+            region_rows = region_rows[offset:offset + limit]
+
         regions = []
 
+        if not include_systems:
+            # Fast path: return just region summaries without nested data
+            for region_row in region_rows:
+                region = dict(region_row)
+                rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
+
+                if region['custom_name']:
+                    region['display_name'] = region['custom_name']
+                else:
+                    region['display_name'] = f"Region ({rx}, {ry}, {rz})"
+
+                region['systems'] = []  # Empty for now, lazy-load via separate endpoint
+                regions.append(region)
+
+            return {'regions': regions, 'total_regions': total_regions}
+
+        # STEP 2: Load all systems for all regions in ONE query
+        region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
+        if not region_coords:
+            return {'regions': [], 'total_regions': 0}
+
+        # Build WHERE clause for all regions
+        placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
+        params = [coord for region in region_coords for coord in region]
+
+        cursor.execute(f'''
+            SELECT * FROM systems
+            WHERE {placeholders}
+            ORDER BY region_x, region_y, region_z, created_at ASC NULLS FIRST, id ASC
+        ''', params)
+
+        all_systems = [dict(row) for row in cursor.fetchall()]
+
+        # Index systems by region
+        systems_by_region = {}
+        for system in all_systems:
+            key = (system['region_x'], system['region_y'], system['region_z'])
+            if key not in systems_by_region:
+                systems_by_region[key] = []
+            systems_by_region[key].append(system)
+
+        # STEP 3: Load all planets for all systems in ONE query
+        system_ids = [s['id'] for s in all_systems]
+        if system_ids:
+            placeholders = ','.join(['?'] * len(system_ids))
+            cursor.execute(f'''
+                SELECT * FROM planets WHERE system_id IN ({placeholders}) ORDER BY system_id, name
+            ''', system_ids)
+            all_planets = [dict(row) for row in cursor.fetchall()]
+
+            # Index planets by system_id
+            planets_by_system = {}
+            for planet in all_planets:
+                sys_id = planet['system_id']
+                if sys_id not in planets_by_system:
+                    planets_by_system[sys_id] = []
+                planets_by_system[sys_id].append(planet)
+
+            # STEP 4: Load all moons for all planets in ONE query
+            planet_ids = [p['id'] for p in all_planets]
+            if planet_ids:
+                placeholders = ','.join(['?'] * len(planet_ids))
+                cursor.execute(f'''
+                    SELECT * FROM moons WHERE planet_id IN ({placeholders}) ORDER BY planet_id, name
+                ''', planet_ids)
+                all_moons = [dict(row) for row in cursor.fetchall()]
+
+                # Index moons by planet_id
+                moons_by_planet = {}
+                for moon in all_moons:
+                    planet_id = moon['planet_id']
+                    if planet_id not in moons_by_planet:
+                        moons_by_planet[planet_id] = []
+                    moons_by_planet[planet_id].append(moon)
+
+                # Attach moons to planets
+                for planet in all_planets:
+                    planet['moons'] = moons_by_planet.get(planet['id'], [])
+            else:
+                for planet in all_planets:
+                    planet['moons'] = []
+
+            # Attach planets to systems
+            for system in all_systems:
+                system['planets'] = planets_by_system.get(system['id'], [])
+        else:
+            planets_by_system = {}
+
+        # STEP 5: Load all discoveries for all systems in ONE query
+        if system_ids:
+            placeholders = ','.join(['?'] * len(system_ids))
+            cursor.execute(f'''
+                SELECT * FROM discoveries WHERE system_id IN ({placeholders}) ORDER BY system_id, discovery_name
+            ''', system_ids)
+            all_discoveries = [dict(row) for row in cursor.fetchall()]
+
+            # Index discoveries by system_id
+            discoveries_by_system = {}
+            for discovery in all_discoveries:
+                sys_id = discovery['system_id']
+                if sys_id not in discoveries_by_system:
+                    discoveries_by_system[sys_id] = []
+                discoveries_by_system[sys_id].append(discovery)
+
+            # Attach discoveries to systems
+            for system in all_systems:
+                system['discoveries'] = discoveries_by_system.get(system['id'], [])
+        else:
+            for system in all_systems:
+                system['discoveries'] = []
+
+        # STEP 6: Build final region objects
         for region_row in region_rows:
             region = dict(region_row)
             rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
 
-            # Get all systems in this region
-            cursor.execute('''
-                SELECT * FROM systems
-                WHERE region_x = ? AND region_y = ? AND region_z = ?
-                ORDER BY created_at ASC NULLS FIRST, id ASC
-            ''', (rx, ry, rz))
+            region['systems'] = systems_by_region.get((rx, ry, rz), [])
+            region['system_count'] = len(region['systems'])
 
-            systems_rows = cursor.fetchall()
-            systems = []
-
-            for sys_row in systems_rows:
-                system = dict(sys_row)
-                sys_id = system['id']
-
-                # Get planets for this system
-                cursor.execute('SELECT * FROM planets WHERE system_id = ? ORDER BY name', (sys_id,))
-                planets_rows = cursor.fetchall()
-                planets = []
-
-                for planet_row in planets_rows:
-                    planet = dict(planet_row)
-                    planet_id = planet['id']
-
-                    # Get moons for this planet
-                    cursor.execute('SELECT * FROM moons WHERE planet_id = ? ORDER BY name', (planet_id,))
-                    moons_rows = cursor.fetchall()
-                    planet['moons'] = [dict(m) for m in moons_rows]
-
-                    planets.append(planet)
-
-                system['planets'] = planets
-
-                # Get discoveries for this system
-                cursor.execute('SELECT * FROM discoveries WHERE system_id = ? ORDER BY discovery_name', (sys_id,))
-                discoveries_rows = cursor.fetchall()
-                system['discoveries'] = [dict(d) for d in discoveries_rows]
-
-                systems.append(system)
-
-            region['systems'] = systems
-            region['system_count'] = len(systems)
-
-            # Generate display name
             if region['custom_name']:
                 region['display_name'] = region['custom_name']
             else:
@@ -2342,7 +2706,7 @@ async def api_regions_grouped():
 
             regions.append(region)
 
-        return {'regions': regions, 'total_regions': len(regions)}
+        return {'regions': regions, 'total_regions': total_regions}
 
     except Exception as e:
         logger.error(f"Error fetching grouped regions: {e}")
@@ -2440,6 +2804,169 @@ async def api_get_region(rx: int, ry: int, rz: int):
         }
     except Exception as e:
         logger.error(f"Error getting region: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/regions/{rx}/{ry}/{rz}/systems')
+async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: int = 50, include_planets: bool = False):
+    """Get paginated systems for a specific region (lazy-loading endpoint).
+
+    Args:
+        rx, ry, rz: Region coordinates
+        page: Page number (1-indexed)
+        limit: Systems per page (default 50, max 200)
+        include_planets: If true, include planets and moons (slower)
+
+    Returns systems ordered by created_at, with optional pagination.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'systems': [], 'total': 0, 'page': page, 'limit': limit}
+
+        # Cap limit to prevent huge responses
+        limit = min(limit, 200)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get total count for this region
+        cursor.execute('''
+            SELECT COUNT(*) as total FROM systems
+            WHERE region_x = ? AND region_y = ? AND region_z = ?
+        ''', (rx, ry, rz))
+        total = cursor.fetchone()['total']
+
+        # Get paginated systems
+        offset = (page - 1) * limit
+        cursor.execute('''
+            SELECT * FROM systems
+            WHERE region_x = ? AND region_y = ? AND region_z = ?
+            ORDER BY created_at ASC NULLS FIRST, id ASC
+            LIMIT ? OFFSET ?
+        ''', (rx, ry, rz, limit, offset))
+
+        systems = [dict(row) for row in cursor.fetchall()]
+
+        if include_planets and systems:
+            # Batch load planets for all systems
+            system_ids = [s['id'] for s in systems]
+            placeholders = ','.join(['?'] * len(system_ids))
+
+            cursor.execute(f'''
+                SELECT * FROM planets WHERE system_id IN ({placeholders}) ORDER BY system_id, name
+            ''', system_ids)
+            all_planets = [dict(row) for row in cursor.fetchall()]
+
+            # Index planets by system_id
+            planets_by_system = {}
+            for planet in all_planets:
+                sys_id = planet['system_id']
+                if sys_id not in planets_by_system:
+                    planets_by_system[sys_id] = []
+                planets_by_system[sys_id].append(planet)
+
+            # Load moons for all planets
+            planet_ids = [p['id'] for p in all_planets]
+            if planet_ids:
+                placeholders = ','.join(['?'] * len(planet_ids))
+                cursor.execute(f'''
+                    SELECT * FROM moons WHERE planet_id IN ({placeholders}) ORDER BY planet_id, name
+                ''', planet_ids)
+                all_moons = [dict(row) for row in cursor.fetchall()]
+
+                # Index moons by planet_id
+                moons_by_planet = {}
+                for moon in all_moons:
+                    planet_id = moon['planet_id']
+                    if planet_id not in moons_by_planet:
+                        moons_by_planet[planet_id] = []
+                    moons_by_planet[planet_id].append(moon)
+
+                # Attach moons to planets
+                for planet in all_planets:
+                    planet['moons'] = moons_by_planet.get(planet['id'], [])
+            else:
+                for planet in all_planets:
+                    planet['moons'] = []
+
+            # Attach planets to systems
+            for system in systems:
+                system['planets'] = planets_by_system.get(system['id'], [])
+        else:
+            for system in systems:
+                system['planets'] = []
+
+        return {
+            'systems': systems,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'total_pages': (total + limit - 1) // limit if limit > 0 else 1
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching region systems: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/systems/{system_id}/planets')
+async def api_system_planets(system_id: str):
+    """Get all planets and moons for a specific system (lazy-loading endpoint).
+
+    Returns planets with their moons nested, using efficient batch queries.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'planets': [], 'system_id': system_id}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all planets for this system
+        cursor.execute('''
+            SELECT * FROM planets WHERE system_id = ? ORDER BY name
+        ''', (system_id,))
+        planets = [dict(row) for row in cursor.fetchall()]
+
+        if planets:
+            # Batch load moons for all planets
+            planet_ids = [p['id'] for p in planets]
+            placeholders = ','.join(['?'] * len(planet_ids))
+
+            cursor.execute(f'''
+                SELECT * FROM moons WHERE planet_id IN ({placeholders}) ORDER BY planet_id, name
+            ''', planet_ids)
+            all_moons = [dict(row) for row in cursor.fetchall()]
+
+            # Index moons by planet_id
+            moons_by_planet = {}
+            for moon in all_moons:
+                planet_id = moon['planet_id']
+                if planet_id not in moons_by_planet:
+                    moons_by_planet[planet_id] = []
+                moons_by_planet[planet_id].append(moon)
+
+            # Attach moons to planets
+            for planet in planets:
+                planet['moons'] = moons_by_planet.get(planet['id'], [])
+        else:
+            for planet in planets:
+                planet['moons'] = []
+
+        return {'planets': planets, 'system_id': system_id}
+
+    except Exception as e:
+        logger.error(f"Error fetching system planets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
@@ -3209,8 +3736,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # Insert moons with ALL fields
             for moon in planet.get('moons', []):
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name', 'Unknown'),
@@ -3222,7 +3749,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     moon.get('flora', 'N/A'),
                     moon.get('materials'),
                     moon.get('notes'),
-                    moon.get('description', '')
+                    moon.get('description', ''),
+                    moon.get('photo')
                 ))
 
         # Insert space station if present
@@ -3433,7 +3961,15 @@ async def upload_photo(file: UploadFile = File(...)):
 
 @app.get('/map/latest')
 async def get_map():
-    # Serve the Three.js-based map with live DB data injection
+    """Serve the Three.js-based galaxy map.
+
+    OPTIMIZED: Systems data is now loaded asynchronously via /api/map/regions-aggregated
+    instead of being injected into the HTML. This dramatically improves load time
+    for large databases (5000+ systems) as:
+    1. HTML file is much smaller (no embedded JSON)
+    2. Data is pre-aggregated by region on the server
+    3. Map only loads summary data, not individual systems
+    """
     mapfile = HAVEN_UI_DIR / 'dist' / 'VH-Map-ThreeJS.html'
 
     # Fallback to old map if ThreeJS version doesn't exist
@@ -3445,17 +3981,12 @@ async def get_map():
 
     try:
         html = mapfile.read_text(encoding='utf-8')
-        # Load systems and discoveries from DB when present
+        # Only inject discoveries data (small payload, still needed for discovery markers)
+        # Systems data is now fetched asynchronously via /api/map/regions-aggregated
         db_path = get_db_path()
         if db_path.exists():
-            systems = load_systems_from_db()
             discoveries = query_discoveries_from_db()
-            # Use ensure_ascii=True to safely encode unicode/emojis as \uXXXX
-            systems_json = json.dumps(systems, ensure_ascii=True)
             discoveries_json = json.dumps(discoveries, ensure_ascii=True)
-            # Use lambda replacement to avoid regex escape sequence interpretation
-            # This prevents "bad escape \u" errors when data contains emojis or unicode
-            html = re.sub(r"window\.SYSTEMS_DATA\s*=\s*\[.*?\];", lambda m: f"window.SYSTEMS_DATA = {systems_json};", html, flags=re.S)
             html = re.sub(r"window\.DISCOVERIES_DATA\s*=\s*\[.*?\];", lambda m: f"window.DISCOVERIES_DATA = {discoveries_json};", html, flags=re.S)
         return HTMLResponse(html, media_type='text/html')
     except Exception as e:
@@ -3863,6 +4394,333 @@ async def db_upload(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post('/api/import_csv')
+async def import_csv(file: UploadFile = File(...), session: Optional[str] = Cookie(None)):
+    """
+    Import star systems from a CSV file (Google Spreadsheet export format).
+
+    Expected CSV columns:
+    - Named? (ignored)
+    - Coordinates (galactic format: XXXX:YYYY:ZZZZ:SSSS)
+    - Original System Name (stored in notes)
+    - HUB Tag (stored in notes)
+    - New System Name (used as system name)
+    - Generated Hub Tag (ignored)
+    - ARK Member (ignored)
+    - Navigation Hints (ignored)
+    - Comments/Special Attributes (stored in notes)
+    - Ignore columns
+
+    Row 1 contains the region name (e.g., "HUB1 - Sea of Xionahui")
+
+    Requires super admin OR csv_import feature enabled.
+    """
+    # Verify session and permissions
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+
+    # Check for csv_import permission
+    enabled_features = session_data.get('enabled_features', [])
+    if not is_super and 'csv_import' not in enabled_features and 'CSV_IMPORT' not in enabled_features:
+        raise HTTPException(
+            status_code=403,
+            detail='CSV import permission required'
+        )
+
+    partner_tag = session_data.get('discord_tag')
+
+    try:
+        # Read the CSV file content
+        content = await file.read()
+        text_content = content.decode('utf-8-sig')  # Handle BOM if present
+
+        # Parse CSV
+        reader = csv.reader(io.StringIO(text_content))
+        rows = list(reader)
+
+        if len(rows) < 2:
+            raise HTTPException(status_code=400, detail='CSV file must have at least a header row and one data row')
+
+        # Row 1 (index 0) contains region name - get it from the first non-empty cell
+        region_name = None
+        for cell in rows[0]:
+            if cell and cell.strip():
+                region_name = cell.strip()
+                break
+
+        # Row 2 (index 1) is the header row
+        header = rows[1]
+
+        # Map column indices (case-insensitive)
+        header_lower = [h.lower().strip() for h in header]
+
+        def find_col(names):
+            for name in names:
+                for i, h in enumerate(header_lower):
+                    if name.lower() in h:
+                        return i
+            return None
+
+        col_coords = find_col(['coordinates', 'coord'])
+        col_original_name = find_col(['original system name', 'original name'])
+        col_hub_tag = find_col(['hub tag'])
+        col_new_name = find_col(['new system name', 'new name'])
+        col_comments = find_col(['comments', 'special attributes', 'comments/special'])
+
+        if col_coords is None:
+            raise HTTPException(status_code=400, detail='Could not find Coordinates column in CSV')
+        if col_hub_tag is None:
+            raise HTTPException(status_code=400, detail='Could not find Hub Tag column in CSV')
+
+        # Process data rows (starting from row 3 / index 2)
+        imported_count = 0
+        skipped_count = 0
+        errors = []
+        imported_region_coords = None  # Track region from first imported system
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for row_idx, row in enumerate(rows[2:], start=3):
+            try:
+                # Skip empty rows
+                if not row or len(row) <= max(filter(lambda x: x is not None, [col_coords, col_hub_tag])):
+                    continue
+
+                # Get coordinates
+                coords = row[col_coords].strip() if col_coords < len(row) else ''
+                if not coords or ':' not in coords:
+                    skipped_count += 1
+                    continue
+
+                # Get system name from hub tag
+                system_name = row[col_hub_tag].strip() if col_hub_tag < len(row) else ''
+                if not system_name:
+                    skipped_count += 1
+                    continue
+
+                # Build notes from various columns
+                notes_parts = []
+
+                # Store new system name in notes (if different from hub tag)
+                if col_new_name is not None and col_new_name < len(row):
+                    new_name = row[col_new_name].strip()
+                    if new_name and new_name != system_name:
+                        notes_parts.append(f"New Name: {new_name}")
+
+                if col_original_name is not None and col_original_name < len(row):
+                    orig_name = row[col_original_name].strip()
+                    if orig_name and orig_name != system_name:
+                        notes_parts.append(f"Original Name: {orig_name}")
+
+                if col_comments is not None and col_comments < len(row):
+                    comments = row[col_comments].strip()
+                    if comments:
+                        notes_parts.append(f"Notes: {comments}")
+
+                description = '\n'.join(notes_parts)
+
+                # Convert galactic coordinates to portal glyph
+                try:
+                    glyph_data = galactic_coords_to_glyph(coords)
+                except ValueError as e:
+                    errors.append(f"Row {row_idx}: Invalid coordinates '{coords}' - {e}")
+                    skipped_count += 1
+                    continue
+
+                glyph_code = glyph_data['glyph']
+                x = glyph_data['x']
+                y = glyph_data['y']
+                z = glyph_data['z']
+                solar_system = glyph_data['solar_system']
+
+                # Calculate star position
+                star_x, star_y, star_z = None, None, None
+                try:
+                    decoded = decode_glyph_to_coords(glyph_code)
+                    star_x = decoded['star_x']
+                    star_y = decoded['star_y']
+                    star_z = decoded['star_z']
+                    region_x = decoded['region_x']
+                    region_y = decoded['region_y']
+                    region_z = decoded['region_z']
+                except Exception:
+                    region_x, region_y, region_z = None, None, None
+
+                # Check for duplicate glyph
+                cursor.execute('SELECT id, name FROM systems WHERE glyph_code = ?', (glyph_code,))
+                existing = cursor.fetchone()
+                if existing:
+                    # Skip duplicates
+                    skipped_count += 1
+                    continue
+
+                # Generate system ID
+                import uuid
+                sys_id = str(uuid.uuid4())
+
+                # Determine discord_tag - use partner's tag if partner, otherwise None
+                discord_tag = partner_tag if not is_super else None
+
+                # Insert system
+                cursor.execute('''
+                    INSERT INTO systems (id, name, galaxy, x, y, z, star_x, star_y, star_z, description,
+                        glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z, discord_tag)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    sys_id,
+                    system_name,
+                    'Euclid',  # Galaxy is always Euclid for now
+                    x,
+                    y,
+                    z,
+                    star_x,
+                    star_y,
+                    star_z,
+                    description,
+                    glyph_code,
+                    0,  # glyph_planet
+                    solar_system,
+                    region_x,
+                    region_y,
+                    region_z,
+                    discord_tag
+                ))
+
+                imported_count += 1
+
+                # Store region coords from first successfully imported system
+                if imported_region_coords is None and region_x is not None and region_y is not None and region_z is not None:
+                    imported_region_coords = {'region_x': region_x, 'region_y': region_y, 'region_z': region_z}
+
+            except Exception as e:
+                errors.append(f"Row {row_idx}: {str(e)}")
+                skipped_count += 1
+
+        conn.commit()
+        conn.close()
+
+        # Update region name if provided
+        if region_name and imported_count > 0 and imported_region_coords:
+            # Use the region coords from the first imported system
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            # Update or insert region name
+            cursor.execute('''
+                INSERT INTO regions (region_x, region_y, region_z, custom_name)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(region_x, region_y, region_z)
+                DO UPDATE SET custom_name = excluded.custom_name
+            ''', (imported_region_coords['region_x'], imported_region_coords['region_y'], imported_region_coords['region_z'], region_name))
+            conn.commit()
+            conn.close()
+
+        # Log the import
+        add_activity_log(
+            'csv_import',
+            f"Imported {imported_count} systems from CSV",
+            details=f"File: {file.filename}, Skipped: {skipped_count}, Errors: {len(errors)}, Region: {region_name}",
+            user_name=session_data.get('username', 'unknown')
+        )
+
+        return {
+            'status': 'ok',
+            'imported': imported_count,
+            'skipped': skipped_count,
+            'errors': errors[:10] if errors else [],  # Return first 10 errors
+            'total_errors': len(errors),
+            'region_name': region_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CSV import error: {e}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+@app.post('/api/migrate_hub_tags')
+async def migrate_hub_tags(session: Optional[str] = Cookie(None)):
+    """Migrate existing systems: extract HUB Tag from description and use it as system name"""
+    import re
+
+    # Check session - super admin only
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    session_data = get_session(session)
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Find all systems with "HUB Tag:" in description
+        cursor.execute('''
+            SELECT id, name, description FROM systems
+            WHERE description LIKE '%HUB Tag:%'
+        ''')
+        systems = cursor.fetchall()
+
+        updated_count = 0
+        for system in systems:
+            sys_id = system['id']
+            old_name = system['name']
+            description = system['description'] or ''
+
+            # Extract hub tag from description
+            match = re.search(r'HUB Tag:\s*([^\n]+)', description)
+            if not match:
+                continue
+
+            hub_tag = match.group(1).strip()
+            if not hub_tag or hub_tag == old_name:
+                continue
+
+            # Build new description: remove "HUB Tag:" line, add "New Name:" if old name wasn't already stored
+            new_desc_parts = []
+            has_new_name = 'New Name:' in description
+
+            for line in description.split('\n'):
+                line = line.strip()
+                if line.startswith('HUB Tag:'):
+                    # Skip this line (we're using it as the name now)
+                    continue
+                if line:
+                    new_desc_parts.append(line)
+
+            # Add old name as "New Name:" if not already present
+            if not has_new_name and old_name and old_name != hub_tag:
+                new_desc_parts.insert(0, f"New Name: {old_name}")
+
+            new_description = '\n'.join(new_desc_parts)
+
+            # Update the system
+            cursor.execute('''
+                UPDATE systems SET name = ?, description = ? WHERE id = ?
+            ''', (hub_tag, new_description, sys_id))
+            updated_count += 1
+
+        conn.commit()
+        conn.close()
+
+        # Log the migration
+        add_activity_log(
+            'hub_tag_migration',
+            f"Migrated {updated_count} systems to use hub tag as name",
+            user_name=session_data.get('username', 'unknown')
+        )
+
+        return {'status': 'ok', 'updated': updated_count, 'total_found': len(systems)}
+
+    except Exception as e:
+        logger.error(f"Hub tag migration error: {e}")
+        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
+
+
 # Lightweight endpoint for the Keeper bot to post discoveries
 @app.get('/api/discoveries')
 async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
@@ -3980,8 +4838,8 @@ async def create_discovery(payload: dict):
 
         cursor.execute('''
             INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             payload.get('discovery_type') or 'Unknown',
             discovery_name,
@@ -4000,6 +4858,7 @@ async def create_discovery(payload: dict):
             payload.get('discord_user_id'),
             payload.get('discord_guild_id'),
             payload.get('photo_url'),
+            payload.get('evidence_urls'),
         ))
         conn.commit()
         discovery_id = cursor.lastrowid
@@ -4282,15 +5141,26 @@ async def submit_system(
                 logger.info(f"Submission for '{system_name}' has glyph_code matching existing system '{existing_glyph_row[1]}' (ID: {existing_glyph_row[0]})")
 
         # Extract discord_tag for filtering (partners only see their tagged submissions)
+        # If submitted via API key, use the API key's discord_tag (auto-tagging)
         discord_tag = payload.get('discord_tag')
+        if api_key_info and api_key_info.get('discord_tag') and not discord_tag:
+            discord_tag = api_key_info['discord_tag']
+            logger.info(f"Auto-tagging submission with API key's discord_tag: {discord_tag}")
         # Extract personal discord username for non-community submissions
         personal_discord_username = payload.get('personal_discord_username')
 
-        # Insert submission with source tracking, discord_tag, and personal_discord_username
+        # Determine if this is an edit (system has ID) or new submission
+        # Also check if glyph_code matches an existing system
+        edit_system_id = system_id  # From payload.get('id') above
+        if not edit_system_id and existing_glyph_system:
+            # Glyph code matches existing system - treat as edit
+            edit_system_id = existing_glyph_system['id']
+
+        # Insert submission with source tracking, discord_tag, personal_discord_username, and edit tracking
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitted_by,
             client_ip,
@@ -4302,7 +5172,8 @@ async def submit_system(
             source,
             api_key_name,
             discord_tag,
-            personal_discord_username
+            personal_discord_username,
+            edit_system_id
         ))
 
         submission_id = cursor.lastrowid
@@ -4386,7 +5257,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
             # Super admin sees ALL submissions with discord_tag visible
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username
+                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username, edit_system_id
                 FROM pending_systems
                 ORDER BY
                     CASE status
@@ -4400,7 +5271,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
             # Partners only see submissions tagged with their discord_tag
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username
+                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username, edit_system_id
                 FROM pending_systems
                 WHERE discord_tag = ?
                 ORDER BY
@@ -4821,8 +5692,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             # Insert moons
             for moon in planet.get('moons', []):
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -4834,7 +5705,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     moon.get('flora', 'N/A'),
                     moon.get('materials'),
                     moon.get('notes'),
-                    moon.get('description', '')
+                    moon.get('description', ''),
+                    moon.get('photo')
                 ))
 
         # Insert space station if present

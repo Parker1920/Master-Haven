@@ -15,10 +15,19 @@ export default function ApiKeys() {
   const [viewKeyModalOpen, setViewKeyModalOpen] = useState(false)
   const [newKeyData, setNewKeyData] = useState(null)
   const [actionInProgress, setActionInProgress] = useState(false)
+  const [discordTags, setDiscordTags] = useState([])
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingKey, setEditingKey] = useState(null)
 
   // Form state for creating a new key
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyRateLimit, setNewKeyRateLimit] = useState(200)
+  const [newKeyDiscordTag, setNewKeyDiscordTag] = useState('')
+
+  // Form state for editing a key
+  const [editKeyName, setEditKeyName] = useState('')
+  const [editKeyRateLimit, setEditKeyRateLimit] = useState(200)
+  const [editKeyDiscordTag, setEditKeyDiscordTag] = useState('')
 
   useEffect(() => {
     adminStatus().then(r => {
@@ -28,12 +37,22 @@ export default function ApiKeys() {
         navigate('/systems')
       } else {
         loadKeys()
+        loadDiscordTags()
       }
     }).catch(() => {
       alert('Failed to verify admin status')
       navigate('/systems')
     })
   }, [navigate])
+
+  async function loadDiscordTags() {
+    try {
+      const response = await axios.get('/api/discord_tags')
+      setDiscordTags(response.data.tags || [])
+    } catch (err) {
+      console.error('Failed to load discord tags:', err)
+    }
+  }
 
   async function loadKeys() {
     setLoading(true)
@@ -58,7 +77,8 @@ export default function ApiKeys() {
       const response = await axios.post('/api/keys', {
         name: newKeyName.trim(),
         rate_limit: newKeyRateLimit,
-        permissions: ['submit', 'check_duplicate']
+        permissions: ['submit', 'check_duplicate'],
+        discord_tag: newKeyDiscordTag || null
       })
 
       // Store the new key data to show in the modal
@@ -69,6 +89,7 @@ export default function ApiKeys() {
       // Reset form
       setNewKeyName('')
       setNewKeyRateLimit(200)
+      setNewKeyDiscordTag('')
 
       // Reload keys list
       loadKeys()
@@ -104,6 +125,38 @@ export default function ApiKeys() {
       loadKeys()
     } catch (err) {
       alert('Failed to reactivate API key: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
+  function openEditModal(key) {
+    setEditingKey(key)
+    setEditKeyName(key.name)
+    setEditKeyRateLimit(key.rate_limit)
+    setEditKeyDiscordTag(key.discord_tag || '')
+    setEditModalOpen(true)
+  }
+
+  async function saveKeyEdits() {
+    if (!editKeyName.trim()) {
+      alert('Please enter a name for the API key')
+      return
+    }
+
+    setActionInProgress(true)
+    try {
+      await axios.put(`/api/keys/${editingKey.id}`, {
+        name: editKeyName.trim(),
+        rate_limit: editKeyRateLimit,
+        discord_tag: editKeyDiscordTag || null
+      })
+      alert(`API key "${editKeyName}" has been updated.`)
+      setEditModalOpen(false)
+      setEditingKey(null)
+      loadKeys()
+    } catch (err) {
+      alert('Failed to update API key: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
     }
@@ -186,6 +239,15 @@ export default function ApiKeys() {
                           Revoked
                         </span>
                       )}
+                      {key.discord_tag && (
+                        <span className={`px-2 py-0.5 text-xs rounded-full border ${
+                          key.discord_tag === 'personal'
+                            ? 'bg-fuchsia-900/50 text-fuchsia-400 border-fuchsia-700'
+                            : 'bg-cyan-900/50 text-cyan-400 border-cyan-700'
+                        }`}>
+                          {key.discord_tag}
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -216,6 +278,14 @@ export default function ApiKeys() {
                   </div>
 
                   <div className="flex gap-2 ml-4">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openEditModal(key)}
+                      disabled={actionInProgress}
+                    >
+                      Edit
+                    </Button>
                     {key.is_active ? (
                       <Button
                         variant="danger"
@@ -275,6 +345,24 @@ export default function ApiKeys() {
             <p className="text-gray-500 text-xs mt-1">Maximum submissions per hour (default: 200)</p>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Discord Community Tag
+            </label>
+            <select
+              value={newKeyDiscordTag}
+              onChange={(e) => setNewKeyDiscordTag(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            >
+              <option value="">-- Select a tag --</option>
+              <option value="personal">Personal</option>
+              {discordTags.map(t => (
+                <option key={t.tag} value={t.tag}>{t.name} ({t.tag})</option>
+              ))}
+            </select>
+            <p className="text-gray-500 text-xs mt-1">Submissions via this key will be auto-tagged with this community</p>
+          </div>
+
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
             <Button variant="secondary" onClick={() => setCreateModalOpen(false)}>
               Cancel
@@ -328,6 +416,10 @@ export default function ApiKeys() {
                 <span className="text-gray-500">Rate Limit:</span>
                 <p className="text-white">{newKeyData.rate_limit}/hour</p>
               </div>
+              <div>
+                <span className="text-gray-500">Discord Tag:</span>
+                <p className="text-white">{newKeyData.discord_tag || 'None'}</p>
+              </div>
             </div>
 
             <div className="bg-gray-800 rounded p-4 text-sm">
@@ -343,6 +435,70 @@ export default function ApiKeys() {
             <div className="flex justify-end pt-4 border-t border-gray-700">
               <Button onClick={() => setViewKeyModalOpen(false)}>
                 I've Saved the Key
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Edit Key Modal */}
+      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit API Key">
+        {editingKey && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Key Name *
+              </label>
+              <input
+                type="text"
+                value={editKeyName}
+                onChange={(e) => setEditKeyName(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Rate Limit (requests/hour)
+              </label>
+              <input
+                type="number"
+                value={editKeyRateLimit}
+                onChange={(e) => setEditKeyRateLimit(parseInt(e.target.value) || 200)}
+                min="1"
+                max="1000"
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Discord Community Tag
+              </label>
+              <select
+                value={editKeyDiscordTag}
+                onChange={(e) => setEditKeyDiscordTag(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              >
+                <option value="">-- No tag --</option>
+                <option value="personal">Personal</option>
+                {discordTags.map(t => (
+                  <option key={t.tag} value={t.tag}>{t.name} ({t.tag})</option>
+                ))}
+              </select>
+              <p className="text-gray-500 text-xs mt-1">Submissions via this key will be auto-tagged with this community</p>
+            </div>
+
+            <div className="text-sm text-gray-400">
+              <span className="text-gray-500">Key Prefix:</span> {editingKey.key_prefix}...
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <Button variant="secondary" onClick={() => setEditModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={saveKeyEdits} disabled={actionInProgress || !editKeyName.trim()}>
+                {actionInProgress ? 'Saving...' : 'Save Changes'}
               </Button>
             </div>
           </div>

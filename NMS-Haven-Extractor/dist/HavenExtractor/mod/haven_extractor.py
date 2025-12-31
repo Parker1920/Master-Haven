@@ -657,6 +657,62 @@ class HavenExtractorMod(Mod):
         fires for nearby systems during galaxy discovery. Only the first 6
         belong to the current system.
         """
+        # v10.0.1: CRITICAL - Cache coordinates from lUA for region scan feature FIRST
+        # This runs even when _capture_enabled is False (e.g., loading into a save)
+        if not self._current_system_coords:
+            try:
+                # lUA is a GcUniverseAddressData struct (same structure as player_state.mLocation)
+                # It has .GalacticAddress and .RealityIndex properties
+                galaxy_idx = 0
+                voxel_x = voxel_y = voxel_z = system_idx = 0
+
+                # Try to access the struct directly (lUA might be already mapped)
+                if hasattr(lUA, 'GalacticAddress'):
+                    ga = lUA.GalacticAddress
+                    voxel_x = self._safe_int(ga.VoxelX)
+                    voxel_y = self._safe_int(ga.VoxelY)
+                    voxel_z = self._safe_int(ga.VoxelZ)
+                    system_idx = self._safe_int(ga.SolarSystemIndex)
+                    if hasattr(lUA, 'RealityIndex'):
+                        galaxy_idx = self._safe_int(lUA.RealityIndex)
+                else:
+                    # Try mapping the pointer to the struct
+                    ua_addr = get_addressof(lUA)
+                    if ua_addr != 0:
+                        # Use nmse.cGcUniverseAddressData from exported_types
+                        ua_struct = map_struct(ua_addr, nmse.cGcUniverseAddressData)
+                        if hasattr(ua_struct, 'GalacticAddress'):
+                            ga = ua_struct.GalacticAddress
+                            voxel_x = self._safe_int(ga.VoxelX)
+                            voxel_y = self._safe_int(ga.VoxelY)
+                            voxel_z = self._safe_int(ga.VoxelZ)
+                            system_idx = self._safe_int(ga.SolarSystemIndex)
+                        if hasattr(ua_struct, 'RealityIndex'):
+                            galaxy_idx = self._safe_int(ua_struct.RealityIndex)
+
+                # Only cache if we got valid data
+                if voxel_x != 0 or voxel_y != 0 or voxel_z != 0:
+                    galaxy_names = {
+                        0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
+                        3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
+                    }
+                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                    glyph_code = self._coords_to_glyphs(voxel_x, voxel_y, voxel_z, system_idx)
+
+                    self._current_system_coords = {
+                        "voxel_x": voxel_x,
+                        "voxel_y": voxel_y,
+                        "voxel_z": voxel_z,
+                        "system_index": system_idx,
+                        "planet_index": 0,
+                        "galaxy_index": galaxy_idx,
+                        "galaxy_name": galaxy_name,
+                        "glyph_code": glyph_code,
+                    }
+                    logger.info(f"[v10.0.1] Cached coords from GenerateCreatureRoles: {glyph_code} in {galaxy_name}")
+            except Exception as e:
+                logger.debug(f"[v10.0.1] Could not cache coords from lUA: {e}")
+
         if not self._capture_enabled:
             return
 
@@ -1224,6 +1280,40 @@ class HavenExtractorMod(Mod):
         ua = (ux) | (uz << 12) | (uy << 24) | (us << 32) | (ug << 41)
         return ua
 
+    def _parse_universal_address(self, ua: int) -> dict:
+        """
+        Parse a Universal Address (UA) to extract coordinates.
+
+        UA format (64-bit):
+        - Bits 0-11:   Voxel X (signed, offset by 2047)
+        - Bits 12-23:  Voxel Z (signed, offset by 2047)
+        - Bits 24-31:  Voxel Y (signed, offset by 127)
+        - Bits 32-40:  System Index (0-511)
+        - Bits 41-47:  Galaxy Index
+        - Bits 48-63:  Reserved/Planet
+        """
+        # Extract each field
+        ux = ua & 0xFFF           # 12 bits
+        uz = (ua >> 12) & 0xFFF   # 12 bits
+        uy = (ua >> 24) & 0xFF    # 8 bits
+        us = (ua >> 32) & 0x1FF   # 9 bits
+        ug = (ua >> 41) & 0x7F    # 7 bits
+        planet_idx = (ua >> 48) & 0xFF  # 8 bits
+
+        # Convert back to signed values
+        voxel_x = ux - 2047
+        voxel_z = uz - 2047
+        voxel_y = uy - 127
+
+        return {
+            "voxel_x": voxel_x,
+            "voxel_y": voxel_y,
+            "voxel_z": voxel_z,
+            "system_index": us,
+            "galaxy_index": ug,
+            "planet_index": planet_idx,
+        }
+
     def _classify_remote_system(self, ua: int) -> Optional[dict]:
         """
         Call ClassifyStarSystem to get star system attributes for a remote system.
@@ -1325,7 +1415,7 @@ class HavenExtractorMod(Mod):
         """
         logger.info("")
         logger.info("=" * 60)
-        logger.info(">>> REGION SCAN STARTED (v10.0.0) <<<")
+        logger.info(">>> REGION SCAN STARTED (v10.0.2) <<<")
         logger.info("=" * 60)
 
         # Get current coordinates to determine region
@@ -1734,6 +1824,97 @@ class HavenExtractorMod(Mod):
         if self._current_system_coords:
             logger.info("  [cached] SUCCESS: Using cached coordinates from previous extraction")
             return self._current_system_coords
+
+        # Method 4: Try cGcApplication global (should always be available)
+        logger.info("  Method 4 - trying cGcApplication global...")
+        try:
+            # Try to access the global GcApplication instance
+            if hasattr(nms, 'cGcApplication') and hasattr(nms.cGcApplication, 'instance'):
+                app = nms.cGcApplication.instance()
+                logger.info(f"  Method 4 - cGcApplication.instance(): {app}")
+                if app:
+                    # Try to get simulation from app
+                    if hasattr(app, 'mpSimulation'):
+                        sim = app.mpSimulation
+                        logger.info(f"  Method 4 - mpSimulation: {sim}")
+                        if sim:
+                            sim_addr = get_addressof(sim)
+                            if sim_addr != 0:
+                                simulation = map_struct(sim_addr, nms.cGcSimulation)
+                                if hasattr(simulation, 'mpSolarSystem'):
+                                    ss_ptr = simulation.mpSolarSystem
+                                    ss_addr = get_addressof(ss_ptr)
+                                    if ss_addr != 0:
+                                        solar_system = map_struct(ss_addr, nms.cGcSolarSystem)
+                                        discovery_data = solar_system.mSolarSystemDiscoveryData
+                                        galactic_addr = discovery_data.UniverseLocation.GalacticAddress
+
+                                        voxel_x = self._safe_int(galactic_addr.VoxelX)
+                                        voxel_y = self._safe_int(galactic_addr.VoxelY)
+                                        voxel_z = self._safe_int(galactic_addr.VoxelZ)
+                                        system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
+                                        planet_idx = self._safe_int(galactic_addr.PlanetIndex)
+                                        galaxy_idx = self._safe_int(discovery_data.UniverseLocation.RealityIndex)
+
+                                        logger.info(f"  [cGcApplication] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}")
+
+                                        glyph_code = self._coords_to_glyphs(
+                                            planet_idx, system_idx, voxel_x, voxel_y, voxel_z
+                                        )
+
+                                        return {
+                                            "system_name": f"System_{glyph_code}",
+                                            "glyph_code": glyph_code,
+                                            "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
+                                            "galaxy_index": galaxy_idx,
+                                            "voxel_x": voxel_x,
+                                            "voxel_y": voxel_y,
+                                            "voxel_z": voxel_z,
+                                            "solar_system_index": system_idx,
+                                        }
+        except Exception as e:
+            logger.info(f"  [cGcApplication] EXCEPTION: {e}")
+
+        # Method 5: Try gameData.game (alternative singleton access)
+        logger.info("  Method 5 - trying gameData.game...")
+        try:
+            if hasattr(gameData, 'game') and gameData.game:
+                game = gameData.game
+                logger.info(f"  Method 5 - gameData.game: {game}")
+                if hasattr(game, 'simulation') and game.simulation:
+                    sim = game.simulation
+                    if hasattr(sim, 'mpSolarSystem') and sim.mpSolarSystem:
+                        ss_addr = get_addressof(sim.mpSolarSystem)
+                        if ss_addr != 0:
+                            solar_system = map_struct(ss_addr, nms.cGcSolarSystem)
+                            discovery_data = solar_system.mSolarSystemDiscoveryData
+                            galactic_addr = discovery_data.UniverseLocation.GalacticAddress
+
+                            voxel_x = self._safe_int(galactic_addr.VoxelX)
+                            voxel_y = self._safe_int(galactic_addr.VoxelY)
+                            voxel_z = self._safe_int(galactic_addr.VoxelZ)
+                            system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
+                            planet_idx = self._safe_int(galactic_addr.PlanetIndex)
+                            galaxy_idx = self._safe_int(discovery_data.UniverseLocation.RealityIndex)
+
+                            logger.info(f"  [gameData.game] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}")
+
+                            glyph_code = self._coords_to_glyphs(
+                                planet_idx, system_idx, voxel_x, voxel_y, voxel_z
+                            )
+
+                            return {
+                                "system_name": f"System_{glyph_code}",
+                                "glyph_code": glyph_code,
+                                "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
+                                "galaxy_index": galaxy_idx,
+                                "voxel_x": voxel_x,
+                                "voxel_y": voxel_y,
+                                "voxel_z": voxel_z,
+                                "solar_system_index": system_idx,
+                            }
+        except Exception as e:
+            logger.info(f"  [gameData.game] EXCEPTION: {e}")
 
         logger.warning("  All coordinate methods failed - are you in a star system?")
         return None
