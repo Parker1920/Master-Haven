@@ -27,6 +27,12 @@ except ImportError:
     # Fallback if running in a different context
     haven_paths = None
 
+# Import schema migration system
+try:
+    from migrations import run_pending_migrations
+except ImportError:
+    from src.migrations import run_pending_migrations
+
 # Import glyph decoder
 try:
     from glyph_decoder import (
@@ -77,6 +83,34 @@ else:
     LOGS_DIR = HAVEN_UI_DIR / 'logs'
 
 DATA_JSON = HAVEN_UI_DIR / 'data' / 'data.json'
+
+# Load galaxies reference data for validation
+GALAXIES_JSON_PATH = Path(__file__).resolve().parents[1] / 'NMS-Save-Watcher' / 'data' / 'galaxies.json'
+
+def load_galaxies() -> dict:
+    """Load galaxy reference data (all 256 NMS galaxies)."""
+    try:
+        if GALAXIES_JSON_PATH.exists():
+            with open(GALAXIES_JSON_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load galaxies.json: {e}")
+    # Fallback to just Euclid if file not found
+    return {"0": "Euclid"}
+
+GALAXIES_DATA = load_galaxies()
+GALAXY_NAMES = set(GALAXIES_DATA.values())
+GALAXY_BY_INDEX = {int(k): v for k, v in GALAXIES_DATA.items()}
+GALAXY_BY_NAME = {v: int(k) for k, v in GALAXIES_DATA.items()}
+
+def validate_galaxy(galaxy: str) -> bool:
+    """Validate galaxy name against known NMS galaxies."""
+    return galaxy in GALAXY_NAMES
+
+def validate_reality(reality: str) -> bool:
+    """Validate reality value (Normal or Permadeath)."""
+    return reality in ('Normal', 'Permadeath')
+
 
 # Ensure directories exist
 HAVEN_UI_DIR.mkdir(parents=True, exist_ok=True)
@@ -568,8 +602,128 @@ def init_database():
         )
     ''')
 
+    # Create data_restrictions table for partner data visibility controls
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS data_restrictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            system_id INTEGER NOT NULL,
+            discord_tag TEXT NOT NULL,
+            is_hidden_from_public INTEGER DEFAULT 0,
+            hidden_fields TEXT DEFAULT '[]',
+            map_visibility TEXT DEFAULT 'normal',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT,
+            FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            UNIQUE(system_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_data_restrictions_system_id ON data_restrictions(system_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_data_restrictions_discord_tag ON data_restrictions(discord_tag)')
+
+    # =========================================================================
+    # Sub-Admin System Tables and Migrations
+    # =========================================================================
+
+    # Create sub_admin_accounts table for partner sub-administrators
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sub_admin_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_partner_id INTEGER,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            enabled_features TEXT DEFAULT '[]',
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP,
+            created_by TEXT,
+            FOREIGN KEY (parent_partner_id) REFERENCES partner_accounts(id) ON DELETE CASCADE
+        )
+    ''')
+
+    # Create approval_audit_log table for tracking all approval/rejection actions
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS approval_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            submission_type TEXT NOT NULL,
+            submission_id INTEGER NOT NULL,
+            submission_name TEXT,
+            approver_username TEXT NOT NULL,
+            approver_type TEXT NOT NULL,
+            approver_account_id INTEGER,
+            approver_discord_tag TEXT,
+            submitter_username TEXT,
+            submitter_account_id INTEGER,
+            submitter_type TEXT,
+            notes TEXT,
+            submission_discord_tag TEXT
+        )
+    ''')
+
+    # Create indexes for sub-admin system
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sub_admin_parent ON sub_admin_accounts(parent_partner_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sub_admin_username ON sub_admin_accounts(username)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON approval_audit_log(timestamp DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_approver ON approval_audit_log(approver_username)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_discord_tag ON approval_audit_log(submission_discord_tag)')
+
+    # Add submitter tracking columns to pending_systems for self-approval detection
+    add_column_if_missing('pending_systems', 'submitter_account_id', 'INTEGER')
+    add_column_if_missing('pending_systems', 'submitter_account_type', 'TEXT')
+
+    # =========================================================================
+    # Multi-Reality and Galaxy Tracking Migrations
+    # =========================================================================
+
+    # Add reality column to systems table (Permadeath vs Normal)
+    # All existing data defaults to 'Normal' since Permadeath is a new tracking category
+    add_column_if_missing('systems', 'reality', "TEXT DEFAULT 'Normal'")
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_reality ON systems(reality)')
+
+    # Add reality and galaxy columns to regions table
+    # Regions are now unique per (reality, galaxy, region_x, region_y, region_z)
+    add_column_if_missing('regions', 'reality', "TEXT DEFAULT 'Normal'")
+    add_column_if_missing('regions', 'galaxy', "TEXT DEFAULT 'Euclid'")
+
+    # Add reality to pending tables
+    add_column_if_missing('pending_systems', 'reality', "TEXT DEFAULT 'Normal'")
+    add_column_if_missing('pending_region_names', 'reality', "TEXT DEFAULT 'Normal'")
+    add_column_if_missing('pending_region_names', 'galaxy', "TEXT DEFAULT 'Euclid'")
+
+    # Update regions unique constraint to include reality and galaxy
+    cursor.execute("PRAGMA index_list(regions)")
+    indexes = cursor.fetchall()
+    has_new_unique = any('idx_regions_reality_galaxy_coords' in str(idx) for idx in indexes)
+
+    if not has_new_unique:
+        # Create new unique index for (reality, galaxy, region_x, region_y, region_z)
+        try:
+            cursor.execute('''
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_regions_reality_galaxy_coords
+                ON regions(reality, galaxy, region_x, region_y, region_z)
+            ''')
+            logger.info("Created new unique index for regions (reality, galaxy, coords)")
+        except Exception as e:
+            logger.warning(f"Could not create regions unique index: {e}")
+
+
     conn.commit()
     conn.close()
+
+    # Run schema migrations after base initialization
+    try:
+        applied_count, versions = run_pending_migrations(db_path)
+        if applied_count > 0:
+            logger.info(f"Applied {applied_count} migration(s): {', '.join(versions)}")
+    except Exception as e:
+        logger.error(f"Schema migration failed: {e}")
+        # Don't raise - let the app start even if migrations fail
+        # A backup was created before migration was attempted
+
     logger.info(f"Database initialized at {db_path}")
 
 
@@ -936,8 +1090,15 @@ async def api_stats():
 
 
 @app.get('/api/map/regions-aggregated')
-async def api_map_regions_aggregated():
+async def api_map_regions_aggregated(
+    reality: str = None,
+    galaxy: str = None
+):
     """Get pre-aggregated region data for the 3D galaxy map.
+
+    Args:
+        reality: Optional filter - 'Normal' or 'Permadeath' (None for all)
+        galaxy: Optional filter - galaxy name like 'Euclid' (None for all)
 
     Returns one data point per region with:
     - Region coordinates (region_x, region_y, region_z)
@@ -958,8 +1119,21 @@ async def api_map_regions_aggregated():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Build WHERE clause with optional filters
+        where_clauses = ["s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL"]
+        params = []
+
+        if reality:
+            where_clauses.append("s.reality = ?")
+            params.append(reality)
+        if galaxy:
+            where_clauses.append("s.galaxy = ?")
+            params.append(galaxy)
+
+        where_sql = " AND ".join(where_clauses)
+
         # Single aggregated query - returns one row per populated region
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
                 s.region_x,
                 s.region_y,
@@ -969,14 +1143,17 @@ async def api_map_regions_aggregated():
                 MIN(s.x) as display_x,
                 MIN(s.y) as display_y,
                 MIN(s.z) as display_z,
-                GROUP_CONCAT(DISTINCT s.galaxy) as galaxies
+                GROUP_CONCAT(DISTINCT s.galaxy) as galaxies,
+                GROUP_CONCAT(DISTINCT s.reality) as realities
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
-            WHERE s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
+                AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            WHERE {where_sql}
             GROUP BY s.region_x, s.region_y, s.region_z
             ORDER BY system_count DESC
-        ''')
+        ''', params)
 
         rows = cursor.fetchall()
         total_systems = 0
@@ -990,6 +1167,11 @@ async def api_map_regions_aggregated():
                 region['galaxies'] = region['galaxies'].split(',')
             else:
                 region['galaxies'] = ['Euclid']
+            # Parse realities string into list
+            if region.get('realities'):
+                region['realities'] = region['realities'].split(',')
+            else:
+                region['realities'] = ['Normal']
             regions.append(region)
 
         return {
@@ -1004,6 +1186,21 @@ async def api_map_regions_aggregated():
     finally:
         if conn:
             conn.close()
+
+
+@app.get('/api/galaxies')
+async def api_galaxies():
+    """Return list of all 256 NMS galaxies with indices.
+    
+    Returns:
+        Dictionary with galaxies list, each containing index and name
+    """
+    return {
+        'galaxies': [
+            {'index': idx, 'name': name}
+            for idx, name in sorted(GALAXY_BY_INDEX.items())
+        ]
+    }
 
 
 @app.get('/api/activity_logs')
@@ -1295,6 +1492,238 @@ def can_access_feature(session_token: Optional[str], feature: str) -> bool:
         return True
     return feature in enabled
 
+def is_sub_admin(session_token: Optional[str]) -> bool:
+    """Check if session belongs to a sub-admin"""
+    session = get_session(session_token)
+    return session is not None and session.get('user_type') == 'sub_admin'
+
+def get_effective_discord_tag(session_token: Optional[str]) -> Optional[str]:
+    """Get discord_tag - direct for partners, inherited for sub-admins"""
+    session = get_session(session_token)
+    if not session:
+        return None
+    if session.get('user_type') in ['partner', 'sub_admin']:
+        return session.get('discord_tag')
+    return None
+
+def get_submitter_identity(session_token: Optional[str]) -> dict:
+    """Get full identity info for audit and self-approval detection purposes"""
+    session = get_session(session_token)
+    if not session:
+        return {'type': 'anonymous', 'username': None, 'account_id': None, 'discord_tag': None}
+
+    user_type = session.get('user_type')
+    account_id = None
+    if user_type == 'partner':
+        account_id = session.get('partner_id')
+    elif user_type == 'sub_admin':
+        account_id = session.get('sub_admin_id')
+
+    return {
+        'type': user_type,
+        'username': session.get('username'),
+        'account_id': account_id,
+        'discord_tag': session.get('discord_tag')
+    }
+
+# ============================================================================
+# DATA RESTRICTION HELPER FUNCTIONS
+# ============================================================================
+
+# Fields that can be restricted and what they hide
+RESTRICTABLE_FIELDS = {
+    'coordinates': ['x', 'y', 'z', 'region_x', 'region_y', 'region_z'],
+    'glyph_code': ['glyph_code', 'glyph_planet', 'glyph_solar_system'],
+    'discovered_by': ['discovered_by', 'discovered_at', 'personal_discord_username'],
+    'base_location': [],  # Applied to planets
+    'description': ['description'],
+    'star_type': ['star_type', 'economy_type', 'economy_level', 'conflict_level'],
+    'planets': [],  # Special handling - hides planet details
+}
+
+def get_restriction_for_system(system_id: int) -> Optional[dict]:
+    """Get restriction settings for a system, or None if unrestricted."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, system_id, discord_tag, is_hidden_from_public, hidden_fields,
+                   map_visibility, created_at, updated_at, created_by
+            FROM data_restrictions WHERE system_id = ?
+        ''', (system_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                'id': row['id'],
+                'system_id': row['system_id'],
+                'discord_tag': row['discord_tag'],
+                'is_hidden_from_public': bool(row['is_hidden_from_public']),
+                'hidden_fields': json.loads(row['hidden_fields'] or '[]'),
+                'map_visibility': row['map_visibility'] or 'normal',
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at'],
+                'created_by': row['created_by']
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get restriction for system {system_id}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_restrictions_by_discord_tag(discord_tag: str) -> list:
+    """Get all restrictions for a specific discord_tag."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT dr.*, s.name as system_name, s.galaxy
+            FROM data_restrictions dr
+            JOIN systems s ON dr.system_id = s.id
+            WHERE dr.discord_tag = ?
+            ORDER BY s.name
+        ''', (discord_tag,))
+        rows = cursor.fetchall()
+        return [{
+            'id': row['id'],
+            'system_id': row['system_id'],
+            'system_name': row['system_name'],
+            'galaxy': row['galaxy'],
+            'discord_tag': row['discord_tag'],
+            'is_hidden_from_public': bool(row['is_hidden_from_public']),
+            'hidden_fields': json.loads(row['hidden_fields'] or '[]'),
+            'map_visibility': row['map_visibility'] or 'normal',
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+            'created_by': row['created_by']
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to get restrictions for tag {discord_tag}: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def can_bypass_restriction(session_data: Optional[dict], system_discord_tag: str) -> bool:
+    """Check if current user can bypass restrictions for a system.
+
+    Super admin can always bypass.
+    Partners can bypass for systems with their own discord_tag.
+    """
+    if not session_data:
+        return False
+    if session_data.get('user_type') == 'super_admin':
+        return True
+    if session_data.get('user_type') == 'partner':
+        return session_data.get('discord_tag') == system_discord_tag
+    return False
+
+def apply_field_restrictions(system: dict, hidden_fields: list) -> dict:
+    """Remove restricted fields from system data. Returns a modified copy."""
+    if not hidden_fields:
+        return system
+
+    result = dict(system)
+
+    for field_group in hidden_fields:
+        if field_group in RESTRICTABLE_FIELDS:
+            # Remove each field in the group
+            for field in RESTRICTABLE_FIELDS[field_group]:
+                if field in result:
+                    del result[field]
+
+        # Special handling for planets - hide detailed info
+        if field_group == 'planets' and 'planets' in result:
+            # Keep only planet count, not details
+            planet_count = len(result.get('planets', []))
+            result['planets'] = []
+            result['planet_count_only'] = planet_count
+
+        # Special handling for base_location - remove from each planet
+        if field_group == 'base_location' and 'planets' in result:
+            for planet in result.get('planets', []):
+                if 'base_location' in planet:
+                    del planet['base_location']
+
+    return result
+
+def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map: bool = False) -> list:
+    """Filter systems based on data restrictions and viewer permissions.
+
+    Args:
+        systems: List of system dictionaries
+        session_data: Current session data (None for public)
+        for_map: If True, also filters based on map_visibility setting
+
+    Returns:
+        Filtered list with restrictions applied
+    """
+    if not systems:
+        return systems
+
+    # Super admin sees everything
+    if session_data and session_data.get('user_type') == 'super_admin':
+        return systems
+
+    viewer_discord_tag = None
+    if session_data and session_data.get('user_type') == 'partner':
+        viewer_discord_tag = session_data.get('discord_tag')
+
+    result = []
+    for system in systems:
+        system_id = system.get('id')
+        system_tag = system.get('discord_tag')
+
+        # Owner sees their own systems unrestricted
+        if viewer_discord_tag and viewer_discord_tag == system_tag:
+            result.append(system)
+            continue
+
+        # Check for restrictions
+        restriction = get_restriction_for_system(system_id) if system_id else None
+
+        if not restriction:
+            # No restrictions - include as-is
+            result.append(system)
+            continue
+
+        # System is hidden from public
+        if restriction.get('is_hidden_from_public'):
+            continue  # Skip this system entirely
+
+        # For map view, check map visibility
+        if for_map:
+            map_vis = restriction.get('map_visibility', 'normal')
+            if map_vis == 'hidden':
+                continue  # Don't show on map
+            elif map_vis == 'point_only':
+                # Strip hover/detail info - keep only position data
+                filtered_system = {
+                    'id': system.get('id'),
+                    'name': system.get('name'),
+                    'x': system.get('x'),
+                    'y': system.get('y'),
+                    'z': system.get('z'),
+                    'star_x': system.get('star_x'),
+                    'star_y': system.get('star_y'),
+                    'star_z': system.get('star_z'),
+                    'galaxy': system.get('galaxy'),
+                    'map_visibility': 'point_only',
+                    'planets': []
+                }
+                result.append(filtered_system)
+                continue
+
+        # Apply field restrictions
+        hidden_fields = restriction.get('hidden_fields', [])
+        filtered_system = apply_field_restrictions(system, hidden_fields)
+        result.append(filtered_system)
+
+    return result
+
 def check_rate_limit(client_ip: str, limit: int = 15, window_hours: int = 1) -> tuple:
     """
     Check if IP has exceeded rate limit for system submissions.
@@ -1325,18 +1754,28 @@ async def admin_status(session: Optional[str] = Cookie(None)):
     if not session_data:
         return {'logged_in': False}
 
+    user_type = session_data.get('user_type')
+    account_id = None
+    if user_type == 'partner':
+        account_id = session_data.get('partner_id')
+    elif user_type == 'sub_admin':
+        account_id = session_data.get('sub_admin_id')
+
     return {
         'logged_in': True,
-        'user_type': session_data.get('user_type'),
+        'user_type': user_type,
         'username': session_data.get('username'),
         'discord_tag': session_data.get('discord_tag'),
         'display_name': session_data.get('display_name'),
-        'enabled_features': session_data.get('enabled_features', [])
+        'enabled_features': session_data.get('enabled_features', []),
+        'account_id': account_id,
+        'parent_display_name': session_data.get('parent_display_name'),  # For sub-admins
+        'is_haven_sub_admin': session_data.get('is_haven_sub_admin', False)  # True if sub-admin under Haven
     }
 
 @app.post('/api/admin/login')
 async def admin_login(credentials: dict, response: Response):
-    """Login with username/password - supports super admin and partners"""
+    """Login with username/password - supports super admin, partners, and sub-admins"""
     username = credentials.get('username', '').strip()
     password = credentials.get('password', '')
 
@@ -1368,43 +1807,116 @@ async def admin_login(credentials: dict, response: Response):
             }
         raise HTTPException(status_code=401, detail='Invalid password')
 
-    # Check partner accounts
+    # Check partner accounts and sub-admin accounts
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # First check partner_accounts
         cursor.execute('''
             SELECT id, password_hash, discord_tag, display_name, enabled_features, is_active
             FROM partner_accounts WHERE username = ?
         ''', (username,))
         row = cursor.fetchone()
 
-        if not row:
+        if row:
+            # Found a partner account
+            if not row['is_active']:
+                raise HTTPException(status_code=401, detail='Account is deactivated')
+
+            if hash_password(password) != row['password_hash']:
+                raise HTTPException(status_code=401, detail='Invalid username or password')
+
+            # Update last_login_at
+            cursor.execute(
+                'UPDATE partner_accounts SET last_login_at = ? WHERE id = ?',
+                (datetime.now(timezone.utc).isoformat(), row['id'])
+            )
+            conn.commit()
+
+            enabled_features = json.loads(row['enabled_features'] or '[]')
+
+            session_token = generate_session_token()
+            _sessions[session_token] = {
+                'user_type': 'partner',
+                'username': username,
+                'discord_tag': row['discord_tag'],
+                'partner_id': row['id'],
+                'display_name': row['display_name'] or username,
+                'enabled_features': enabled_features,
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+            }
+
+            response.set_cookie(
+                key='session',
+                value=session_token,
+                httponly=True,
+                max_age=600,  # 10 minutes
+                samesite='lax'
+            )
+
+            return {
+                'status': 'ok',
+                'logged_in': True,
+                'user_type': 'partner',
+                'username': username,
+                'discord_tag': row['discord_tag'],
+                'display_name': row['display_name'] or username,
+                'enabled_features': enabled_features
+            }
+
+        # Not a partner - check sub_admin_accounts
+        cursor.execute('''
+            SELECT sa.id, sa.password_hash, sa.display_name, sa.enabled_features, sa.is_active,
+                   sa.parent_partner_id, pa.discord_tag as parent_discord_tag,
+                   pa.display_name as parent_display_name, pa.is_active as parent_is_active
+            FROM sub_admin_accounts sa
+            LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+            WHERE sa.username = ?
+        ''', (username,))
+        sub_row = cursor.fetchone()
+
+        if not sub_row:
             raise HTTPException(status_code=401, detail='Invalid username or password')
 
-        if not row['is_active']:
+        # Check if sub-admin account is active
+        if not sub_row['is_active']:
             raise HTTPException(status_code=401, detail='Account is deactivated')
 
-        if hash_password(password) != row['password_hash']:
+        # Check if parent partner account is active (only if has a parent)
+        if sub_row['parent_partner_id'] and not sub_row['parent_is_active']:
+            raise HTTPException(status_code=401, detail='Parent partner account is deactivated')
+
+        if hash_password(password) != sub_row['password_hash']:
             raise HTTPException(status_code=401, detail='Invalid username or password')
 
         # Update last_login_at
         cursor.execute(
-            'UPDATE partner_accounts SET last_login_at = ? WHERE id = ?',
-            (datetime.now(timezone.utc).isoformat(), row['id'])
+            'UPDATE sub_admin_accounts SET last_login_at = ? WHERE id = ?',
+            (datetime.now(timezone.utc).isoformat(), sub_row['id'])
         )
         conn.commit()
 
-        enabled_features = json.loads(row['enabled_features'] or '[]')
+        # Sub-admin features are their own (subset of parent's, or any for Haven sub-admins)
+        enabled_features = json.loads(sub_row['enabled_features'] or '[]')
+
+        # Haven sub-admins have no parent partner
+        is_haven_sub_admin = sub_row['parent_partner_id'] is None
+        discord_tag = None if is_haven_sub_admin else sub_row['parent_discord_tag']
+        parent_display_name = 'Haven' if is_haven_sub_admin else sub_row['parent_display_name']
 
         session_token = generate_session_token()
         _sessions[session_token] = {
-            'user_type': 'partner',
+            'user_type': 'sub_admin',
             'username': username,
-            'discord_tag': row['discord_tag'],
-            'partner_id': row['id'],
-            'display_name': row['display_name'] or username,
+            'discord_tag': discord_tag,  # Inherit parent's discord_tag (None for Haven sub-admins)
+            'sub_admin_id': sub_row['id'],
+            'partner_id': sub_row['parent_partner_id'],  # None for Haven sub-admins
+            'display_name': sub_row['display_name'] or username,
+            'parent_display_name': parent_display_name,
             'enabled_features': enabled_features,
+            'is_haven_sub_admin': is_haven_sub_admin,
             'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
         }
 
@@ -1419,11 +1931,13 @@ async def admin_login(credentials: dict, response: Response):
         return {
             'status': 'ok',
             'logged_in': True,
-            'user_type': 'partner',
+            'user_type': 'sub_admin',
             'username': username,
-            'discord_tag': row['discord_tag'],
-            'display_name': row['display_name'] or username,
-            'enabled_features': enabled_features
+            'discord_tag': discord_tag,
+            'display_name': sub_row['display_name'] or username,
+            'parent_display_name': parent_display_name,
+            'enabled_features': enabled_features,
+            'is_haven_sub_admin': is_haven_sub_admin
         }
     finally:
         if conn:
@@ -1725,6 +2239,407 @@ async def activate_partner(partner_id: int, session: Optional[str] = Cookie(None
         if conn:
             conn.close()
 
+
+# ============================================================================
+# Sub-Admin Account Management
+# ============================================================================
+
+@app.get('/api/sub_admins')
+async def list_sub_admins(
+    partner_id: Optional[int] = None,
+    show_all: bool = False,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    List sub-admins. Super admin sees all (optionally filtered by partner_id).
+    Partners see only their own sub-admins.
+    If show_all=false and super admin has no partner_id, shows Haven's sub-admins.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    user_type = session_data.get('user_type')
+    is_super = user_type == 'super_admin'
+
+    # Partners and sub-admins can only see sub-admins for their partner
+    if not is_super:
+        partner_id = session_data.get('partner_id')
+        if not partner_id:
+            raise HTTPException(status_code=403, detail='Access denied')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if partner_id:
+            cursor.execute('''
+                SELECT sa.*, pa.discord_tag as parent_discord_tag, pa.display_name as parent_display_name
+                FROM sub_admin_accounts sa
+                JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+                WHERE sa.parent_partner_id = ?
+                ORDER BY sa.username
+            ''', (partner_id,))
+        elif is_super and not show_all:
+            # Super admin viewing their own sub-admins (parent_partner_id IS NULL)
+            cursor.execute('''
+                SELECT sa.*, NULL as parent_discord_tag, 'Haven' as parent_display_name
+                FROM sub_admin_accounts sa
+                WHERE sa.parent_partner_id IS NULL
+                ORDER BY sa.username
+            ''')
+        else:
+            # Super admin sees all (including their own)
+            cursor.execute('''
+                SELECT sa.*,
+                       COALESCE(pa.discord_tag, NULL) as parent_discord_tag,
+                       COALESCE(pa.display_name, 'Haven') as parent_display_name
+                FROM sub_admin_accounts sa
+                LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+                ORDER BY COALESCE(pa.display_name, 'Haven'), sa.username
+            ''')
+
+        sub_admins = []
+        for row in cursor.fetchall():
+            sub_admins.append({
+                'id': row['id'],
+                'parent_partner_id': row['parent_partner_id'],
+                'username': row['username'],
+                'display_name': row['display_name'],
+                'enabled_features': json.loads(row['enabled_features'] or '[]'),
+                'is_active': bool(row['is_active']),
+                'created_at': row['created_at'],
+                'last_login_at': row['last_login_at'],
+                'created_by': row['created_by'],
+                'parent_discord_tag': row['parent_discord_tag'],
+                'parent_display_name': row['parent_display_name']
+            })
+
+        return {'sub_admins': sub_admins}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/sub_admins')
+async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Create a sub-admin account.
+    Super admin can create for any partner.
+    Partners can create sub-admins under themselves.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    user_type = session_data.get('user_type')
+    is_super = user_type == 'super_admin'
+    current_username = session_data.get('username')
+
+    username = payload.get('username', '').strip()
+    password = payload.get('password', '')
+    display_name = payload.get('display_name', '').strip() or None
+    enabled_features = payload.get('enabled_features', [])
+    parent_partner_id = payload.get('parent_partner_id')
+
+    # Validation
+    if not username or len(username) < 3:
+        raise HTTPException(status_code=400, detail='Username must be at least 3 characters')
+    if not password or len(password) < 4:
+        raise HTTPException(status_code=400, detail='Password must be at least 4 characters')
+
+    # Determine parent partner
+    # Super admin can create sub-admins for themselves (NULL parent) or for a partner
+    # Partners create sub-admins under themselves
+    is_haven_sub_admin = False
+    if is_super:
+        # Super admin can optionally specify parent_partner_id
+        # If not specified, creates a "Haven" sub-admin (parent_partner_id = NULL)
+        if not parent_partner_id:
+            is_haven_sub_admin = True
+    else:
+        # Partners create sub-admins under themselves
+        parent_partner_id = session_data.get('partner_id')
+        if not parent_partner_id:
+            raise HTTPException(status_code=403, detail='Only partners and super admins can create sub-admins')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check partner exists and is active (only if creating under a partner)
+        if parent_partner_id:
+            cursor.execute('SELECT id, enabled_features FROM partner_accounts WHERE id = ? AND is_active = 1', (parent_partner_id,))
+            partner_row = cursor.fetchone()
+            if not partner_row:
+                raise HTTPException(status_code=404, detail='Parent partner not found or inactive')
+
+            # Validate that sub-admin features are subset of parent's features
+            parent_features = json.loads(partner_row['enabled_features'] or '[]')
+            if 'all' not in parent_features:
+                invalid_features = [f for f in enabled_features if f not in parent_features]
+                if invalid_features:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
+                    )
+        # Haven sub-admins can have any features (super admin creates them)
+
+        # Check username uniqueness across all user tables
+        cursor.execute('SELECT username FROM partner_accounts WHERE username = ?', (username,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail='Username already exists (partner account)')
+        cursor.execute('SELECT username FROM sub_admin_accounts WHERE username = ?', (username,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail='Username already exists (sub-admin account)')
+
+        # Create sub-admin
+        cursor.execute('''
+            INSERT INTO sub_admin_accounts
+            (parent_partner_id, username, password_hash, display_name, enabled_features, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            parent_partner_id,
+            username,
+            hash_password(password),
+            display_name,
+            json.dumps(enabled_features),
+            current_username
+        ))
+
+        sub_admin_id = cursor.lastrowid
+        conn.commit()
+
+        parent_label = f"partner {parent_partner_id}" if parent_partner_id else "Haven (super admin)"
+        logger.info(f"Sub-admin created: {username} (ID: {sub_admin_id}) under {parent_label} by {current_username}")
+
+        return {
+            'status': 'ok',
+            'sub_admin_id': sub_admin_id,
+            'username': username
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/sub_admins/{sub_admin_id}')
+async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """Update a sub-admin account."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    user_type = session_data.get('user_type')
+    is_super = user_type == 'super_admin'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get sub-admin
+        cursor.execute('''
+            SELECT sa.*, pa.enabled_features as parent_features
+            FROM sub_admin_accounts sa
+            JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+            WHERE sa.id = ?
+        ''', (sub_admin_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Sub-admin not found')
+
+        # Permission check: super admin or parent partner can edit
+        if not is_super:
+            if session_data.get('partner_id') != row['parent_partner_id']:
+                raise HTTPException(status_code=403, detail='Can only edit your own sub-admins')
+
+        # Build update
+        updates = []
+        params = []
+
+        if 'display_name' in payload:
+            updates.append('display_name = ?')
+            params.append(payload['display_name'] or None)
+
+        if 'enabled_features' in payload:
+            new_features = payload['enabled_features']
+            # Validate features against parent
+            parent_features = json.loads(row['parent_features'] or '[]')
+            if 'all' not in parent_features:
+                invalid_features = [f for f in new_features if f not in parent_features]
+                if invalid_features:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
+                    )
+            updates.append('enabled_features = ?')
+            params.append(json.dumps(new_features))
+
+        if 'is_active' in payload:
+            updates.append('is_active = ?')
+            params.append(1 if payload['is_active'] else 0)
+
+        if updates:
+            updates.append('updated_at = ?')
+            params.append(datetime.now(timezone.utc).isoformat())
+            params.append(sub_admin_id)
+
+            cursor.execute(
+                f'UPDATE sub_admin_accounts SET {", ".join(updates)} WHERE id = ?',
+                params
+            )
+            conn.commit()
+
+        return {'status': 'ok'}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/sub_admins/{sub_admin_id}/reset_password')
+async def reset_sub_admin_password(sub_admin_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """Reset a sub-admin's password."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    user_type = session_data.get('user_type')
+    is_super = user_type == 'super_admin'
+
+    new_password = payload.get('new_password', '')
+    if not new_password or len(new_password) < 4:
+        raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT parent_partner_id FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Sub-admin not found')
+
+        # Permission check
+        if not is_super:
+            if session_data.get('partner_id') != row['parent_partner_id']:
+                raise HTTPException(status_code=403, detail='Can only reset passwords for your own sub-admins')
+
+        cursor.execute(
+            'UPDATE sub_admin_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
+            (hash_password(new_password), datetime.now(timezone.utc).isoformat(), sub_admin_id)
+        )
+        conn.commit()
+
+        return {'status': 'ok'}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.delete('/api/sub_admins/{sub_admin_id}')
+async def delete_sub_admin(sub_admin_id: int, session: Optional[str] = Cookie(None)):
+    """Deactivate a sub-admin account."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    user_type = session_data.get('user_type')
+    is_super = user_type == 'super_admin'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT parent_partner_id FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Sub-admin not found')
+
+        # Permission check
+        if not is_super:
+            if session_data.get('partner_id') != row['parent_partner_id']:
+                raise HTTPException(status_code=403, detail='Can only deactivate your own sub-admins')
+
+        cursor.execute(
+            'UPDATE sub_admin_accounts SET is_active = 0, updated_at = ? WHERE id = ?',
+            (datetime.now(timezone.utc).isoformat(), sub_admin_id)
+        )
+        conn.commit()
+
+        return {'status': 'ok'}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/approval_audit')
+async def get_approval_audit(
+    limit: int = 100,
+    offset: int = 0,
+    discord_tag: Optional[str] = None,
+    approver: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get approval audit history (super admin only).
+    Returns all approval/rejection actions with full details.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = 'SELECT * FROM approval_audit_log WHERE 1=1'
+        params = []
+
+        if discord_tag:
+            query += ' AND submission_discord_tag = ?'
+            params.append(discord_tag)
+
+        if approver:
+            query += ' AND approver_username = ?'
+            params.append(approver)
+
+        query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        audit_entries = [dict(row) for row in rows]
+
+        # Get total count for pagination
+        count_query = 'SELECT COUNT(*) FROM approval_audit_log WHERE 1=1'
+        count_params = []
+        if discord_tag:
+            count_query += ' AND submission_discord_tag = ?'
+            count_params.append(discord_tag)
+        if approver:
+            count_query += ' AND approver_username = ?'
+            count_params.append(approver)
+
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()[0]
+
+        return {
+            'entries': audit_entries,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
 # Get list of available discord tags (for dropdowns)
 @app.get('/api/discord_tags')
 async def list_discord_tags():
@@ -1950,6 +2865,462 @@ async def update_partner_theme(payload: dict, session: Optional[str] = Cookie(No
 
         conn.commit()
         return {'status': 'ok', 'theme': theme}
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# DATA RESTRICTIONS API ENDPOINTS
+# ============================================================================
+
+@app.get('/api/partner/my_systems')
+async def get_partner_systems(session: Optional[str] = Cookie(None)):
+    """Get all systems owned by the current partner with restriction status.
+
+    Returns systems tagged with the partner's discord_tag, including
+    whether each system has restrictions applied.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    # Get discord_tag - super admin sees all, partner sees their own
+    discord_tag = None
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+
+    if not is_super_admin:
+        discord_tag = session_data.get('discord_tag')
+        if not discord_tag:
+            raise HTTPException(status_code=403, detail='Partner discord_tag required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get systems with optional restriction data
+        if is_super_admin:
+            cursor.execute('''
+                SELECT s.id, s.name, s.galaxy, s.discord_tag, s.x, s.y, s.z,
+                       s.region_x, s.region_y, s.region_z, s.glyph_code,
+                       r.custom_name as region_name,
+                       dr.id as restriction_id,
+                       dr.is_hidden_from_public,
+                       dr.hidden_fields,
+                       dr.map_visibility
+                FROM systems s
+                LEFT JOIN regions r ON s.region_x = r.region_x
+                    AND s.region_y = r.region_y AND s.region_z = r.region_z
+                LEFT JOIN data_restrictions dr ON s.id = dr.system_id
+                ORDER BY s.discord_tag, s.name
+            ''')
+        else:
+            cursor.execute('''
+                SELECT s.id, s.name, s.galaxy, s.discord_tag, s.x, s.y, s.z,
+                       s.region_x, s.region_y, s.region_z, s.glyph_code,
+                       r.custom_name as region_name,
+                       dr.id as restriction_id,
+                       dr.is_hidden_from_public,
+                       dr.hidden_fields,
+                       dr.map_visibility
+                FROM systems s
+                LEFT JOIN regions r ON s.region_x = r.region_x
+                    AND s.region_y = r.region_y AND s.region_z = r.region_z
+                LEFT JOIN data_restrictions dr ON s.id = dr.system_id
+                WHERE s.discord_tag = ?
+                ORDER BY s.name
+            ''', (discord_tag,))
+
+        rows = cursor.fetchall()
+        systems = []
+        for row in rows:
+            system = {
+                'id': row['id'],
+                'name': row['name'],
+                'galaxy': row['galaxy'],
+                'discord_tag': row['discord_tag'],
+                'x': row['x'],
+                'y': row['y'],
+                'z': row['z'],
+                'region_x': row['region_x'],
+                'region_y': row['region_y'],
+                'region_z': row['region_z'],
+                'region_name': row['region_name'],
+                'glyph_code': row['glyph_code'],
+                'has_restriction': row['restriction_id'] is not None,
+                'restriction': None
+            }
+            if row['restriction_id']:
+                system['restriction'] = {
+                    'id': row['restriction_id'],
+                    'is_hidden_from_public': bool(row['is_hidden_from_public']),
+                    'hidden_fields': json.loads(row['hidden_fields'] or '[]'),
+                    'map_visibility': row['map_visibility'] or 'normal'
+                }
+            systems.append(system)
+
+        return {'systems': systems, 'total': len(systems)}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/data_restrictions')
+async def get_data_restrictions(session: Optional[str] = Cookie(None)):
+    """Get all data restrictions for the current partner's systems.
+
+    Super admin gets all restrictions, partners get their own discord_tag's restrictions.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    discord_tag = session_data.get('discord_tag')
+
+    if not is_super_admin and not discord_tag:
+        raise HTTPException(status_code=403, detail='Partner discord_tag required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if is_super_admin:
+            cursor.execute('''
+                SELECT dr.*, s.name as system_name, s.galaxy
+                FROM data_restrictions dr
+                JOIN systems s ON dr.system_id = s.id
+                ORDER BY dr.discord_tag, s.name
+            ''')
+        else:
+            cursor.execute('''
+                SELECT dr.*, s.name as system_name, s.galaxy
+                FROM data_restrictions dr
+                JOIN systems s ON dr.system_id = s.id
+                WHERE dr.discord_tag = ?
+                ORDER BY s.name
+            ''', (discord_tag,))
+
+        rows = cursor.fetchall()
+        restrictions = [{
+            'id': row['id'],
+            'system_id': row['system_id'],
+            'system_name': row['system_name'],
+            'galaxy': row['galaxy'],
+            'discord_tag': row['discord_tag'],
+            'is_hidden_from_public': bool(row['is_hidden_from_public']),
+            'hidden_fields': json.loads(row['hidden_fields'] or '[]'),
+            'map_visibility': row['map_visibility'] or 'normal',
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+            'created_by': row['created_by']
+        } for row in rows]
+
+        return {'restrictions': restrictions, 'total': len(restrictions)}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/data_restrictions')
+async def save_data_restriction(payload: dict, session: Optional[str] = Cookie(None)):
+    """Create or update a data restriction for a system.
+
+    Partners can only modify restrictions for systems with their discord_tag.
+    Super admin can modify any restriction.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    system_id = payload.get('system_id')
+    if not system_id:
+        raise HTTPException(status_code=400, detail='system_id is required')
+
+    is_hidden = payload.get('is_hidden_from_public', False)
+    hidden_fields = payload.get('hidden_fields', [])
+    map_visibility = payload.get('map_visibility', 'normal')
+
+    # Validate map_visibility
+    if map_visibility not in ['normal', 'point_only', 'hidden']:
+        raise HTTPException(status_code=400, detail='Invalid map_visibility value')
+
+    # Validate hidden_fields
+    valid_fields = list(RESTRICTABLE_FIELDS.keys())
+    for field in hidden_fields:
+        if field not in valid_fields:
+            raise HTTPException(status_code=400, detail=f'Invalid hidden_field: {field}')
+
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    partner_discord_tag = session_data.get('discord_tag')
+    username = session_data.get('username', 'Unknown')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Verify system exists and get its discord_tag
+        cursor.execute('SELECT id, discord_tag FROM systems WHERE id = ?', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            raise HTTPException(status_code=404, detail='System not found')
+
+        system_discord_tag = system['discord_tag']
+
+        # Permission check - partner can only modify their own systems
+        if not is_super_admin:
+            if system_discord_tag != partner_discord_tag:
+                raise HTTPException(status_code=403, detail='You can only modify restrictions for your own systems')
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Check if restriction already exists
+        cursor.execute('SELECT id FROM data_restrictions WHERE system_id = ?', (system_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            # Update existing restriction
+            cursor.execute('''
+                UPDATE data_restrictions
+                SET is_hidden_from_public = ?,
+                    hidden_fields = ?,
+                    map_visibility = ?,
+                    updated_at = ?
+                WHERE system_id = ?
+            ''', (1 if is_hidden else 0, json.dumps(hidden_fields), map_visibility, now, system_id))
+        else:
+            # Create new restriction
+            cursor.execute('''
+                INSERT INTO data_restrictions
+                (system_id, discord_tag, is_hidden_from_public, hidden_fields, map_visibility, created_at, updated_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (system_id, system_discord_tag, 1 if is_hidden else 0,
+                  json.dumps(hidden_fields), map_visibility, now, now, username))
+
+        conn.commit()
+
+        # Log activity
+        add_activity_log(
+            'restriction_updated',
+            f'Data restriction {"updated" if existing else "created"} for system ID {system_id}',
+            json.dumps({'system_id': system_id, 'is_hidden': is_hidden, 'map_visibility': map_visibility}),
+            username
+        )
+
+        return {'status': 'ok', 'message': 'Restriction saved'}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/data_restrictions/bulk')
+async def save_bulk_restrictions(payload: dict, session: Optional[str] = Cookie(None)):
+    """Apply the same restriction settings to multiple systems.
+
+    Partners can only modify restrictions for systems with their discord_tag.
+    Super admin can modify any restriction.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    system_ids = payload.get('system_ids', [])
+    if not system_ids or not isinstance(system_ids, list):
+        raise HTTPException(status_code=400, detail='system_ids array is required')
+
+    is_hidden = payload.get('is_hidden_from_public', False)
+    hidden_fields = payload.get('hidden_fields', [])
+    map_visibility = payload.get('map_visibility', 'normal')
+
+    # Validate map_visibility
+    if map_visibility not in ['normal', 'point_only', 'hidden']:
+        raise HTTPException(status_code=400, detail='Invalid map_visibility value')
+
+    # Validate hidden_fields
+    valid_fields = list(RESTRICTABLE_FIELDS.keys())
+    for field in hidden_fields:
+        if field not in valid_fields:
+            raise HTTPException(status_code=400, detail=f'Invalid hidden_field: {field}')
+
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    partner_discord_tag = session_data.get('discord_tag')
+    username = session_data.get('username', 'Unknown')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        updated = 0
+        created = 0
+        skipped = 0
+        now = datetime.now(timezone.utc).isoformat()
+
+        for system_id in system_ids:
+            # Verify system exists and get its discord_tag
+            cursor.execute('SELECT id, discord_tag FROM systems WHERE id = ?', (system_id,))
+            system = cursor.fetchone()
+            if not system:
+                skipped += 1
+                continue
+
+            system_discord_tag = system['discord_tag']
+
+            # Permission check - partner can only modify their own systems
+            if not is_super_admin and system_discord_tag != partner_discord_tag:
+                skipped += 1
+                continue
+
+            # Check if restriction already exists
+            cursor.execute('SELECT id FROM data_restrictions WHERE system_id = ?', (system_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute('''
+                    UPDATE data_restrictions
+                    SET is_hidden_from_public = ?,
+                        hidden_fields = ?,
+                        map_visibility = ?,
+                        updated_at = ?
+                    WHERE system_id = ?
+                ''', (1 if is_hidden else 0, json.dumps(hidden_fields), map_visibility, now, system_id))
+                updated += 1
+            else:
+                cursor.execute('''
+                    INSERT INTO data_restrictions
+                    (system_id, discord_tag, is_hidden_from_public, hidden_fields, map_visibility, created_at, updated_at, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (system_id, system_discord_tag, 1 if is_hidden else 0,
+                      json.dumps(hidden_fields), map_visibility, now, now, username))
+                created += 1
+
+        conn.commit()
+
+        # Log activity
+        add_activity_log(
+            'restriction_bulk_update',
+            f'Bulk restriction update: {created} created, {updated} updated, {skipped} skipped',
+            json.dumps({'system_ids': system_ids, 'is_hidden': is_hidden, 'map_visibility': map_visibility}),
+            username
+        )
+
+        return {'status': 'ok', 'created': created, 'updated': updated, 'skipped': skipped}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.delete('/api/data_restrictions/{system_id}')
+async def delete_data_restriction(system_id: int, session: Optional[str] = Cookie(None)):
+    """Remove a data restriction from a system (returns to public visibility).
+
+    Partners can only remove restrictions for systems with their discord_tag.
+    Super admin can remove any restriction.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    partner_discord_tag = session_data.get('discord_tag')
+    username = session_data.get('username', 'Unknown')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get the restriction and verify ownership
+        cursor.execute('''
+            SELECT dr.id, dr.discord_tag, s.name as system_name
+            FROM data_restrictions dr
+            JOIN systems s ON dr.system_id = s.id
+            WHERE dr.system_id = ?
+        ''', (system_id,))
+        restriction = cursor.fetchone()
+
+        if not restriction:
+            raise HTTPException(status_code=404, detail='Restriction not found')
+
+        # Permission check
+        if not is_super_admin and restriction['discord_tag'] != partner_discord_tag:
+            raise HTTPException(status_code=403, detail='You can only remove restrictions for your own systems')
+
+        cursor.execute('DELETE FROM data_restrictions WHERE system_id = ?', (system_id,))
+        conn.commit()
+
+        # Log activity
+        add_activity_log(
+            'restriction_removed',
+            f'Data restriction removed from system: {restriction["system_name"]}',
+            json.dumps({'system_id': system_id}),
+            username
+        )
+
+        return {'status': 'ok', 'message': 'Restriction removed'}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/data_restrictions/bulk_remove')
+async def bulk_remove_restrictions(payload: dict, session: Optional[str] = Cookie(None)):
+    """Remove restrictions from multiple systems at once.
+
+    Partners can only remove restrictions for systems with their discord_tag.
+    Super admin can remove any restriction.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    system_ids = payload.get('system_ids', [])
+    if not system_ids or not isinstance(system_ids, list):
+        raise HTTPException(status_code=400, detail='system_ids array is required')
+
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    partner_discord_tag = session_data.get('discord_tag')
+    username = session_data.get('username', 'Unknown')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        removed = 0
+        skipped = 0
+
+        for system_id in system_ids:
+            # Get the restriction and verify ownership
+            cursor.execute('SELECT id, discord_tag FROM data_restrictions WHERE system_id = ?', (system_id,))
+            restriction = cursor.fetchone()
+
+            if not restriction:
+                skipped += 1
+                continue
+
+            # Permission check
+            if not is_super_admin and restriction['discord_tag'] != partner_discord_tag:
+                skipped += 1
+                continue
+
+            cursor.execute('DELETE FROM data_restrictions WHERE system_id = ?', (system_id,))
+            removed += 1
+
+        conn.commit()
+
+        # Log activity
+        add_activity_log(
+            'restriction_bulk_remove',
+            f'Bulk restriction removal: {removed} removed, {skipped} skipped',
+            json.dumps({'system_ids': system_ids}),
+            username
+        )
+
+        return {'status': 'ok', 'removed': removed, 'skipped': skipped}
     finally:
         if conn:
             conn.close()
@@ -2346,121 +3717,124 @@ async def api_systems():
 
 # NOTE: This route MUST be defined BEFORE /api/systems/{system_id} to avoid route shadowing
 @app.get('/api/systems/search')
-async def api_search(q: str = '', page: int = 1, limit: int = 10, include_planets: bool = True):
-    """Search systems by name or planet name with pagination.
+async def api_search(q: str = '', limit: int = 20, session: Optional[str] = Cookie(None)):
+    """Search systems by name, glyph code, galaxy, or description.
+
+    Uses efficient SQL LIKE queries and returns results with region info.
+    Applies data restrictions based on viewer permissions.
 
     Args:
-        q: Search query (matches system name or planet name)
-        page: Page number (1-indexed)
-        limit: Results per page (default 10, max 50)
-        include_planets: If True, also search planet names (default True)
+        q: Search query (matches system name, glyph_code, galaxy, description)
+        limit: Max results to return (default 20, max 50)
+        session: Session cookie for permission checking
 
     Returns:
         {
-            "results": [...],
-            "total": 45,
-            "page": 1,
-            "limit": 10,
-            "total_pages": 5
+            "results": [
+                {
+                    "id": "system-uuid",
+                    "name": "System Name",
+                    "region_x": 2, "region_y": 45, "region_z": -12,
+                    "region_name": "Widjir",
+                    "galaxy": "Euclid",
+                    "glyph_code": "1234...",
+                    "planet_count": 4,
+                    "discord_tag": "Haven"
+                }
+            ],
+            "total": 42,
+            "query": "search term"
         }
     """
-    import math
+    session_data = get_session(session)
+    q = q.strip()
 
-    q = q.strip().lower()
+    if not q:
+        return {'results': [], 'total': 0, 'query': ''}
+
     limit = max(1, min(limit, 50))  # Clamp between 1 and 50
-    page = max(1, page)
 
-    # Prefer DB search
+    conn = None
     try:
         db_path = get_db_path()
-        if db_path.exists():
-            systems = load_systems_from_db()
+        if not db_path.exists():
+            return {'results': [], 'total': 0, 'query': q}
 
-            # Filter by query
-            if q:
-                filtered = []
-                for s in systems:
-                    # Check system name
-                    if q in s.get('name', '').lower():
-                        filtered.append(s)
-                        continue
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-                    # Check planet names if include_planets is enabled
-                    if include_planets:
-                        planets = s.get('planets', [])
-                        planet_match = False
-                        for p in planets:
-                            if q in p.get('name', '').lower():
-                                planet_match = True
-                                break
-                        if planet_match:
-                            filtered.append(s)
-            else:
-                filtered = systems
+        # Search pattern for LIKE queries
+        search_pattern = f'%{q}%'
 
-            # Calculate pagination
-            total = len(filtered)
-            total_pages = math.ceil(total / limit) if total > 0 else 1
-            start_idx = (page - 1) * limit
-            end_idx = start_idx + limit
-            paginated = filtered[start_idx:end_idx]
+        # Efficient SQL search across multiple fields
+        # Fetch more than limit to account for filtering by data restrictions
+        cursor.execute('''
+            SELECT s.id, s.name, s.region_x, s.region_y, s.region_z,
+                   s.galaxy, s.glyph_code, s.discord_tag, s.star_type,
+                   r.custom_name as region_name,
+                   (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+            WHERE s.name LIKE ? COLLATE NOCASE
+               OR s.glyph_code LIKE ? COLLATE NOCASE
+               OR s.galaxy LIKE ? COLLATE NOCASE
+               OR s.description LIKE ? COLLATE NOCASE
+            ORDER BY
+                CASE WHEN LOWER(s.name) = LOWER(?) THEN 0
+                     WHEN LOWER(s.name) LIKE LOWER(?) THEN 1
+                     ELSE 2
+                END,
+                s.name ASC
+            LIMIT ?
+        ''', (search_pattern, search_pattern, search_pattern, search_pattern,
+              q, f'{q}%', limit * 2))
 
-            return {
-                'results': paginated,
-                'total': total,
-                'page': page,
-                'limit': limit,
-                'total_pages': total_pages
-            }
-    except Exception:
-        pass
+        rows = cursor.fetchall()
+        systems = [dict(row) for row in rows]
 
-    # Fallback to cache
-    async with _systems_lock:
-        systems = list(_systems_cache.values())
+        # Apply data restrictions
+        systems = apply_data_restrictions(systems, session_data)
 
-    if q:
-        filtered = []
-        for s in systems:
-            if q in s.get('name', '').lower():
-                filtered.append(s)
-                continue
-            if include_planets:
-                planets = s.get('planets', [])
-                for p in planets:
-                    if q in p.get('name', '').lower():
-                        filtered.append(s)
-                        break
-    else:
-        filtered = systems
+        # Limit to requested amount
+        results = systems[:limit]
 
-    total = len(filtered)
-    total_pages = math.ceil(total / limit) if total > 0 else 1
-    start_idx = (page - 1) * limit
-    end_idx = start_idx + limit
-    paginated = filtered[start_idx:end_idx]
+        return {
+            'results': results,
+            'total': len(results),
+            'query': q
+        }
 
-    return {
-        'results': paginated,
-        'total': total,
-        'page': page,
-        'limit': limit,
-        'total_pages': total_pages
-    }
+    except Exception as e:
+        logger.error(f"Error searching systems: {e}")
+        return {'results': [], 'total': 0, 'query': q, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get('/api/systems_by_region')
-async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
+async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0,
+                                 reality: str = None,
+                                 galaxy: str = None,
+                                 for_map: bool = False,
+                                 session: Optional[str] = Cookie(None)):
     """Return all systems within a specific region.
 
     Args:
         rx: Region X coordinate (0-4095, centered at 2048)
         ry: Region Y coordinate (0-255, centered at 128)
         rz: Region Z coordinate (0-4095, centered at 2048)
+        reality: Optional filter - 'Normal' or 'Permadeath' (None for all)
+        galaxy: Optional filter - galaxy name like 'Euclid' (None for all)
+        for_map: If True, applies map visibility restrictions
+        session: Session cookie for permission checking
 
     Returns:
         Dictionary with systems list and region info
     """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
@@ -2468,14 +3842,27 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Query systems by region coordinates
-            cursor.execute('''
+            # Build WHERE clause with optional filters
+            where_clauses = ["s.region_x = ?", "s.region_y = ?", "s.region_z = ?"]
+            params = [rx, ry, rz]
+
+            if reality:
+                where_clauses.append("s.reality = ?")
+                params.append(reality)
+            if galaxy:
+                where_clauses.append("s.galaxy = ?")
+                params.append(galaxy)
+
+            where_sql = " AND ".join(where_clauses)
+
+            # Query systems by region coordinates with optional filters
+            cursor.execute(f'''
                 SELECT s.*,
                     (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count
                 FROM systems s
-                WHERE s.region_x = ? AND s.region_y = ? AND s.region_z = ?
+                WHERE {where_sql}
                 ORDER BY s.name
-            ''', (rx, ry, rz))
+            ''', params)
 
             rows = cursor.fetchall()
             systems = []
@@ -2490,6 +3877,9 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
                 system['planets'] = [dict(p) for p in planets_rows]
 
                 systems.append(system)
+
+            # Apply data restrictions
+            systems = apply_data_restrictions(systems, session_data, for_map=for_map)
 
             return {
                 'region': {'x': rx, 'y': ry, 'z': rz},
@@ -2507,6 +3897,9 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
             if s.get('region_x') == rx and s.get('region_y') == ry and s.get('region_z') == rz
         ]
 
+        # Apply data restrictions
+        systems = apply_data_restrictions(systems, session_data, for_map=for_map)
+
         return {
             'region': {'x': rx, 'y': ry, 'z': rz},
             'system_count': len(systems),
@@ -2522,19 +3915,23 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0):
 
 
 @app.get('/api/regions/grouped')
-async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0):
+async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0,
+                               session: Optional[str] = Cookie(None)):
     """Return all regions with their systems grouped together.
 
     Performance-optimized version:
     - Uses JOINs instead of N+1 queries
     - Optional pagination with page/limit params
     - include_systems=false returns just region summaries (much faster)
+    - Applies data restrictions based on viewer permissions
 
     Returns regions ordered by:
     1. "Sea of Gidzenuf" (home system) always first
     2. Named regions sorted by system count descending
     3. Unnamed regions sorted by system count descending
     """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
@@ -2582,6 +3979,30 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
 
         if not include_systems:
             # Fast path: return just region summaries without nested data
+            # BUT we need accurate counts, so fetch minimal system data for restriction checks
+            region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
+
+            if region_coords:
+                # Build WHERE clause for all regions
+                placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
+                params = [coord for region in region_coords for coord in region]
+
+                cursor.execute(f'''
+                    SELECT id, discord_tag, region_x, region_y, region_z FROM systems
+                    WHERE {placeholders}
+                ''', params)
+
+                all_systems = [dict(row) for row in cursor.fetchall()]
+
+                # Apply data restrictions to get accurate visible systems
+                visible_systems = apply_data_restrictions(all_systems, session_data)
+
+                # Count visible systems per region
+                visible_counts = {}
+                for system in visible_systems:
+                    key = (system['region_x'], system['region_y'], system['region_z'])
+                    visible_counts[key] = visible_counts.get(key, 0) + 1
+
             for region_row in region_rows:
                 region = dict(region_row)
                 rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
@@ -2591,10 +4012,15 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 else:
                     region['display_name'] = f"Region ({rx}, {ry}, {rz})"
 
+                # Use accurate visible count
+                region['system_count'] = visible_counts.get((rx, ry, rz), 0) if region_coords else 0
                 region['systems'] = []  # Empty for now, lazy-load via separate endpoint
                 regions.append(region)
 
-            return {'regions': regions, 'total_regions': total_regions}
+            # Filter out regions with no visible systems
+            regions = [r for r in regions if r['system_count'] > 0]
+
+            return {'regions': regions, 'total_regions': len(regions)}
 
         # STEP 2: Load all systems for all regions in ONE query
         region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
@@ -2691,13 +4117,17 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             for system in all_systems:
                 system['discoveries'] = []
 
-        # STEP 6: Build final region objects
+        # STEP 6: Build final region objects with data restrictions applied
         for region_row in region_rows:
             region = dict(region_row)
             rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
 
-            region['systems'] = systems_by_region.get((rx, ry, rz), [])
-            region['system_count'] = len(region['systems'])
+            # Get systems for this region and apply data restrictions
+            region_systems = systems_by_region.get((rx, ry, rz), [])
+            region_systems = apply_data_restrictions(region_systems, session_data)
+
+            region['systems'] = region_systems
+            region['system_count'] = len(region_systems)  # Recalculate after filtering
 
             if region['custom_name']:
                 region['display_name'] = region['custom_name']
@@ -2751,8 +4181,12 @@ async def api_list_regions():
 
 
 @app.get('/api/regions/{rx}/{ry}/{rz}')
-async def api_get_region(rx: int, ry: int, rz: int):
-    """Get region info including custom name if set and any pending submissions."""
+async def api_get_region(rx: int, ry: int, rz: int, session: Optional[str] = Cookie(None)):
+    """Get region info including custom name if set and any pending submissions.
+    System count respects data restrictions (hidden systems are not counted for public).
+    """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
@@ -2777,13 +4211,16 @@ async def api_get_region(rx: int, ry: int, rz: int):
         row = cursor.fetchone()
         custom_name = row['custom_name'] if row else None
 
-        # Get system count in this region
+        # Get systems in this region and apply data restrictions for accurate count
         cursor.execute('''
-            SELECT COUNT(*) as count FROM systems
+            SELECT id, discord_tag FROM systems
             WHERE region_x = ? AND region_y = ? AND region_z = ?
         ''', (rx, ry, rz))
-        count_row = cursor.fetchone()
-        system_count = count_row['count'] if count_row else 0
+        systems = [dict(row) for row in cursor.fetchall()]
+
+        # Apply data restrictions to get accurate visible count
+        visible_systems = apply_data_restrictions(systems, session_data)
+        system_count = len(visible_systems)
 
         # Check for pending name submission
         cursor.execute('''
@@ -2811,7 +4248,8 @@ async def api_get_region(rx: int, ry: int, rz: int):
 
 
 @app.get('/api/regions/{rx}/{ry}/{rz}/systems')
-async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: int = 50, include_planets: bool = False):
+async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: int = 50,
+                              include_planets: bool = False, session: Optional[str] = Cookie(None)):
     """Get paginated systems for a specific region (lazy-loading endpoint).
 
     Args:
@@ -2819,38 +4257,45 @@ async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: in
         page: Page number (1-indexed)
         limit: Systems per page (default 50, max 200)
         include_planets: If true, include planets and moons (slower)
+        session: Session cookie for permission checking
 
     Returns systems ordered by created_at, with optional pagination.
+    Applies data restrictions based on viewer permissions.
     """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
         if not db_path.exists():
             return {'systems': [], 'total': 0, 'page': page, 'limit': limit}
 
-        # Cap limit to prevent huge responses
-        limit = min(limit, 200)
+        # Cap limit to prevent huge responses (500 max for region views)
+        # Use limit=0 to mean "no limit" (still capped at 500)
+        if limit == 0:
+            limit = 500
+        else:
+            limit = min(limit, 500)
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get total count for this region
-        cursor.execute('''
-            SELECT COUNT(*) as total FROM systems
-            WHERE region_x = ? AND region_y = ? AND region_z = ?
-        ''', (rx, ry, rz))
-        total = cursor.fetchone()['total']
-
-        # Get paginated systems
-        offset = (page - 1) * limit
+        # Get ALL systems for this region first (we need to filter before pagination)
         cursor.execute('''
             SELECT * FROM systems
             WHERE region_x = ? AND region_y = ? AND region_z = ?
             ORDER BY created_at ASC NULLS FIRST, id ASC
-            LIMIT ? OFFSET ?
-        ''', (rx, ry, rz, limit, offset))
+        ''', (rx, ry, rz))
 
-        systems = [dict(row) for row in cursor.fetchall()]
+        all_systems = [dict(row) for row in cursor.fetchall()]
+
+        # Apply data restrictions BEFORE pagination
+        all_systems = apply_data_restrictions(all_systems, session_data)
+
+        # Now paginate the filtered results
+        total = len(all_systems)
+        offset = (page - 1) * limit
+        systems = all_systems[offset:offset + limit]
 
         if include_planets and systems:
             # Batch load planets for all systems
@@ -2918,11 +4363,14 @@ async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: in
 
 
 @app.get('/api/systems/{system_id}/planets')
-async def api_system_planets(system_id: str):
+async def api_system_planets(system_id: str, session: Optional[str] = Cookie(None)):
     """Get all planets and moons for a specific system (lazy-loading endpoint).
 
     Returns planets with their moons nested, using efficient batch queries.
+    Applies data restrictions based on viewer permissions.
     """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
@@ -2931,6 +4379,32 @@ async def api_system_planets(system_id: str):
 
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # Get the system to check restrictions
+        cursor.execute('SELECT id, discord_tag FROM systems WHERE id = ?', (system_id,))
+        system_row = cursor.fetchone()
+        if not system_row:
+            return {'planets': [], 'system_id': system_id}
+
+        sys_id = system_row['id']
+        system_discord_tag = system_row['discord_tag']
+
+        # Check if viewer can bypass restrictions
+        can_bypass = can_bypass_restriction(session_data, system_discord_tag)
+
+        # Check for restrictions
+        restriction = get_restriction_for_system(sys_id) if not can_bypass else None
+
+        # If system is hidden, return empty (shouldn't happen if they got here, but safety check)
+        if restriction and restriction.get('is_hidden_from_public'):
+            return {'planets': [], 'system_id': system_id}
+
+        # If planets are restricted, return empty or count only
+        if restriction and 'planets' in restriction.get('hidden_fields', []):
+            # Get count only
+            cursor.execute('SELECT COUNT(*) as count FROM planets WHERE system_id = ?', (system_id,))
+            count = cursor.fetchone()['count']
+            return {'planets': [], 'system_id': system_id, 'planet_count_only': count}
 
         # Get all planets for this system
         cursor.execute('''
@@ -2959,6 +4433,12 @@ async def api_system_planets(system_id: str):
             # Attach moons to planets
             for planet in planets:
                 planet['moons'] = moons_by_planet.get(planet['id'], [])
+
+            # Apply base_location restriction if needed
+            if restriction and 'base_location' in restriction.get('hidden_fields', []):
+                for planet in planets:
+                    if 'base_location' in planet:
+                        del planet['base_location']
         else:
             for planet in planets:
                 planet['moons'] = []
@@ -3342,8 +4822,13 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
 
 
 @app.get('/api/systems/{system_id}')
-async def get_system(system_id: str):
-    """Return a single system by id or name, including nested planets, moons, and space station."""
+async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
+    """Return a single system by id or name, including nested planets, moons, and space station.
+
+    Applies data restrictions based on viewer permissions.
+    """
+    session_data = get_session(session)
+
     conn = None
     try:
         db_path = get_db_path()
@@ -3361,6 +4846,17 @@ async def get_system(system_id: str):
                 raise HTTPException(status_code=404, detail='System not found')
             system = dict(row)
             sys_id = system.get('id')
+            system_discord_tag = system.get('discord_tag')
+
+            # Check if viewer can bypass restrictions for this system
+            can_bypass = can_bypass_restriction(session_data, system_discord_tag)
+
+            # Check for restrictions
+            restriction = get_restriction_for_system(sys_id) if not can_bypass else None
+
+            # If system is hidden and viewer cannot bypass, return 404
+            if restriction and restriction.get('is_hidden_from_public'):
+                raise HTTPException(status_code=404, detail='System not found')
 
             # planets
             cursor.execute('SELECT * FROM planets WHERE system_id = ?', (sys_id,))
@@ -3380,6 +4876,10 @@ async def get_system(system_id: str):
             else:
                 system['space_station'] = None
 
+            # Apply field restrictions if applicable
+            if restriction and restriction.get('hidden_fields'):
+                system = apply_field_restrictions(system, restriction['hidden_fields'])
+
             return system
 
         # JSON fallback
@@ -3387,6 +4887,16 @@ async def get_system(system_id: str):
         systems = data.get('systems', [])
         for s in systems:
             if s.get('id') == system_id or s.get('name') == system_id:
+                # Apply restrictions for JSON fallback too
+                system_discord_tag = s.get('discord_tag')
+                can_bypass = can_bypass_restriction(session_data, system_discord_tag)
+                if not can_bypass:
+                    restriction = get_restriction_for_system(s.get('id'))
+                    if restriction:
+                        if restriction.get('is_hidden_from_public'):
+                            raise HTTPException(status_code=404, detail='System not found')
+                        if restriction.get('hidden_fields'):
+                            s = apply_field_restrictions(s, restriction['hidden_fields'])
                 return s
         raise HTTPException(status_code=404, detail='System not found')
     except HTTPException:
@@ -3502,6 +5012,18 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
     if not name:
         raise HTTPException(status_code=400, detail='Name required')
 
+    # Validate and normalize reality (default to Normal)
+    reality = payload.get('reality', 'Normal')
+    if not validate_reality(reality):
+        raise HTTPException(status_code=400, detail="Reality must be 'Normal' or 'Permadeath'")
+    payload['reality'] = reality
+
+    # Validate galaxy if provided
+    galaxy = payload.get('galaxy', 'Euclid')
+    if galaxy and not validate_galaxy(galaxy):
+        raise HTTPException(status_code=400, detail=f"Unknown galaxy: {galaxy}")
+    payload['galaxy'] = galaxy
+
     # Get system ID if provided (for updates)
     system_id = payload.get('id')
 
@@ -3608,7 +5130,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # Update existing system (including name for renames and new NMS fields)
             cursor.execute('''
                 UPDATE systems SET
-                    name = ?, galaxy = ?, x = ?, y = ?, z = ?,
+                    name = ?, galaxy = ?, reality = ?, x = ?, y = ?, z = ?,
                     star_x = ?, star_y = ?, star_z = ?,
                     description = ?,
                     glyph_code = ?, glyph_planet = ?, glyph_solar_system = ?,
@@ -3619,6 +5141,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             ''', (
                 name,
                 payload.get('galaxy', 'Euclid'),
+                payload.get('reality', 'Normal'),
                 payload.get('x', 0),
                 payload.get('y', 0),
                 payload.get('z', 0),
@@ -3650,14 +5173,15 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             sys_id = str(uuid.uuid4())
             # Insert new system (including new NMS fields and discord_tag)
             cursor.execute('''
-                INSERT INTO systems (id, name, galaxy, x, y, z, star_x, star_y, star_z, description,
+                INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
                 payload.get('galaxy', 'Euclid'),
+                payload.get('reality', 'Normal'),
                 payload.get('x', 0),
                 payload.get('y', 0),
                 payload.get('z', 0),
@@ -3972,10 +5496,6 @@ async def get_map():
     """
     mapfile = HAVEN_UI_DIR / 'dist' / 'VH-Map-ThreeJS.html'
 
-    # Fallback to old map if ThreeJS version doesn't exist
-    if not mapfile.exists():
-        mapfile = HAVEN_UI_DIR / 'dist' / 'VH-Map.html'
-
     if not mapfile.exists():
         return HTMLResponse('<h1>Map Not Available</h1>')
 
@@ -4001,14 +5521,19 @@ async def get_haven_ui_map():
 
 
 @app.get('/map/region')
-async def get_region_map(rx: int = 0, ry: int = 0, rz: int = 0):
+async def get_region_map(rx: int = 0, ry: int = 0, rz: int = 0,
+                          session: Optional[str] = Cookie(None)):
     """Serve the Region View - shows all star systems within a specific region.
 
     URL parameters:
         rx, ry, rz: Region coordinates
 
     Example: /map/region?rx=2047&ry=128&rz=2048
+
+    Applies map visibility restrictions based on viewer permissions.
     """
+    session_data = get_session(session)
+
     mapfile = HAVEN_UI_DIR / 'dist' / 'VH-Map-Region.html'
 
     if not mapfile.exists():
@@ -4045,6 +5570,9 @@ async def get_region_map(rx: int = 0, ry: int = 0, rz: int = 0):
                 system['planets'] = [dict(p) for p in planets_rows]
                 systems.append(system)
             conn.close()
+
+            # Apply map visibility restrictions
+            systems = apply_data_restrictions(systems, session_data, for_map=True)
 
             region_data = {
                 'region_x': rx,
@@ -4568,13 +6096,14 @@ async def import_csv(file: UploadFile = File(...), session: Optional[str] = Cook
 
                 # Insert system
                 cursor.execute('''
-                    INSERT INTO systems (id, name, galaxy, x, y, z, star_x, star_y, star_z, description,
+                    INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                         glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z, discord_tag)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     sys_id,
                     system_name,
                     'Euclid',  # Galaxy is always Euclid for now
+                    'Normal',  # Reality defaults to Normal
                     x,
                     y,
                     z,
@@ -5156,13 +6685,16 @@ async def submit_system(
             # Glyph code matches existing system - treat as edit
             edit_system_id = existing_glyph_system['id']
 
-        # Insert submission with source tracking, discord_tag, personal_discord_username, and edit tracking
+        # Get submitter identity for self-approval detection
+        submitter_identity = get_submitter_identity(session)
+
+        # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            submitted_by,
+            submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
             datetime.now(timezone.utc).isoformat(),
             json.dumps(payload),
@@ -5173,7 +6705,9 @@ async def submit_system(
             api_key_name,
             discord_tag,
             personal_discord_username,
-            edit_system_id
+            edit_system_id,
+            submitter_identity['account_id'],
+            submitter_identity['type'] if submitter_identity['type'] != 'anonymous' else None
         ))
 
         submission_id = cursor.lastrowid
@@ -5257,7 +6791,8 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
             # Super admin sees ALL submissions with discord_tag visible
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username, edit_system_id
+                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
+                       personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                 FROM pending_systems
                 ORDER BY
                     CASE status
@@ -5268,10 +6803,11 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
                     submission_date DESC
             ''')
         else:
-            # Partners only see submissions tagged with their discord_tag
+            # Partners and sub-admins only see submissions tagged with their discord_tag
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag, personal_discord_username, edit_system_id
+                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
+                       personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                 FROM pending_systems
                 WHERE discord_tag = ?
                 ORDER BY
@@ -5381,10 +6917,21 @@ async def get_pending_system_details(submission_id: int, session: Optional[str] 
 async def approve_system(submission_id: int, session: Optional[str] = Cookie(None)):
     """
     Approve a pending system submission and add it to the main database (admin only).
+    Self-approval is blocked for non-super-admin users.
     """
     # Verify admin session
     if not verify_session(session):
         raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    # Get current user identity for self-approval check and audit
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
 
     conn = None
     try:
@@ -5406,6 +6953,30 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 status_code=400,
                 detail=f"Submission already {submission['status']}"
             )
+
+        # SELF-APPROVAL BLOCKING
+        # Super admin can approve anything (trusted role)
+        # Partners and sub-admins cannot approve their own submissions
+        if current_user_type != 'super_admin':
+            submitter_account_id = submission.get('submitter_account_id')
+            submitter_account_type = submission.get('submitter_account_type')
+            submitted_by = submission.get('submitted_by')
+
+            is_self_submission = False
+
+            # Match by account ID if available (most reliable)
+            if submitter_account_id is not None and submitter_account_type:
+                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                    is_self_submission = True
+            # Fallback: match by username (for legacy submissions without account tracking)
+            elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                is_self_submission = True
+
+            if is_self_submission:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You cannot approve your own submission. Another admin must review it."
+                )
 
         # Parse system data
         system_data = json.loads(submission['system_data'])
@@ -5596,15 +7167,16 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
 
             # INSERT new system (including new companion app fields and discord_tag)
             cursor.execute('''
-                INSERT INTO systems (id, name, galaxy, x, y, z, star_x, star_y, star_z, description,
+                INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
                 system_data.get('galaxy', 'Euclid'),
+                system_data.get('reality', 'Normal'),
                 system_data.get('x', 0),
                 system_data.get('y', 0),
                 system_data.get('z', 0),
@@ -5728,24 +7300,47 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 station.get('buy_percent') or 50
             ))
 
-        # Mark submission as approved
+        # Mark submission as approved (use actual username instead of generic 'admin')
         cursor.execute('''
             UPDATE pending_systems
             SET status = ?, reviewed_by = ?, review_date = ?
             WHERE id = ?
-        ''', ('approved', 'admin', datetime.now(timezone.utc).isoformat(), submission_id))
+        ''', ('approved', current_username, datetime.now(timezone.utc).isoformat(), submission_id))
+
+        # Add to approval audit log for full tracking
+        cursor.execute('''
+            INSERT INTO approval_audit_log
+            (timestamp, action, submission_type, submission_id, submission_name,
+             approver_username, approver_type, approver_account_id, approver_discord_tag,
+             submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            'approved',
+            'system',
+            submission_id,
+            system_data.get('name'),
+            current_username,
+            current_user_type,
+            current_account_id,
+            session_data.get('discord_tag'),
+            submission.get('submitted_by'),
+            submission.get('submitter_account_id'),
+            submission.get('submitter_account_type'),
+            submission.get('discord_tag')
+        ))
 
         conn.commit()
 
         action = 'updated' if is_edit else 'added'
-        logger.info(f"Approved system submission: '{system_data.get('name')}' (ID: {submission_id}) - {action}")
+        logger.info(f"Approved system submission: '{system_data.get('name')}' (ID: {submission_id}) - {action} by {current_username}")
 
         # Add activity log
         add_activity_log(
             'system_approved',
             f"System '{system_data.get('name')}' approved and {action}",
-            details=f"Galaxy: {system_data.get('galaxy', 'Euclid')}",
-            user_name='Admin'
+            details=f"Galaxy: {system_data.get('galaxy', 'Euclid')}, Approver: {current_username}",
+            user_name=current_username
         )
 
         return {
@@ -5770,10 +7365,21 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
 async def reject_system(submission_id: int, payload: dict, session: Optional[str] = Cookie(None)):
     """
     Reject a pending system submission with reason (admin only).
+    Self-rejection is blocked for non-super-admin users (same as approval).
     """
     # Verify admin session
     if not verify_session(session):
         raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    # Get current user identity for self-rejection check and audit
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
 
     reason = payload.get('reason', 'No reason provided')
 
@@ -5784,37 +7390,83 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
         cursor = conn.cursor()
 
         # Check submission exists and is pending
-        cursor.execute('SELECT status, system_name FROM pending_systems WHERE id = ?', (submission_id,))
+        cursor.execute('SELECT * FROM pending_systems WHERE id = ?', (submission_id,))
         row = cursor.fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail="Submission not found")
 
-        status, system_name = row
+        submission = dict(row)
+        system_name = submission.get('system_name')
 
-        if status != 'pending':
+        if submission['status'] != 'pending':
             raise HTTPException(
                 status_code=400,
-                detail=f"Submission already {status}"
+                detail=f"Submission already {submission['status']}"
             )
 
-        # Mark as rejected
+        # SELF-REJECTION BLOCKING (same logic as approval)
+        # Super admin can reject anything (trusted role)
+        if current_user_type != 'super_admin':
+            submitter_account_id = submission.get('submitter_account_id')
+            submitter_account_type = submission.get('submitter_account_type')
+            submitted_by = submission.get('submitted_by')
+
+            is_self_submission = False
+
+            if submitter_account_id is not None and submitter_account_type:
+                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                    is_self_submission = True
+            elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                is_self_submission = True
+
+            if is_self_submission:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You cannot reject your own submission. Another admin must review it."
+                )
+
+        # Mark as rejected (use actual username)
         cursor.execute('''
             UPDATE pending_systems
             SET status = ?, reviewed_by = ?, review_date = ?, rejection_reason = ?
             WHERE id = ?
-        ''', ('rejected', 'admin', datetime.now(timezone.utc).isoformat(), reason, submission_id))
+        ''', ('rejected', current_username, datetime.now(timezone.utc).isoformat(), reason, submission_id))
+
+        # Add to approval audit log
+        cursor.execute('''
+            INSERT INTO approval_audit_log
+            (timestamp, action, submission_type, submission_id, submission_name,
+             approver_username, approver_type, approver_account_id, approver_discord_tag,
+             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            'rejected',
+            'system',
+            submission_id,
+            system_name,
+            current_username,
+            current_user_type,
+            current_account_id,
+            session_data.get('discord_tag'),
+            submission.get('submitted_by'),
+            submission.get('submitter_account_id'),
+            submission.get('submitter_account_type'),
+            reason,
+            submission.get('discord_tag')
+        ))
 
         conn.commit()
 
-        logger.info(f"Rejected system submission: '{system_name}' (ID: {submission_id}). Reason: {reason}")
+        logger.info(f"Rejected system submission: '{system_name}' (ID: {submission_id}) by {current_username}. Reason: {reason}")
 
         # Add activity log
         add_activity_log(
             'system_rejected',
             f"System '{system_name}' rejected",
-            details=reason,
-            user_name='Admin'
+            details=f"Reason: {reason}, Reviewer: {current_username}",
+            user_name=current_username
         )
 
         return {
@@ -5828,6 +7480,609 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
     except Exception as e:
         logger.error(f"Error rejecting submission: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reject submission: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# =============================================================================
+# BATCH APPROVAL/REJECTION ENDPOINTS
+# =============================================================================
+
+@app.post('/api/approve_systems/batch')
+async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Batch approve multiple pending system submissions (admin only).
+    Requires 'batch_approvals' feature for non-super-admins.
+    Self-submissions are skipped (not failed) for non-super-admin users.
+    """
+    # Verify admin session
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    enabled_features = session_data.get('enabled_features', [])
+
+    # Permission check: super admin OR has batch_approvals feature
+    is_super = current_user_type == 'super_admin'
+    if not is_super and 'batch_approvals' not in enabled_features:
+        raise HTTPException(status_code=403, detail="Batch approvals permission required")
+
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
+
+    submission_ids = payload.get('submission_ids', [])
+    if not submission_ids:
+        raise HTTPException(status_code=400, detail="No submission IDs provided")
+
+    results = {
+        'approved': [],
+        'failed': [],
+        'skipped': []
+    }
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                # Get submission
+                cursor.execute('SELECT * FROM pending_systems WHERE id = ?', (submission_id,))
+                row = cursor.fetchone()
+
+                if not row:
+                    results['failed'].append({
+                        'id': submission_id,
+                        'name': None,
+                        'error': 'Submission not found'
+                    })
+                    continue
+
+                submission = dict(row)
+                system_name = submission.get('system_name')
+
+                if submission['status'] != 'pending':
+                    results['skipped'].append({
+                        'id': submission_id,
+                        'name': system_name,
+                        'reason': f"Already {submission['status']}"
+                    })
+                    continue
+
+                # Self-approval check (skip for non-super-admins)
+                if not is_super:
+                    submitter_account_id = submission.get('submitter_account_id')
+                    submitter_account_type = submission.get('submitter_account_type')
+                    submitted_by = submission.get('submitted_by')
+
+                    is_self_submission = False
+                    if submitter_account_id is not None and submitter_account_type:
+                        if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                            is_self_submission = True
+                    elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                        is_self_submission = True
+
+                    if is_self_submission:
+                        results['skipped'].append({
+                            'id': submission_id,
+                            'name': system_name,
+                            'reason': 'Self-submission'
+                        })
+                        continue
+
+                # Parse and process system data
+                system_data = json.loads(submission['system_data'])
+                if not system_data.get('glyph_code'):
+                    system_data['glyph_code'] = None
+
+                # Calculate star and region coordinates
+                star_x, star_y, star_z = None, None, None
+                region_x, region_y, region_z = None, None, None
+
+                submission_x = system_data.get('x')
+                submission_y = system_data.get('y')
+                submission_z = system_data.get('z')
+                original_glyph = system_data.get('glyph_code')
+
+                if original_glyph:
+                    try:
+                        decoded = decode_glyph_to_coords(original_glyph)
+                        glyph_x, glyph_y, glyph_z = decoded['x'], decoded['y'], decoded['z']
+
+                        coords_match = True
+                        if submission_x is not None and submission_y is not None and submission_z is not None:
+                            if (abs(glyph_x - submission_x) > 1 or
+                                abs(glyph_y - submission_y) > 1 or
+                                abs(glyph_z - submission_z) > 1):
+                                coords_match = False
+
+                        if coords_match:
+                            star_x, star_y, star_z = decoded['star_x'], decoded['star_y'], decoded['star_z']
+                            region_x = decoded.get('region_x')
+                            region_y = decoded.get('region_y')
+                            region_z = decoded.get('region_z')
+                        else:
+                            planet_idx = decoded.get('planet', 0)
+                            solar_idx = decoded.get('solar_system', 1)
+                            corrected_glyph = encode_coords_to_glyph(
+                                int(submission_x), int(submission_y), int(submission_z),
+                                planet_idx, solar_idx
+                            )
+                            corrected_decoded = decode_glyph_to_coords(corrected_glyph)
+                            system_data['glyph_code'] = corrected_glyph
+                            star_x, star_y, star_z = corrected_decoded['star_x'], corrected_decoded['star_y'], corrected_decoded['star_z']
+                            region_x = corrected_decoded.get('region_x')
+                            region_y = corrected_decoded.get('region_y')
+                            region_z = corrected_decoded.get('region_z')
+                    except Exception as e:
+                        logger.warning(f"Batch approval: Failed to validate glyph for submission {submission_id}: {e}")
+
+                elif submission_x is not None and submission_y is not None and submission_z is not None:
+                    try:
+                        calculated_glyph = encode_coords_to_glyph(
+                            int(submission_x), int(submission_y), int(submission_z), 0, 1
+                        )
+                        decoded = decode_glyph_to_coords(calculated_glyph)
+                        system_data['glyph_code'] = calculated_glyph
+                        star_x, star_y, star_z = decoded['star_x'], decoded['star_y'], decoded['star_z']
+                        region_x = decoded.get('region_x')
+                        region_y = decoded.get('region_y')
+                        region_z = decoded.get('region_z')
+                    except Exception as e:
+                        logger.warning(f"Batch approval: Failed to calculate glyph for submission {submission_id}: {e}")
+
+                if region_x is not None:
+                    system_data['region_x'] = region_x
+                if region_y is not None:
+                    system_data['region_y'] = region_y
+                if region_z is not None:
+                    system_data['region_z'] = region_z
+
+                # Check if edit or new
+                existing_system_id = system_data.get('id')
+                is_edit = False
+                system_id = None
+
+                if existing_system_id:
+                    cursor.execute('SELECT id FROM systems WHERE id = ?', (existing_system_id,))
+                    existing_row = cursor.fetchone()
+                    if existing_row:
+                        is_edit = True
+                        system_id = existing_system_id
+
+                if not is_edit and system_data.get('glyph_code'):
+                    cursor.execute('SELECT id FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
+                    existing_glyph_row = cursor.fetchone()
+                    if existing_glyph_row:
+                        is_edit = True
+                        system_id = existing_glyph_row[0]
+
+                if is_edit:
+                    cursor.execute('''
+                        UPDATE systems
+                        SET name = ?, galaxy = ?, x = ?, y = ?, z = ?,
+                            star_x = ?, star_y = ?, star_z = ?,
+                            description = ?,
+                            glyph_code = ?, glyph_planet = ?, glyph_solar_system = ?,
+                            region_x = ?, region_y = ?, region_z = ?,
+                            star_type = ?, economy_type = ?, economy_level = ?,
+                            conflict_level = ?, dominant_lifeform = ?,
+                            discovered_by = ?, discovered_at = ?,
+                            discord_tag = ?, personal_discord_username = ?
+                        WHERE id = ?
+                    ''', (
+                        system_data.get('name'),
+                        system_data.get('galaxy', 'Euclid'),
+                        system_data.get('x', 0),
+                        system_data.get('y', 0),
+                        system_data.get('z', 0),
+                        star_x, star_y, star_z,
+                        system_data.get('description', ''),
+                        system_data.get('glyph_code'),
+                        system_data.get('glyph_planet', 0),
+                        system_data.get('glyph_solar_system', 1),
+                        system_data.get('region_x'),
+                        system_data.get('region_y'),
+                        system_data.get('region_z'),
+                        system_data.get('star_type'),
+                        system_data.get('economy_type'),
+                        system_data.get('economy_level'),
+                        system_data.get('conflict_level'),
+                        system_data.get('dominant_lifeform'),
+                        system_data.get('discovered_by'),
+                        system_data.get('discovered_at'),
+                        submission.get('discord_tag'),
+                        submission.get('personal_discord_username'),
+                        system_id
+                    ))
+
+                    # Delete existing planets, moons, and space station
+                    cursor.execute('SELECT id FROM planets WHERE system_id = ?', (system_id,))
+                    planet_ids = [row[0] for row in cursor.fetchall()]
+                    for pid in planet_ids:
+                        cursor.execute('DELETE FROM moons WHERE planet_id = ?', (pid,))
+                    cursor.execute('DELETE FROM planets WHERE system_id = ?', (system_id,))
+                    cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (system_id,))
+                else:
+                    import uuid
+                    system_id = str(uuid.uuid4())
+
+                    cursor.execute('''
+                        INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
+                            glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
+                            star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
+                            discovered_by, discovered_at, discord_tag, personal_discord_username)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        system_id,
+                        system_data.get('name'),
+                        system_data.get('galaxy', 'Euclid'),
+                        system_data.get('reality', 'Normal'),
+                        system_data.get('x', 0),
+                        system_data.get('y', 0),
+                        system_data.get('z', 0),
+                        star_x, star_y, star_z,
+                        system_data.get('description', ''),
+                        system_data.get('glyph_code'),
+                        system_data.get('glyph_planet', 0),
+                        system_data.get('glyph_solar_system', 1),
+                        system_data.get('region_x'),
+                        system_data.get('region_y'),
+                        system_data.get('region_z'),
+                        system_data.get('star_type'),
+                        system_data.get('economy_type'),
+                        system_data.get('economy_level'),
+                        system_data.get('conflict_level'),
+                        system_data.get('dominant_lifeform'),
+                        system_data.get('discovered_by'),
+                        system_data.get('discovered_at'),
+                        submission.get('discord_tag'),
+                        submission.get('personal_discord_username')
+                    ))
+
+                # Insert planets
+                for planet in system_data.get('planets', []):
+                    sentinel_val = planet.get('sentinel') or planet.get('sentinel_level', 'None')
+                    fauna_val = planet.get('fauna') or planet.get('fauna_level', 'N/A')
+                    flora_val = planet.get('flora') or planet.get('flora_level', 'N/A')
+
+                    cursor.execute('''
+                        INSERT INTO planets (
+                            system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
+                            fauna_count, flora_count, has_water, materials, base_location, photo, notes, description,
+                            biome, biome_subtype, planet_size, planet_index, is_moon,
+                            storm_frequency, weather_intensity, building_density,
+                            hazard_temperature, hazard_radiation, hazard_toxicity,
+                            common_resource, uncommon_resource, rare_resource,
+                            weather_text, sentinels_text, flora_text, fauna_text
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        system_id,
+                        planet.get('name'),
+                        planet.get('x', 0),
+                        planet.get('y', 0),
+                        planet.get('z', 0),
+                        planet.get('climate'),
+                        planet.get('weather'),
+                        sentinel_val,
+                        fauna_val,
+                        flora_val,
+                        planet.get('fauna_count', 0),
+                        planet.get('flora_count', 0),
+                        planet.get('has_water', 0),
+                        planet.get('materials'),
+                        planet.get('base_location'),
+                        planet.get('photo'),
+                        planet.get('notes'),
+                        planet.get('description', ''),
+                        planet.get('biome'),
+                        planet.get('biome_subtype'),
+                        planet.get('planet_size'),
+                        planet.get('planet_index'),
+                        1 if planet.get('is_moon') else 0,
+                        planet.get('storm_frequency'),
+                        planet.get('weather_intensity'),
+                        planet.get('building_density'),
+                        planet.get('hazard_temperature', 0),
+                        planet.get('hazard_radiation', 0),
+                        planet.get('hazard_toxicity', 0),
+                        planet.get('common_resource'),
+                        planet.get('uncommon_resource'),
+                        planet.get('rare_resource'),
+                        planet.get('weather_text'),
+                        planet.get('sentinels_text'),
+                        planet.get('flora_text'),
+                        planet.get('fauna_text')
+                    ))
+                    planet_id = cursor.lastrowid
+
+                    for moon in planet.get('moons', []):
+                        cursor.execute('''
+                            INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            planet_id,
+                            moon.get('name'),
+                            moon.get('orbit_radius', 0.5),
+                            moon.get('orbit_speed', 0),
+                            moon.get('climate'),
+                            moon.get('sentinel', 'None'),
+                            moon.get('fauna', 'N/A'),
+                            moon.get('flora', 'N/A'),
+                            moon.get('materials'),
+                            moon.get('notes'),
+                            moon.get('description', ''),
+                            moon.get('photo')
+                        ))
+
+                # Insert space station if present
+                if system_data.get('space_station'):
+                    station = system_data['space_station']
+                    cursor.execute('''
+                        INSERT INTO space_stations (system_id, name, race, x, y, z, sell_percent, buy_percent)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        system_id,
+                        station.get('name') or f"{system_data.get('name')} Station",
+                        station.get('race') or 'Gek',
+                        station.get('x') or 0,
+                        station.get('y') or 0,
+                        station.get('z') or 0,
+                        station.get('sell_percent') or 80,
+                        station.get('buy_percent') or 50
+                    ))
+
+                # Mark submission as approved
+                cursor.execute('''
+                    UPDATE pending_systems
+                    SET status = ?, reviewed_by = ?, review_date = ?
+                    WHERE id = ?
+                ''', ('approved', current_username, datetime.now(timezone.utc).isoformat(), submission_id))
+
+                # Add to approval audit log
+                cursor.execute('''
+                    INSERT INTO approval_audit_log
+                    (timestamp, action, submission_type, submission_id, submission_name,
+                     approver_username, approver_type, approver_account_id, approver_discord_tag,
+                     submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    datetime.now(timezone.utc).isoformat(),
+                    'approved',
+                    'system',
+                    submission_id,
+                    system_data.get('name'),
+                    current_username,
+                    current_user_type,
+                    current_account_id,
+                    session_data.get('discord_tag'),
+                    submission.get('submitted_by'),
+                    submission.get('submitter_account_id'),
+                    submission.get('submitter_account_type'),
+                    submission.get('discord_tag')
+                ))
+
+                results['approved'].append({
+                    'id': submission_id,
+                    'name': system_data.get('name'),
+                    'system_id': system_id,
+                    'is_edit': is_edit
+                })
+
+            except Exception as e:
+                logger.error(f"Batch approval: Error processing submission {submission_id}: {e}")
+                results['failed'].append({
+                    'id': submission_id,
+                    'name': system_name if 'system_name' in dir() else None,
+                    'error': str(e)
+                })
+
+        conn.commit()
+
+        # Add activity log for batch operation
+        add_activity_log(
+            'batch_approval',
+            f"Batch approved {len(results['approved'])} systems",
+            details=f"Approved: {len(results['approved'])}, Failed: {len(results['failed'])}, Skipped: {len(results['skipped'])}, Approver: {current_username}",
+            user_name=current_username
+        )
+
+        logger.info(f"Batch approval completed by {current_username}: {len(results['approved'])} approved, {len(results['failed'])} failed, {len(results['skipped'])} skipped")
+
+        return {
+            'status': 'ok',
+            'results': results,
+            'summary': {
+                'total': len(submission_ids),
+                'approved': len(results['approved']),
+                'failed': len(results['failed']),
+                'skipped': len(results['skipped'])
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch approval error: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch approval failed: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/reject_systems/batch')
+async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Batch reject multiple pending system submissions with a shared reason (admin only).
+    Requires 'batch_approvals' feature for non-super-admins.
+    Self-submissions are skipped (not failed) for non-super-admin users.
+    """
+    # Verify admin session
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    enabled_features = session_data.get('enabled_features', [])
+
+    # Permission check: super admin OR has batch_approvals feature
+    is_super = current_user_type == 'super_admin'
+    if not is_super and 'batch_approvals' not in enabled_features:
+        raise HTTPException(status_code=403, detail="Batch approvals permission required")
+
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
+
+    submission_ids = payload.get('submission_ids', [])
+    reason = payload.get('reason', 'No reason provided')
+
+    if not submission_ids:
+        raise HTTPException(status_code=400, detail="No submission IDs provided")
+
+    if not reason or not reason.strip():
+        raise HTTPException(status_code=400, detail="Rejection reason is required")
+
+    results = {
+        'rejected': [],
+        'failed': [],
+        'skipped': []
+    }
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                # Get submission
+                cursor.execute('SELECT * FROM pending_systems WHERE id = ?', (submission_id,))
+                row = cursor.fetchone()
+
+                if not row:
+                    results['failed'].append({
+                        'id': submission_id,
+                        'name': None,
+                        'error': 'Submission not found'
+                    })
+                    continue
+
+                submission = dict(row)
+                system_name = submission.get('system_name')
+
+                if submission['status'] != 'pending':
+                    results['skipped'].append({
+                        'id': submission_id,
+                        'name': system_name,
+                        'reason': f"Already {submission['status']}"
+                    })
+                    continue
+
+                # Self-rejection check (skip for non-super-admins)
+                if not is_super:
+                    submitter_account_id = submission.get('submitter_account_id')
+                    submitter_account_type = submission.get('submitter_account_type')
+                    submitted_by = submission.get('submitted_by')
+
+                    is_self_submission = False
+                    if submitter_account_id is not None and submitter_account_type:
+                        if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                            is_self_submission = True
+                    elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                        is_self_submission = True
+
+                    if is_self_submission:
+                        results['skipped'].append({
+                            'id': submission_id,
+                            'name': system_name,
+                            'reason': 'Self-submission'
+                        })
+                        continue
+
+                # Mark as rejected
+                cursor.execute('''
+                    UPDATE pending_systems
+                    SET status = ?, reviewed_by = ?, review_date = ?, rejection_reason = ?
+                    WHERE id = ?
+                ''', ('rejected', current_username, datetime.now(timezone.utc).isoformat(), reason, submission_id))
+
+                # Add to approval audit log
+                cursor.execute('''
+                    INSERT INTO approval_audit_log
+                    (timestamp, action, submission_type, submission_id, submission_name,
+                     approver_username, approver_type, approver_account_id, approver_discord_tag,
+                     submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    datetime.now(timezone.utc).isoformat(),
+                    'rejected',
+                    'system',
+                    submission_id,
+                    system_name,
+                    current_username,
+                    current_user_type,
+                    current_account_id,
+                    session_data.get('discord_tag'),
+                    submission.get('submitted_by'),
+                    submission.get('submitter_account_id'),
+                    submission.get('submitter_account_type'),
+                    reason,
+                    submission.get('discord_tag')
+                ))
+
+                results['rejected'].append({
+                    'id': submission_id,
+                    'name': system_name
+                })
+
+            except Exception as e:
+                logger.error(f"Batch rejection: Error processing submission {submission_id}: {e}")
+                results['failed'].append({
+                    'id': submission_id,
+                    'name': system_name if 'system_name' in dir() else None,
+                    'error': str(e)
+                })
+
+        conn.commit()
+
+        # Add activity log for batch operation
+        add_activity_log(
+            'batch_rejection',
+            f"Batch rejected {len(results['rejected'])} systems",
+            details=f"Rejected: {len(results['rejected'])}, Failed: {len(results['failed'])}, Skipped: {len(results['skipped'])}, Reason: {reason}, Reviewer: {current_username}",
+            user_name=current_username
+        )
+
+        logger.info(f"Batch rejection completed by {current_username}: {len(results['rejected'])} rejected, {len(results['failed'])} failed, {len(results['skipped'])} skipped. Reason: {reason}")
+
+        return {
+            'status': 'ok',
+            'results': results,
+            'summary': {
+                'total': len(submission_ids),
+                'rejected': len(results['rejected']),
+                'failed': len(results['failed']),
+                'skipped': len(results['skipped'])
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch rejection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch rejection failed: {str(e)}")
     finally:
         if conn:
             conn.close()

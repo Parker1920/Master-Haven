@@ -8,6 +8,8 @@ import Modal from '../components/Modal'
 import GlyphPicker from '../components/GlyphPicker'
 import { AuthContext } from '../utils/AuthContext'
 import { generateRandomStationPosition } from '../utils/stationPlacement'
+import SearchableSelect from '../components/SearchableSelect'
+import { GALAXIES, REALITIES } from '../data/galaxies'
 
 function useQuery(){ return new URLSearchParams(useLocation().search) }
 
@@ -17,7 +19,7 @@ export default function Wizard(){
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isPartner, user } = auth || {}
   const edit = query.get('edit')
-  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '' })
+  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', reality:'Normal', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '' })
   const [planetModalOpen, setPlanetModalOpen] = useState(false)
   const [editingPlanetIndex, setEditingPlanetIndex] = useState(null)
   const [editingPlanet, setEditingPlanet] = useState(null)
@@ -271,7 +273,41 @@ export default function Wizard(){
           </div>
         )}
 
-        <label className="block mt-3">Galaxy <input placeholder="Galaxy" className="w-full mt-1" value={system.galaxy || 'Euclid'} onChange={e=>setField('galaxy', e.target.value)} /></label>
+        {/* Reality and Galaxy Selection */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Reality <span className="text-red-400">*</span>
+            </label>
+            <select
+              className="w-full p-2 border rounded bg-gray-700 border-gray-600"
+              value={system.reality || 'Normal'}
+              onChange={e => setField('reality', e.target.value)}
+              required
+            >
+              {REALITIES.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Permadeath is separate from all other game modes
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Galaxy <span className="text-red-400">*</span>
+            </label>
+            <SearchableSelect
+              options={GALAXIES.map(g => ({ value: g.name, label: `${g.index}: ${g.name}` }))}
+              value={system.galaxy || 'Euclid'}
+              onChange={v => setField('galaxy', v || 'Euclid')}
+              placeholder="Search by number or name..."
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Search by galaxy index (0-255) or name
+            </p>
+          </div>
+        </div>
 
         {/* System Attributes - Required */}
         <div className="mt-4 p-4 bg-gray-800/50 rounded border border-gray-700">

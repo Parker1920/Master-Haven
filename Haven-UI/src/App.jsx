@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import Systems from './pages/Systems'
 import SystemDetail from './pages/SystemDetail'
+import RegionDetail from './pages/RegionDetail'
 import Wizard from './pages/Wizard'
 import RTAI from './pages/RTAI'
 import Settings from './pages/Settings'
@@ -12,7 +13,10 @@ import DBStats from './pages/DBStats'
 import PendingApprovals from './pages/PendingApprovals'
 import ApiKeys from './pages/ApiKeys'
 import PartnerManagement from './pages/PartnerManagement'
+import SubAdminManagement from './pages/SubAdminManagement'
+import ApprovalAudit from './pages/ApprovalAudit'
 import CsvImport from './pages/CsvImport'
+import DataRestrictions from './pages/DataRestrictions'
 import Navbar from './components/Navbar'
 import InactivityOverlay from './components/InactivityOverlay'
 import { AuthProvider, AuthContext, FEATURES } from './utils/AuthContext'
@@ -69,6 +73,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/systems" element={<Systems />} />
             <Route path="/systems/:id" element={<SystemDetail />} />
+            <Route path="/regions/:rx/:ry/:rz" element={<RegionDetail />} />
             <Route path="/create" element={<Wizard />} />
             <Route path="/wizard" element={<Wizard />} />
             <Route path="/discoveries" element={<Discoveries />} />
@@ -79,11 +84,17 @@ export default function App() {
             <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />
             <Route path="/tests" element={<RequireSuperAdmin><Tests /></RequireSuperAdmin>} />
             <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
+            <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
+            <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
+
+            {/* Partners can manage their own sub-admins */}
+            <Route path="/admin/sub-admins" element={<RequireAdmin><SubAdminManagement /></RequireAdmin>} />
 
             {/* Admin routes (super admin or partner with access) */}
             <Route path="/settings" element={<RequireFeature feature={FEATURES.SETTINGS}><Settings /></RequireFeature>} />
             <Route path="/pending-approvals" element={<RequireFeature feature={FEATURES.APPROVALS}><PendingApprovals /></RequireFeature>} />
             <Route path="/csv-import" element={<RequireFeature feature={FEATURES.CSV_IMPORT}><CsvImport /></RequireFeature>} />
+            <Route path="/data-restrictions" element={<RequireAdmin><DataRestrictions /></RequireAdmin>} />
           </Routes>
         </main>
         <InactivityOverlay />

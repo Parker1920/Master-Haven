@@ -4,12 +4,29 @@ import { useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
-import { AuthContext } from '../utils/AuthContext'
+import { AuthContext, FEATURES } from '../utils/AuthContext'
 
 export default function PendingApprovals() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
-  const { isAdmin, isSuperAdmin, loading: authLoading } = auth || {}
+  const { isAdmin, isSuperAdmin, user, loading: authLoading, canAccess } = auth || {}
+
+  // Check if a submission was made by the current user (self-submission)
+  function isSelfSubmission(submission) {
+    if (!user) return false
+    // Super admin can approve their own (trusted role)
+    if (isSuperAdmin) return false
+    // Check by account ID first (most reliable)
+    if (submission.submitter_account_id && submission.submitter_account_type) {
+      return user.type === submission.submitter_account_type &&
+             user.accountId === submission.submitter_account_id
+    }
+    // Fallback: check by username
+    if (submission.submitted_by && user.username) {
+      return submission.submitted_by.toLowerCase() === user.username.toLowerCase()
+    }
+    return false
+  }
   const [loading, setLoading] = useState(true)
   const [submissions, setSubmissions] = useState([])
   const [regionSubmissions, setRegionSubmissions] = useState([])
@@ -23,6 +40,14 @@ export default function PendingApprovals() {
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectionReason, setRejectionReason] = useState('')
   const [actionInProgress, setActionInProgress] = useState(false)
+  // Batch approval state
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [batchInProgress, setBatchInProgress] = useState(false)
+  const [batchRejectModalOpen, setBatchRejectModalOpen] = useState(false)
+  const [batchRejectionReason, setBatchRejectionReason] = useState('')
+  const [batchResultsModalOpen, setBatchResultsModalOpen] = useState(false)
+  const [batchResults, setBatchResults] = useState(null)
   // Discord tag filtering (super admin only)
   const [discordTags, setDiscordTags] = useState([])
   const [filterTag, setFilterTag] = useState('all') // 'all', 'untagged', or specific tag
@@ -223,6 +248,82 @@ export default function PendingApprovals() {
     }
   }
 
+  // Batch approval functions
+  function toggleSelection(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  function selectAllEligible() {
+    const eligibleIds = filteredPendingSubmissions
+      .filter(s => !isSelfSubmission(s))
+      .map(s => s.id)
+    setSelectedIds(new Set(eligibleIds))
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  function exitBatchMode() {
+    setBatchMode(false)
+    setSelectedIds(new Set())
+  }
+
+  async function handleBatchApprove() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Approve ${selectedIds.size} selected system(s)?\n\nThis will add them to the main database.`)) {
+      return
+    }
+
+    setBatchInProgress(true)
+    try {
+      const response = await axios.post('/api/approve_systems/batch', {
+        submission_ids: Array.from(selectedIds)
+      })
+      setBatchResults(response.data)
+      setBatchResultsModalOpen(true)
+      setSelectedIds(new Set())
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch approval failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchInProgress(false)
+    }
+  }
+
+  async function handleBatchReject() {
+    if (!batchRejectionReason.trim()) {
+      alert('Please provide a rejection reason')
+      return
+    }
+
+    setBatchInProgress(true)
+    try {
+      const response = await axios.post('/api/reject_systems/batch', {
+        submission_ids: Array.from(selectedIds),
+        reason: batchRejectionReason
+      })
+      setBatchResults(response.data)
+      setBatchRejectModalOpen(false)
+      setBatchRejectionReason('')
+      setBatchResultsModalOpen(true)
+      setSelectedIds(new Set())
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch rejection failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchInProgress(false)
+    }
+  }
+
   function getStatusBadge(status) {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -354,6 +455,15 @@ export default function PendingApprovals() {
                 </select>
               </div>
             )}
+            {/* Batch Mode Toggle - Requires batch_approvals feature */}
+            {canAccess && canAccess(FEATURES.BATCH_APPROVALS) && filteredPendingSubmissions.length > 0 && (
+              <Button
+                className={batchMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}
+                onClick={() => batchMode ? exitBatchMode() : setBatchMode(true)}
+              >
+                {batchMode ? 'Exit Batch Mode' : 'Batch Mode'}
+              </Button>
+            )}
             <Button className="bg-gray-200 text-gray-800" onClick={() => navigate('/systems')}>
               Back to Systems
             </Button>
@@ -453,6 +563,49 @@ export default function PendingApprovals() {
           </div>
         )}
 
+        {/* Batch Action Bar */}
+        {batchMode && (
+          <div className="mb-4 p-3 bg-indigo-900 border border-indigo-500 rounded flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <span className="text-white font-semibold">
+                {selectedIds.size} of {filteredPendingSubmissions.filter(s => !isSelfSubmission(s)).length} selected
+              </span>
+              <button
+                onClick={selectAllEligible}
+                className="text-sm text-indigo-300 hover:text-white underline"
+              >
+                Select All Eligible
+              </button>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={clearSelection}
+                  className="text-sm text-indigo-300 hover:text-white underline"
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+            {selectedIds.size > 0 && (
+              <div className="flex items-center space-x-2">
+                <Button
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  onClick={handleBatchApprove}
+                  disabled={batchInProgress}
+                >
+                  {batchInProgress ? 'Processing...' : `Approve Selected (${selectedIds.size})`}
+                </Button>
+                <Button
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  onClick={() => setBatchRejectModalOpen(true)}
+                  disabled={batchInProgress}
+                >
+                  {batchInProgress ? 'Processing...' : `Reject Selected (${selectedIds.size})`}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Pending System Submissions */}
         <div className="mb-6">
           <h3 className="text-xl font-semibold mb-3">
@@ -469,8 +622,23 @@ export default function PendingApprovals() {
               {filteredPendingSubmissions.map(submission => (
                 <div
                   key={submission.id}
-                  className="border rounded p-3 bg-cyan-700 hover:bg-cyan-600 flex justify-between items-center"
+                  className={`border rounded p-3 bg-cyan-700 hover:bg-cyan-600 flex justify-between items-center ${
+                    batchMode && selectedIds.has(submission.id) ? 'ring-2 ring-indigo-400' : ''
+                  }`}
                 >
+                  {/* Batch mode checkbox */}
+                  {batchMode && (
+                    <div className="mr-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(submission.id)}
+                        onChange={() => toggleSelection(submission.id)}
+                        disabled={isSelfSubmission(submission)}
+                        className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={isSelfSubmission(submission) ? 'Cannot select your own submission' : ''}
+                      />
+                    </div>
+                  )}
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
                       <h4 className="font-semibold text-lg">{submission.system_name}</h4>
@@ -487,6 +655,12 @@ export default function PendingApprovals() {
                           NEW
                         </span>
                       )}
+                      {/* Self-submission badge - user cannot approve their own */}
+                      {isSelfSubmission(submission) && (
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-amber-500 text-black">
+                          YOUR SUBMISSION
+                        </span>
+                      )}
                       {/* Discord Tag Badge - Super Admin sees all tags */}
                       {isSuperAdmin && getDiscordTagBadge(submission.discord_tag, submission.personal_discord_username)}
                       {submission.source === 'companion_app' && submission.api_key_name && (
@@ -497,6 +671,10 @@ export default function PendingApprovals() {
                     </div>
                     <div className="text-sm text-gray-300 mt-1">
                       <span>Galaxy: {submission.system_galaxy || 'Euclid'}</span>
+                      <span className="mx-2">•</span>
+                      <span className={submission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>
+                        {submission.system_data?.reality || 'Normal'}
+                      </span>
                       <span className="mx-2">•</span>
                       <span>Submitted by: {submission.submitted_by || 'Anonymous'}</span>
                       <span className="mx-2">•</span>
@@ -583,6 +761,7 @@ export default function PendingApprovals() {
                 <div className="text-sm space-y-1">
                   <p><strong>Name:</strong> {selectedSubmission.system_data?.name}</p>
                   <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
+                  <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>
                   {selectedSubmission.system_data?.region_x !== null && (
                     <p><strong>Region:</strong> [{selectedSubmission.system_data.region_x}, {selectedSubmission.system_data.region_y}, {selectedSubmission.system_data.region_z}]</p>
                   )}
@@ -694,34 +873,46 @@ export default function PendingApprovals() {
 
               {/* Actions */}
               {selectedSubmission.status === 'pending' && (
-                <div className="flex space-x-2 pt-3 border-t">
-                  <Button
-                    className="btn-primary bg-green-600 hover:bg-green-700"
-                    onClick={() => approveSubmission(selectedSubmission.id, selectedSubmission.system_name)}
-                    disabled={actionInProgress}
-                  >
-                    {actionInProgress ? 'Approving...' : 'Approve System'}
-                  </Button>
-                  <Button
-                    className="bg-red-600 text-white hover:bg-red-700"
-                    onClick={() => {
-                      setViewModalOpen(false)
-                      openRejectModal(selectedSubmission)
-                    }}
-                    disabled={actionInProgress}
-                  >
-                    Reject System
-                  </Button>
-                  <Button
-                    className="bg-gray-200 text-gray-800"
-                    onClick={() => {
-                      setViewModalOpen(false)
-                      setSelectedSubmission(null)
-                    }}
-                    disabled={actionInProgress}
-                  >
-                    Close
-                  </Button>
+                <div className="pt-3 border-t">
+                  {/* Self-submission warning */}
+                  {isSelfSubmission(selectedSubmission) && (
+                    <div className="mb-3 p-3 bg-amber-900/50 border border-amber-500 rounded">
+                      <p className="text-amber-300 text-sm">
+                        <strong>You submitted this system.</strong> Another admin must review and approve it to prevent conflicts of interest.
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex space-x-2">
+                    <Button
+                      className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => approveSubmission(selectedSubmission.id, selectedSubmission.system_name)}
+                      disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
+                      title={isSelfSubmission(selectedSubmission) ? 'You cannot approve your own submission' : ''}
+                    >
+                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Approve' : (actionInProgress ? 'Approving...' : 'Approve System')}
+                    </Button>
+                    <Button
+                      className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        setViewModalOpen(false)
+                        openRejectModal(selectedSubmission)
+                      }}
+                      disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
+                      title={isSelfSubmission(selectedSubmission) ? 'You cannot reject your own submission' : ''}
+                    >
+                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Reject' : 'Reject System'}
+                    </Button>
+                    <Button
+                      className="bg-gray-200 text-gray-800"
+                      onClick={() => {
+                        setViewModalOpen(false)
+                        setSelectedSubmission(null)
+                      }}
+                      disabled={actionInProgress}
+                    >
+                      Close
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -928,6 +1119,7 @@ export default function PendingApprovals() {
                     <div className="space-y-1">
                       <p><strong>System Name:</strong> {selectedEditRequest.edit_data.name}</p>
                       <p><strong>Galaxy:</strong> {selectedEditRequest.edit_data.galaxy || 'Euclid'}</p>
+                      <p><strong>Reality:</strong> <span className={selectedEditRequest.edit_data.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedEditRequest.edit_data.reality || 'Normal'}</span></p>
                       {selectedEditRequest.edit_data.description && (
                         <p><strong>Description:</strong> {selectedEditRequest.edit_data.description}</p>
                       )}
@@ -1025,6 +1217,150 @@ export default function PendingApprovals() {
                   disabled={actionInProgress}
                 >
                   Cancel
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Batch Rejection Reason Modal */}
+        {batchRejectModalOpen && (
+          <Modal
+            title={`Batch Reject ${selectedIds.size} Submission(s)`}
+            onClose={() => {
+              setBatchRejectModalOpen(false)
+              setBatchRejectionReason('')
+            }}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                Please provide a reason for rejecting these {selectedIds.size} submission(s). This reason will be applied to all selected items.
+              </p>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">Rejection Reason</label>
+                <textarea
+                  className="w-full border rounded p-2"
+                  rows="4"
+                  value={batchRejectionReason}
+                  onChange={(e) => setBatchRejectionReason(e.target.value)}
+                  placeholder="e.g., Duplicate systems, incomplete information, violates naming guidelines..."
+                />
+              </div>
+
+              <div className="flex space-x-2">
+                <Button
+                  className="bg-red-600 text-white hover:bg-red-700"
+                  onClick={handleBatchReject}
+                  disabled={batchInProgress || !batchRejectionReason.trim()}
+                >
+                  {batchInProgress ? 'Rejecting...' : `Reject ${selectedIds.size} Submission(s)`}
+                </Button>
+                <Button
+                  className="bg-gray-200 text-gray-800"
+                  onClick={() => {
+                    setBatchRejectModalOpen(false)
+                    setBatchRejectionReason('')
+                  }}
+                  disabled={batchInProgress}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Batch Results Modal */}
+        {batchResultsModalOpen && batchResults && (
+          <Modal
+            title="Batch Operation Results"
+            onClose={() => {
+              setBatchResultsModalOpen(false)
+              setBatchResults(null)
+            }}
+          >
+            <div className="space-y-4">
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="p-3 bg-green-900/50 border border-green-500 rounded">
+                  <div className="text-2xl font-bold text-green-400">
+                    {batchResults.summary?.approved || batchResults.summary?.rejected || 0}
+                  </div>
+                  <div className="text-sm text-green-300">
+                    {batchResults.results?.approved ? 'Approved' : 'Rejected'}
+                  </div>
+                </div>
+                <div className="p-3 bg-red-900/50 border border-red-500 rounded">
+                  <div className="text-2xl font-bold text-red-400">
+                    {batchResults.summary?.failed || 0}
+                  </div>
+                  <div className="text-sm text-red-300">Failed</div>
+                </div>
+                <div className="p-3 bg-amber-900/50 border border-amber-500 rounded">
+                  <div className="text-2xl font-bold text-amber-400">
+                    {batchResults.summary?.skipped || 0}
+                  </div>
+                  <div className="text-sm text-amber-300">Skipped</div>
+                </div>
+              </div>
+
+              {/* Details */}
+              <div className="max-h-64 overflow-y-auto space-y-3">
+                {/* Approved/Rejected */}
+                {(batchResults.results?.approved?.length > 0 || batchResults.results?.rejected?.length > 0) && (
+                  <div>
+                    <h4 className="font-semibold text-green-400 mb-1">
+                      {batchResults.results?.approved ? 'Approved' : 'Rejected'}:
+                    </h4>
+                    <ul className="text-sm space-y-1">
+                      {(batchResults.results?.approved || batchResults.results?.rejected || []).map(item => (
+                        <li key={item.id} className="text-gray-300">
+                          {item.name || `ID: ${item.id}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Failed */}
+                {batchResults.results?.failed?.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-red-400 mb-1">Failed:</h4>
+                    <ul className="text-sm space-y-1">
+                      {batchResults.results.failed.map(item => (
+                        <li key={item.id} className="text-red-300">
+                          {item.name || `ID: ${item.id}`}: {item.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Skipped */}
+                {batchResults.results?.skipped?.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-amber-400 mb-1">Skipped:</h4>
+                    <ul className="text-sm space-y-1">
+                      {batchResults.results.skipped.map(item => (
+                        <li key={item.id} className="text-amber-300">
+                          {item.name || `ID: ${item.id}`}: {item.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t">
+                <Button
+                  className="bg-gray-200 text-gray-800"
+                  onClick={() => {
+                    setBatchResultsModalOpen(false)
+                    setBatchResults(null)
+                  }}
+                >
+                  Close
                 </Button>
               </div>
             </div>

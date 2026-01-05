@@ -405,7 +405,6 @@
             width: 100%;
             accent-color: #00C2B3;
         }
-
         /* Zoom level indicator */
         #zoom-indicator {
             position: absolute;
@@ -654,7 +653,12 @@
                 `[${region.region_x}, ${region.region_y}, ${region.region_z}]`;
 
             try {
-                const response = await fetch(`/api/systems_by_region?rx=${region.region_x}&ry=${region.region_y}&rz=${region.region_z}`);
+                const params = new URLSearchParams({
+                    rx: region.region_x,
+                    ry: region.region_y,
+                    rz: region.region_z
+                });
+                const response = await fetch(`/api/systems_by_region?${params.toString()}`);
                 if (response.ok) {
                     const data = await response.json();
                     window.REGION_DATA.systems = data.systems || [];
@@ -705,9 +709,9 @@
             controls.minDistance = 20;
             controls.maxDistance = 500;
 
-            // Raycaster for interaction
+            // Raycaster for interaction - larger threshold for easier selection in dense regions
             raycaster = new THREE.Raycaster();
-            raycaster.params.Points.threshold = 5;
+            raycaster.params.Points.threshold = 8;
             mouse = new THREE.Vector2();
 
             // Create region boundary box
@@ -813,19 +817,18 @@
             // Clear to transparent
             ctx.clearRect(0, 0, 64, 64);
 
-            // Draw outer glow first
-            const glowGradient = ctx.createRadialGradient(32, 32, 10, 32, 32, 32);
+            // Draw TIGHT outer glow - reduced radius to prevent overlap blur
+            const glowGradient = ctx.createRadialGradient(32, 32, 8, 32, 32, 20);
             glowGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            glowGradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.7)');
-            glowGradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
+            glowGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
             glowGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
             ctx.fillStyle = glowGradient;
             ctx.fillRect(0, 0, 64, 64);
 
-            // Draw LARGE solid bright core on top - this is key for visibility
+            // Draw solid bright core - smaller for cleaner look in dense regions
             ctx.fillStyle = 'rgba(255, 255, 255, 1)';
             ctx.beginPath();
-            ctx.arc(32, 32, 16, 0, Math.PI * 2);  // Larger core (was 12)
+            ctx.arc(32, 32, 10, 0, Math.PI * 2);
             ctx.fill();
 
             const texture = new THREE.CanvasTexture(canvas);
@@ -958,13 +961,19 @@
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
 
-            // Shader material - FIXED SIZE approach for consistent visibility
+            // Shader material - DENSITY-AWARE sizing for clear visibility in large regions
             const starTexture = createStarTexture();
+            const systemCount = systems.length;
+            // Scale point size inversely with density: fewer systems = larger points
+            // 50 systems = 20px, 500+ systems = 8px
+            const densityScale = Math.max(0.4, Math.min(1.0, 100 / systemCount));
+            const calculatedBaseSize = 20.0 * densityScale;
+
             const material = new THREE.ShaderMaterial({
                 uniforms: {
                     pointTexture: { value: starTexture },
                     sizeMultiplier: { value: 1.0 },
-                    baseSize: { value: 24.0 }  // Fixed base size in pixels
+                    baseSize: { value: calculatedBaseSize }
                 },
                 vertexShader: `
                     attribute float size;
@@ -975,9 +984,8 @@
                         vColor = color;
                         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
 
-                        // FIXED SIZE - same visual size regardless of distance
-                        // Only slight variation based on planet count (size attribute)
-                        float finalSize = baseSize * sizeMultiplier * (0.8 + size * 0.02);
+                        // Density-aware sizing with slight variation for planet count
+                        float finalSize = baseSize * sizeMultiplier * (0.9 + size * 0.01);
 
                         gl_PointSize = finalSize;
                         gl_Position = projectionMatrix * mvPosition;
@@ -989,18 +997,18 @@
                     void main() {
                         vec4 texColor = texture2D(pointTexture, gl_PointCoord);
 
-                        // FULL BRIGHTNESS - no fading at all
-                        // Solid bright color with texture shape
-                        vec3 brightColor = vColor * 1.5;  // Boost brightness
-                        float alpha = texColor.a;
+                        // Moderate brightness - prevents wash-out in dense regions
+                        vec3 brightColor = vColor * 1.2;
+                        float alpha = texColor.a * 0.85;  // Slightly reduced alpha to prevent overlap bloom
 
                         gl_FragColor = vec4(brightColor, alpha);
 
                         if (alpha < 0.01) discard;
                     }
                 `,
-                blending: THREE.AdditiveBlending,
-                depthTest: false,
+                blending: THREE.NormalBlending,
+                depthTest: true,
+                depthWrite: false,
                 transparent: true,
                 vertexColors: true
             });
@@ -1163,17 +1171,33 @@
         function showSystemInfo(system) {
             selectedSystem = system;
 
+            // Check if system has point_only visibility restriction
+            const isPointOnly = system.map_visibility === 'point_only';
+
             document.getElementById('system-name').textContent = system.name || 'Unknown';
             document.getElementById('system-galaxy').textContent = system.galaxy || 'Euclid';
-            document.getElementById('system-planets').textContent =
-                (system.planets?.length || 0) + ' planets';
-            document.getElementById('system-description').textContent =
-                system.description || 'No description available';
 
-            // Render glyph display
-            renderGlyphDisplay(system.glyph_code);
+            if (isPointOnly) {
+                // Show minimal info for restricted systems
+                document.getElementById('system-planets').textContent = 'Details restricted';
+                document.getElementById('system-description').textContent =
+                    'This system\'s details are not publicly available.';
+                // Hide glyph display
+                document.getElementById('glyph-display').style.display = 'none';
+                // Hide view system link
+                document.getElementById('view-system-link').style.display = 'none';
+            } else {
+                document.getElementById('system-planets').textContent =
+                    (system.planets?.length || 0) + ' planets';
+                document.getElementById('system-description').textContent =
+                    system.description || 'No description available';
+                // Render glyph display
+                renderGlyphDisplay(system.glyph_code);
+                // Show view system link
+                document.getElementById('view-system-link').style.display = '';
+            }
 
-            // Set link to system view
+            // Set link to system view (even if hidden, set href for consistency)
             const systemLink = document.getElementById('view-system-link');
             const systemId = system.id || system.name;
             systemLink.href = `/map/system/${encodeURIComponent(systemId)}`;
@@ -1258,13 +1282,52 @@
 
             if (!labelsEnabled) return;
 
-            systemData.forEach(data => {
+            const systemCount = systemData.length;
+            // Limit labels based on density to prevent overlap
+            // 50 systems = show all, 500+ = show max 50 labels
+            const maxLabels = Math.min(systemCount, Math.max(30, Math.floor(150 / (systemCount / 100))));
+
+            // Sort by distance to camera to prioritize visible labels
+            const sortedSystems = [...systemData].sort((a, b) => {
+                const distA = camera.position.distanceTo(a.position);
+                const distB = camera.position.distanceTo(b.position);
+                return distA - distB;
+            });
+
+            // Only create labels for closest systems up to maxLabels
+            sortedSystems.slice(0, maxLabels).forEach(data => {
                 const system = data.system;
                 const label = createTextSprite(system.name || 'Unknown');
                 label.position.copy(data.position);
                 label.position.y += 5; // Offset above point
+                label.userData = { systemPosition: data.position };
                 scene.add(label);
                 labelSprites.push(label);
+            });
+        }
+
+        function updateLabelVisibility() {
+            if (!labelsEnabled || labelSprites.length === 0) return;
+
+            const zoom = getZoomLevel();
+            const systemCount = systemData.length;
+
+            // Calculate visibility threshold based on zoom and density
+            // At low zoom (far away), hide labels in dense regions
+            const zoomThreshold = systemCount > 200 ? 1.5 : (systemCount > 100 ? 1.0 : 0.5);
+
+            labelSprites.forEach(sprite => {
+                if (zoom < zoomThreshold) {
+                    // When zoomed out, only show labels for very close systems
+                    const dist = camera.position.distanceTo(sprite.userData.systemPosition);
+                    sprite.visible = dist < 50;
+                } else {
+                    sprite.visible = true;
+                }
+
+                // Scale labels based on zoom for better readability
+                const scaleFactor = Math.max(0.5, Math.min(1.5, zoom));
+                sprite.scale.set(20 * scaleFactor, 5 * scaleFactor, 1);
             });
         }
 
@@ -1310,6 +1373,9 @@
 
             // Update zoom indicator
             updateZoomIndicator();
+
+            // Update label visibility based on zoom and density
+            updateLabelVisibility();
 
             renderer.render(scene, camera);
         }

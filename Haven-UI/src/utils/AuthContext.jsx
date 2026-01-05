@@ -12,13 +12,15 @@ export const FEATURES = {
   APPROVALS: 'approvals',
   STATS: 'stats',
   SETTINGS: 'settings',
-  CSV_IMPORT: 'csv_import'
+  CSV_IMPORT: 'csv_import',
+  BATCH_APPROVALS: 'batch_approvals'
 }
 
 export const AuthContext = createContext({
   isAdmin: false,
   isSuperAdmin: false,
   isPartner: false,
+  isSubAdmin: false,
   user: null,
   loading: true,
   login: async () => {},
@@ -41,7 +43,9 @@ export function AuthProvider({ children }) {
           username: data.username,
           discordTag: data.discord_tag,
           displayName: data.display_name,
-          enabledFeatures: data.enabled_features || []
+          enabledFeatures: data.enabled_features || [],
+          accountId: data.account_id,
+          parentDisplayName: data.parent_display_name  // For sub-admins
         })
       } else {
         setUser(null)
@@ -61,6 +65,7 @@ export function AuthProvider({ children }) {
   const isAdmin = !!user
   const isSuperAdmin = user?.type === 'super_admin'
   const isPartner = user?.type === 'partner'
+  const isSubAdmin = user?.type === 'sub_admin'
 
   function canAccess(feature) {
     if (!user) return false
@@ -87,7 +92,9 @@ export function AuthProvider({ children }) {
       username: data.username,
       discordTag: data.discord_tag,
       displayName: data.display_name,
-      enabledFeatures: data.enabled_features || []
+      enabledFeatures: data.enabled_features || [],
+      accountId: data.account_id,
+      parentDisplayName: data.parent_display_name
     })
     return data
   }
@@ -106,6 +113,7 @@ export function AuthProvider({ children }) {
       isAdmin,
       isSuperAdmin,
       isPartner,
+      isSubAdmin,
       user,
       loading,
       login,

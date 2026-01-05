@@ -2,6 +2,24 @@ import React, { useState } from 'react'
 import MoonEditor from './MoonEditor'
 import { uploadPhoto } from '../utils/api'
 import Modal from './Modal'
+import SearchableSelect from './SearchableSelect'
+import {
+  biomeAdjectives,
+  weatherAdjectives,
+  sentinelAdjectives,
+  floraAdjectives,
+  faunaAdjectives,
+  resourcesList,
+  toSelectOptions
+} from '../data/adjectives'
+
+// Pre-compute options for react-select
+const biomeOptions = toSelectOptions(biomeAdjectives)
+const weatherOptions = toSelectOptions(weatherAdjectives)
+const sentinelOptions = toSelectOptions(sentinelAdjectives)
+const floraOptions = toSelectOptions(floraAdjectives)
+const faunaOptions = toSelectOptions(faunaAdjectives)
+const resourcesOptions = toSelectOptions(resourcesList)
 
 export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }){
   const [uploading, setUploading] = useState(false)
@@ -80,82 +98,74 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           <label className="block text-sm">Planet Name</label>
           <input className="mt-1 p-1 rounded w-full" value={planet.name || ''} onChange={e => setField('name', e.target.value)} placeholder="Planet name" />
         </div>
-        <div className="w-32">
+        <div className="min-w-56">
           <label className="block text-sm">Biome</label>
-          <select className="w-full mt-1 p-1 rounded" value={planet.biome || ''} onChange={e => setField('biome', e.target.value)}>
-            <option value="">-- Select --</option>
-            <option value="Lush">Lush</option>
-            <option value="Barren">Barren</option>
-            <option value="Dead">Dead</option>
-            <option value="Scorched">Scorched</option>
-            <option value="Frozen">Frozen</option>
-            <option value="Toxic">Toxic</option>
-            <option value="Radioactive">Radioactive</option>
-            <option value="Marsh">Marsh</option>
-            <option value="Exotic">Exotic</option>
-          </select>
+          <div className="mt-1">
+            <SearchableSelect
+              options={biomeOptions}
+              value={planet.biome || ''}
+              onChange={(val) => setField('biome', val)}
+              placeholder="Search biome..."
+            />
+          </div>
         </div>
-        <div className="w-36">
+        <div className="min-w-56">
           <label className="block text-sm">Weather</label>
-          <select className="w-full mt-1 p-1 rounded" value={planet.weather || ''} onChange={e => setField('weather', e.target.value)}>
-            <option value="">-- Select --</option>
-            <option value="Clear">Clear</option>
-            <option value="Dusty">Dusty</option>
-            <option value="Humid">Humid</option>
-            <option value="Superheated">Superheated</option>
-            <option value="Freezing">Freezing</option>
-            <option value="Toxic Rain">Toxic Rain</option>
-            <option value="Irradiated">Irradiated</option>
-            <option value="Extreme Storms">Extreme Storms</option>
-            <option value="Electric">Electric</option>
-            <option value="Blissful">Blissful</option>
-          </select>
+          <div className="mt-1">
+            <SearchableSelect
+              options={weatherOptions}
+              value={planet.weather || ''}
+              onChange={(val) => setField('weather', val)}
+              placeholder="Search weather..."
+            />
+          </div>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-3">
         <div>
           <label className="block text-sm">Sentinels</label>
-          <select className="w-full mt-1 p-1 rounded" value={planet.sentinel || ''} onChange={e => setField('sentinel', e.target.value)}>
-            <option value="">-- Select --</option>
-            <option value="None">None</option>
-            <option value="Limited">Limited</option>
-            <option value="Low Security">Low Security</option>
-            <option value="Normal">Normal</option>
-            <option value="High Security">High Security</option>
-            <option value="Aggressive">Aggressive</option>
-            <option value="Frenzied">Frenzied</option>
-            <option value="Corrupted">Corrupted</option>
-          </select>
+          <div className="mt-1">
+            <SearchableSelect
+              options={sentinelOptions}
+              value={planet.sentinel || ''}
+              onChange={(val) => setField('sentinel', val)}
+              placeholder="Search sentinels..."
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm">Flora</label>
-          <select aria-label="Planet Flora" className="mt-1 p-1 rounded w-full" value={planet.flora || ''} onChange={e => setField('flora', e.target.value)}>
-            <option value="">-- Select --</option>
-            <option value="None">None</option>
-            <option value="Sparse">Sparse</option>
-            <option value="Low">Low</option>
-            <option value="Average">Average</option>
-            <option value="High">High</option>
-            <option value="Abundant">Abundant</option>
-            <option value="Lush">Lush</option>
-          </select>
+          <div className="mt-1">
+            <SearchableSelect
+              options={floraOptions}
+              value={planet.flora || ''}
+              onChange={(val) => setField('flora', val)}
+              placeholder="Search flora..."
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm">Fauna</label>
-          <select aria-label="Planet Fauna" className="mt-1 p-1 rounded w-full" value={planet.fauna || ''} onChange={e => setField('fauna', e.target.value)}>
-            <option value="">-- Select --</option>
-            <option value="None">None</option>
-            <option value="Sparse">Sparse</option>
-            <option value="Low">Low</option>
-            <option value="Ample">Ample</option>
-            <option value="Full">Full</option>
-            <option value="Bountiful">Bountiful</option>
-            <option value="Copious">Copious</option>
-          </select>
+          <div className="mt-1">
+            <SearchableSelect
+              options={faunaOptions}
+              value={planet.fauna || ''}
+              onChange={(val) => setField('fauna', val)}
+              placeholder="Search fauna..."
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm">Resources / Materials</label>
-          <input aria-label="Planet Materials" placeholder="Comma separated" className="mt-1 p-1 rounded w-full" value={planet.materials || ''} onChange={e => setField('materials', e.target.value)} />
+          <div className="mt-1">
+            <SearchableSelect
+              options={resourcesOptions}
+              value={planet.materials || ''}
+              onChange={(val) => setField('materials', val)}
+              placeholder="Search resources..."
+              isMulti={true}
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm">Base Location</label>

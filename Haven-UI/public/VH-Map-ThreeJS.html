@@ -561,6 +561,96 @@
         #dir-west { top: 50%; left: 50%; transform: translate(-50%, -50%); }
         #dir-up { top: 80px; left: 50%; transform: translateX(-50%); }
         #dir-down { bottom: 80px; left: 50%; transform: translateX(-50%); }
+
+        /* Filter Controls */
+        #filter-controls {
+            position: absolute;
+            top: 440px;
+            right: 20px;
+            background: rgba(20, 27, 61, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(157, 78, 221, 0.5);
+            z-index: 100;
+            min-width: 180px;
+            backdrop-filter: blur(10px);
+        }
+        #filter-controls h4 {
+            color: #9d4edd;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .filter-row {
+            margin: 12px 0;
+        }
+        .filter-row label {
+            display: block;
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+        .filter-btn-group {
+            display: flex;
+            gap: 4px;
+        }
+        .filter-btn {
+            flex: 1;
+            padding: 6px 8px;
+            background: rgba(40, 40, 60, 0.8);
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #888;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.2s;
+        }
+        .filter-btn.active {
+            background: #9d4edd;
+            border-color: #9d4edd;
+            color: white;
+        }
+        .filter-btn:hover:not(.active) {
+            background: rgba(60, 60, 80, 0.8);
+        }
+        #galaxy-search {
+            width: 100%;
+            padding: 6px 8px;
+            background: rgba(40, 40, 60, 0.8);
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: white;
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+        #galaxy-search::placeholder {
+            color: #666;
+        }
+        #filter-galaxy {
+            width: 100%;
+            padding: 6px;
+            background: rgba(40, 40, 60, 0.8);
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: white;
+            font-size: 11px;
+        }
+        #filter-status {
+            font-size: 10px;
+            color: #00C2B3;
+            margin-top: 10px;
+            padding: 6px;
+            background: rgba(0, 194, 179, 0.1);
+            border-radius: 4px;
+        }
+        @media (max-width: 768px) {
+            #filter-controls {
+                top: auto;
+                bottom: 120px;
+                right: 10px;
+                left: 10px;
+                min-width: auto;
+            }
+        }
     </style>
 </head>
 <body>
@@ -615,6 +705,27 @@
             </div>
             <input type="range" id="pinch-speed" min="0.1" max="3" step="0.1" value="1" onchange="updatePinchSpeed(this.value)" oninput="updatePinchSpeedDisplay(this.value)">
         </div>
+    </div>
+
+    <!-- Reality/Galaxy Filter Controls -->
+    <div id="filter-controls">
+        <h4>🔮 Filters</h4>
+        <div class="filter-row">
+            <label>Reality</label>
+            <div class="filter-btn-group">
+                <button class="filter-btn active" id="filter-reality-all" onclick="setRealityFilter(null)">All</button>
+                <button class="filter-btn" id="filter-reality-normal" onclick="setRealityFilter('Normal')">Normal</button>
+                <button class="filter-btn" id="filter-reality-perma" onclick="setRealityFilter('Permadeath')">Perma</button>
+            </div>
+        </div>
+        <div class="filter-row">
+            <label>Galaxy</label>
+            <input type="text" id="galaxy-search" placeholder="Search by # or name..." oninput="filterGalaxyOptions(this.value)">
+            <select id="filter-galaxy" onchange="setGalaxyFilter(this.value)">
+                <option value="">All Galaxies</option>
+            </select>
+        </div>
+        <div id="filter-status">Showing all data</div>
     </div>
 
     <!-- Collapsible Search Panel - Left Side -->
@@ -744,6 +855,86 @@
         const urlParams = new URLSearchParams(window.location.search);
         const isEmbedMode = urlParams.get('embed') === 'true';
 
+        // ========== FILTER STATE ==========
+        let filterReality = null;  // null = all, 'Normal', or 'Permadeath'
+        let filterGalaxy = null;   // null = all, or galaxy name
+        let galaxiesData = [];
+
+        // Load galaxies for dropdown
+        async function loadGalaxies() {
+            try {
+                const resp = await fetch('/api/galaxies');
+                const data = await resp.json();
+                galaxiesData = data.galaxies || [];
+                populateGalaxyDropdown();
+            } catch (e) {
+                console.error('Failed to load galaxies:', e);
+            }
+        }
+
+        function populateGalaxyDropdown() {
+            const select = document.getElementById('filter-galaxy');
+            if (!select) return;
+            select.innerHTML = '<option value="">All Galaxies</option>';
+            galaxiesData.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g.name;
+                opt.textContent = `${g.index}: ${g.name}`;
+                select.appendChild(opt);
+            });
+        }
+
+        function filterGalaxyOptions(search) {
+            const select = document.getElementById('filter-galaxy');
+            if (!select) return;
+            const lowerSearch = search.toLowerCase();
+
+            Array.from(select.options).forEach(opt => {
+                if (opt.value === '') {
+                    opt.hidden = false;
+                } else {
+                    const matchesName = opt.textContent.toLowerCase().includes(lowerSearch);
+                    const matchesIndex = galaxiesData.find(g => g.name === opt.value && g.index.toString() === search);
+                    opt.hidden = !(matchesName || matchesIndex);
+                }
+            });
+        }
+
+        function setRealityFilter(reality) {
+            filterReality = reality;
+            // Update button states
+            document.querySelectorAll('.filter-btn-group .filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (reality === null) {
+                document.getElementById('filter-reality-all').classList.add('active');
+            } else if (reality === 'Normal') {
+                document.getElementById('filter-reality-normal').classList.add('active');
+            } else {
+                document.getElementById('filter-reality-perma').classList.add('active');
+            }
+            // Reload map data with new filter
+            loadAndCreateSystems();
+        }
+
+        function setGalaxyFilter(galaxy) {
+            filterGalaxy = galaxy || null;
+            // Reload map data with new filter
+            loadAndCreateSystems();
+        }
+
+        function updateFilterStatus(totalSystems, totalRegions) {
+            const statusEl = document.getElementById('filter-status');
+            if (!statusEl) return;
+
+            let status = '';
+            if (filterReality) status += filterReality + ' ';
+            if (filterGalaxy) status += 'in ' + filterGalaxy + ' ';
+            if (!filterReality && !filterGalaxy) status = 'All data ';
+            status += `(${totalSystems} systems, ${totalRegions} regions)`;
+            statusEl.textContent = status;
+        }
+
         // Apply embed mode settings - hide UI and set defaults
         function applyEmbedMode() {
             if (!isEmbedMode) return;
@@ -751,7 +942,7 @@
             // Hide all UI panels
             const elementsToHide = [
                 'info-panel', 'controls', 'fps-counter', 'system-info',
-                'mobile-settings', 'back-to-haven', 'search-panel'
+                'mobile-settings', 'back-to-haven', 'search-panel', 'filter-controls'
             ];
             elementsToHide.forEach(id => {
                 const el = document.getElementById(id);
@@ -869,6 +1060,9 @@
             // Add galaxy center marker
             createGalaxyCenter();
             console.log('Galaxy center created');
+
+            // Load galaxies for filter dropdown
+            loadGalaxies();
 
             // Load and create systems asynchronously
             await loadAndCreateSystems();
@@ -1079,24 +1273,44 @@
         }
 
         async function loadAndCreateSystems() {
+            // Clear previous system data before loading new filtered data
+            systemData = [];
+
             // Show loading indicator
             document.getElementById('system-count').textContent = 'Loading...';
 
             try {
+                // Build URL with filter parameters
+                const params = new URLSearchParams();
+                if (filterReality) params.append('reality', filterReality);
+                if (filterGalaxy) params.append('galaxy', filterGalaxy);
+                const queryString = params.toString();
+                const url = '/api/map/regions-aggregated' + (queryString ? '?' + queryString : '');
+
                 // Fetch pre-aggregated region data from API (MUCH faster than loading all systems)
-                console.log('Fetching aggregated region data...');
-                const response = await fetch('/api/map/regions-aggregated');
+                console.log('Fetching aggregated region data...', url);
+                const response = await fetch(url);
                 const data = await response.json();
 
                 regionsData = data.regions || [];
                 const totalSystems = data.total_systems || 0;
                 const totalRegions = data.total_regions || 0;
 
+                // Update filter status display
+                updateFilterStatus(totalSystems, totalRegions);
+
                 console.log(`Loaded ${totalSystems} systems in ${totalRegions} regions from API`);
 
                 if (regionsData.length === 0) {
                     console.log('No regions data available - no populated regions to display');
-                    document.getElementById('system-count').textContent = '0 (no systems discovered yet)';
+                    document.getElementById('system-count').textContent = '0 systems';
+                    // Clear existing points from scene when filter returns no results
+                    if (systemPoints) {
+                        scene.remove(systemPoints);
+                        if (systemPoints.geometry) systemPoints.geometry.dispose();
+                        if (systemPoints.material) systemPoints.material.dispose();
+                        systemPoints = null;
+                    }
                     return;
                 }
 
@@ -1313,6 +1527,14 @@
 
         // Create the Three.js geometry from arrays
         function createPointsGeometry(positions, colors, sizes) {
+            // Remove old points from scene before creating new ones
+            if (systemPoints) {
+                scene.remove(systemPoints);
+                if (systemPoints.geometry) systemPoints.geometry.dispose();
+                if (systemPoints.material) systemPoints.material.dispose();
+                systemPoints = null;
+            }
+
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));

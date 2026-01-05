@@ -14,7 +14,7 @@ export default function Navbar() {
   const intervalRef = useRef(null)
   const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
 
-  const { isAdmin, isSuperAdmin, isPartner, user, canAccess } = auth
+  const { isAdmin, isSuperAdmin, isPartner, isSubAdmin, user, canAccess } = auth
 
   // Fetch pending count every 30 seconds if admin
   useEffect(() => {
@@ -82,6 +82,7 @@ export default function Navbar() {
                     {user?.displayName || user?.username}
                     {isPartner && user?.discordTag && <span className="ml-1 text-cyan-400">({user.discordTag})</span>}
                     {isSuperAdmin && <span className="ml-1 text-yellow-400">(Super Admin)</span>}
+                    {isSubAdmin && <span className="ml-1 text-amber-400">(Sub-Admin)</span>}
                   </span>
                 ) : 'Web'}
               </div>
@@ -111,7 +112,10 @@ export default function Navbar() {
             )}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/api-keys">API Keys</Link>}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/partners">Partners</Link>}
+            {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/audit">Audit Log</Link>}
+            {(isSuperAdmin || isPartner) && <Link className="px-3 py-1 hover:underline" to="/admin/sub-admins">Sub-Admins</Link>}
             {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-1 hover:underline" to="/csv-import">CSV Import</Link>}
+            {isAdmin && <Link className="px-3 py-1 hover:underline" to="/data-restrictions">Restrictions</Link>}
             {!isAdmin ? (
               <button className="px-3 py-1 bg-blue-500 text-white rounded" onClick={() => setShowLogin(true)}>Login</button>
             ) : (
@@ -153,12 +157,16 @@ export default function Navbar() {
             )}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/api-keys" onClick={closeMenu}>API Keys</Link>}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/partners" onClick={closeMenu}>Partners</Link>}
+            {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/audit" onClick={closeMenu}>Audit Log</Link>}
+            {(isSuperAdmin || isPartner) && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/sub-admins" onClick={closeMenu}>Sub-Admins</Link>}
             {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/csv-import" onClick={closeMenu}>CSV Import</Link>}
+            {isAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/data-restrictions" onClick={closeMenu}>Data Restrictions</Link>}
             <div className="pt-2 border-t border-gray-700">
               {isAdmin && (
                 <div className="px-3 py-2 text-sm text-gray-400 mb-2">
                   Logged in as: {user?.displayName || user?.username}
                   {isPartner && user?.discordTag && <span className="text-cyan-400"> ({user.discordTag})</span>}
+                  {isSubAdmin && <span className="text-amber-400"> (Sub-Admin)</span>}
                 </div>
               )}
               {!isAdmin ? (
