@@ -1,0 +1,3 @@
+[submodule "Planet_Atlas"]
+	path = Planet_Atlas
+	url = https://github.com/gusgust/Planet_Atlas.git
