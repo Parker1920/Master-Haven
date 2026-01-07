@@ -28,10 +28,8 @@ export default function Wizard(){
   const [discordTags, setDiscordTags] = useState([])
   const [editExplanation, setEditExplanation] = useState('')
   const [originalTag, setOriginalTag] = useState(null)
-  // Personal discord username for non-community submissions
-  const [personalDiscordUsername, setPersonalDiscordUsername] = useState('')
-  const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
-  const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
+  // Discord username for all submissions (required for self-submission detection)
+  const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
 
   // Fetch available discord tags for dropdown (all users can assign tags)
   useEffect(() => {
@@ -84,10 +82,9 @@ export default function Wizard(){
       return;
     }
 
-    // If personal is selected, discord username is required
-    if (system.discord_tag === 'personal' && !personalDiscordUsername.trim()) {
-      alert('Discord username is required for personal submissions.');
-      setPersonalDiscordModalOpen(true);
+    // Discord username is required for all submissions (for self-submission detection)
+    if (!submitterDiscordUsername.trim() && !isAdmin) {
+      alert('Your Discord username is required for all submissions.');
       return;
     }
 
@@ -112,9 +109,9 @@ export default function Wizard(){
       } else {
         // Non-admin: submit for approval
         const payload = { ...system }
-        // Include personal discord username if personal tag selected
-        if (system.discord_tag === 'personal' && personalDiscordUsername.trim()) {
-          payload.personal_discord_username = personalDiscordUsername.trim()
+        // Always include submitter discord username for self-submission detection
+        if (submitterDiscordUsername.trim()) {
+          payload.personal_discord_username = submitterDiscordUsername.trim()
         }
         const r = await axios.post('/api/submit_system', payload);
         alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
@@ -423,20 +420,7 @@ export default function Wizard(){
           <select
             className={`w-full p-2 border rounded bg-gray-700 ${!system.discord_tag ? 'border-red-500' : ''}`}
             value={system.discord_tag || ''}
-            onChange={e => {
-              const value = e.target.value
-              if (value === 'personal') {
-                // Open modal to collect discord username
-                setPersonalDiscordModalOpen(true)
-                setPendingPersonalSelection(true)
-              } else {
-                setField('discord_tag', value || null)
-                // Clear personal discord username if switching away from personal
-                if (system.discord_tag === 'personal') {
-                  setPersonalDiscordUsername('')
-                }
-              }
-            }}
+            onChange={e => setField('discord_tag', e.target.value || null)}
             required
           >
             <option value="">-- Select a Community (Required) --</option>
@@ -448,22 +432,27 @@ export default function Wizard(){
           <p className="text-xs text-gray-500 mt-1">
             Select which Discord community this system belongs to, or "Personal" if not affiliated with a community.
           </p>
-          {/* Show personal discord username if personal is selected */}
-          {system.discord_tag === 'personal' && personalDiscordUsername && (
-            <div className="mt-2 p-2 bg-fuchsia-900/30 border border-fuchsia-500 rounded flex justify-between items-center">
-              <span className="text-fuchsia-300">
-                Discord Username: <strong>{personalDiscordUsername}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => setPersonalDiscordModalOpen(true)}
-                className="text-xs px-2 py-1 bg-fuchsia-600 text-white rounded hover:bg-fuchsia-700"
-              >
-                Edit
-              </button>
-            </div>
-          )}
         </div>
+
+        {/* Your Discord Username - REQUIRED for all submissions */}
+        {!isAdmin && (
+          <div className="mt-3">
+            <label className="block text-sm font-medium mb-1">
+              Your Discord Username <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              className={`w-full p-2 border rounded bg-gray-700 ${!submitterDiscordUsername.trim() ? 'border-red-500' : 'border-gray-600'}`}
+              value={submitterDiscordUsername}
+              onChange={e => setSubmitterDiscordUsername(e.target.value)}
+              placeholder="e.g., username or username#1234"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Your Discord username is required so we can contact you about your submission if needed.
+            </p>
+          </div>
+        )}
 
         {/* Warning/explanation for partners editing untagged systems */}
         {needsEditExplanation && (
@@ -613,69 +602,6 @@ export default function Wizard(){
         </Modal>
       )}
 
-        {/* Personal Discord Username Modal */}
-        {personalDiscordModalOpen && (
-          <Modal
-            title="Personal Discord Username"
-            onClose={() => {
-              setPersonalDiscordModalOpen(false)
-              // If they cancel without entering a username, don't set personal tag
-              if (pendingPersonalSelection && !personalDiscordUsername.trim()) {
-                setPendingPersonalSelection(false)
-              }
-            }}
-          >
-            <div className="space-y-4">
-              <p className="text-sm text-gray-300">
-                Since you selected "Personal" (no community affiliation), please provide your Discord username
-                so we can contact you if we need more information about your submission.
-              </p>
-              <div>
-                <label className="block text-sm font-semibold mb-2">
-                  Discord Username <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="w-full p-2 border rounded bg-gray-700 text-white"
-                  value={personalDiscordUsername}
-                  onChange={e => setPersonalDiscordUsername(e.target.value)}
-                  placeholder="e.g., username or username#1234"
-                  autoFocus
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter your Discord username so we can DM you if needed.
-                </p>
-              </div>
-              <div className="flex space-x-2">
-                <Button
-                  className="btn-primary bg-fuchsia-600 hover:bg-fuchsia-700"
-                  onClick={() => {
-                    if (!personalDiscordUsername.trim()) {
-                      alert('Discord username is required')
-                      return
-                    }
-                    // Set the discord_tag to personal and close modal
-                    setField('discord_tag', 'personal')
-                    setPendingPersonalSelection(false)
-                    setPersonalDiscordModalOpen(false)
-                  }}
-                >
-                  Confirm
-                </Button>
-                <Button
-                  className="bg-gray-600 text-white hover:bg-gray-500"
-                  onClick={() => {
-                    setPersonalDiscordModalOpen(false)
-                    setPendingPersonalSelection(false)
-                    setPersonalDiscordUsername('')
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        )}
         </form>
       </Card>
     </div>

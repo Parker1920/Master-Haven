@@ -79,8 +79,8 @@ export default function Systems() {
     }).catch(() => {})
   }, [])
 
-  // Load regions on mount
-  useEffect(() => { load() }, [])
+  // Load regions on mount and when filterTag changes
+  useEffect(() => { load() }, [filterTag])
 
   // Backend search when query changes
   useEffect(() => {
@@ -100,7 +100,12 @@ export default function Systems() {
   async function load() {
     setLoading(true)
     try {
-      const r = await axios.get('/api/regions/grouped?include_systems=false')
+      // Build query params including discord_tag filter
+      const params = new URLSearchParams({ include_systems: 'false' })
+      if (filterTag && filterTag !== 'all') {
+        params.append('discord_tag', filterTag)
+      }
+      const r = await axios.get(`/api/regions/grouped?${params.toString()}`)
       setRegions(r.data.regions || [])
     } catch (e) {
       console.error('Failed to load regions:', e)

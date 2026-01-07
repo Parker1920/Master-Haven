@@ -1226,9 +1226,9 @@
         function buildPlanetInfo(data) {
             let html = '<p><span class="label">Type:</span> <span class="value">' + (data.is_moon ? 'Moon' : 'Planet') + '</span></p>';
 
-            // Add View 3D Planet button if planet has terrain data
+            // Add View 3D Planet button - opens Planet Atlas visualization
             if (data.id) {
-                html += '<a href="/haven-ui/planet/' + data.id + '" target="_blank" style="display: inline-block; margin: 10px 0; padding: 10px 20px; background: linear-gradient(135deg, #9d4edd 0%, #7b2cbf 100%); border: 1px solid #9d4edd; border-radius: 8px; color: white; text-decoration: none; font-size: 14px; font-weight: bold; transition: all 0.2s;"' +
+                html += '<a href="/map/planet/' + data.id + '" target="_blank" style="display: inline-block; margin: 10px 0; padding: 10px 20px; background: linear-gradient(135deg, #9d4edd 0%, #7b2cbf 100%); border: 1px solid #9d4edd; border-radius: 8px; color: white; text-decoration: none; font-size: 14px; font-weight: bold; transition: all 0.2s;"' +
                         ' onmouseover="this.style.background=\'linear-gradient(135deg, #b366f9 0%, #9d4edd 100%)\'; this.style.transform=\'scale(1.02)\';"' +
                         ' onmouseout="this.style.background=\'linear-gradient(135deg, #9d4edd 0%, #7b2cbf 100%)\'; this.style.transform=\'scale(1)\';">' +
                         '🌍 View 3D Planet</a>';

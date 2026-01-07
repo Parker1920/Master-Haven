@@ -82,12 +82,12 @@ export default function Dashboard() {
 
     fetchData()
 
-    // Fetch pending approvals
-    axios.get('/api/pending-approvals').then(r => {
+    // Fetch pending approvals count
+    axios.get('/api/pending_systems/count').then(r => {
       const data = r.data || {}
       setPending({
-        systems: (data.systems || []).length,
-        regions: (data.regions || []).length
+        systems: data.systems || 0,
+        regions: data.regions || 0
       })
     }).catch(() => {})
 
@@ -113,7 +113,7 @@ export default function Dashboard() {
         if (!logsPaused) {
           fetchActivityLogs()
         }
-      }, 5000)
+      }, 60000)
     }
 
     startPolling()
@@ -347,11 +347,6 @@ export default function Dashboard() {
                 <ChartBarIcon className="w-4 h-4" style={{ color: '#00C2B3' }} />
                 <span>DB Stats</span>
               </Link>
-              <button onClick={() => fetch('/api/generate_map', { method: 'POST' })}
-                      className="flex items-center gap-2 p-2 rounded-lg text-xs transition-colors hover:bg-white/5 text-left">
-                <GlobeAltIcon className="w-4 h-4" style={{ color: '#9d4edd' }} />
-                <span>Regen Map</span>
-              </button>
             </div>
           </div>
         </div>

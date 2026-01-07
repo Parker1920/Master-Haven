@@ -277,15 +277,171 @@ STORM_FREQUENCY = {
     3: "Always",
 }
 
+# Resource ID to human-readable name mapping
+RESOURCE_NAMES = {
+    # Stellar metals (found in deposits)
+    "YELLOW": "Copper",
+    "YELLOW2": "Chromatic Metal",
+    "RED": "Cadmium",
+    "RED2": "Chromatic Metal",
+    "GREEN": "Emeril",
+    "GREEN2": "Chromatic Metal",
+    "BLUE": "Indium",
+    "BLUE2": "Chromatic Metal",
+    "PURPLE": "Indium",
+    "PURPLE2": "Indium",
+    # Activated stellar metals (extreme weather planets)
+    "EX_YELLOW": "Activated Copper",
+    "EX_RED": "Activated Cadmium",
+    "EX_GREEN": "Activated Emeril",
+    "EX_BLUE": "Activated Indium",
+    "EX_PURPLE": "Activated Indium",
+    # Biome-specific resources
+    "COLD1": "Dioxite",
+    "SNOW1": "Dioxite",
+    "HOT1": "Phosphorus",
+    "LUSH1": "Paraffinium",
+    "DUSTY1": "Pyrite",
+    "TOXIC1": "Ammonia",
+    "RADIO1": "Uranium",
+    "SWAMP1": "Faecium",
+    "LAVA1": "Basalt",
+    "WEIRD1": "Magnetised Ferrite",
+    # Common elements
+    "FUEL1": "Carbon",
+    "FUEL2": "Condensed Carbon",
+    "LAND1": "Ferrite Dust",
+    "LAND2": "Pure Ferrite",
+    "LAND3": "Magnetised Ferrite",
+    "OXYGEN": "Oxygen",
+    "CATALYST1": "Sodium",
+    "CATALYST2": "Sodium Nitrate",
+    "LAUNCHSUB": "Di-hydrogen",
+    "LAUNCHSUB2": "Di-hydrogen Jelly",
+    "CAVE1": "Cobalt",
+    "CAVE2": "Ionised Cobalt",
+    "WATER1": "Salt",
+    "WATER2": "Chlorine",
+    "ASTEROID1": "Silver",
+    "ASTEROID2": "Gold",
+    "ASTEROID3": "Platinum",
+    # Plant/Flora resources
+    "PLANT_POOP": "Mordite",
+    "PLANT_TOXIC": "Fungal Mould",
+    "PLANT_SNOW": "Frost Crystal",
+    "PLANT_HOT": "Solanium",
+    "PLANT_RADIO": "Gamma Root",
+    "PLANT_DUST": "Cactus Flesh",
+    "PLANT_LUSH": "Star Bulb",
+    "PLANT_CAVE": "Marrow Bulb",
+    "PLANT_WATER": "Kelp Sac",
+    # Rare resources
+    "RARE1": "Rusted Metal",
+    "RARE2": "Living Pearl",
+    # Space/Anomaly resources
+    "SPACEGUNK1": "Residual Goop",
+    "SPACEGUNK2": "Runaway Mould",
+    "SPACEGUNK3": "Living Slime",
+    "SPACEGUNK4": "Viscous Fluids",
+    "SPACEGUNK5": "Tainted Metal",
+    # Special biome resources
+    "ROBOT1": "Pugneum",
+    "GAS1": "Nitrogen",
+    "GAS2": "Sulphurine",
+    "GAS3": "Radon",
+}
+
+
+def translate_resource(resource_id: str) -> str:
+    """Translate a resource ID to human-readable name."""
+    if not resource_id or resource_id == "Unknown" or resource_id == "":
+        return resource_id
+    # Direct lookup
+    if resource_id in RESOURCE_NAMES:
+        return RESOURCE_NAMES[resource_id]
+    # Try uppercase
+    if resource_id.upper() in RESOURCE_NAMES:
+        return RESOURCE_NAMES[resource_id.upper()]
+    # Return original if no mapping found
+    return resource_id
+
+
+def clean_weather_string(weather_str: str) -> str:
+    """Clean raw weather strings like 'weather_glitch 6' to readable names."""
+    if not weather_str or weather_str == "Unknown" or weather_str == "":
+        return weather_str
+
+    # Already a clean name from WEATHER_OPTIONS
+    clean_names = ["Clear", "Dust", "Humid", "Snow", "Toxic", "Scorched",
+                   "Radioactive", "RedWeather", "GreenWeather", "BlueWeather",
+                   "Swamp", "Lava", "Bubble", "Weird", "Fire", "ClearCold", "GasGiant"]
+    if weather_str in clean_names:
+        return weather_str
+
+    # Map raw weather string prefixes to readable names
+    weather_mappings = {
+        "weather_glitch": "Glitch",
+        "weather_lava": "Lava",
+        "weather_frozen": "Frozen",
+        "weather_cold": "Cold",
+        "weather_hot": "Scorched",
+        "weather_toxic": "Toxic",
+        "weather_radioactive": "Radioactive",
+        "weather_dust": "Dusty",
+        "weather_humid": "Humid",
+        "weather_scorched": "Scorched",
+        "weather_swamp": "Swamp",
+        "weather_bubble": "Bubble",
+        "weather_weird": "Weird",
+        "weather_fire": "Fire",
+        "weather_storm": "Stormy",
+        "weather_clear": "Clear",
+        "weather_normal": "Normal",
+        "weather_snow": "Snow",
+        "weather_blizzard": "Blizzard",
+        "weather_extreme": "Extreme",
+        "lush": "Lush",
+        "toxic": "Toxic",
+        "scorched": "Scorched",
+        "frozen": "Frozen",
+        "barren": "Barren",
+        "dead": "Dead",
+        "weird": "Weird",
+        "red": "Red",
+        "green": "Green",
+        "blue": "Blue",
+    }
+
+    # Convert to lowercase for matching
+    lower_weather = weather_str.lower()
+
+    # Try to match prefix
+    for prefix, readable in weather_mappings.items():
+        if lower_weather.startswith(prefix):
+            return readable
+
+    # Try to extract meaningful part (remove numbers and underscores)
+    import re
+    cleaned = re.sub(r'[_\d]+$', '', weather_str)  # Remove trailing numbers and underscores
+    cleaned = cleaned.replace('_', ' ').title()
+    if cleaned and cleaned != weather_str:
+        return cleaned
+
+    return weather_str
+
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
     __version__ = "10.0.0"
     __description__ = "Remote region enumeration + core planet data extraction"
 
-    # Mapping for flora/fauna/sentinel levels
-    LIFE_LEVELS = {0: "Dead", 1: "Low", 2: "Mid", 3: "Full"}
-    SENTINEL_LEVELS = {0: "Low", 1: "Default", 2: "High", 3: "Aggressive"}
+    # Mapping for flora/fauna levels (NMS adjectives)
+    FLORA_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Bountiful"}
+    FAUNA_LEVELS = {0: "None", 1: "Scarce", 2: "Regular", 3: "Copious"}
+    # Legacy mapping for compatibility
+    LIFE_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Abundant"}
+    # Sentinel activity levels
+    SENTINEL_LEVELS = {0: "Minimal", 1: "Limited", 2: "High", 3: "Aggressive"}
 
     def __init__(self):
         super().__init__()
@@ -697,7 +853,7 @@ class HavenExtractorMod(Mod):
                         3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
                     }
                     galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
-                    glyph_code = self._coords_to_glyphs(voxel_x, voxel_y, voxel_z, system_idx)
+                    glyph_code = self._coords_to_glyphs(0, system_idx, voxel_x, voxel_y, voxel_z)
 
                     self._current_system_coords = {
                         "voxel_x": voxel_x,
@@ -711,7 +867,7 @@ class HavenExtractorMod(Mod):
                     }
                     logger.info(f"[v10.0.1] Cached coords from GenerateCreatureRoles: {glyph_code} in {galaxy_name}")
             except Exception as e:
-                logger.debug(f"[v10.0.1] Could not cache coords from lUA: {e}")
+                logger.info(f"[v10.0.1] Could not cache coords from lUA: {e}")
 
         if not self._capture_enabled:
             return
@@ -728,9 +884,7 @@ class HavenExtractorMod(Mod):
                 logger.debug("GenerateCreatureRoles: lPlanetData is NULL")
                 return
 
-            # Map to cGcPlanetData structure
-            from pymhf.core.memutils import map_struct
-            import nmspy.data.exported_types as nmse
+            # Map to cGcPlanetData structure (using global imports)
             planet_data = map_struct(planet_data_addr, nmse.cGcPlanetData)
 
             # Determine planet index - use length of captured dict
@@ -746,7 +900,7 @@ class HavenExtractorMod(Mod):
                         flora_raw = life_val.value
                     else:
                         flora_raw = int(life_val) if life_val is not None else 0
-                    flora_name = self.LIFE_LEVELS.get(flora_raw, f"Unknown({flora_raw})")
+                    flora_name = self.FLORA_LEVELS.get(flora_raw, f"Unknown({flora_raw})")
             except Exception as e:
                 logger.debug(f"Flora extraction failed: {e}")
 
@@ -760,18 +914,31 @@ class HavenExtractorMod(Mod):
                         fauna_raw = creature_val.value
                     else:
                         fauna_raw = int(creature_val) if creature_val is not None else 0
-                    fauna_name = self.LIFE_LEVELS.get(fauna_raw, f"Unknown({fauna_raw})")
+                    fauna_name = self.FAUNA_LEVELS.get(fauna_raw, f"Unknown({fauna_raw})")
             except Exception as e:
                 logger.debug(f"Fauna extraction failed: {e}")
 
-            # Extract Sentinels (from GroundCombatDataPerDifficulty.SentinelLevel)
+            # Extract Sentinels (from GroundCombatDataPerDifficulty[0].SentinelLevel)
+            # GroundCombatDataPerDifficulty is an array with 4 entries (one per difficulty)
+            # We use index 0 for normal difficulty
             sentinel_raw = 0
             sentinel_name = "Unknown"
             try:
                 if hasattr(planet_data, 'GroundCombatDataPerDifficulty'):
-                    combat_data = planet_data.GroundCombatDataPerDifficulty
-                    if hasattr(combat_data, 'SentinelLevel'):
-                        sentinel_val = combat_data.SentinelLevel
+                    combat_data_array = planet_data.GroundCombatDataPerDifficulty
+                    # Access the first element (normal difficulty)
+                    if hasattr(combat_data_array, '__getitem__'):
+                        combat_data = combat_data_array[0]
+                        if hasattr(combat_data, 'SentinelLevel'):
+                            sentinel_val = combat_data.SentinelLevel
+                            if hasattr(sentinel_val, 'value'):
+                                sentinel_raw = sentinel_val.value
+                            else:
+                                sentinel_raw = int(sentinel_val) if sentinel_val is not None else 0
+                            sentinel_name = self.SENTINEL_LEVELS.get(sentinel_raw, f"Unknown({sentinel_raw})")
+                    elif hasattr(combat_data_array, 'SentinelLevel'):
+                        # Fallback: maybe it's not an array after all
+                        sentinel_val = combat_data_array.SentinelLevel
                         if hasattr(sentinel_val, 'value'):
                             sentinel_raw = sentinel_val.value
                         else:
@@ -2290,20 +2457,9 @@ class HavenExtractorMod(Mod):
                             if val and val != "None":
                                 result["weather"] = val
 
-                        if hasattr(info, 'SentinelsPerDifficulty'):
-                            val = str(info.SentinelsPerDifficulty)
-                            if val and val != "None":
-                                result["sentinel_level"] = val
-
-                        if hasattr(info, 'Flora'):
-                            val = str(info.Flora)
-                            if val and val != "None":
-                                result["flora_level"] = val
-
-                        if hasattr(info, 'Fauna'):
-                            val = str(info.Fauna)
-                            if val and val != "None":
-                                result["fauna_level"] = val
+                        # NOTE: SentinelsPerDifficulty, Flora, Fauna are array types
+                        # We already get these from the GenerateCreatureRoles hook
+                        # Skip these fallbacks to avoid overwriting good data with object references
                 except Exception:
                     pass
 

@@ -21,6 +21,7 @@ export const AuthContext = createContext({
   isSuperAdmin: false,
   isPartner: false,
   isSubAdmin: false,
+  isHavenSubAdmin: false,
   user: null,
   loading: true,
   login: async () => {},
@@ -45,7 +46,8 @@ export function AuthProvider({ children }) {
           displayName: data.display_name,
           enabledFeatures: data.enabled_features || [],
           accountId: data.account_id,
-          parentDisplayName: data.parent_display_name  // For sub-admins
+          parentDisplayName: data.parent_display_name,  // For sub-admins
+          isHavenSubAdmin: data.is_haven_sub_admin || false  // True if Haven sub-admin (no parent partner)
         })
       } else {
         setUser(null)
@@ -66,6 +68,7 @@ export function AuthProvider({ children }) {
   const isSuperAdmin = user?.type === 'super_admin'
   const isPartner = user?.type === 'partner'
   const isSubAdmin = user?.type === 'sub_admin'
+  const isHavenSubAdmin = user?.isHavenSubAdmin || false
 
   function canAccess(feature) {
     if (!user) return false
@@ -94,7 +97,8 @@ export function AuthProvider({ children }) {
       displayName: data.display_name,
       enabledFeatures: data.enabled_features || [],
       accountId: data.account_id,
-      parentDisplayName: data.parent_display_name
+      parentDisplayName: data.parent_display_name,
+      isHavenSubAdmin: data.is_haven_sub_admin || false
     })
     return data
   }
@@ -114,6 +118,7 @@ export function AuthProvider({ children }) {
       isSuperAdmin,
       isPartner,
       isSubAdmin,
+      isHavenSubAdmin,
       user,
       loading,
       login,

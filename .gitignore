@@ -192,3 +192,16 @@ NMS-Save-Watcher/config.json
 "Haven-UI/.env.backup" 
 nul
 Haven-UI/.env.backup
+
+# -----------------
+# NMS-HAVEN-EXTRACTOR DEVELOPMENT FILES
+# -----------------
+# These contain hardcoded paths for local development
+# Only dist/HavenExtractor should be distributed to users
+NMS-Haven-Extractor/RUN_SCANNER.bat
+NMS-Haven-Extractor/INSTALL_EXTRACTOR.bat
+NMS-Haven-Extractor/SETUP_PYMHF.bat
+NMS-Haven-Extractor/RUN_DEBUG_TEST.bat
+NMS-Haven-Extractor/ANALYZE_DUMP.bat
+NMS-Haven-Extractor/logs/
+NMS-Haven-Extractor/haven_extractor_mod/

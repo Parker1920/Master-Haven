@@ -5,49 +5,43 @@
 # start_exe = true
 # ///
 """
-Haven Extractor v10.0.0 - Remote Region Enumeration
+Haven Extractor v9.0.0 - Batch Mode
 
 Extracts planet data from NMS and sends it to Haven UI via API.
 Works with ngrok for remote connections.
 
-v10.0.0 - REMOTE REGION ENUMERATION:
-- Scan ALL 512 systems in current region WITHOUT visiting them!
-- Uses ClassifyStarSystem static function to query remote systems
-- Captures: star type, economy, conflict, race, planet count, planet sizes
-- Marks data as "remote" (enumerated) vs "visited" (full detail)
-
-v9.0.0 - STREAMLINED:
-- Removed terrain/color extraction (research complete)
-- Core planet data: biome, weather, resources, flora/fauna/sentinels
-
 BATCH MODE:
-- Visit MULTIPLE star systems, all data stored in memory
+- Warp to systems - planet data captured automatically via hook
+- All visited systems stored in memory
 - Click "Export Batch" to save ALL systems to a single JSON
+- Click "Batch Status" to see collection progress
 
-REGION SCAN MODE (NEW):
-- Click "Scan Region" to enumerate all 512 systems in current region
-- Captures system-level data remotely (no warp required!)
-- Click "Export Region" to save the enumerated region data
-- Data marked as "remote" to distinguish from visited systems
+WORKFLOW:
+1. Run the extractor and start NMS
+2. Warp to a system - data captured automatically
+3. Continue warping to more systems
+4. Click "Export Batch" when ready to save all data
+
+Data extracted per system:
+- star_type, economy_type, economy_strength, conflict_level
+- dominant_lifeform, planet count
+
+Data extracted per planet:
+- biome, biome_subtype, weather
+- flora_level, fauna_level, sentinel_level
+- common_resource, uncommon_resource, rare_resource
+- is_moon, planet_size, planet_name
 
 SETUP:
 1. Create config.json in Documents/Haven-Extractor/ with your API URL:
    {"api_url": "https://your-ngrok-url.ngrok-free.app"}
 2. Or place haven_config.json in the same folder as this mod
 
-Data extracted remotely (per system):
-- star_type, economy_type, economy_strength, conflict_level
-- dominant_lifeform, planet_count, planet_sizes
-- is_abandoned, is_pirate, is_gas_giant
-
-Data requires visiting (per planet):
-- weather, flora_level, fauna_level, sentinel_level
-- planet_name (procedurally generated but needs visit for display)
-
 Data is:
 - Saved locally as backup in Documents/Haven-Extractor/
-- NOT auto-sent to Haven UI (manual upload via Save Watcher)
+- Sent to Haven UI API automatically (if configured)
 """
+
 
 import json
 import logging
@@ -277,15 +271,171 @@ STORM_FREQUENCY = {
     3: "Always",
 }
 
+# Resource ID to human-readable name mapping
+RESOURCE_NAMES = {
+    # Stellar metals (found in deposits)
+    "YELLOW": "Copper",
+    "YELLOW2": "Chromatic Metal",
+    "RED": "Cadmium",
+    "RED2": "Chromatic Metal",
+    "GREEN": "Emeril",
+    "GREEN2": "Chromatic Metal",
+    "BLUE": "Indium",
+    "BLUE2": "Chromatic Metal",
+    "PURPLE": "Indium",
+    "PURPLE2": "Indium",
+    # Activated stellar metals (extreme weather planets)
+    "EX_YELLOW": "Activated Copper",
+    "EX_RED": "Activated Cadmium",
+    "EX_GREEN": "Activated Emeril",
+    "EX_BLUE": "Activated Indium",
+    "EX_PURPLE": "Activated Indium",
+    # Biome-specific resources
+    "COLD1": "Dioxite",
+    "SNOW1": "Dioxite",
+    "HOT1": "Phosphorus",
+    "LUSH1": "Paraffinium",
+    "DUSTY1": "Pyrite",
+    "TOXIC1": "Ammonia",
+    "RADIO1": "Uranium",
+    "SWAMP1": "Faecium",
+    "LAVA1": "Basalt",
+    "WEIRD1": "Magnetised Ferrite",
+    # Common elements
+    "FUEL1": "Carbon",
+    "FUEL2": "Condensed Carbon",
+    "LAND1": "Ferrite Dust",
+    "LAND2": "Pure Ferrite",
+    "LAND3": "Magnetised Ferrite",
+    "OXYGEN": "Oxygen",
+    "CATALYST1": "Sodium",
+    "CATALYST2": "Sodium Nitrate",
+    "LAUNCHSUB": "Di-hydrogen",
+    "LAUNCHSUB2": "Di-hydrogen Jelly",
+    "CAVE1": "Cobalt",
+    "CAVE2": "Ionised Cobalt",
+    "WATER1": "Salt",
+    "WATER2": "Chlorine",
+    "ASTEROID1": "Silver",
+    "ASTEROID2": "Gold",
+    "ASTEROID3": "Platinum",
+    # Plant/Flora resources
+    "PLANT_POOP": "Mordite",
+    "PLANT_TOXIC": "Fungal Mould",
+    "PLANT_SNOW": "Frost Crystal",
+    "PLANT_HOT": "Solanium",
+    "PLANT_RADIO": "Gamma Root",
+    "PLANT_DUST": "Cactus Flesh",
+    "PLANT_LUSH": "Star Bulb",
+    "PLANT_CAVE": "Marrow Bulb",
+    "PLANT_WATER": "Kelp Sac",
+    # Rare resources
+    "RARE1": "Rusted Metal",
+    "RARE2": "Living Pearl",
+    # Space/Anomaly resources
+    "SPACEGUNK1": "Residual Goop",
+    "SPACEGUNK2": "Runaway Mould",
+    "SPACEGUNK3": "Living Slime",
+    "SPACEGUNK4": "Viscous Fluids",
+    "SPACEGUNK5": "Tainted Metal",
+    # Special biome resources
+    "ROBOT1": "Pugneum",
+    "GAS1": "Nitrogen",
+    "GAS2": "Sulphurine",
+    "GAS3": "Radon",
+}
+
+
+def translate_resource(resource_id: str) -> str:
+    """Translate a resource ID to human-readable name."""
+    if not resource_id or resource_id == "Unknown" or resource_id == "":
+        return resource_id
+    # Direct lookup
+    if resource_id in RESOURCE_NAMES:
+        return RESOURCE_NAMES[resource_id]
+    # Try uppercase
+    if resource_id.upper() in RESOURCE_NAMES:
+        return RESOURCE_NAMES[resource_id.upper()]
+    # Return original if no mapping found
+    return resource_id
+
+
+def clean_weather_string(weather_str: str) -> str:
+    """Clean raw weather strings like 'weather_glitch 6' to readable names."""
+    if not weather_str or weather_str == "Unknown" or weather_str == "":
+        return weather_str
+
+    # Already a clean name from WEATHER_OPTIONS
+    clean_names = ["Clear", "Dust", "Humid", "Snow", "Toxic", "Scorched",
+                   "Radioactive", "RedWeather", "GreenWeather", "BlueWeather",
+                   "Swamp", "Lava", "Bubble", "Weird", "Fire", "ClearCold", "GasGiant"]
+    if weather_str in clean_names:
+        return weather_str
+
+    # Map raw weather string prefixes to readable names
+    weather_mappings = {
+        "weather_glitch": "Glitch",
+        "weather_lava": "Lava",
+        "weather_frozen": "Frozen",
+        "weather_cold": "Cold",
+        "weather_hot": "Scorched",
+        "weather_toxic": "Toxic",
+        "weather_radioactive": "Radioactive",
+        "weather_dust": "Dusty",
+        "weather_humid": "Humid",
+        "weather_scorched": "Scorched",
+        "weather_swamp": "Swamp",
+        "weather_bubble": "Bubble",
+        "weather_weird": "Weird",
+        "weather_fire": "Fire",
+        "weather_storm": "Stormy",
+        "weather_clear": "Clear",
+        "weather_normal": "Normal",
+        "weather_snow": "Snow",
+        "weather_blizzard": "Blizzard",
+        "weather_extreme": "Extreme",
+        "lush": "Lush",
+        "toxic": "Toxic",
+        "scorched": "Scorched",
+        "frozen": "Frozen",
+        "barren": "Barren",
+        "dead": "Dead",
+        "weird": "Weird",
+        "red": "Red",
+        "green": "Green",
+        "blue": "Blue",
+    }
+
+    # Convert to lowercase for matching
+    lower_weather = weather_str.lower()
+
+    # Try to match prefix
+    for prefix, readable in weather_mappings.items():
+        if lower_weather.startswith(prefix):
+            return readable
+
+    # Try to extract meaningful part (remove numbers and underscores)
+    import re
+    cleaned = re.sub(r'[_\d]+$', '', weather_str)  # Remove trailing numbers and underscores
+    cleaned = cleaned.replace('_', ' ').title()
+    if cleaned and cleaned != weather_str:
+        return cleaned
+
+    return weather_str
+
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "10.0.0"
-    __description__ = "Remote region enumeration + core planet data extraction"
+    __version__ = "9.0.0"
+    __description__ = "Batch mode planet data extraction"
 
-    # Mapping for flora/fauna/sentinel levels
-    LIFE_LEVELS = {0: "Dead", 1: "Low", 2: "Mid", 3: "Full"}
-    SENTINEL_LEVELS = {0: "Low", 1: "Default", 2: "High", 3: "Aggressive"}
+    # Mapping for flora/fauna levels (NMS adjectives)
+    FLORA_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Bountiful"}
+    FAUNA_LEVELS = {0: "None", 1: "Scarce", 2: "Regular", 3: "Copious"}
+    # Legacy mapping for compatibility
+    LIFE_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Abundant"}
+    # Sentinel activity levels
+    SENTINEL_LEVELS = {0: "Minimal", 1: "Limited", 2: "High", 3: "Aggressive"}
 
     def __init__(self):
         super().__init__()
@@ -323,30 +473,18 @@ class HavenExtractorMod(Mod):
         # =====================================================
         self._system_saved_to_batch = False
 
-        # =====================================================
-        # v10.0.0: REGION ENUMERATION - Remote system scanning
-        # Stores data for all 512 systems in current region
-        # =====================================================
-        self._region_systems = []  # List of remotely enumerated systems
-        self._current_region_coords = None  # Voxel coords of current region
-        self._region_scan_in_progress = False
-        self._region_scan_progress = 0
 
         logger.info("=" * 60)
-        logger.info("Haven Extractor v10.0.0 - Remote Region Enumeration")
-        logger.info("Extracts: system data remotely + planet data on visit")
+        logger.info("Haven Extractor v9.0.0 - Batch Mode")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
-        logger.info("*** NEW: REGION SCAN MODE ***")
-        logger.info("Click 'Scan Region' to enumerate ALL 512 systems remotely!")
-        logger.info("No warping required - captures system-level data from anywhere")
-        logger.info("")
-        logger.info("*** BATCH MODE (for visited systems) ***")
-        logger.info("1. Warp to system - data captured AND SAVED to batch automatically")
-        logger.info("2. Warp to more systems - each saved to batch when ready")
-        logger.info("3. Click 'Export Batch' to export ALL systems to JSON")
+        logger.info("*** BATCH MODE ***")
+        logger.info("1. Warp to system - data captured automatically")
+        logger.info("2. Continue warping - all systems saved to batch")
+        logger.info("3. Click 'Export Batch' to save ALL systems to JSON")
         logger.info("=" * 60)
+
 
     # =========================================================================
     # DIRECT MEMORY READ UTILITIES
@@ -482,10 +620,12 @@ class HavenExtractorMod(Mod):
             result["is_moon"] = (size_val == 3)  # Moon = 3
             logger.info(f"    [DIRECT] Size: {result['planet_size']} (raw: {size_val}, is_moon: {result['is_moon']})")
 
-            # Read resources (16-byte strings)
-            result["common_resource"] = self._read_string(planet_gen_addr, PlanetGenInputOffsets.COMMON_SUBSTANCE, 16)
-            result["rare_resource"] = self._read_string(planet_gen_addr, PlanetGenInputOffsets.RARE_SUBSTANCE, 16)
-            logger.info(f"    [DIRECT] Resources: common={result['common_resource']}, rare={result['rare_resource']}")
+            # Read resources (16-byte strings) and translate to human-readable names
+            raw_common = self._read_string(planet_gen_addr, PlanetGenInputOffsets.COMMON_SUBSTANCE, 16)
+            raw_rare = self._read_string(planet_gen_addr, PlanetGenInputOffsets.RARE_SUBSTANCE, 16)
+            result["common_resource"] = translate_resource(raw_common)
+            result["rare_resource"] = translate_resource(raw_rare)
+            logger.info(f"    [DIRECT] Resources: common={result['common_resource']} ({raw_common}), rare={result['rare_resource']} ({raw_rare})")
 
         except Exception as e:
             logger.error(f"Direct planet gen input read failed: {e}")
@@ -657,7 +797,7 @@ class HavenExtractorMod(Mod):
         fires for nearby systems during galaxy discovery. Only the first 6
         belong to the current system.
         """
-        # v10.0.1: CRITICAL - Cache coordinates from lUA for region scan feature FIRST
+        # v9.0.0: CRITICAL - Cache coordinates from lUA for batch mode
         # This runs even when _capture_enabled is False (e.g., loading into a save)
         if not self._current_system_coords:
             try:
@@ -697,7 +837,7 @@ class HavenExtractorMod(Mod):
                         3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
                     }
                     galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
-                    glyph_code = self._coords_to_glyphs(voxel_x, voxel_y, voxel_z, system_idx)
+                    glyph_code = self._coords_to_glyphs(0, system_idx, voxel_x, voxel_y, voxel_z)
 
                     self._current_system_coords = {
                         "voxel_x": voxel_x,
@@ -709,9 +849,9 @@ class HavenExtractorMod(Mod):
                         "galaxy_name": galaxy_name,
                         "glyph_code": glyph_code,
                     }
-                    logger.info(f"[v10.0.1] Cached coords from GenerateCreatureRoles: {glyph_code} in {galaxy_name}")
+                    logger.info(f"[v9.0.0] Cached coords from GenerateCreatureRoles: {glyph_code} in {galaxy_name}")
             except Exception as e:
-                logger.debug(f"[v10.0.1] Could not cache coords from lUA: {e}")
+                logger.info(f"[v9.0.0] Could not cache coords from lUA: {e}")
 
         if not self._capture_enabled:
             return
@@ -728,9 +868,7 @@ class HavenExtractorMod(Mod):
                 logger.debug("GenerateCreatureRoles: lPlanetData is NULL")
                 return
 
-            # Map to cGcPlanetData structure
-            from pymhf.core.memutils import map_struct
-            import nmspy.data.exported_types as nmse
+            # Map to cGcPlanetData structure (using global imports)
             planet_data = map_struct(planet_data_addr, nmse.cGcPlanetData)
 
             # Determine planet index - use length of captured dict
@@ -746,7 +884,7 @@ class HavenExtractorMod(Mod):
                         flora_raw = life_val.value
                     else:
                         flora_raw = int(life_val) if life_val is not None else 0
-                    flora_name = self.LIFE_LEVELS.get(flora_raw, f"Unknown({flora_raw})")
+                    flora_name = self.FLORA_LEVELS.get(flora_raw, f"Unknown({flora_raw})")
             except Exception as e:
                 logger.debug(f"Flora extraction failed: {e}")
 
@@ -760,18 +898,31 @@ class HavenExtractorMod(Mod):
                         fauna_raw = creature_val.value
                     else:
                         fauna_raw = int(creature_val) if creature_val is not None else 0
-                    fauna_name = self.LIFE_LEVELS.get(fauna_raw, f"Unknown({fauna_raw})")
+                    fauna_name = self.FAUNA_LEVELS.get(fauna_raw, f"Unknown({fauna_raw})")
             except Exception as e:
                 logger.debug(f"Fauna extraction failed: {e}")
 
-            # Extract Sentinels (from GroundCombatDataPerDifficulty.SentinelLevel)
+            # Extract Sentinels (from GroundCombatDataPerDifficulty[0].SentinelLevel)
+            # GroundCombatDataPerDifficulty is an array with 4 entries (one per difficulty)
+            # We use index 0 for normal difficulty
             sentinel_raw = 0
             sentinel_name = "Unknown"
             try:
                 if hasattr(planet_data, 'GroundCombatDataPerDifficulty'):
-                    combat_data = planet_data.GroundCombatDataPerDifficulty
-                    if hasattr(combat_data, 'SentinelLevel'):
-                        sentinel_val = combat_data.SentinelLevel
+                    combat_data_array = planet_data.GroundCombatDataPerDifficulty
+                    # Access the first element (normal difficulty)
+                    if hasattr(combat_data_array, '__getitem__'):
+                        combat_data = combat_data_array[0]
+                        if hasattr(combat_data, 'SentinelLevel'):
+                            sentinel_val = combat_data.SentinelLevel
+                            if hasattr(sentinel_val, 'value'):
+                                sentinel_raw = sentinel_val.value
+                            else:
+                                sentinel_raw = int(sentinel_val) if sentinel_val is not None else 0
+                            sentinel_name = self.SENTINEL_LEVELS.get(sentinel_raw, f"Unknown({sentinel_raw})")
+                    elif hasattr(combat_data_array, 'SentinelLevel'):
+                        # Fallback: maybe it's not an array after all
+                        sentinel_val = combat_data_array.SentinelLevel
                         if hasattr(sentinel_val, 'value'):
                             sentinel_raw = sentinel_val.value
                         else:
@@ -885,8 +1036,9 @@ class HavenExtractorMod(Mod):
                             val = str(info.Weather) or ""
                             fallback_weather = ''.join(c for c in val if c.isprintable() and ord(c) < 128)
                             if fallback_weather and len(fallback_weather) >= 2 and fallback_weather != "None":
-                                weather = fallback_weather
-                                logger.info(f"    [HOOK] Weather fallback from PlanetInfo: {weather}")
+                                # Clean up raw weather strings like "weather_glitch 6"
+                                weather = clean_weather_string(fallback_weather)
+                                logger.info(f"    [HOOK] Weather fallback from PlanetInfo: {weather} (raw: {fallback_weather})")
                 except Exception as e:
                     logger.debug(f"Weather fallback extraction failed: {e}")
 
@@ -1101,19 +1253,9 @@ class HavenExtractorMod(Mod):
                                 if weather == "NOT_READ" and hasattr(info, 'Weather'):
                                     w = str(info.Weather)
                                     if w and w != "None":
-                                        weather = w
-                                if hasattr(info, 'SentinelsPerDifficulty'):
-                                    s = str(info.SentinelsPerDifficulty)
-                                    if s and s != "None":
-                                        sentinels = s
-                                if hasattr(info, 'Flora'):
-                                    f = str(info.Flora)
-                                    if f and f != "None":
-                                        flora = f
-                                if hasattr(info, 'Fauna'):
-                                    fa = str(info.Fauna)
-                                    if fa and fa != "None":
-                                        fauna = fa
+                                        weather = clean_weather_string(w)
+                                # NOTE: SentinelsPerDifficulty, Flora, Fauna are array types
+                                # Use captured data from hook instead (these would show object refs)
                     except Exception as e:
                         logger.debug(f"Error checking planet {i}: {e}")
 
@@ -1253,388 +1395,6 @@ class HavenExtractorMod(Mod):
         logger.info("")
 
     # =========================================================================
-    # v10.0.0: REGION ENUMERATION - Remote System Scanning
-    # =========================================================================
-
-    def _build_universal_address(self, voxel_x: int, voxel_y: int, voxel_z: int,
-                                   system_index: int, galaxy_index: int = 0) -> int:
-        """
-        Build a Universal Address (UA) from coordinates.
-
-        UA format (64-bit):
-        - Bits 0-11:   Voxel X (signed, offset by 2047)
-        - Bits 12-23:  Voxel Z (signed, offset by 2047)
-        - Bits 24-31:  Voxel Y (signed, offset by 127)
-        - Bits 32-40:  System Index (0-511)
-        - Bits 41-47:  Galaxy Index
-        - Bits 48-63:  Reserved/Planet (usually 0 for system-level queries)
-        """
-        # Convert signed voxel coords to unsigned with offset
-        ux = (voxel_x + 2047) & 0xFFF  # 12 bits
-        uz = (voxel_z + 2047) & 0xFFF  # 12 bits
-        uy = (voxel_y + 127) & 0xFF    # 8 bits
-        us = system_index & 0x1FF       # 9 bits
-        ug = galaxy_index & 0x7F        # 7 bits
-
-        # Pack into 64-bit UA
-        ua = (ux) | (uz << 12) | (uy << 24) | (us << 32) | (ug << 41)
-        return ua
-
-    def _parse_universal_address(self, ua: int) -> dict:
-        """
-        Parse a Universal Address (UA) to extract coordinates.
-
-        UA format (64-bit):
-        - Bits 0-11:   Voxel X (signed, offset by 2047)
-        - Bits 12-23:  Voxel Z (signed, offset by 2047)
-        - Bits 24-31:  Voxel Y (signed, offset by 127)
-        - Bits 32-40:  System Index (0-511)
-        - Bits 41-47:  Galaxy Index
-        - Bits 48-63:  Reserved/Planet
-        """
-        # Extract each field
-        ux = ua & 0xFFF           # 12 bits
-        uz = (ua >> 12) & 0xFFF   # 12 bits
-        uy = (ua >> 24) & 0xFF    # 8 bits
-        us = (ua >> 32) & 0x1FF   # 9 bits
-        ug = (ua >> 41) & 0x7F    # 7 bits
-        planet_idx = (ua >> 48) & 0xFF  # 8 bits
-
-        # Convert back to signed values
-        voxel_x = ux - 2047
-        voxel_z = uz - 2047
-        voxel_y = uy - 127
-
-        return {
-            "voxel_x": voxel_x,
-            "voxel_y": voxel_y,
-            "voxel_z": voxel_z,
-            "system_index": us,
-            "galaxy_index": ug,
-            "planet_index": planet_idx,
-        }
-
-    def _classify_remote_system(self, ua: int) -> Optional[dict]:
-        """
-        Call ClassifyStarSystem to get star system attributes for a remote system.
-
-        Returns dict with:
-        - star_type, economy_type, economy_strength, conflict_level
-        - dominant_lifeform, planet_count, planet_sizes
-        - is_abandoned, is_pirate, is_gas_giant, etc.
-
-        Returns None if the call fails.
-        """
-        try:
-            # Create output structure for star attributes
-            star_attrs = nmse.cGcGalaxyStarAttributesData()
-
-            # Call the static ClassifyStarSystem function
-            ua_val = c_uint64(ua)
-            nms.cGcGalaxyAttributeGenerator.ClassifyStarSystem(ua_val, pointer(star_attrs))
-
-            # Extract data from the output structure
-            result = {
-                "data_source": "remote",
-                "universal_address": hex(ua),
-
-                # Star type
-                "star_type": STAR_TYPES.get(
-                    star_attrs.Type.value if hasattr(star_attrs.Type, 'value') else int(star_attrs.Type),
-                    "Unknown"
-                ),
-
-                # Economy from TradingData
-                "economy_type": TRADING_CLASSES.get(
-                    star_attrs.TradingData.TradingClass.value if hasattr(star_attrs.TradingData.TradingClass, 'value') else 0,
-                    "Unknown"
-                ),
-                "economy_strength": WEALTH_CLASSES.get(
-                    star_attrs.TradingData.WealthClass.value if hasattr(star_attrs.TradingData.WealthClass, 'value') else 0,
-                    "Unknown"
-                ),
-
-                # Conflict level
-                "conflict_level": CONFLICT_LEVELS.get(
-                    star_attrs.ConflictData.value if hasattr(star_attrs.ConflictData, 'value') else int(star_attrs.ConflictData),
-                    "Unknown"
-                ),
-
-                # Dominant race
-                "dominant_lifeform": ALIEN_RACES.get(
-                    star_attrs.Race.value if hasattr(star_attrs.Race, 'value') else int(star_attrs.Race),
-                    "Unknown"
-                ),
-
-                # Planet counts
-                "planet_count": int(star_attrs.NumberOfPlanets),
-                "prime_planets": int(star_attrs.NumberOfPrimePlanets),
-
-                # System flags
-                "is_abandoned": bool(star_attrs.AbandonedSystem),
-                "is_pirate": bool(star_attrs.IsPirateSystem),
-                "is_gas_giant_system": bool(star_attrs.IsGasGiantSystem),
-                "is_giant_system": bool(star_attrs.IsGiantSystem),
-                "is_safe": bool(star_attrs.IsSystemSafe),
-
-                # Planet data (sizes available remotely)
-                "planets": []
-            }
-
-            # Extract planet sizes for each planet
-            for i in range(min(result["planet_count"], 16)):
-                planet_size_val = star_attrs.PlanetSizes[i]
-                size_int = planet_size_val.value if hasattr(planet_size_val, 'value') else int(planet_size_val)
-                is_moon = (size_int == 3)
-
-                planet_info = {
-                    "planet_index": i,
-                    "planet_size": PLANET_SIZES.get(size_int, f"Unknown({size_int})"),
-                    "is_moon": is_moon,
-                    "data_source": "remote",
-                    # These require visiting to get full data
-                    "biome": "Unknown (visit required)",
-                    "weather": "Unknown (visit required)",
-                    "flora_level": "Unknown (visit required)",
-                    "fauna_level": "Unknown (visit required)",
-                    "sentinel_level": "Unknown (visit required)",
-                }
-                result["planets"].append(planet_info)
-
-            return result
-
-        except Exception as e:
-            logger.debug(f"ClassifyStarSystem failed for UA {hex(ua)}: {e}")
-            return None
-
-    @gui_button("Scan Region")
-    def scan_region(self):
-        """
-        Scan ALL 512 systems in the current region remotely.
-        No warping required - uses ClassifyStarSystem to query each system.
-        """
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> REGION SCAN STARTED (v10.0.2) <<<")
-        logger.info("=" * 60)
-
-        # Get current coordinates to determine region
-        coords = self._get_current_coordinates()
-
-        # Fallback: use cached coordinates from last system warp
-        if not coords and self._current_system_coords:
-            logger.info("Using cached coordinates from last system warp...")
-            coords = self._current_system_coords
-
-        if not coords:
-            logger.error("Cannot scan region - no coordinates available")
-            logger.error("")
-            logger.error("To fix this:")
-            logger.error("  1. Make sure you're fully loaded into a star system")
-            logger.error("  2. Try warping to a new system first (this captures coords)")
-            logger.error("  3. Then click 'Scan Region' again")
-            logger.error("")
-            logger.error("If you just started, warp to any system to initialize.")
-            return
-
-        voxel_x = coords.get('voxel_x', 0)
-        voxel_y = coords.get('voxel_y', 0)
-        voxel_z = coords.get('voxel_z', 0)
-        galaxy_idx = coords.get('galaxy_index', 0)
-
-        logger.info(f"  Current region: X={voxel_x}, Y={voxel_y}, Z={voxel_z}")
-        logger.info(f"  Galaxy: {coords.get('galaxy_name', 'Unknown')}")
-        logger.info(f"  Scanning all 512 systems in this region...")
-        logger.info("")
-
-        # Store region coords
-        self._current_region_coords = {
-            'voxel_x': voxel_x,
-            'voxel_y': voxel_y,
-            'voxel_z': voxel_z,
-            'galaxy_index': galaxy_idx,
-            'galaxy_name': coords.get('galaxy_name', 'Unknown'),
-        }
-
-        # Clear previous region data
-        self._region_systems = []
-        self._region_scan_in_progress = True
-        self._region_scan_progress = 0
-
-        # Scan all 512 systems (indices 0-511)
-        success_count = 0
-        fail_count = 0
-
-        for sys_idx in range(512):
-            self._region_scan_progress = sys_idx
-
-            # Build UA for this system
-            ua = self._build_universal_address(voxel_x, voxel_y, voxel_z, sys_idx, galaxy_idx)
-
-            # Get system data
-            system_data = self._classify_remote_system(ua)
-
-            if system_data:
-                # Add coordinate info
-                system_data['system_index'] = sys_idx
-                system_data['voxel_x'] = voxel_x
-                system_data['voxel_y'] = voxel_y
-                system_data['voxel_z'] = voxel_z
-                system_data['galaxy_index'] = galaxy_idx
-                system_data['galaxy_name'] = coords.get('galaxy_name', 'Unknown')
-
-                # Generate glyph code
-                glyph_code = self._coords_to_glyphs(0, sys_idx, voxel_x, voxel_y, voxel_z)
-                system_data['glyph_code'] = glyph_code
-                system_data['system_name'] = f"System_{glyph_code}"
-
-                self._region_systems.append(system_data)
-                success_count += 1
-            else:
-                fail_count += 1
-
-            # Progress logging every 50 systems
-            if (sys_idx + 1) % 50 == 0:
-                logger.info(f"  Progress: {sys_idx + 1}/512 systems scanned...")
-
-        self._region_scan_in_progress = False
-        self._region_scan_progress = 512
-
-        # Summary
-        total_planets = sum(s.get('planet_count', 0) for s in self._region_systems)
-
-        logger.info("")
-        logger.info("*" * 60)
-        logger.info(f">>> REGION SCAN COMPLETE! <<<")
-        logger.info(f"    Systems enumerated: {success_count}")
-        logger.info(f"    Failed queries: {fail_count}")
-        logger.info(f"    Total planets found: {total_planets}")
-        logger.info(f"")
-        logger.info(f"    Click 'Export Region' to save this data")
-        logger.info(f"    Click 'Region Status' to see details")
-        logger.info("*" * 60)
-        logger.info("")
-
-    @gui_button("Region Status")
-    def region_status(self):
-        """Show status of current region scan."""
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> REGION STATUS (v10.0.0) <<<")
-        logger.info("=" * 60)
-
-        if self._region_scan_in_progress:
-            logger.info(f"  Scan in progress: {self._region_scan_progress}/512")
-            return
-
-        if not self._region_systems:
-            logger.info("  No region data - click 'Scan Region' first")
-            logger.info("=" * 60)
-            return
-
-        if self._current_region_coords:
-            logger.info(f"  Region: X={self._current_region_coords['voxel_x']}, "
-                       f"Y={self._current_region_coords['voxel_y']}, "
-                       f"Z={self._current_region_coords['voxel_z']}")
-            logger.info(f"  Galaxy: {self._current_region_coords.get('galaxy_name', 'Unknown')}")
-
-        logger.info(f"  Systems scanned: {len(self._region_systems)}")
-
-        total_planets = sum(s.get('planet_count', 0) for s in self._region_systems)
-        total_moons = sum(
-            sum(1 for p in s.get('planets', []) if p.get('is_moon'))
-            for s in self._region_systems
-        )
-        logger.info(f"  Total planets: {total_planets}")
-        logger.info(f"  Total moons: {total_moons}")
-
-        # Count by star type
-        star_counts = {}
-        for sys in self._region_systems:
-            st = sys.get('star_type', 'Unknown')
-            star_counts[st] = star_counts.get(st, 0) + 1
-
-        logger.info("")
-        logger.info("  Star types:")
-        for st, count in sorted(star_counts.items()):
-            logger.info(f"    {st}: {count}")
-
-        # Show sample systems
-        logger.info("")
-        logger.info("  Sample systems (first 5):")
-        for i, sys in enumerate(self._region_systems[:5]):
-            glyph = sys.get('glyph_code', 'Unknown')
-            planets = sys.get('planet_count', 0)
-            star = sys.get('star_type', '?')
-            economy = sys.get('economy_type', '?')
-            logger.info(f"    {i+1}. [{glyph}] - {star} star, {economy}, {planets} planets")
-
-        logger.info("")
-        logger.info("  Click 'Export Region' to save all data to JSON")
-        logger.info("=" * 60)
-        logger.info("")
-
-    @gui_button("Export Region")
-    def export_region(self):
-        """Export all enumerated region data to a JSON file."""
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> EXPORT REGION DATA <<<")
-        logger.info("=" * 60)
-
-        if not self._region_systems:
-            logger.warning("No region data to export - run 'Scan Region' first")
-            return
-
-        total_planets = sum(s.get('planet_count', 0) for s in self._region_systems)
-
-        region_data = {
-            "export_type": "region_enumeration",
-            "extraction_time": datetime.now().isoformat(),
-            "extractor_version": "10.0.0",
-            "data_source": "remote_enumeration",
-
-            # Region coordinates
-            "region": self._current_region_coords or {},
-
-            # Summary stats
-            "total_systems": len(self._region_systems),
-            "total_planets": total_planets,
-
-            # All systems
-            "systems": self._region_systems
-        }
-
-        # Save to file
-        try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            region_file = self._output_dir / f"region_{len(self._region_systems)}sys_{ts}.json"
-
-            with open(region_file, 'w', encoding='utf-8') as f:
-                json.dump(region_data, f, indent=2, default=str)
-
-            # Also update latest.json
-            latest = self._output_dir / "latest_region.json"
-            with open(latest, 'w', encoding='utf-8') as f:
-                json.dump(region_data, f, indent=2, default=str)
-
-            logger.info(f"")
-            logger.info(f"*" * 60)
-            logger.info(f">>> REGION EXPORT COMPLETE! <<<")
-            logger.info(f"    File: {region_file}")
-            logger.info(f"    Systems: {len(self._region_systems)}")
-            logger.info(f"    Planets: {total_planets}")
-            logger.info(f"")
-            logger.info(f"    Data marked as 'remote' - visit systems for full detail")
-            logger.info(f"*" * 60)
-            logger.info(f"")
-
-        except Exception as e:
-            logger.error(f"Region export failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-    # =========================================================================
     # EXTRACTION LOGIC
     # =========================================================================
 
@@ -1703,9 +1463,9 @@ class HavenExtractorMod(Mod):
             logger.warning("Could not get player coordinates")
             return
 
-        # CRITICAL: Cache coordinates for region scan feature (v10.0.0)
+        # Cache coordinates for batch mode
         self._current_system_coords = coords
-        logger.info(f"Coordinates cached for region scan: {coords.get('glyph_code')} in {coords.get('galaxy_name')}")
+        logger.info(f"Coordinates cached: {coords.get('glyph_code')} in {coords.get('galaxy_name')}")
 
         # Determine data source based on whether we have captured data
         data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
@@ -2165,13 +1925,13 @@ class HavenExtractorMod(Mod):
                 result["fauna_level"] = captured.get('fauna', 'Unknown')
                 result["sentinel_level"] = captured.get('sentinel', 'Unknown')
 
-                # Apply captured resources if not already set from direct read
+                # Apply captured resources if not already set from direct read (translate to readable names)
                 if result["common_resource"] == "Unknown" and captured.get('common_resource'):
-                    result["common_resource"] = captured['common_resource']
+                    result["common_resource"] = translate_resource(captured['common_resource'])
                 if captured.get('uncommon_resource'):
-                    result["uncommon_resource"] = captured['uncommon_resource']
+                    result["uncommon_resource"] = translate_resource(captured['uncommon_resource'])
                 if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
-                    result["rare_resource"] = captured['rare_resource']
+                    result["rare_resource"] = translate_resource(captured['rare_resource'])
 
                 # v8.1.8: Apply captured weather from cGcPlanetWeatherData.WeatherType
                 # This is reliable for ALL planets (not just visited ones)
@@ -2288,41 +2048,30 @@ class HavenExtractorMod(Mod):
                         if hasattr(info, 'Weather'):
                             val = str(info.Weather)
                             if val and val != "None":
-                                result["weather"] = val
+                                result["weather"] = clean_weather_string(val)
 
-                        if hasattr(info, 'SentinelsPerDifficulty'):
-                            val = str(info.SentinelsPerDifficulty)
-                            if val and val != "None":
-                                result["sentinel_level"] = val
-
-                        if hasattr(info, 'Flora'):
-                            val = str(info.Flora)
-                            if val and val != "None":
-                                result["flora_level"] = val
-
-                        if hasattr(info, 'Fauna'):
-                            val = str(info.Fauna)
-                            if val and val != "None":
-                                result["fauna_level"] = val
+                        # NOTE: SentinelsPerDifficulty, Flora, Fauna are array types
+                        # We already get these from the GenerateCreatureRoles hook
+                        # Skip these fallbacks to avoid overwriting good data with object references
                 except Exception:
                     pass
 
-                # Resources from PlanetData if not already set - clean garbage
+                # Resources from PlanetData if not already set - clean and translate to readable names
                 try:
                     if result["common_resource"] == "Unknown" and hasattr(planet_data, 'CommonSubstanceID'):
                         val = self._clean_resource_string(str(planet_data.CommonSubstanceID))
                         if val:
-                            result["common_resource"] = val
+                            result["common_resource"] = translate_resource(val)
 
                     if hasattr(planet_data, 'UncommonSubstanceID'):
                         val = self._clean_resource_string(str(planet_data.UncommonSubstanceID))
                         if val:
-                            result["uncommon_resource"] = val
+                            result["uncommon_resource"] = translate_resource(val)
 
                     if result["rare_resource"] == "Unknown" and hasattr(planet_data, 'RareSubstanceID'):
                         val = self._clean_resource_string(str(planet_data.RareSubstanceID))
                         if val:
-                            result["rare_resource"] = val
+                            result["rare_resource"] = translate_resource(val)
                 except Exception:
                     pass
 

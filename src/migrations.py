@@ -432,3 +432,175 @@ def migration_1_13_0_versioning(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.13.0")
+
+
+@register_migration("1.14.0", "Haven sub-admins and planet POIs")
+def migration_1_14_0_haven_sub_admins(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Haven Sub-Admins & Planet POIs.
+
+    Changes:
+    - Recreate sub_admin_accounts to allow NULL parent_partner_id (for Haven sub-admins)
+    - Add planet_pois table for 3D planet POI markers
+    """
+    cursor = conn.cursor()
+
+    # Check if sub_admin_accounts table has the NOT NULL constraint issue
+    cursor.execute("PRAGMA table_info(sub_admin_accounts)")
+    columns = cursor.fetchall()
+
+    needs_rebuild = False
+    for col in columns:
+        # col format: (cid, name, type, notnull, default, pk)
+        if col[1] == 'parent_partner_id' and col[3] == 1:  # notnull = 1 means NOT NULL
+            needs_rebuild = True
+            break
+
+    if needs_rebuild:
+        logger.info("Rebuilding sub_admin_accounts to allow NULL parent_partner_id...")
+
+        # Create new table with correct schema
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sub_admin_accounts_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_partner_id INTEGER,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                display_name TEXT,
+                enabled_features TEXT DEFAULT '[]',
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login_at TIMESTAMP,
+                created_by TEXT,
+                FOREIGN KEY (parent_partner_id) REFERENCES partner_accounts(id) ON DELETE CASCADE
+            )
+        ''')
+
+        # Copy existing data
+        cursor.execute('''
+            INSERT INTO sub_admin_accounts_new
+            SELECT * FROM sub_admin_accounts
+        ''')
+
+        # Drop old table and rename new one
+        cursor.execute('DROP TABLE sub_admin_accounts')
+        cursor.execute('ALTER TABLE sub_admin_accounts_new RENAME TO sub_admin_accounts')
+
+        # Recreate indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sub_admin_parent ON sub_admin_accounts(parent_partner_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sub_admin_username ON sub_admin_accounts(username)')
+
+        logger.info("sub_admin_accounts table rebuilt successfully")
+    else:
+        logger.info("sub_admin_accounts already allows NULL parent_partner_id")
+
+    # Add planet_pois table if it doesn't exist
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='planet_pois'
+    """)
+    if not cursor.fetchone():
+        cursor.execute('''
+            CREATE TABLE planet_pois (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                planet_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                poi_type TEXT DEFAULT 'custom',
+                color TEXT DEFAULT '#00C2B3',
+                created_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (planet_id) REFERENCES planets(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_planet_pois_planet_id ON planet_pois(planet_id)')
+        logger.info("Created planet_pois table")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.14.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.14.0")
+
+
+@register_migration("1.15.0", "Haven sub-admin discord tag visibility")
+def migration_1_15_0_sub_admin_discord_tags(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Haven Sub-Admin Discord Tag Visibility.
+
+    Changes:
+    - Add additional_discord_tags column to sub_admin_accounts
+      (JSON array of discord tags that Haven sub-admins can see/approve beyond "Haven")
+    """
+    cursor = conn.cursor()
+
+    # Check if column already exists
+    cursor.execute("PRAGMA table_info(sub_admin_accounts)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if 'additional_discord_tags' not in columns:
+        cursor.execute('''
+            ALTER TABLE sub_admin_accounts
+            ADD COLUMN additional_discord_tags TEXT DEFAULT '[]'
+        ''')
+        logger.info("Added additional_discord_tags column to sub_admin_accounts")
+    else:
+        logger.info("additional_discord_tags column already exists")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.15.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.15.0")
+
+
+@register_migration("1.16.0", "Haven sub-admin personal uploads permission")
+def migration_1_16_0_personal_uploads(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Haven Sub-Admin Personal Uploads Permission.
+
+    Changes:
+    - Add can_approve_personal_uploads column to sub_admin_accounts
+      (allows Haven sub-admins to approve personal uploads without seeing discord info)
+    """
+    cursor = conn.cursor()
+
+    # Check if column already exists
+    cursor.execute("PRAGMA table_info(sub_admin_accounts)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if 'can_approve_personal_uploads' not in columns:
+        cursor.execute('''
+            ALTER TABLE sub_admin_accounts
+            ADD COLUMN can_approve_personal_uploads INTEGER DEFAULT 0
+        ''')
+        logger.info("Added can_approve_personal_uploads column to sub_admin_accounts")
+    else:
+        logger.info("can_approve_personal_uploads column already exists")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.16.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.16.0")

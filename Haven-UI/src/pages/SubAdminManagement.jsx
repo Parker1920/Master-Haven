@@ -22,6 +22,7 @@ export default function SubAdminManagement() {
   const auth = useContext(AuthContext)
   const [subAdmins, setSubAdmins] = useState([])
   const [partners, setPartners] = useState([]) // For super admin to select partner
+  const [availableDiscordTags, setAvailableDiscordTags] = useState([]) // For Haven sub-admin tag visibility
   const [loading, setLoading] = useState(true)
   const [actionInProgress, setActionInProgress] = useState(false)
 
@@ -37,7 +38,9 @@ export default function SubAdminManagement() {
     password: '',
     display_name: '',
     enabled_features: [],
-    parent_partner_id: partnerId || ''
+    parent_partner_id: partnerId || '',
+    additional_discord_tags: [], // For Haven sub-admins only
+    can_approve_personal_uploads: false // For Haven sub-admins only
   })
 
   // For password reset
@@ -52,6 +55,7 @@ export default function SubAdminManagement() {
     loadSubAdmins()
     if (auth.isSuperAdmin && !partnerId) {
       loadPartners()
+      loadAvailableDiscordTags()
     }
   }, [auth.isAdmin, auth.isSuperAdmin, navigate, partnerId])
 
@@ -77,6 +81,15 @@ export default function SubAdminManagement() {
     }
   }
 
+  async function loadAvailableDiscordTags() {
+    try {
+      const response = await axios.get('/api/available_discord_tags')
+      setAvailableDiscordTags(response.data.discord_tags || [])
+    } catch (err) {
+      console.error('Failed to load discord tags:', err)
+    }
+  }
+
   function resetForm() {
     setFormData({
       username: '',
@@ -84,7 +97,9 @@ export default function SubAdminManagement() {
       display_name: '',
       enabled_features: [],
       // Default to 'haven' for super admin creating sub-admins
-      parent_partner_id: partnerId || (auth.isSuperAdmin ? 'haven' : '')
+      parent_partner_id: partnerId || (auth.isSuperAdmin ? 'haven' : ''),
+      additional_discord_tags: [],
+      can_approve_personal_uploads: false
     })
   }
 
@@ -111,6 +126,10 @@ export default function SubAdminManagement() {
       // Only include parent_partner_id if specified (for super admin creating under a partner)
       if (formData.parent_partner_id && formData.parent_partner_id !== 'haven') {
         payload.parent_partner_id = parseInt(formData.parent_partner_id)
+      } else if (formData.parent_partner_id === 'haven') {
+        // For Haven sub-admins, include additional permissions
+        payload.additional_discord_tags = formData.additional_discord_tags
+        payload.can_approve_personal_uploads = formData.can_approve_personal_uploads
       }
       await axios.post('/api/sub_admins', payload)
       alert('Sub-admin account created successfully!')
@@ -131,7 +150,9 @@ export default function SubAdminManagement() {
       password: '',
       display_name: subAdmin.display_name || '',
       enabled_features: subAdmin.enabled_features || [],
-      parent_partner_id: subAdmin.parent_partner_id
+      parent_partner_id: subAdmin.parent_partner_id,
+      additional_discord_tags: subAdmin.additional_discord_tags || [],
+      can_approve_personal_uploads: subAdmin.can_approve_personal_uploads || false
     })
     setEditModalOpen(true)
   }
@@ -139,11 +160,17 @@ export default function SubAdminManagement() {
   async function updateSubAdmin() {
     setActionInProgress(true)
     try {
-      await axios.put(`/api/sub_admins/${selectedSubAdmin.id}`, {
+      const payload = {
         display_name: formData.display_name.trim() || null,
         enabled_features: formData.enabled_features,
         is_active: selectedSubAdmin.is_active
-      })
+      }
+      // Include additional_discord_tags and can_approve_personal_uploads for Haven sub-admins (no parent_partner_id)
+      if (!selectedSubAdmin.parent_partner_id) {
+        payload.additional_discord_tags = formData.additional_discord_tags
+        payload.can_approve_personal_uploads = formData.can_approve_personal_uploads
+      }
+      await axios.put(`/api/sub_admins/${selectedSubAdmin.id}`, payload)
       alert('Sub-admin updated successfully!')
       setEditModalOpen(false)
       setSelectedSubAdmin(null)
@@ -212,6 +239,17 @@ export default function SubAdminManagement() {
         return { ...prev, enabled_features: features.filter(f => f !== featureId) }
       } else {
         return { ...prev, enabled_features: [...features, featureId] }
+      }
+    })
+  }
+
+  function toggleDiscordTag(tag) {
+    setFormData(prev => {
+      const tags = prev.additional_discord_tags || []
+      if (tags.includes(tag)) {
+        return { ...prev, additional_discord_tags: tags.filter(t => t !== tag) }
+      } else {
+        return { ...prev, additional_discord_tags: [...tags, tag] }
       }
     })
   }
@@ -288,6 +326,19 @@ export default function SubAdminManagement() {
                         <span className="text-sm text-gray-400 italic">No features enabled</span>
                       )}
                     </div>
+                    {/* Show additional discord tags for Haven sub-admins */}
+                    {!subAdmin.parent_partner_id && subAdmin.additional_discord_tags && subAdmin.additional_discord_tags.length > 0 && (
+                      <div className="mt-2">
+                        <span className="text-xs text-gray-400">Can also view: </span>
+                        <span className="text-xs text-yellow-400">{subAdmin.additional_discord_tags.join(', ')}</span>
+                      </div>
+                    )}
+                    {/* Show personal uploads permission for Haven sub-admins */}
+                    {!subAdmin.parent_partner_id && subAdmin.can_approve_personal_uploads && (
+                      <div className="mt-1">
+                        <span className="px-2 py-0.5 rounded text-xs bg-purple-600 text-white">Can approve personal uploads</span>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-400 mt-2">
                       Created: {new Date(subAdmin.created_at).toLocaleDateString()}
                       {subAdmin.last_login_at && (
@@ -395,6 +446,55 @@ export default function SubAdminManagement() {
                 ))}
               </div>
             </div>
+
+            {/* Haven-specific options - show when creating under Haven */}
+            {formData.parent_partner_id === 'haven' && auth.isSuperAdmin && (
+              <>
+                {/* Additional Discord Tags */}
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Additional Discord Tag Visibility</label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Select which partner discords this Haven sub-admin can see and approve submissions for.
+                  </p>
+                  <div className="max-h-32 overflow-y-auto border border-gray-600 rounded p-2 bg-gray-800 space-y-2">
+                    {availableDiscordTags.length === 0 ? (
+                      <p className="text-sm text-gray-400 italic">No partner discord tags available</p>
+                    ) : (
+                      availableDiscordTags.filter(t => t.discord_tag !== 'Haven').map(tag => (
+                        <label key={tag.discord_tag} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.additional_discord_tags.includes(tag.discord_tag)}
+                            onChange={() => toggleDiscordTag(tag.discord_tag)}
+                            className="rounded"
+                          />
+                          <span className="text-sm">{tag.discord_tag}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Personal Uploads Permission */}
+                <div className="border-t border-gray-600 pt-3">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.can_approve_personal_uploads}
+                      onChange={(e) => setFormData({...formData, can_approve_personal_uploads: e.target.checked})}
+                      className="rounded w-5 h-5"
+                    />
+                    <div>
+                      <span className="text-sm font-semibold">Can Approve Personal Uploads</span>
+                      <p className="text-xs text-gray-400">
+                        Allow this sub-admin to approve submissions without a discord tag.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </>
+            )}
+
             <div className="flex space-x-2 pt-3">
               <Button
                 className="bg-green-600 text-white"
@@ -443,6 +543,63 @@ export default function SubAdminManagement() {
                 ))}
               </div>
             </div>
+
+            {/* Additional Discord Tags - Only for Haven sub-admins */}
+            {!selectedSubAdmin.parent_partner_id && auth.isSuperAdmin && (
+              <div>
+                <label className="block text-sm font-semibold mb-1">Additional Discord Tag Visibility</label>
+                <p className="text-xs text-gray-400 mb-2">
+                  Select which partner discords this Haven sub-admin can see and approve submissions for (in addition to "Haven").
+                </p>
+                <div className="max-h-48 overflow-y-auto border border-gray-600 rounded p-2 bg-gray-800 space-y-2">
+                  {availableDiscordTags.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">No partner discord tags available</p>
+                  ) : (
+                    availableDiscordTags.filter(t => t.discord_tag !== 'Haven').map(tag => (
+                      <label key={tag.discord_tag} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.additional_discord_tags.includes(tag.discord_tag)}
+                          onChange={() => toggleDiscordTag(tag.discord_tag)}
+                          className="rounded"
+                        />
+                        <span className="text-sm">{tag.discord_tag}</span>
+                        {tag.display_name && (
+                          <span className="text-xs text-gray-400">({tag.display_name})</span>
+                        )}
+                      </label>
+                    ))
+                  )}
+                </div>
+                {formData.additional_discord_tags.length > 0 && (
+                  <p className="text-xs text-cyan-400 mt-1">
+                    Can view: Haven + {formData.additional_discord_tags.join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Personal Uploads Permission - Only for Haven sub-admins */}
+            {!selectedSubAdmin.parent_partner_id && auth.isSuperAdmin && (
+              <div className="border-t border-gray-600 pt-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.can_approve_personal_uploads}
+                    onChange={(e) => setFormData({...formData, can_approve_personal_uploads: e.target.checked})}
+                    className="rounded w-5 h-5"
+                  />
+                  <div>
+                    <span className="text-sm font-semibold">Can Approve Personal Uploads</span>
+                    <p className="text-xs text-gray-400">
+                      Allow this sub-admin to see and approve submissions without a discord tag (personal uploads).
+                      Note: Discord info will be hidden - only visible to super admin.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
+
             <div className="flex space-x-2 pt-3">
               <Button
                 className="bg-blue-600 text-white"

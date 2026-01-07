@@ -6,6 +6,7 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
 import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon } from '@heroicons/react/24/outline'
+import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
 
 // Custom debounce hook
 function useDebounce(value, delay) {
@@ -205,7 +206,7 @@ export default function RegionDetail() {
     let moonCount = 0
     let discoveryCount = 0
     const galaxies = new Set()
-    const biomeDistribution = {}
+    const rawBiomeDistribution = {}
     const economyDistribution = {}
     const starTypeDistribution = {}
 
@@ -227,9 +228,12 @@ export default function RegionDetail() {
         moonCount += (planet.moons?.length || 0)
 
         const biome = planet.biome || 'Unknown'
-        biomeDistribution[biome] = (biomeDistribution[biome] || 0) + 1
+        rawBiomeDistribution[biome] = (rawBiomeDistribution[biome] || 0) + 1
       })
     })
+
+    // Aggregate biomes by parent category
+    const biomeDistribution = aggregateBiomesByCategory(rawBiomeDistribution)
 
     return {
       systemCount: systems.length,
@@ -238,6 +242,7 @@ export default function RegionDetail() {
       discoveryCount,
       galaxies: Array.from(galaxies),
       biomeDistribution,
+      rawBiomeDistribution,
       economyDistribution,
       starTypeDistribution
     }
@@ -399,6 +404,40 @@ export default function RegionDetail() {
     )
   }
 
+  // Biome Distribution component with scroll to show all categories
+  function BiomeDistributionBar({ data }) {
+    const entries = Object.entries(data).sort((a, b) => b[1] - a[1])
+    const total = entries.reduce((sum, [, count]) => sum + count, 0)
+    if (total === 0) return null
+
+    return (
+      <div className="bg-gray-800 rounded p-3">
+        <h4 className="text-sm font-semibold mb-2 text-gray-300">Biomes</h4>
+        <div className="max-h-64 overflow-y-auto pr-1 space-y-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+          {entries.map(([name, count]) => (
+            <div key={name} className="flex items-center gap-2">
+              <div className="flex-1">
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="text-gray-400">{name}</span>
+                  <span className="text-gray-500">{count}</span>
+                </div>
+                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${getBiomeCategoryColor(name)}`}
+                    style={{ width: `${(count / total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-700">
+          {entries.length} biome categories | {total} total planets
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -518,18 +557,7 @@ export default function RegionDetail() {
         {/* Distribution breakdown */}
         {showBreakdown && (
           <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <DistributionBar
-              title="Biomes"
-              data={stats.biomeDistribution}
-              colorFn={(name) => {
-                const colors = {
-                  'Lush': 'bg-green-500', 'Frozen': 'bg-cyan-500', 'Toxic': 'bg-lime-500',
-                  'Scorched': 'bg-orange-500', 'Barren': 'bg-amber-500', 'Dead': 'bg-gray-500',
-                  'Exotic': 'bg-purple-500', 'Marsh': 'bg-teal-500', 'Volcanic': 'bg-red-500'
-                }
-                return colors[name] || 'bg-indigo-500'
-              }}
-            />
+            <BiomeDistributionBar data={stats.biomeDistribution} />
             <DistributionBar
               title="Star Types"
               data={stats.starTypeDistribution}

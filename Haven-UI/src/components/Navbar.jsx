@@ -36,7 +36,7 @@ export default function Navbar() {
     }
 
     const startPolling = () => {
-      intervalRef.current = setInterval(fetchCount, 30000) // Update every 30 seconds
+      intervalRef.current = setInterval(fetchCount, 60000) // Update every 60 seconds
     }
 
     fetchCount()

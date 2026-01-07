@@ -9,21 +9,41 @@ import { AuthContext, FEATURES } from '../utils/AuthContext'
 export default function PendingApprovals() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
-  const { isAdmin, isSuperAdmin, user, loading: authLoading, canAccess } = auth || {}
+  const { isAdmin, isSuperAdmin, isHavenSubAdmin, user, loading: authLoading, canAccess } = auth || {}
+
+  // Normalize Discord username by stripping #XXXX discriminator and lowercasing
+  function normalizeDiscordUsername(username) {
+    if (!username) return ''
+    let normalized = username.toLowerCase().trim()
+    // Strip Discord discriminator (#0000 to #9999)
+    if (normalized.includes('#')) {
+      normalized = normalized.split('#')[0]
+    }
+    return normalized
+  }
 
   // Check if a submission was made by the current user (self-submission)
   function isSelfSubmission(submission) {
     if (!user) return false
     // Super admin can approve their own (trusted role)
     if (isSuperAdmin) return false
-    // Check by account ID first (most reliable)
+    // Check by account ID first (most reliable for logged-in submissions)
     if (submission.submitter_account_id && submission.submitter_account_type) {
       return user.type === submission.submitter_account_type &&
              user.accountId === submission.submitter_account_id
     }
-    // Fallback: check by username
-    if (submission.submitted_by && user.username) {
-      return submission.submitted_by.toLowerCase() === user.username.toLowerCase()
+    // Check by username against both submitted_by and personal_discord_username
+    // Uses normalized comparison to handle Discord #XXXX discriminator (e.g., TurpitZz vs TurpitZz#9999)
+    if (user.username) {
+      const normalizedUser = normalizeDiscordUsername(user.username)
+      // Check submitted_by
+      if (submission.submitted_by && normalizeDiscordUsername(submission.submitted_by) === normalizedUser) {
+        return true
+      }
+      // Check personal_discord_username (for personal uploads where user wasn't logged in)
+      if (submission.personal_discord_username && normalizeDiscordUsername(submission.personal_discord_username) === normalizedUser) {
+        return true
+      }
     }
     return false
   }
@@ -379,10 +399,11 @@ export default function PendingApprovals() {
     }
 
     // Special handling for "personal" tag - magenta color
+    // Show the discord username inside the badge if provided (super admin only)
     if (tag === 'personal') {
       return (
         <span className="px-2 py-1 rounded text-xs font-semibold bg-fuchsia-600 text-white">
-          PERSONAL {personalDiscordUsername && `(${personalDiscordUsername})`}
+          PERSONAL{personalDiscordUsername ? ` - ${personalDiscordUsername}` : ''}
         </span>
       )
     }
@@ -661,8 +682,8 @@ export default function PendingApprovals() {
                           YOUR SUBMISSION
                         </span>
                       )}
-                      {/* Discord Tag Badge - Super Admin sees all tags */}
-                      {isSuperAdmin && getDiscordTagBadge(submission.discord_tag, submission.personal_discord_username)}
+                      {/* Discord Tag Badge - shows tag type without personal info */}
+                      {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
                       {submission.source === 'companion_app' && submission.api_key_name && (
                         <span className="px-2 py-1 rounded text-xs font-semibold bg-cyan-200 text-cyan-800">
                           {submission.api_key_name}
@@ -724,8 +745,8 @@ export default function PendingApprovals() {
                           NEW
                         </span>
                       )}
-                      {/* Discord Tag Badge - Super Admin sees all tags */}
-                      {isSuperAdmin && getDiscordTagBadge(submission.discord_tag, submission.personal_discord_username)}
+                      {/* Discord Tag Badge - shows tag type without personal info */}
+                      {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
                     </div>
                     <div className="text-sm text-gray-300 mt-1">
                       <span>Reviewed by: {submission.reviewed_by || 'Unknown'}</span>
@@ -855,19 +876,12 @@ export default function PendingApprovals() {
                 <p><strong>Submitted by:</strong> {selectedSubmission.submitted_by || 'Anonymous'}</p>
                 <p><strong>Submission Date:</strong> {new Date(selectedSubmission.submission_date).toLocaleString()}</p>
                 <p><strong>IP Address:</strong> {selectedSubmission.submitted_by_ip}</p>
-                {selectedSubmission.discord_tag && (
+                {/* Discord info - shows tag type without personal info */}
+                {(isSuperAdmin || isHavenSubAdmin) && selectedSubmission.discord_tag && (
                   <p className="mt-2">
                     <strong>Discord Community:</strong>{' '}
-                    {getDiscordTagBadge(selectedSubmission.discord_tag, selectedSubmission.personal_discord_username)}
+                    {getDiscordTagBadge(selectedSubmission.discord_tag, isSuperAdmin ? selectedSubmission.personal_discord_username : null)}
                   </p>
-                )}
-                {/* Show personal discord username prominently for personal submissions */}
-                {selectedSubmission.discord_tag === 'personal' && selectedSubmission.personal_discord_username && (
-                  <div className="mt-2 p-2 bg-fuchsia-900/30 border border-fuchsia-500 rounded">
-                    <p className="text-fuchsia-300">
-                      <strong>Contact Discord:</strong> {selectedSubmission.personal_discord_username}
-                    </p>
-                  </div>
                 )}
               </div>
 

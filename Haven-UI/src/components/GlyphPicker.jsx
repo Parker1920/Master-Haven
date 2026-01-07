@@ -30,6 +30,14 @@ const GlyphPicker = ({ value, onChange, onDecoded }) => {
       });
   }, []);
 
+  // Sync local state with parent value when it changes (e.g., when loading existing system for edit)
+  useEffect(() => {
+    if (value && value !== glyphCode) {
+      setGlyphCode(value);
+      setSelectedGlyphs(value.split(''));
+    }
+  }, [value]);
+
   // Update parent when glyph code changes
   useEffect(() => {
     if (onChange) {

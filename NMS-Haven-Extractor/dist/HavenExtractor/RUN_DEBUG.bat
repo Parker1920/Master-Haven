@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v10.0.0 - DEBUG MODE
+title Haven Extractor v9.0.0 - DEBUG MODE
 echo ============================================================
-echo   HAVEN EXTRACTOR v10.0.0 - DEBUG MODE
+echo   HAVEN EXTRACTOR v9.0.0 - DEBUG MODE
 echo ============================================================
 echo.
 

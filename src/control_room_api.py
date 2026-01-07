@@ -59,6 +59,12 @@ except ImportError:
         GLYPH_IMAGES
     )
 
+# Import Planet Atlas wrapper for 3D planet visualization
+try:
+    from planet_atlas_wrapper import generate_planet_html
+except ImportError:
+    from src.planet_atlas_wrapper import generate_planet_html
+
 app = FastAPI()
 logger = logging.getLogger('control.room')
 
@@ -110,6 +116,25 @@ def validate_galaxy(galaxy: str) -> bool:
 def validate_reality(reality: str) -> bool:
     """Validate reality value (Normal or Permadeath)."""
     return reality in ('Normal', 'Permadeath')
+
+def normalize_discord_username(username: str) -> str:
+    """
+    Normalize a Discord username for comparison by:
+    1. Converting to lowercase
+    2. Stripping the #XXXX discriminator suffix if present
+
+    Examples:
+        'TurpitZz#9999' -> 'turpitzz'
+        'TurpitZz' -> 'turpitzz'
+        'User#1234' -> 'user'
+    """
+    if not username:
+        return ''
+    normalized = username.lower().strip()
+    # Strip Discord discriminator (#0000 to #9999)
+    if '#' in normalized:
+        normalized = normalized.split('#')[0]
+    return normalized
 
 
 # Ensure directories exist
@@ -710,6 +735,32 @@ def init_database():
         except Exception as e:
             logger.warning(f"Could not create regions unique index: {e}")
 
+    # =========================================================================
+    # Planet Atlas Integration - POI markers on planets
+    # =========================================================================
+
+    # Create planet_pois table for storing Points of Interest on planet surfaces
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS planet_pois (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            planet_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            poi_type TEXT DEFAULT 'custom',
+            color TEXT DEFAULT '#00C2B3',
+            symbol TEXT DEFAULT 'circle',
+            category TEXT DEFAULT '-',
+            created_by TEXT,
+            discord_tag TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (planet_id) REFERENCES planets(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_planet_pois_planet_id ON planet_pois(planet_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_planet_pois_type ON planet_pois(poi_type)')
 
     conn.commit()
     conn.close()
@@ -1067,7 +1118,7 @@ async def api_stats():
     try:
         db_path = get_db_path()
         if not db_path.exists():
-            return {'total': 0, 'galaxies': []}
+            return {'total': 0, 'galaxies': [], 'discord_tags': {}}
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -1080,7 +1131,16 @@ async def api_stats():
         cursor.execute('SELECT DISTINCT galaxy FROM systems WHERE galaxy IS NOT NULL ORDER BY galaxy')
         galaxies = [row[0] for row in cursor.fetchall()]
 
-        return {'total': total, 'galaxies': galaxies}
+        # Get discord_tag distribution to help debug filtering
+        cursor.execute('''
+            SELECT COALESCE(discord_tag, 'NULL/untagged') as tag, COUNT(*) as count
+            FROM systems
+            GROUP BY discord_tag
+            ORDER BY count DESC
+        ''')
+        tag_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+        return {'total': total, 'galaxies': galaxies, 'discord_tags': tag_counts}
     except Exception as e:
         logger.error(f"Stats query error: {e}")
         return {'total': 0, 'galaxies': []}
@@ -1869,8 +1929,9 @@ async def admin_login(credentials: dict, response: Response):
         # Not a partner - check sub_admin_accounts
         cursor.execute('''
             SELECT sa.id, sa.password_hash, sa.display_name, sa.enabled_features, sa.is_active,
-                   sa.parent_partner_id, pa.discord_tag as parent_discord_tag,
-                   pa.display_name as parent_display_name, pa.is_active as parent_is_active
+                   sa.parent_partner_id, sa.additional_discord_tags, sa.can_approve_personal_uploads,
+                   pa.discord_tag as parent_discord_tag, pa.display_name as parent_display_name,
+                   pa.is_active as parent_is_active
             FROM sub_admin_accounts sa
             LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
             WHERE sa.username = ?
@@ -1906,6 +1967,11 @@ async def admin_login(credentials: dict, response: Response):
         discord_tag = None if is_haven_sub_admin else sub_row['parent_discord_tag']
         parent_display_name = 'Haven' if is_haven_sub_admin else sub_row['parent_display_name']
 
+        # Get additional discord tags and personal uploads permission for Haven sub-admins
+        sub_row_dict = dict(sub_row)
+        additional_discord_tags = json.loads(sub_row_dict.get('additional_discord_tags') or '[]') if is_haven_sub_admin else []
+        can_approve_personal_uploads = bool(sub_row_dict.get('can_approve_personal_uploads', 0)) if is_haven_sub_admin else False
+
         session_token = generate_session_token()
         _sessions[session_token] = {
             'user_type': 'sub_admin',
@@ -1917,6 +1983,8 @@ async def admin_login(credentials: dict, response: Response):
             'parent_display_name': parent_display_name,
             'enabled_features': enabled_features,
             'is_haven_sub_admin': is_haven_sub_admin,
+            'additional_discord_tags': additional_discord_tags,  # Extra discord tags this Haven sub-admin can see
+            'can_approve_personal_uploads': can_approve_personal_uploads,  # Permission to approve personal uploads (without discord tag)
             'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
         }
 
@@ -2024,6 +2092,46 @@ async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
         finally:
             if conn:
                 conn.close()
+
+    elif user_type == 'sub_admin':
+        sub_admin_id = session_data.get('sub_admin_id')
+        if not sub_admin_id:
+            raise HTTPException(status_code=400, detail='Invalid session')
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Get current password hash
+            cursor.execute('SELECT password_hash FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Account not found')
+
+            # Verify current password
+            if hash_password(current_password) != row['password_hash']:
+                raise HTTPException(status_code=401, detail='Current password is incorrect')
+
+            # Update password
+            cursor.execute(
+                'UPDATE sub_admin_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
+                (hash_password(new_password), datetime.now(timezone.utc).isoformat(), sub_admin_id)
+            )
+            conn.commit()
+
+            logger.info(f"Sub-admin {session_data.get('username')} changed their password")
+            return {'status': 'ok', 'message': 'Password changed successfully'}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to change sub-admin password: {e}")
+            raise HTTPException(status_code=500, detail=f'Failed to change password: {str(e)}')
+        finally:
+            if conn:
+                conn.close()
+
     else:
         raise HTTPException(status_code=400, detail='Unknown user type')
 
@@ -2302,6 +2410,7 @@ async def list_sub_admins(
 
         sub_admins = []
         for row in cursor.fetchall():
+            row_dict = dict(row)
             sub_admins.append({
                 'id': row['id'],
                 'parent_partner_id': row['parent_partner_id'],
@@ -2313,10 +2422,17 @@ async def list_sub_admins(
                 'last_login_at': row['last_login_at'],
                 'created_by': row['created_by'],
                 'parent_discord_tag': row['parent_discord_tag'],
-                'parent_display_name': row['parent_display_name']
+                'parent_display_name': row['parent_display_name'],
+                'additional_discord_tags': json.loads(row_dict.get('additional_discord_tags') or '[]'),
+                'can_approve_personal_uploads': bool(row_dict.get('can_approve_personal_uploads', 0))
             })
 
         return {'sub_admins': sub_admins}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing sub-admins: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -2342,6 +2458,8 @@ async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None))
     display_name = payload.get('display_name', '').strip() or None
     enabled_features = payload.get('enabled_features', [])
     parent_partner_id = payload.get('parent_partner_id')
+    additional_discord_tags = payload.get('additional_discord_tags', [])  # Only for Haven sub-admins
+    can_approve_personal_uploads = payload.get('can_approve_personal_uploads', False)  # Only for Haven sub-admins
 
     # Validation
     if not username or len(username) < 3:
@@ -2396,17 +2514,22 @@ async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None))
             raise HTTPException(status_code=400, detail='Username already exists (sub-admin account)')
 
         # Create sub-admin
+        # additional_discord_tags and can_approve_personal_uploads only apply to Haven sub-admins (parent_partner_id is NULL)
+        tags_to_store = json.dumps(additional_discord_tags) if is_haven_sub_admin else '[]'
+        personal_uploads_perm = 1 if (is_haven_sub_admin and can_approve_personal_uploads) else 0
         cursor.execute('''
             INSERT INTO sub_admin_accounts
-            (parent_partner_id, username, password_hash, display_name, enabled_features, created_by)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (parent_partner_id, username, password_hash, display_name, enabled_features, created_by, additional_discord_tags, can_approve_personal_uploads)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             parent_partner_id,
             username,
             hash_password(password),
             display_name,
             json.dumps(enabled_features),
-            current_username
+            current_username,
+            tags_to_store,
+            personal_uploads_perm
         ))
 
         sub_admin_id = cursor.lastrowid
@@ -2420,6 +2543,11 @@ async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None))
             'sub_admin_id': sub_admin_id,
             'username': username
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating sub-admin: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -2440,19 +2568,24 @@ async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[s
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get sub-admin
+        # Get sub-admin (LEFT JOIN for Haven sub-admins with NULL parent_partner_id)
         cursor.execute('''
             SELECT sa.*, pa.enabled_features as parent_features
             FROM sub_admin_accounts sa
-            JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+            LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
             WHERE sa.id = ?
         ''', (sub_admin_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail='Sub-admin not found')
 
+        # Check if this is a Haven sub-admin (no parent partner)
+        is_haven_sub_admin = row['parent_partner_id'] is None
+
         # Permission check: super admin or parent partner can edit
         if not is_super:
+            if is_haven_sub_admin:
+                raise HTTPException(status_code=403, detail='Only super admin can edit Haven sub-admins')
             if session_data.get('partner_id') != row['parent_partner_id']:
                 raise HTTPException(status_code=403, detail='Can only edit your own sub-admins')
 
@@ -2466,21 +2599,32 @@ async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[s
 
         if 'enabled_features' in payload:
             new_features = payload['enabled_features']
-            # Validate features against parent
-            parent_features = json.loads(row['parent_features'] or '[]')
-            if 'all' not in parent_features:
-                invalid_features = [f for f in new_features if f not in parent_features]
-                if invalid_features:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
-                    )
+            # Validate features against parent (skip for Haven sub-admins - they can have any features)
+            if not is_haven_sub_admin:
+                parent_features = json.loads(row['parent_features'] or '[]')
+                if 'all' not in parent_features:
+                    invalid_features = [f for f in new_features if f not in parent_features]
+                    if invalid_features:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
+                        )
             updates.append('enabled_features = ?')
             params.append(json.dumps(new_features))
 
         if 'is_active' in payload:
             updates.append('is_active = ?')
             params.append(1 if payload['is_active'] else 0)
+
+        # additional_discord_tags only for Haven sub-admins
+        if 'additional_discord_tags' in payload and is_haven_sub_admin:
+            updates.append('additional_discord_tags = ?')
+            params.append(json.dumps(payload['additional_discord_tags']))
+
+        # can_approve_personal_uploads only for Haven sub-admins
+        if 'can_approve_personal_uploads' in payload and is_haven_sub_admin:
+            updates.append('can_approve_personal_uploads = ?')
+            params.append(1 if payload['can_approve_personal_uploads'] else 0)
 
         if updates:
             updates.append('updated_at = ?')
@@ -2494,6 +2638,11 @@ async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[s
             conn.commit()
 
         return {'status': 'ok'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating sub-admin: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -2523,8 +2672,13 @@ async def reset_sub_admin_password(sub_admin_id: int, payload: dict, session: Op
         if not row:
             raise HTTPException(status_code=404, detail='Sub-admin not found')
 
+        # Check if this is a Haven sub-admin (no parent partner)
+        is_haven_sub_admin = row['parent_partner_id'] is None
+
         # Permission check
         if not is_super:
+            if is_haven_sub_admin:
+                raise HTTPException(status_code=403, detail='Only super admin can reset Haven sub-admin passwords')
             if session_data.get('partner_id') != row['parent_partner_id']:
                 raise HTTPException(status_code=403, detail='Can only reset passwords for your own sub-admins')
 
@@ -2535,6 +2689,11 @@ async def reset_sub_admin_password(sub_admin_id: int, payload: dict, session: Op
         conn.commit()
 
         return {'status': 'ok'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting sub-admin password: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -2560,8 +2719,13 @@ async def delete_sub_admin(sub_admin_id: int, session: Optional[str] = Cookie(No
         if not row:
             raise HTTPException(status_code=404, detail='Sub-admin not found')
 
+        # Check if this is a Haven sub-admin (no parent partner)
+        is_haven_sub_admin = row['parent_partner_id'] is None
+
         # Permission check
         if not is_super:
+            if is_haven_sub_admin:
+                raise HTTPException(status_code=403, detail='Only super admin can deactivate Haven sub-admins')
             if session_data.get('partner_id') != row['parent_partner_id']:
                 raise HTTPException(status_code=403, detail='Can only deactivate your own sub-admins')
 
@@ -2572,6 +2736,49 @@ async def delete_sub_admin(sub_admin_id: int, session: Optional[str] = Cookie(No
         conn.commit()
 
         return {'status': 'ok'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deactivating sub-admin: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/available_discord_tags')
+async def get_available_discord_tags(session: Optional[str] = Cookie(None)):
+    """
+    Get list of all available discord tags (from partners).
+    Super admin only - used for configuring Haven sub-admin visibility.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all discord tags from partners (including Haven)
+        cursor.execute('''
+            SELECT DISTINCT discord_tag, display_name
+            FROM partner_accounts
+            WHERE discord_tag IS NOT NULL AND is_active = 1
+            ORDER BY discord_tag
+        ''')
+
+        tags = []
+        for row in cursor.fetchall():
+            tags.append({
+                'discord_tag': row['discord_tag'],
+                'display_name': row['display_name']
+            })
+
+        return {'discord_tags': tags}
+    except Exception as e:
+        logger.error(f"Error fetching discord tags: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -3768,8 +3975,10 @@ async def api_search(q: str = '', limit: int = 20, session: Optional[str] = Cook
 
         # Efficient SQL search across multiple fields
         # Fetch more than limit to account for filtering by data restrictions
+        # Include x, y, z for map display positioning
         cursor.execute('''
             SELECT s.id, s.name, s.region_x, s.region_y, s.region_z,
+                   s.x, s.y, s.z,
                    s.galaxy, s.glyph_code, s.discord_tag, s.star_type,
                    r.custom_name as region_name,
                    (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count
@@ -3916,6 +4125,7 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0,
 
 @app.get('/api/regions/grouped')
 async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0,
+                               discord_tag: str = None,
                                session: Optional[str] = Cookie(None)):
     """Return all regions with their systems grouped together.
 
@@ -3924,6 +4134,8 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
     - Optional pagination with page/limit params
     - include_systems=false returns just region summaries (much faster)
     - Applies data restrictions based on viewer permissions
+    - discord_tag filter: 'all' or None for all, 'untagged' for NULL tags,
+      'personal' for personal tag, or specific tag name
 
     Returns regions ordered by:
     1. "Sea of Gidzenuf" (home system) always first
@@ -3941,9 +4153,21 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Build discord_tag filter clause
+        tag_filter = ""
+        tag_params = []
+        if discord_tag and discord_tag != 'all':
+            if discord_tag == 'untagged':
+                tag_filter = " AND (s.discord_tag IS NULL OR s.discord_tag = '')"
+            elif discord_tag == 'personal':
+                tag_filter = " AND s.discord_tag = 'personal'"
+            else:
+                tag_filter = " AND s.discord_tag = ?"
+                tag_params = [discord_tag]
+
         # STEP 1: Get all regions with aggregated counts in a SINGLE query
         # This replaces the N+1 pattern with one efficient GROUP BY query
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
                 s.region_x, s.region_y, s.region_z,
                 r.custom_name,
@@ -3955,6 +4179,7 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
             WHERE s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL
+                {tag_filter}
             GROUP BY s.region_x, s.region_y, s.region_z
             ORDER BY
                 CASE
@@ -3965,7 +4190,7 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 COUNT(DISTINCT s.id) DESC,
                 first_system_date ASC NULLS FIRST,
                 first_system_id ASC
-        ''')
+        ''', tag_params)
 
         region_rows = cursor.fetchall()
         total_regions = len(region_rows)
@@ -3986,10 +4211,12 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 # Build WHERE clause for all regions
                 placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
                 params = [coord for region in region_coords for coord in region]
+                # Add tag filter params if present
+                params.extend(tag_params)
 
                 cursor.execute(f'''
-                    SELECT id, discord_tag, region_x, region_y, region_z FROM systems
-                    WHERE {placeholders}
+                    SELECT id, discord_tag, region_x, region_y, region_z FROM systems s
+                    WHERE ({placeholders}) {tag_filter}
                 ''', params)
 
                 all_systems = [dict(row) for row in cursor.fetchall()]
@@ -4020,7 +4247,11 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             # Filter out regions with no visible systems
             regions = [r for r in regions if r['system_count'] > 0]
 
-            return {'regions': regions, 'total_regions': len(regions)}
+            return {
+                'regions': regions,
+                'total_regions': len(regions),
+                'applied_filter': discord_tag or 'all'
+            }
 
         # STEP 2: Load all systems for all regions in ONE query
         region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
@@ -4030,11 +4261,13 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         # Build WHERE clause for all regions
         placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
         params = [coord for region in region_coords for coord in region]
+        # Add tag filter params if present
+        params.extend(tag_params)
 
         cursor.execute(f'''
-            SELECT * FROM systems
-            WHERE {placeholders}
-            ORDER BY region_x, region_y, region_z, created_at ASC NULLS FIRST, id ASC
+            SELECT * FROM systems s
+            WHERE ({placeholders}) {tag_filter}
+            ORDER BY s.region_x, s.region_y, s.region_z, s.created_at ASC NULLS FIRST, s.id ASC
         ''', params)
 
         all_systems = [dict(row) for row in cursor.fetchall()]
@@ -4447,6 +4680,309 @@ async def api_system_planets(system_id: str, session: Optional[str] = Cookie(Non
 
     except Exception as e:
         logger.error(f"Error fetching system planets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+# =============================================================================
+# Planet Atlas Integration - POI (Points of Interest) Endpoints
+# =============================================================================
+
+@app.get('/api/planets/{planet_id}/pois')
+async def api_get_planet_pois(planet_id: int, session: Optional[str] = Cookie(None)):
+    """Get all POIs for a specific planet."""
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'pois': [], 'planet_id': planet_id}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get planet info first
+        cursor.execute('SELECT id, name, system_id FROM planets WHERE id = ?', (planet_id,))
+        planet = cursor.fetchone()
+        if not planet:
+            raise HTTPException(status_code=404, detail='Planet not found')
+
+        # Get system info for context
+        cursor.execute('SELECT name FROM systems WHERE id = ?', (planet['system_id'],))
+        system = cursor.fetchone()
+
+        # Get all POIs for this planet
+        cursor.execute('''
+            SELECT * FROM planet_pois WHERE planet_id = ? ORDER BY created_at DESC
+        ''', (planet_id,))
+        pois = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            'pois': pois,
+            'planet_id': planet_id,
+            'planet_name': planet['name'],
+            'system_name': system['name'] if system else 'Unknown'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching planet POIs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/planets/{planet_id}/pois')
+async def api_create_planet_poi(planet_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """Create a new POI on a planet."""
+    # Validate required fields
+    name = payload.get('name', '').strip()
+    latitude = payload.get('latitude')
+    longitude = payload.get('longitude')
+
+    if not name:
+        raise HTTPException(status_code=400, detail='POI name is required')
+    if latitude is None or longitude is None:
+        raise HTTPException(status_code=400, detail='Latitude and longitude are required')
+
+    # Validate coordinate ranges
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+        if latitude < -90 or latitude > 90:
+            raise HTTPException(status_code=400, detail='Latitude must be between -90 and 90')
+        # Normalize longitude to -180 to 180
+        longitude = ((longitude + 180) % 360) - 180
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail='Invalid latitude or longitude values')
+
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=500, detail='Database not initialized')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Verify planet exists
+        cursor.execute('SELECT id FROM planets WHERE id = ?', (planet_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail='Planet not found')
+
+        # Get session data for created_by
+        session_data = get_session(session)
+        created_by = session_data.get('username') if session_data else 'anonymous'
+
+        # Insert the POI
+        cursor.execute('''
+            INSERT INTO planet_pois (planet_id, name, description, latitude, longitude,
+                                     poi_type, color, symbol, category, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            planet_id,
+            name,
+            payload.get('description', ''),
+            latitude,
+            longitude,
+            payload.get('poi_type', 'custom'),
+            payload.get('color', '#00C2B3'),
+            payload.get('symbol', 'circle'),
+            payload.get('category', '-'),
+            created_by
+        ))
+
+        poi_id = cursor.lastrowid
+        conn.commit()
+
+        # Return the created POI
+        cursor.execute('SELECT * FROM planet_pois WHERE id = ?', (poi_id,))
+        poi = dict(cursor.fetchone())
+
+        logger.info(f"Created POI '{name}' on planet {planet_id} by {created_by}")
+        return {'success': True, 'poi': poi}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating planet POI: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/planets/pois/{poi_id}')
+async def api_update_planet_poi(poi_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """Update an existing POI."""
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=500, detail='Database not initialized')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if POI exists
+        cursor.execute('SELECT * FROM planet_pois WHERE id = ?', (poi_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail='POI not found')
+
+        # Build update query dynamically
+        updates = []
+        values = []
+
+        if 'name' in payload:
+            updates.append('name = ?')
+            values.append(payload['name'].strip())
+        if 'description' in payload:
+            updates.append('description = ?')
+            values.append(payload['description'])
+        if 'latitude' in payload:
+            lat = float(payload['latitude'])
+            if lat < -90 or lat > 90:
+                raise HTTPException(status_code=400, detail='Latitude must be between -90 and 90')
+            updates.append('latitude = ?')
+            values.append(lat)
+        if 'longitude' in payload:
+            lon = float(payload['longitude'])
+            lon = ((lon + 180) % 360) - 180  # Normalize
+            updates.append('longitude = ?')
+            values.append(lon)
+        if 'poi_type' in payload:
+            updates.append('poi_type = ?')
+            values.append(payload['poi_type'])
+        if 'color' in payload:
+            updates.append('color = ?')
+            values.append(payload['color'])
+        if 'symbol' in payload:
+            updates.append('symbol = ?')
+            values.append(payload['symbol'])
+        if 'category' in payload:
+            updates.append('category = ?')
+            values.append(payload['category'])
+
+        if not updates:
+            raise HTTPException(status_code=400, detail='No fields to update')
+
+        updates.append('updated_at = CURRENT_TIMESTAMP')
+        values.append(poi_id)
+
+        cursor.execute(f'''
+            UPDATE planet_pois SET {', '.join(updates)} WHERE id = ?
+        ''', values)
+
+        conn.commit()
+
+        # Return updated POI
+        cursor.execute('SELECT * FROM planet_pois WHERE id = ?', (poi_id,))
+        poi = dict(cursor.fetchone())
+
+        logger.info(f"Updated POI {poi_id}")
+        return {'success': True, 'poi': poi}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating planet POI: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.delete('/api/planets/pois/{poi_id}')
+async def api_delete_planet_poi(poi_id: int, session: Optional[str] = Cookie(None)):
+    """Delete a POI."""
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=500, detail='Database not initialized')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if POI exists
+        cursor.execute('SELECT name FROM planet_pois WHERE id = ?', (poi_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail='POI not found')
+
+        # Delete the POI
+        cursor.execute('DELETE FROM planet_pois WHERE id = ?', (poi_id,))
+        conn.commit()
+
+        logger.info(f"Deleted POI {poi_id} ({existing['name']})")
+        return {'success': True, 'deleted_id': poi_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting planet POI: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/map/planet/{planet_id}')
+async def get_planet_3d_map(planet_id: int, session: Optional[str] = Cookie(None)):
+    """Serve the Planet Atlas 3D visualization for a specific planet.
+
+    Generates an interactive 3D globe with POI markers using the planet_atlas_wrapper.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=500, detail='Database not initialized')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get planet info
+        cursor.execute('''
+            SELECT p.*, s.name as system_name, s.glyph_code
+            FROM planets p
+            JOIN systems s ON p.system_id = s.id
+            WHERE p.id = ?
+        ''', (planet_id,))
+        planet_row = cursor.fetchone()
+
+        if not planet_row:
+            raise HTTPException(status_code=404, detail='Planet not found')
+
+        # Convert to dict for easier access
+        planet = dict(planet_row)
+
+        # Get POIs for this planet
+        cursor.execute('''
+            SELECT * FROM planet_pois WHERE planet_id = ? ORDER BY created_at DESC
+        ''', (planet_id,))
+        pois = [dict(row) for row in cursor.fetchall()]
+
+        # Generate the HTML visualization
+        html_content = generate_planet_html(
+            planet_name=planet['name'],
+            planet_id=planet_id,
+            system_name=planet['system_name'],
+            pois=pois,
+            biome=planet.get('biome'),
+            glyph_code=planet.get('glyph_code')
+        )
+
+        return HTMLResponse(content=html_content)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating planet 3D map: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
@@ -5296,6 +5832,41 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
 
         conn.commit()
         logger.info(f"Saved system '{name}' to database (ID: {sys_id})")
+
+        # Add audit log entry for direct saves (so super admin can track everything)
+        is_edit = existing is not None
+        action = 'direct_edit' if is_edit else 'direct_add'
+        current_username = session_data.get('username')
+        current_user_type = session_data.get('user_type')
+        current_account_id = session_data.get('partner_id') or session_data.get('sub_admin_id')
+
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                action,
+                'system',
+                None,  # No submission_id since this bypasses pending_systems
+                name,
+                current_username,
+                current_user_type,
+                current_account_id,
+                session_data.get('discord_tag'),
+                current_username,  # Submitter is same as approver for direct saves
+                current_account_id,
+                current_user_type,
+                f"Direct save to database (system_id: {sys_id})",
+                payload.get('discord_tag')
+            ))
+            conn.commit()
+            logger.info(f"Audit log: {action} for system '{name}' by {current_username}")
+        except Exception as audit_err:
+            logger.warning(f"Failed to add audit log entry: {audit_err}")
 
         # Also save to JSON for backup
         async with _systems_lock:
@@ -6771,7 +7342,8 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
     """
     Get pending system submissions (admin only).
     - Super admin: sees ALL submissions
-    - Partners: see only submissions tagged with their discord_tag
+    - Haven sub-admins: sees ALL submissions (they work for Haven)
+    - Partners/partner sub-admins: see only submissions tagged with their discord_tag
     """
     # Verify admin session and get session data
     session_data = get_session(session)
@@ -6779,6 +7351,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         raise HTTPException(status_code=401, detail="Admin authentication required")
 
     is_super = session_data.get('user_type') == 'super_admin'
+    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False)
     partner_tag = session_data.get('discord_tag')
 
     conn = None
@@ -6788,7 +7361,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         cursor = conn.cursor()
 
         if is_super:
-            # Super admin sees ALL submissions with discord_tag visible
+            # Super admin sees ALL submissions
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
                        reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
@@ -6802,8 +7375,49 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
                     END,
                     submission_date DESC
             ''')
+        elif is_haven_sub_admin:
+            # Haven sub-admins see submissions tagged with "Haven" + any additional discord tags
+            additional_tags = session_data.get('additional_discord_tags', [])
+            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
+            all_tags = ['Haven'] + additional_tags
+
+            # Build dynamic query with placeholders
+            placeholders = ','.join(['?' for _ in all_tags])
+
+            # If can_approve_personal_uploads, also include submissions with discord_tag = 'personal' (personal uploads)
+            if can_approve_personal:
+                cursor.execute(f'''
+                    SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                           reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
+                           personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
+                    FROM pending_systems
+                    WHERE discord_tag IN ({placeholders})
+                       OR discord_tag = 'personal'
+                    ORDER BY
+                        CASE status
+                            WHEN 'pending' THEN 1
+                            WHEN 'approved' THEN 2
+                            WHEN 'rejected' THEN 3
+                        END,
+                        submission_date DESC
+                ''', all_tags)
+            else:
+                cursor.execute(f'''
+                    SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                           reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
+                           personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
+                    FROM pending_systems
+                    WHERE discord_tag IN ({placeholders})
+                    ORDER BY
+                        CASE status
+                            WHEN 'pending' THEN 1
+                            WHEN 'approved' THEN 2
+                            WHEN 'rejected' THEN 3
+                        END,
+                        submission_date DESC
+                ''', all_tags)
         else:
-            # Partners and sub-admins only see submissions tagged with their discord_tag
+            # Partners and partner sub-admins only see submissions tagged with their discord_tag
             cursor.execute('''
                 SELECT id, submitted_by, submission_date, status, system_name, system_region,
                        reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
@@ -6822,6 +7436,34 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         rows = cursor.fetchall()
         submissions = [dict(row) for row in rows]
 
+        # For non-super-admins, filter out self-submissions (users cannot approve their own)
+        if not is_super:
+            logged_in_username = normalize_discord_username(session_data.get('username', ''))
+            logged_in_account_id = session_data.get('sub_admin_id') or session_data.get('partner_id')
+            logged_in_account_type = session_data.get('user_type')
+
+            def is_self_submission(sub):
+                # Check by account ID first (most reliable)
+                if sub.get('submitter_account_id') and sub.get('submitter_account_type'):
+                    if (sub['submitter_account_id'] == logged_in_account_id and
+                        sub['submitter_account_type'] == logged_in_account_type):
+                        return True
+                # Check by username against submitted_by (normalize to handle #XXXX discriminator)
+                if sub.get('submitted_by') and normalize_discord_username(sub['submitted_by']) == logged_in_username:
+                    return True
+                # Check by username against personal_discord_username (normalize to handle #XXXX discriminator)
+                if sub.get('personal_discord_username') and normalize_discord_username(sub['personal_discord_username']) == logged_in_username:
+                    return True
+                return False
+
+            submissions = [s for s in submissions if not is_self_submission(s)]
+
+        # Hide personal_discord_username for Haven sub-admins (only super admin sees contact info)
+        # But keep discord_tag so frontend can distinguish personal uploads from Haven submissions
+        if is_haven_sub_admin:
+            for submission in submissions:
+                submission['personal_discord_username'] = None
+
         return {'submissions': submissions}
 
     except Exception as e:
@@ -6836,13 +7478,16 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
 async def get_pending_count(session: Optional[str] = Cookie(None)):
     """
     Get count of pending submissions for badge display.
-    - Super admin / not logged in: sees count of ALL pending
-    - Partners: sees count of only their discord_tag submissions
+    - Super admin: sees count of ALL pending
+    - Haven sub-admins: sees count of "Haven" tagged submissions (minus self-submissions)
+    - Partners/partner sub-admins: sees count of only their discord_tag submissions (minus self-submissions)
+    - Not logged in: sees count of ALL pending
     Must be defined BEFORE /api/pending_systems/{submission_id} to avoid route conflict.
     """
     # Get session data if available (for partner filtering)
     session_data = get_session(session) if session else None
     is_super = session_data and session_data.get('user_type') == 'super_admin'
+    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False) if session_data else False
     partner_tag = session_data.get('discord_tag') if session_data else None
 
     conn = None
@@ -6851,14 +7496,60 @@ async def get_pending_count(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Count pending systems (filtered for partners)
-        if session_data and not is_super and partner_tag:
-            # Partner only sees their tagged submissions
-            cursor.execute("SELECT COUNT(*) FROM pending_systems WHERE status = 'pending' AND discord_tag = ?", (partner_tag,))
-        else:
-            # Super admin or not logged in sees all
+        # For non-super-admins, we need to fetch rows and filter out self-submissions
+        if is_super or not session_data:
+            # Super admin or not logged in sees all - simple count
             cursor.execute("SELECT COUNT(*) FROM pending_systems WHERE status = 'pending'")
-        system_count = cursor.fetchone()[0]
+            system_count = cursor.fetchone()[0]
+        else:
+            # For sub-admins/partners, fetch rows to filter out self-submissions
+            if is_haven_sub_admin:
+                additional_tags = session_data.get('additional_discord_tags', []) if session_data else []
+                can_approve_personal = session_data.get('can_approve_personal_uploads', False) if session_data else False
+                all_tags = ['Haven'] + additional_tags
+                placeholders = ','.join(['?' for _ in all_tags])
+
+                if can_approve_personal:
+                    cursor.execute(f"""
+                        SELECT id, submitted_by, personal_discord_username, submitter_account_id, submitter_account_type
+                        FROM pending_systems
+                        WHERE status = 'pending' AND (discord_tag IN ({placeholders}) OR discord_tag = 'personal')
+                    """, all_tags)
+                else:
+                    cursor.execute(f"""
+                        SELECT id, submitted_by, personal_discord_username, submitter_account_id, submitter_account_type
+                        FROM pending_systems
+                        WHERE status = 'pending' AND discord_tag IN ({placeholders})
+                    """, all_tags)
+            elif partner_tag:
+                cursor.execute("""
+                    SELECT id, submitted_by, personal_discord_username, submitter_account_id, submitter_account_type
+                    FROM pending_systems
+                    WHERE status = 'pending' AND discord_tag = ?
+                """, (partner_tag,))
+            else:
+                cursor.execute("SELECT id FROM pending_systems WHERE 1=0")  # No results
+
+            rows = cursor.fetchall()
+
+            # Filter out self-submissions (normalize usernames to handle #XXXX discriminator)
+            logged_in_username = normalize_discord_username(session_data.get('username', ''))
+            logged_in_account_id = session_data.get('sub_admin_id') or session_data.get('partner_id')
+            logged_in_account_type = session_data.get('user_type')
+
+            def is_self_submission(row):
+                sub = dict(row)
+                if sub.get('submitter_account_id') and sub.get('submitter_account_type'):
+                    if (sub['submitter_account_id'] == logged_in_account_id and
+                        sub['submitter_account_type'] == logged_in_account_type):
+                        return True
+                if sub.get('submitted_by') and normalize_discord_username(sub['submitted_by']) == logged_in_username:
+                    return True
+                if sub.get('personal_discord_username') and normalize_discord_username(sub['personal_discord_username']) == logged_in_username:
+                    return True
+                return False
+
+            system_count = sum(1 for row in rows if not is_self_submission(row))
 
         # Count pending region names (these don't have discord_tag filtering yet)
         cursor.execute("SELECT COUNT(*) FROM pending_region_names WHERE status = 'pending'")
@@ -6884,6 +7575,10 @@ async def get_pending_system_details(submission_id: int, session: Optional[str] 
     if not verify_session(session):
         raise HTTPException(status_code=401, detail="Admin authentication required")
 
+    # Check if Haven sub-admin (need to hide personal_discord_username)
+    session_data = get_session(session)
+    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False) if session_data else False
+
     conn = None
     try:
         db_path = get_db_path()
@@ -6900,6 +7595,10 @@ async def get_pending_system_details(submission_id: int, session: Optional[str] 
         # Parse JSON system_data
         if submission.get('system_data'):
             submission['system_data'] = json.loads(submission['system_data'])
+
+        # Hide personal_discord_username for Haven sub-admins (only super admin sees contact info)
+        if is_haven_sub_admin:
+            submission['personal_discord_username'] = None
 
         return submission
 
@@ -6961,6 +7660,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
             submitted_by = submission.get('submitted_by')
+            personal_discord_username = submission.get('personal_discord_username')
+            # Normalize usernames to handle Discord #XXXX discriminator
+            normalized_current = normalize_discord_username(current_username)
 
             is_self_submission = False
 
@@ -6969,8 +7671,12 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
                     is_self_submission = True
             # Fallback: match by username (for legacy submissions without account tracking)
-            elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
                 is_self_submission = True
+            # Also check personal_discord_username (used for all submissions now)
+            if not is_self_submission and personal_discord_username and normalized_current:
+                if normalize_discord_username(personal_discord_username) == normalized_current:
+                    is_self_submission = True
 
             if is_self_submission:
                 raise HTTPException(
@@ -6996,6 +7702,19 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         submission_y = system_data.get('y')
         submission_z = system_data.get('z')
         original_glyph = system_data.get('glyph_code')
+
+        # EARLY CHECK: For EDIT submissions with no glyph, fetch the original system's glyph
+        # This MUST happen before any glyph calculation to preserve the correct glyph
+        existing_system_id = system_data.get('id')
+        if existing_system_id and not original_glyph:
+            cursor.execute('SELECT glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
+            existing_row = cursor.fetchone()
+            if existing_row and existing_row[0]:
+                original_glyph = existing_row[0]
+                system_data['glyph_code'] = original_glyph
+                system_data['glyph_planet'] = existing_row[1] or 0
+                system_data['glyph_solar_system'] = existing_row[2] or 1
+                logger.info(f"Edit submission {submission_id}: Preserved original glyph {original_glyph} from existing system {existing_system_id}")
 
         if original_glyph:
             try:
@@ -7086,30 +7805,50 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         # Check if this is an edit of an existing system (has an id)
         existing_system_id = system_data.get('id')
         is_edit = False
+        original_glyph_data = None  # Store original glyph info for edits
 
         logger.info(f"Approving submission {submission_id}: system_data.id = {existing_system_id}")
 
         if existing_system_id:
             # Check if the system actually exists in the database
-            cursor.execute('SELECT id FROM systems WHERE id = ?', (existing_system_id,))
+            cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
             existing_row = cursor.fetchone()
             if existing_row:
                 is_edit = True
                 system_id = existing_system_id
-                logger.info(f"Submission {submission_id} is an EDIT - found existing system with ID: {system_id}")
+                # Store original glyph data to preserve if submission doesn't have it
+                original_glyph_data = {
+                    'glyph_code': existing_row[1],
+                    'glyph_planet': existing_row[2],
+                    'glyph_solar_system': existing_row[3]
+                }
+                logger.info(f"Submission {submission_id} is an EDIT - found existing system with ID: {system_id}, original glyph: {original_glyph_data['glyph_code']}")
             else:
                 logger.info(f"Submission {submission_id} has ID {existing_system_id} but system not found in DB - treating as NEW")
 
         # If not already an edit, check if a system with this glyph_code already exists
         # This handles the case where someone submits via text input a glyph that's already in the DB
         if not is_edit and system_data.get('glyph_code'):
-            cursor.execute('SELECT id, name FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
+            cursor.execute('SELECT id, name, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
             existing_glyph_row = cursor.fetchone()
             if existing_glyph_row:
                 is_edit = True
                 system_id = existing_glyph_row[0]
                 existing_name = existing_glyph_row[1]
+                original_glyph_data = {
+                    'glyph_code': existing_glyph_row[2],
+                    'glyph_planet': existing_glyph_row[3],
+                    'glyph_solar_system': existing_glyph_row[4]
+                }
                 logger.info(f"Submission {submission_id} has glyph_code that matches existing system '{existing_name}' (ID: {system_id}) - treating as EDIT")
+
+        # For EDITS: If submission doesn't have glyph data, preserve the original
+        if is_edit and original_glyph_data:
+            if not system_data.get('glyph_code') and original_glyph_data.get('glyph_code'):
+                system_data['glyph_code'] = original_glyph_data['glyph_code']
+                system_data['glyph_planet'] = original_glyph_data.get('glyph_planet', 0)
+                system_data['glyph_solar_system'] = original_glyph_data.get('glyph_solar_system', 1)
+                logger.info(f"Preserved original glyph for edit: {system_data['glyph_code']}")
 
         if is_edit:
             # UPDATE existing system (including new companion app fields)
@@ -7324,7 +8063,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             current_user_type,
             current_account_id,
             session_data.get('discord_tag'),
-            submission.get('submitted_by'),
+            # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
+            submission.get('personal_discord_username') or submission.get('submitted_by'),
             submission.get('submitter_account_id'),
             submission.get('submitter_account_type'),
             submission.get('discord_tag')
@@ -7411,14 +8151,21 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
             submitted_by = submission.get('submitted_by')
+            personal_discord_username = submission.get('personal_discord_username')
+            # Normalize usernames to handle Discord #XXXX discriminator
+            normalized_current = normalize_discord_username(current_username)
 
             is_self_submission = False
 
             if submitter_account_id is not None and submitter_account_type:
                 if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
                     is_self_submission = True
-            elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
                 is_self_submission = True
+            # Also check personal_discord_username (used for all submissions now)
+            if not is_self_submission and personal_discord_username and normalized_current:
+                if normalize_discord_username(personal_discord_username) == normalized_current:
+                    is_self_submission = True
 
             if is_self_submission:
                 raise HTTPException(
@@ -7450,7 +8197,8 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
             current_user_type,
             current_account_id,
             session_data.get('discord_tag'),
-            submission.get('submitted_by'),
+            # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
+            submission.get('personal_discord_username') or submission.get('submitted_by'),
             submission.get('submitter_account_id'),
             submission.get('submitter_account_type'),
             reason,
@@ -7561,13 +8309,20 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     submitter_account_id = submission.get('submitter_account_id')
                     submitter_account_type = submission.get('submitter_account_type')
                     submitted_by = submission.get('submitted_by')
+                    personal_discord_username = submission.get('personal_discord_username')
+                    # Normalize usernames to handle Discord #XXXX discriminator
+                    normalized_current = normalize_discord_username(current_username)
 
                     is_self_submission = False
                     if submitter_account_id is not None and submitter_account_type:
                         if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
                             is_self_submission = True
-                    elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                    elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
                         is_self_submission = True
+                    # Also check personal_discord_username (used for all submissions now)
+                    if not is_self_submission and personal_discord_username and normalized_current:
+                        if normalize_discord_username(personal_discord_username) == normalized_current:
+                            is_self_submission = True
 
                     if is_self_submission:
                         results['skipped'].append({
@@ -7590,6 +8345,18 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                 submission_y = system_data.get('y')
                 submission_z = system_data.get('z')
                 original_glyph = system_data.get('glyph_code')
+
+                # EARLY CHECK: For EDIT submissions with no glyph, fetch the original system's glyph
+                existing_system_id = system_data.get('id')
+                if existing_system_id and not original_glyph:
+                    cursor.execute('SELECT glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
+                    existing_row = cursor.fetchone()
+                    if existing_row and existing_row[0]:
+                        original_glyph = existing_row[0]
+                        system_data['glyph_code'] = original_glyph
+                        system_data['glyph_planet'] = existing_row[1] or 0
+                        system_data['glyph_solar_system'] = existing_row[2] or 1
+                        logger.info(f"Batch approval: Preserved original glyph {original_glyph} for edit of system {existing_system_id}")
 
                 if original_glyph:
                     try:
@@ -7649,20 +8416,38 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                 existing_system_id = system_data.get('id')
                 is_edit = False
                 system_id = None
+                original_glyph_data = None  # Store original glyph info for edits
 
                 if existing_system_id:
-                    cursor.execute('SELECT id FROM systems WHERE id = ?', (existing_system_id,))
+                    cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
                     existing_row = cursor.fetchone()
                     if existing_row:
                         is_edit = True
                         system_id = existing_system_id
+                        original_glyph_data = {
+                            'glyph_code': existing_row[1],
+                            'glyph_planet': existing_row[2],
+                            'glyph_solar_system': existing_row[3]
+                        }
 
                 if not is_edit and system_data.get('glyph_code'):
-                    cursor.execute('SELECT id FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
+                    cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
                     existing_glyph_row = cursor.fetchone()
                     if existing_glyph_row:
                         is_edit = True
                         system_id = existing_glyph_row[0]
+                        original_glyph_data = {
+                            'glyph_code': existing_glyph_row[1],
+                            'glyph_planet': existing_glyph_row[2],
+                            'glyph_solar_system': existing_glyph_row[3]
+                        }
+
+                # For EDITS: If submission doesn't have glyph data, preserve the original
+                if is_edit and original_glyph_data:
+                    if not system_data.get('glyph_code') and original_glyph_data.get('glyph_code'):
+                        system_data['glyph_code'] = original_glyph_data['glyph_code']
+                        system_data['glyph_planet'] = original_glyph_data.get('glyph_planet', 0)
+                        system_data['glyph_solar_system'] = original_glyph_data.get('glyph_solar_system', 1)
 
                 if is_edit:
                     cursor.execute('''
@@ -7864,7 +8649,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     current_user_type,
                     current_account_id,
                     session_data.get('discord_tag'),
-                    submission.get('submitted_by'),
+                    # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
+                    submission.get('personal_discord_username') or submission.get('submitted_by'),
                     submission.get('submitter_account_id'),
                     submission.get('submitter_account_type'),
                     submission.get('discord_tag')
@@ -7995,13 +8781,20 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
                     submitter_account_id = submission.get('submitter_account_id')
                     submitter_account_type = submission.get('submitter_account_type')
                     submitted_by = submission.get('submitted_by')
+                    personal_discord_username = submission.get('personal_discord_username')
+                    # Normalize usernames to handle Discord #XXXX discriminator
+                    normalized_current = normalize_discord_username(current_username)
 
                     is_self_submission = False
                     if submitter_account_id is not None and submitter_account_type:
                         if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
                             is_self_submission = True
-                    elif submitted_by and current_username and submitted_by.lower() == current_username.lower():
+                    elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
                         is_self_submission = True
+                    # Also check personal_discord_username (used for all submissions now)
+                    if not is_self_submission and personal_discord_username and normalized_current:
+                        if normalize_discord_username(personal_discord_username) == normalized_current:
+                            is_self_submission = True
 
                     if is_self_submission:
                         results['skipped'].append({
@@ -8035,7 +8828,8 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
                     current_user_type,
                     current_account_id,
                     session_data.get('discord_tag'),
-                    submission.get('submitted_by'),
+                    # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
+                    submission.get('personal_discord_username') or submission.get('submitted_by'),
                     submission.get('submitter_account_id'),
                     submission.get('submitter_account_type'),
                     reason,
@@ -8289,4 +9083,155 @@ async def receive_extraction(
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=8005)
+    import uvicorn.logging
+    from datetime import datetime
+
+    # Try to import colorama for colored output
+    try:
+        from colorama import init, Fore, Style
+        init()
+        CYAN = Fore.CYAN
+        GREEN = Fore.GREEN
+        YELLOW = Fore.YELLOW
+        RED = Fore.RED
+        WHITE = Fore.WHITE
+        MAGENTA = Fore.MAGENTA
+        DIM = Style.DIM
+        RESET = Style.RESET_ALL
+        BRIGHT = Style.BRIGHT
+    except ImportError:
+        # Fallback to no colors if colorama not installed
+        CYAN = GREEN = YELLOW = RED = WHITE = MAGENTA = DIM = RESET = BRIGHT = ""
+
+    class HavenLogFormatter(logging.Formatter):
+        """Custom formatter for clean boxed log output."""
+
+        LEVEL_COLORS = {
+            'DEBUG': ('DEBUG', DIM),
+            'INFO': ('INFO ', GREEN),
+            'WARNING': ('WARN ', YELLOW),
+            'ERROR': ('ERROR', RED),
+            'CRITICAL': ('CRIT ', RED + BRIGHT),
+        }
+
+        def format(self, record):
+            # Get level info
+            level_name = record.levelname
+            level_tag, level_color = self.LEVEL_COLORS.get(level_name, (level_name[:5], WHITE))
+
+            # Format timestamp
+            timestamp = datetime.now().strftime('%H:%M:%S')
+
+            # Clean up the message
+            message = record.getMessage()
+
+            # Special formatting for access logs (HTTP requests)
+            if 'uvicorn.access' in record.name:
+                # Parse access log: "IP:PORT - "METHOD PATH HTTP/X.X" STATUS"
+                parts = message.split('" ')
+                if len(parts) >= 2:
+                    # Extract IP address (before the " - " separator)
+                    ip_part = parts[0].split(' - ')[0] if ' - ' in parts[0] else ''
+                    # Remove port if present (IP:PORT -> IP)
+                    client_ip = ip_part.split(':')[0] if ip_part else '?'
+
+                    method_path = parts[0].split('"')[-1] if '"' in parts[0] else parts[0]
+                    status = parts[1].split()[0] if parts[1] else ''
+
+                    # Color code by status
+                    if status.startswith('2'):
+                        status_color = GREEN
+                    elif status.startswith('3'):
+                        status_color = CYAN
+                    elif status.startswith('4'):
+                        status_color = YELLOW
+                    else:
+                        status_color = RED
+
+                    return f"    {CYAN}│{RESET} {DIM}{timestamp}{RESET} {MAGENTA}{client_ip:>15}{RESET} {status_color}{status}{RESET} {WHITE}{method_path}{RESET}"
+
+            # Standard log message
+            return f"    {CYAN}│{RESET} {DIM}{timestamp}{RESET} [{level_color}{level_tag}{RESET}] {message}"
+
+    def print_startup_info():
+        """Print professional startup information."""
+        print(f"\n{CYAN}    [SYSTEM]{RESET} Database initializing...")
+
+        # Initialize database before uvicorn starts
+        init_database()
+        print(f"{GREEN}    [  OK  ]{RESET} Database ready")
+
+        # Count records
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM systems")
+            system_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM planets")
+            planet_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM regions WHERE custom_name IS NOT NULL")
+            region_count = cursor.fetchone()[0]
+            conn.close()
+
+            print(f"\n{CYAN}    ┌──────────────────────────────────────────────────────┐{RESET}")
+            print(f"{CYAN}    │{RESET}  {BRIGHT}DATABASE STATISTICS{RESET}                                {CYAN}│{RESET}")
+            print(f"{CYAN}    ├──────────────────────────────────────────────────────┤{RESET}")
+            print(f"{CYAN}    │{RESET}   Systems  : {YELLOW}{system_count:>6,}{RESET}                                 {CYAN}│{RESET}")
+            print(f"{CYAN}    │{RESET}   Planets  : {YELLOW}{planet_count:>6,}{RESET}                                 {CYAN}│{RESET}")
+            print(f"{CYAN}    │{RESET}   Regions  : {YELLOW}{region_count:>6,}{RESET}                                 {CYAN}│{RESET}")
+            print(f"{CYAN}    └──────────────────────────────────────────────────────┘{RESET}")
+        except Exception as e:
+            print(f"{YELLOW}    [WARN]{RESET} Could not read database stats: {e}")
+
+        print(f"\n{GREEN}    [READY]{RESET} Haven Control Room API starting...")
+        print(f"\n{CYAN}    ┌──────────────────────────────────────────────────────────────────────────┐{RESET}")
+        print(f"{CYAN}    │{RESET}  {BRIGHT}SERVER LOG{RESET}                                                            {CYAN}│{RESET}")
+        print(f"{CYAN}    ├──────────────────────────────────────────────────────────────────────────┤{RESET}")
+
+    def print_shutdown_box():
+        """Print shutdown box."""
+        print(f"{CYAN}    └──────────────────────────────────────────────────────────────────────────┘{RESET}")
+
+    # Run startup info
+    print_startup_info()
+
+    # Configure custom logging
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "haven": {
+                "()": HavenLogFormatter,
+            },
+        },
+        "handlers": {
+            "default": {
+                "formatter": "haven",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+            "access": {
+                "formatter": "haven",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "uvicorn.error": {"level": "INFO"},
+            "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+        },
+    }
+
+    # Register shutdown handler
+    import atexit
+    atexit.register(print_shutdown_box)
+
+    # Configure uvicorn with custom logging
+    uvicorn.run(
+        app,
+        host='0.0.0.0',
+        port=8005,
+        log_config=log_config,
+        access_log=True
+    )

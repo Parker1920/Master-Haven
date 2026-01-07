@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v10.0.0
+title Haven Extractor v9.0.0
 echo ============================================================
-echo   HAVEN EXTRACTOR v10.0.0 - Remote Region Enumeration
+echo   HAVEN EXTRACTOR v9.0.0 - Batch Mode
 echo   For No Man's Sky
 echo ============================================================
 echo.
@@ -27,8 +27,8 @@ echo.
 echo This will:
 echo   1. Start No Man's Sky
 echo   2. Inject the Haven Extractor mod
-echo   3. NEW: Scan Region - enumerate ALL 512 systems remotely!
-echo   4. Extract visited system data for full planet details
+echo   3. Warp to systems - data captured automatically!
+echo   4. Click "Export Batch" to save all systems
 echo.
 echo Press any key to continue or Ctrl+C to cancel...
 pause > nul

@@ -2025,15 +2025,15 @@
             const system = searchResultsData[index];
             if (!system) return;
 
-            // Use REGION coordinates (x, y, z) for the visible point position
-            // These are what's displayed on the map, not star_x/star_y/star_z
-            const regionX = (system.x !== null && system.x !== undefined) ? system.x : 0;
-            const regionY = (system.y !== null && system.y !== undefined) ? system.y : 0;
-            const regionZ = (system.z !== null && system.z !== undefined) ? system.z : 0;
+            // Use system x, y, z coordinates for display positioning
+            // These are the actual star coordinates used on the map (not region_x/y/z)
+            const displayX = (system.x !== null && system.x !== undefined) ? system.x : 0;
+            const displayY = (system.y !== null && system.y !== undefined) ? system.y : 0;
+            const displayZ = (system.z !== null && system.z !== undefined) ? system.z : 0;
 
-            const targetX = regionX * DISPLAY_SCALE;
-            const targetY = regionY * DISPLAY_SCALE;
-            const targetZ = regionZ * DISPLAY_SCALE;
+            const targetX = displayX * DISPLAY_SCALE;
+            const targetY = displayY * DISPLAY_SCALE;
+            const targetZ = displayZ * DISPLAY_SCALE;
 
             console.log('Flying to system:', system.name, 'at region coords', targetX, targetY, targetZ);
 
@@ -2055,8 +2055,8 @@
             // Remove any existing highlight
             removeHighlight();
 
-            // Create a pulsing highlight ring
-            const geometry = new THREE.RingGeometry(3, 4.5, 32);
+            // Create a pulsing highlight ring - small base size, will scale with camera distance
+            const geometry = new THREE.RingGeometry(1, 1.5, 32);
             const material = new THREE.MeshBasicMaterial({
                 color: 0x00ff00,
                 side: THREE.DoubleSide,
@@ -2069,15 +2069,30 @@
             highlightedMesh.lookAt(camera.position);
             scene.add(highlightedMesh);
 
-            // Animate the highlight
+            // Store target position for distance calculation
+            const targetPos = new THREE.Vector3(x, y, z);
+
+            // Animate the highlight with zoom-responsive scaling
             let pulse = 0;
             const animateHighlight = () => {
                 if (!highlightedMesh) return;
 
                 pulse += 0.05;
-                const scale = 1 + Math.sin(pulse) * 0.3;
-                highlightedMesh.scale.set(scale, scale, scale);
-                highlightedMesh.material.opacity = 0.5 + Math.sin(pulse) * 0.3;
+
+                // Calculate scale based on camera distance to the highlight
+                // Closer camera = smaller ring, farther camera = larger ring
+                const distance = camera.position.distanceTo(targetPos);
+                const baseScale = distance * 0.015;  // Scale factor relative to distance
+                const minScale = 2;   // Minimum size when very close
+                const maxScale = 30;  // Maximum size when far away
+                const zoomScale = Math.max(minScale, Math.min(maxScale, baseScale));
+
+                // Add pulse animation on top of zoom scale
+                const pulseScale = 1 + Math.sin(pulse) * 0.2;
+                const finalScale = zoomScale * pulseScale;
+
+                highlightedMesh.scale.set(finalScale, finalScale, finalScale);
+                highlightedMesh.material.opacity = 0.6 + Math.sin(pulse) * 0.2;
                 highlightedMesh.lookAt(camera.position);
 
                 highlightedMesh.animationFrame = requestAnimationFrame(animateHighlight);

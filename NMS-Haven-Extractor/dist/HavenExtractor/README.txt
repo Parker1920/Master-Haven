@@ -1,5 +1,5 @@
 ============================================================
-  HAVEN EXTRACTOR v8.0.0 - Remote API Sync
+  HAVEN EXTRACTOR v9.0.0 - Batch Mode
   For No Man's Sky
 ============================================================
 
@@ -7,9 +7,25 @@ QUICK START:
 1. Extract this entire folder to a location of your choice
 2. Run "RUN_HAVEN_EXTRACTOR.bat"
 3. The game will start with the extractor mod loaded
-4. Warp to a solar system
-5. Click "Extract Now" in the pyMHF GUI window
-6. Data is automatically sent to Haven UI + saved locally!
+4. Warp to a solar system - data is captured automatically!
+5. Continue warping to collect multiple systems
+6. Click "Export Batch" to save all systems to JSON
+
+BATCH MODE WORKFLOW:
+1. Warp to a new system - planet data captured via hook
+2. Continue warping - all systems saved to batch automatically
+3. Click "Batch Status" to see how many systems collected
+4. Click "Export Batch" when ready to save all data
+
+Data extracted per system:
+- star_type, economy_type, economy_strength, conflict_level
+- dominant_lifeform, planet count
+
+Data extracted per planet:
+- biome, biome_subtype, weather
+- flora_level, fauna_level, sentinel_level
+- common_resource, uncommon_resource, rare_resource
+- is_moon, planet_size, planet_name
 
 API SYNC:
 Remote sync is ENABLED BY DEFAULT!
@@ -22,6 +38,13 @@ If you need to use a DIFFERENT ngrok URL:
 3. Edit haven_config.json and set your custom ngrok URL:
    {"api_url": "https://your-custom-url.ngrok-free.app"}
 
+GUI BUTTONS:
+- "Check Planet Data" - See captured planet info
+- "Extract Now"       - Manual extraction of current system
+- "Export Batch"      - Save ALL collected systems to JSON
+- "Clear Batch"       - Clear batch for fresh collection
+- "Batch Status"      - Show batch collection progress
+
 REQUIREMENTS:
 - No Man's Sky (Steam version recommended)
 - Windows 10/11
@@ -29,6 +52,7 @@ REQUIREMENTS:
 
 FILES:
 - RUN_HAVEN_EXTRACTOR.bat       - Main launcher (run this!)
+- RUN_DEBUG.bat                 - Debug launcher with extra info
 - FIRST_TIME_SETUP.bat          - Verify installation
 - python/                       - Embedded Python (don't modify)
 - mod/                          - Extractor mod files
@@ -41,7 +65,7 @@ TROUBLESHOOTING:
 
 LOCAL OUTPUT (always saved as backup):
   %USERPROFILE%\Documents\Haven-Extractor\latest.json
-  %USERPROFILE%\Documents\Haven-Extractor\extraction_YYYYMMDD_HHMMSS.json
+  %USERPROFILE%\Documents\Haven-Extractor\batch_*.json
 
 For support, visit: https://github.com/voyagershaven
 ============================================================
