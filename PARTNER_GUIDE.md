@@ -47,9 +47,6 @@ From the homepage, click **"Add System"** or go directly to:
 https://voyagers-haven-3dmap.ngrok.io/haven-ui/wizard
 ```
 
-![System Wizard Placeholder]
-<!-- Screenshot: System wizard form -->
-
 #### Step 2: Enter System Information
 
 **Required Fields (marked with red *):**
@@ -74,9 +71,6 @@ https://voyagers-haven-3dmap.ngrok.io/haven-ui/wizard
 
 Click **"Add Planet"** to document planets in the system:
 
-![Planet Editor Placeholder]
-<!-- Screenshot: Planet editor modal -->
-
 You can include:
 - Planet name and type
 - Climate/weather conditions
@@ -92,9 +86,6 @@ When you're ready:
 1. Review your information
 2. Click **"Submit for Approval"**
 3. You'll see a confirmation with your Submission ID
-
-![Submission Success Placeholder]
-<!-- Screenshot: Submission confirmation message -->
 
 ```
 System submitted for approval!
@@ -152,9 +143,6 @@ Partner accounts are created by Haven administrators. If you'd like to register 
 
 3. You'll see your community name displayed after login
 
-![Partner Login Placeholder]
-<!-- Screenshot: Logged in as partner -->
-
 > **Note:** Sessions expire after 10 minutes of inactivity for security. Just log back in if needed.
 
 ### What Partners Can Do
@@ -181,9 +169,6 @@ Your main job is reviewing submissions from your community members:
    ```
 
 2. You'll see submissions tagged with your community
-
-![Approvals Queue Placeholder]
-<!-- Screenshot: Partner view of approvals queue -->
 
 3. Click a submission to review the details
 
@@ -221,9 +206,6 @@ Need help managing submissions? Create Sub-Admin accounts for trusted community 
    - **Password** - At least 6 characters (share securely with them)
    - **Display Name** - Their name shown in the system
    - **Features** - What they're allowed to do
-
-![Create Sub-Admin Placeholder]
-<!-- Screenshot: Create sub-admin form -->
 
 #### Available Features for Sub-Admins
 
@@ -301,9 +283,6 @@ Haven has multiple security measures to ensure data quality and prevent abuse.
 ### Self-Approval Prevention
 
 **You cannot approve your own submissions.** This applies to Partners AND Sub-Admins.
-
-![Self Submission Badge Placeholder]
-<!-- Screenshot: YOUR SUBMISSION badge -->
 
 When viewing a submission you made, you'll see:
 - A **"YOUR SUBMISSION"** badge (amber/yellow)
