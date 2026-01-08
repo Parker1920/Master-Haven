@@ -8,7 +8,7 @@ A **No Man's Sky discovery mapping and archival system** built for explorers and
 
 Haven UI is a web dashboard where No Man's Sky players can browse, submit, and manage star system discoveries. Whether you're an independent explorer documenting your journey or part of a community building a shared archive, Haven UI gives you the tools to make it happen.
 
-**No installation required** — Haven UI is hosted online. Just click the link and start exploring.
+**No installation required** — Haven UI is hosted online at **[voyagers-haven-3dmap.ngrok.io](https://voyagers-haven-3dmap.ngrok.io)**. Just click and start exploring.
 
 ---
 
