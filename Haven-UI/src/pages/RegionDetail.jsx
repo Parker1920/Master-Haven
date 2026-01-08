@@ -5,7 +5,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
-import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
 
 // Custom debounce hook
@@ -159,6 +159,9 @@ export default function RegionDetail() {
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
 
+  // Mobile filter panel toggle
+  const [showFilters, setShowFilters] = useState(false)
+
   // Bulk selection (admin)
   const [bulkMode, setBulkMode] = useState(false)
   const [selectedSystems, setSelectedSystems] = useState(new Set())
@@ -263,6 +266,15 @@ export default function RegionDetail() {
       starTypes: Array.from(starTypes).sort()
     }
   }, [systems])
+
+  // Count active filters for mobile badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (filterGalaxy !== 'all') count++
+    if (filterStarType !== 'all') count++
+    if (filterDiscordTag !== 'all') count++
+    return count
+  }, [filterGalaxy, filterStarType, filterDiscordTag])
 
   // Filtered and sorted systems
   const filteredSystems = useMemo(() => {
@@ -578,73 +590,179 @@ export default function RegionDetail() {
         )}
       </Card>
 
-      {/* Filters & Sort Bar */}
+      {/* Filters & Sort Bar - Mobile Optimized */}
       <Card className="mb-4">
-        <div className="flex flex-col lg:flex-row gap-3">
-          {/* Search */}
-          <div className="flex-1">
-            <input
-              type="text"
-              placeholder="Search systems..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full px-3 py-2 rounded bg-gray-800 border border-gray-700 focus:border-cyan-500 focus:outline-none"
-            />
+        <div className="space-y-3">
+          {/* Top Row: Search + Filter Toggle (mobile) / Full controls (desktop) */}
+          <div className="flex gap-2">
+            {/* Search - Always visible */}
+            <div className="flex-1">
+              <input
+                type="text"
+                placeholder="Search systems..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full px-3 py-2 rounded bg-gray-800 border border-gray-700 focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Mobile: Filter toggle button */}
+            <button
+              className={`lg:hidden px-3 py-2 rounded border transition-colors flex items-center gap-1.5 ${
+                showFilters || activeFilterCount > 0
+                  ? 'bg-cyan-600 border-cyan-500 text-white'
+                  : 'bg-gray-700 border-gray-600 text-gray-300'
+              }`}
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              {showFilters ? <XMarkIcon className="w-5 h-5" /> : <FunnelIcon className="w-5 h-5" />}
+              {activeFilterCount > 0 && !showFilters && (
+                <span className="bg-white text-cyan-600 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
+            {/* Desktop: Inline filters */}
+            <div className="hidden lg:flex flex-wrap gap-2">
+              <select
+                value={filterGalaxy}
+                onChange={e => setFilterGalaxy(e.target.value)}
+                className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="all">All Galaxies</option>
+                {filterOptions.galaxies.map(g => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterStarType}
+                onChange={e => setFilterStarType(e.target.value)}
+                className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="all">All Stars</option>
+                {filterOptions.starTypes.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterDiscordTag}
+                onChange={e => setFilterDiscordTag(e.target.value)}
+                className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="all">All Tags</option>
+                <option value="untagged">Untagged</option>
+                {discordTags.map(t => (
+                  <option key={t.tag} value={t.tag}>{t.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={`${sortBy}-${sortOrder}`}
+                onChange={e => {
+                  const [by, order] = e.target.value.split('-')
+                  setSortBy(by)
+                  setSortOrder(order)
+                }}
+                className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="name-asc">Name A-Z</option>
+                <option value="name-desc">Name Z-A</option>
+                <option value="date-desc">Newest First</option>
+                <option value="date-asc">Oldest First</option>
+                <option value="planets-desc">Most Planets</option>
+                <option value="planets-asc">Fewest Planets</option>
+              </select>
+            </div>
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2">
-            <select
-              value={filterGalaxy}
-              onChange={e => setFilterGalaxy(e.target.value)}
-              className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
-            >
-              <option value="all">All Galaxies</option>
-              {filterOptions.galaxies.map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
+          {/* Mobile: Collapsible Filter Panel */}
+          {showFilters && (
+            <div className="lg:hidden bg-gray-800/50 rounded-lg p-4 space-y-4 border border-gray-700">
+              {/* Sort */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-2">Sort By</label>
+                <select
+                  value={`${sortBy}-${sortOrder}`}
+                  onChange={e => {
+                    const [by, order] = e.target.value.split('-')
+                    setSortBy(by)
+                    setSortOrder(order)
+                  }}
+                  className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 text-sm"
+                >
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
+                  <option value="date-desc">Newest First</option>
+                  <option value="date-asc">Oldest First</option>
+                  <option value="planets-desc">Most Planets</option>
+                  <option value="planets-asc">Fewest Planets</option>
+                </select>
+              </div>
 
-            <select
-              value={filterStarType}
-              onChange={e => setFilterStarType(e.target.value)}
-              className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
-            >
-              <option value="all">All Stars</option>
-              {filterOptions.starTypes.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+              {/* Galaxy Filter */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-2">Galaxy</label>
+                <select
+                  value={filterGalaxy}
+                  onChange={e => setFilterGalaxy(e.target.value)}
+                  className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 text-sm"
+                >
+                  <option value="all">All Galaxies</option>
+                  {filterOptions.galaxies.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
 
-            <select
-              value={filterDiscordTag}
-              onChange={e => setFilterDiscordTag(e.target.value)}
-              className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
-            >
-              <option value="all">All Tags</option>
-              <option value="untagged">Untagged</option>
-              {discordTags.map(t => (
-                <option key={t.tag} value={t.tag}>{t.name}</option>
-              ))}
-            </select>
+              {/* Star Type Filter */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-2">Star Type</label>
+                <select
+                  value={filterStarType}
+                  onChange={e => setFilterStarType(e.target.value)}
+                  className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 text-sm"
+                >
+                  <option value="all">All Stars</option>
+                  {filterOptions.starTypes.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
 
-            <select
-              value={`${sortBy}-${sortOrder}`}
-              onChange={e => {
-                const [by, order] = e.target.value.split('-')
-                setSortBy(by)
-                setSortOrder(order)
-              }}
-              className="px-3 py-2 rounded bg-gray-800 border border-gray-700 text-sm"
-            >
-              <option value="name-asc">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-              <option value="date-desc">Newest First</option>
-              <option value="date-asc">Oldest First</option>
-              <option value="planets-desc">Most Planets</option>
-              <option value="planets-asc">Fewest Planets</option>
-            </select>
-          </div>
+              {/* Discord Tag Filter */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-2">Community Tag</label>
+                <select
+                  value={filterDiscordTag}
+                  onChange={e => setFilterDiscordTag(e.target.value)}
+                  className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 text-sm"
+                >
+                  <option value="all">All Tags</option>
+                  <option value="untagged">Untagged</option>
+                  {discordTags.map(t => (
+                    <option key={t.tag} value={t.tag}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Clear Filters */}
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={() => {
+                    setFilterGalaxy('all')
+                    setFilterStarType('all')
+                    setFilterDiscordTag('all')
+                  }}
+                  className="w-full py-2 text-sm text-cyan-400 hover:text-cyan-300 border border-gray-600 rounded"
+                >
+                  Clear All Filters
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Bulk mode toggle (admin only) */}

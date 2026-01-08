@@ -3,7 +3,7 @@ import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import FormField from '../components/FormField'
-import { Squares2X2Icon, ListBulletIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { Squares2X2Icon, ListBulletIcon, MagnifyingGlassIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../utils/AuthContext'
 
@@ -71,6 +71,17 @@ export default function Systems() {
 
   // View mode toggle: 'list' or 'grid'
   const [viewMode, setViewMode] = useState('list')
+
+  // Mobile filter panel toggle
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Count active filters for badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (filterTag !== 'all') count++
+    if (hideDirectional) count++
+    return count
+  }, [filterTag, hideDirectional])
 
   // Fetch discord tags for filter dropdown
   useEffect(() => {
@@ -165,9 +176,11 @@ export default function Systems() {
 
   return (
     <div>
-      {/* Search and Actions Bar */}
-      <div className="mb-6 flex flex-col lg:grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 flex gap-2">
+      {/* Search and Actions Bar - Mobile Optimized */}
+      <div className="mb-6 space-y-3">
+        {/* Top Row: Search + Filter Toggle (mobile) / Full controls (desktop) */}
+        <div className="flex gap-2">
+          {/* Search Input - Always visible */}
           <FormField className="flex-1">
             <div className="relative">
               <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -176,71 +189,175 @@ export default function Systems() {
                 className="w-full pl-10 pr-3 py-2 rounded bg-gray-800 border border-gray-700 focus:border-cyan-500 focus:outline-none"
                 value={q}
                 onChange={e => setQ(e.target.value)}
-                placeholder="Search systems by name, glyph code, or galaxy..."
+                placeholder="Search systems..."
               />
               {isSearching && (
                 <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-cyan-400 text-sm">
-                  Searching...
+                  ...
                 </span>
               )}
             </div>
           </FormField>
-          {/* Hide Directional Regions Toggle */}
+
+          {/* Mobile: Filter toggle button */}
           <button
-            className={`px-3 py-2 rounded border transition-colors ${
-              hideDirectional
-                ? 'bg-purple-600 border-purple-500 text-white'
-                : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+            className={`lg:hidden px-3 py-2 rounded border transition-colors flex items-center gap-1.5 ${
+              showFilters || activeFilterCount > 0
+                ? 'bg-cyan-600 border-cyan-500 text-white'
+                : 'bg-gray-700 border-gray-600 text-gray-300'
             }`}
-            onClick={() => setHideDirectional(!hideDirectional)}
-            title="Hide directional region names (Center Top, North-East Bottom, etc.)"
+            onClick={() => setShowFilters(!showFilters)}
           >
-            {hideDirectional ? '🧭 Named Only' : '🧭 Show All'}
+            {showFilters ? <XMarkIcon className="w-5 h-5" /> : <FunnelIcon className="w-5 h-5" />}
+            {activeFilterCount > 0 && !showFilters && (
+              <span className="bg-white text-cyan-600 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
           </button>
-          {/* Discord Tag Filter */}
-          <select
-            className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
-            value={filterTag}
-            onChange={e => setFilterTag(e.target.value)}
-          >
-            <option value="all">All Communities</option>
-            <option value="untagged">Untagged Only</option>
-            <option value="personal">Personal Only</option>
-            {discordTags.map(t => (
-              <option key={t.tag} value={t.tag}>{t.name}</option>
-            ))}
-          </select>
-          {/* View Mode Toggle */}
-          <div className="flex rounded border border-gray-600 overflow-hidden">
+
+          {/* Desktop: Inline filter controls */}
+          <div className="hidden lg:flex gap-2">
+            {/* Hide Directional Regions Toggle */}
             <button
-              className={`px-3 py-2 flex items-center gap-1 transition-colors ${
-                viewMode === 'list'
-                  ? 'bg-cyan-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              className={`px-3 py-2 rounded border transition-colors ${
+                hideDirectional
+                  ? 'bg-purple-600 border-purple-500 text-white'
+                  : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
               }`}
-              onClick={() => setViewMode('list')}
-              title="List view"
+              onClick={() => setHideDirectional(!hideDirectional)}
+              title="Hide directional region names (Center Top, North-East Bottom, etc.)"
             >
-              <ListBulletIcon className="w-4 h-4" />
+              {hideDirectional ? '🧭 Named Only' : '🧭 Show All'}
             </button>
-            <button
-              className={`px-3 py-2 flex items-center gap-1 transition-colors ${
-                viewMode === 'grid'
-                  ? 'bg-cyan-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-              onClick={() => setViewMode('grid')}
-              title="Grid view"
+            {/* Discord Tag Filter */}
+            <select
+              className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
+              value={filterTag}
+              onChange={e => setFilterTag(e.target.value)}
             >
-              <Squares2X2Icon className="w-4 h-4" />
-            </button>
+              <option value="all">All Communities</option>
+              <option value="untagged">Untagged Only</option>
+              <option value="personal">Personal Only</option>
+              {discordTags.map(t => (
+                <option key={t.tag} value={t.tag}>{t.name}</option>
+              ))}
+            </select>
+            {/* View Mode Toggle */}
+            <div className="flex rounded border border-gray-600 overflow-hidden">
+              <button
+                className={`px-3 py-2 flex items-center gap-1 transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setViewMode('list')}
+                title="List view"
+              >
+                <ListBulletIcon className="w-4 h-4" />
+              </button>
+              <button
+                className={`px-3 py-2 flex items-center gap-1 transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setViewMode('grid')}
+                title="Grid view"
+              >
+                <Squares2X2Icon className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Desktop: Action buttons */}
+          <div className="hidden lg:flex gap-2">
+            <Button onClick={() => { setQ(''); setFilterTag('all'); setHideDirectional(false) }} variant="ghost">Clear</Button>
+            <Button onClick={load} variant="ghost">Reload</Button>
+            <Link to="/wizard"><Button variant="neutral">New</Button></Link>
           </div>
         </div>
-        <div className="flex gap-2 justify-end">
-          <Button onClick={() => { setQ(''); setFilterTag('all'); setHideDirectional(false) }} variant="ghost">Clear</Button>
-          <Button onClick={load} variant="ghost">Reload</Button>
-          <Link to="/wizard"><Button variant="neutral">New</Button></Link>
-        </div>
+
+        {/* Mobile: Collapsible Filter Panel */}
+        {showFilters && (
+          <div className="lg:hidden bg-gray-800/50 rounded-lg p-4 space-y-4 border border-gray-700">
+            {/* View Mode Toggle */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-2">View Mode</label>
+              <div className="flex rounded border border-gray-600 overflow-hidden w-fit">
+                <button
+                  className={`px-4 py-2 flex items-center gap-2 transition-colors ${
+                    viewMode === 'list'
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                  onClick={() => setViewMode('list')}
+                >
+                  <ListBulletIcon className="w-4 h-4" />
+                  <span>List</span>
+                </button>
+                <button
+                  className={`px-4 py-2 flex items-center gap-2 transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                  onClick={() => setViewMode('grid')}
+                >
+                  <Squares2X2Icon className="w-4 h-4" />
+                  <span>Grid</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Community Filter */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-2">Community</label>
+              <select
+                className="w-full px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
+                value={filterTag}
+                onChange={e => setFilterTag(e.target.value)}
+              >
+                <option value="all">All Communities</option>
+                <option value="untagged">Untagged Only</option>
+                <option value="personal">Personal Only</option>
+                {discordTags.map(t => (
+                  <option key={t.tag} value={t.tag}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Region Type Toggle */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-2">Region Type</label>
+              <button
+                className={`w-full px-3 py-2 rounded border transition-colors text-left ${
+                  hideDirectional
+                    ? 'bg-purple-600 border-purple-500 text-white'
+                    : 'bg-gray-700 border-gray-600 text-gray-300'
+                }`}
+                onClick={() => setHideDirectional(!hideDirectional)}
+              >
+                {hideDirectional ? '🧭 Named Regions Only' : '🧭 Show All Regions'}
+              </button>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-2 border-t border-gray-700">
+              <Button
+                onClick={() => { setQ(''); setFilterTag('all'); setHideDirectional(false) }}
+                variant="ghost"
+                className="flex-1"
+              >
+                Clear All
+              </Button>
+              <Button onClick={load} variant="ghost" className="flex-1">Reload</Button>
+              <Link to="/wizard" className="flex-1">
+                <Button variant="neutral" className="w-full">New</Button>
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search Results Section */}
