@@ -42,12 +42,13 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
 
   return (
     <div className="p-2 border rounded my-2 bg-white/5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex-1">
+      {/* Top row: Moon Name, Biome, Weather - stacks on mobile */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div>
           <label className="block text-sm">Moon Name</label>
           <input placeholder="Moon name" className="mt-1 p-1 rounded w-full" value={moon.name || ''} onChange={e => setField('name', e.target.value)} />
         </div>
-        <div className="min-w-56">
+        <div>
           <label className="block text-sm">Biome</label>
           <div className="mt-1">
             <SearchableSelect
@@ -58,7 +59,7 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
             />
           </div>
         </div>
-        <div className="min-w-56">
+        <div>
           <label className="block text-sm">Weather</label>
           <div className="mt-1">
             <SearchableSelect
@@ -69,11 +70,9 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
             />
           </div>
         </div>
-        <div className="pl-2">
-          <button type="button" onClick={() => onRemove(index)} className="px-2 py-1 bg-red-600 rounded">Remove Moon</button>
-        </div>
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2">
+      {/* Second row: Sentinels, Flora, Fauna, Materials, Notes, Photo */}
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         <div>
           <label className="block text-sm">Sentinels</label>
           <div className="mt-1">
@@ -132,7 +131,7 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
               <img
                 src={moon.photo.startsWith('http') ? moon.photo : `/haven-ui-photos/${moon.photo.replace(/^photos[\\/]/, '').split(/[\\/]/).pop()}`}
                 alt="Moon photo"
-                className="max-w-xs max-h-32 rounded border border-gray-600"
+                className="max-w-full sm:max-w-xs max-h-32 rounded border border-gray-600"
               />
               <button
                 type="button"
@@ -147,10 +146,13 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
           )}
         </div>
       </div>
-      <div className="mt-2">
-        {onSave && (
-          <button type="button" onClick={() => onSave(moon)} className="px-3 py-1 bg-blue-600 rounded">Save</button>
-        )}
+      <div className="mt-3 flex justify-between items-center">
+        <div>
+          {onSave && (
+            <button type="button" onClick={() => onSave(moon)} className="px-3 py-1.5 bg-blue-600 rounded text-sm">Save</button>
+          )}
+        </div>
+        <button type="button" onClick={() => onRemove(index)} className="px-3 py-1.5 bg-red-600 rounded text-sm">Remove Moon</button>
       </div>
     </div>
   )

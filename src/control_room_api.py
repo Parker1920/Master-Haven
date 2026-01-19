@@ -228,6 +228,21 @@ def get_db():
             conn.close()
 
 
+def parse_station_data(station_row):
+    """Parse space station data from database row, handling JSON trade_goods field."""
+    if not station_row:
+        return None
+    station = dict(station_row)
+    # Parse trade_goods JSON string to list
+    trade_goods = station.get('trade_goods', '[]')
+    if isinstance(trade_goods, str):
+        try:
+            station['trade_goods'] = json.loads(trade_goods)
+        except (json.JSONDecodeError, TypeError):
+            station['trade_goods'] = []
+    return station
+
+
 def init_database():
     """Initialize the Haven database with required tables."""
     db_path = get_db_path()
@@ -576,6 +591,7 @@ def init_database():
             display_name TEXT,
             enabled_features TEXT DEFAULT '[]',
             theme_settings TEXT DEFAULT '{}',
+            region_color TEXT DEFAULT '#00C2B3',
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -617,6 +633,9 @@ def init_database():
     # Create indexes for discord_tag filtering
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_discord_tag ON systems(discord_tag)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_regions_discord_tag ON regions(discord_tag)')
+
+    # Add region_color to partner_accounts for custom 3D map region coloring
+    add_column_if_missing('partner_accounts', 'region_color', "TEXT DEFAULT '#00C2B3'")
 
     # Create super_admin_settings table for storing changeable super admin password
     cursor.execute('''
@@ -718,6 +737,8 @@ def init_database():
     add_column_if_missing('pending_systems', 'reality', "TEXT DEFAULT 'Normal'")
     add_column_if_missing('pending_region_names', 'reality', "TEXT DEFAULT 'Normal'")
     add_column_if_missing('pending_region_names', 'galaxy', "TEXT DEFAULT 'Euclid'")
+    add_column_if_missing('pending_region_names', 'discord_tag', 'TEXT')  # Community tag for routing approvals
+    add_column_if_missing('pending_region_names', 'personal_discord_username', 'TEXT')  # Discord username for contact
 
     # Update regions unique constraint to include reality and galaxy
     cursor.execute("PRAGMA index_list(regions)")
@@ -869,7 +890,7 @@ def load_systems_from_db() -> list:
         # Read space stations
         cursor.execute('SELECT * FROM space_stations')
         stations_rows = cursor.fetchall()
-        stations = [dict(st) for st in stations_rows]
+        stations = [parse_station_data(st) for st in stations_rows]
 
         # Index planets by system_id
         planets_by_system = {}
@@ -1193,6 +1214,7 @@ async def api_map_regions_aggregated(
         where_sql = " AND ".join(where_clauses)
 
         # Single aggregated query - returns one row per populated region
+        # Includes discord_tag info for custom region coloring
         cursor.execute(f'''
             SELECT
                 s.region_x,
@@ -1204,7 +1226,8 @@ async def api_map_regions_aggregated(
                 MIN(s.y) as display_y,
                 MIN(s.z) as display_z,
                 GROUP_CONCAT(DISTINCT s.galaxy) as galaxies,
-                GROUP_CONCAT(DISTINCT s.reality) as realities
+                GROUP_CONCAT(DISTINCT s.reality) as realities,
+                GROUP_CONCAT(DISTINCT s.discord_tag) as discord_tags
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
@@ -1232,6 +1255,15 @@ async def api_map_regions_aggregated(
                 region['realities'] = region['realities'].split(',')
             else:
                 region['realities'] = ['Normal']
+            # Parse discord_tags string into list (filter out None values)
+            if region.get('discord_tags'):
+                tags = [t for t in region['discord_tags'].split(',') if t and t != 'None']
+                region['discord_tags'] = tags
+                # Set dominant_tag as the first non-null tag (most common in the region)
+                region['dominant_tag'] = tags[0] if tags else None
+            else:
+                region['discord_tags'] = []
+                region['dominant_tag'] = None
             regions.append(region)
 
         return {
@@ -2136,6 +2168,89 @@ async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
         raise HTTPException(status_code=400, detail='Unknown user type')
 
 
+@app.post('/api/change_username')
+async def change_username(payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Change username for the currently logged-in partner.
+    Requires current password for verification.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    user_type = session_data.get('user_type')
+
+    # Only partners can change their username via this endpoint
+    if user_type != 'partner':
+        raise HTTPException(status_code=403, detail='Only partner accounts can change username')
+
+    current_password = payload.get('current_password', '')
+    new_username = payload.get('new_username', '').strip()
+
+    if not current_password:
+        raise HTTPException(status_code=400, detail='Current password is required')
+
+    if not new_username or len(new_username) < 3:
+        raise HTTPException(status_code=400, detail='New username must be at least 3 characters')
+
+    if len(new_username) > 50:
+        raise HTTPException(status_code=400, detail='Username must be 50 characters or less')
+
+    # Basic username validation - alphanumeric, underscores, hyphens
+    import re
+    if not re.match(r'^[a-zA-Z0-9_-]+$', new_username):
+        raise HTTPException(status_code=400, detail='Username can only contain letters, numbers, underscores, and hyphens')
+
+    partner_id = session_data.get('partner_id')
+    if not partner_id:
+        raise HTTPException(status_code=400, detail='Invalid session')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get current password hash and username
+        cursor.execute('SELECT username, password_hash FROM partner_accounts WHERE id = ?', (partner_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Account not found')
+
+        current_username = row['username']
+
+        # Check if new username is same as current
+        if new_username.lower() == current_username.lower():
+            raise HTTPException(status_code=400, detail='New username must be different from current username')
+
+        # Verify current password
+        if hash_password(current_password) != row['password_hash']:
+            raise HTTPException(status_code=401, detail='Current password is incorrect')
+
+        # Check if new username is already taken
+        cursor.execute('SELECT id FROM partner_accounts WHERE LOWER(username) = LOWER(?) AND id != ?', (new_username, partner_id))
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail='Username is already taken')
+
+        # Update username
+        cursor.execute(
+            'UPDATE partner_accounts SET username = ?, updated_at = ? WHERE id = ?',
+            (new_username, datetime.now(timezone.utc).isoformat(), partner_id)
+        )
+        conn.commit()
+
+        logger.info(f"Partner changed username from '{current_username}' to '{new_username}'")
+        return {'status': 'ok', 'message': 'Username changed successfully'}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to change partner username: {e}")
+        raise HTTPException(status_code=500, detail=f'Failed to change username: {str(e)}')
+    finally:
+        if conn:
+            conn.close()
+
+
 # ============================================================================
 # Partner Account Management (Super Admin Only)
 # ============================================================================
@@ -2790,11 +2905,26 @@ async def get_approval_audit(
     offset: int = 0,
     discord_tag: Optional[str] = None,
     approver: Optional[str] = None,
+    submitter: Optional[str] = None,
+    action: Optional[str] = None,
+    submission_type: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    search: Optional[str] = None,
     session: Optional[str] = Cookie(None)
 ):
     """
     Get approval audit history (super admin only).
     Returns all approval/rejection actions with full details.
+
+    Enhanced filters:
+    - discord_tag: Filter by community
+    - approver: Filter by approver username
+    - submitter: Filter by submitter username
+    - action: Filter by action type (approved, rejected, direct_edit, direct_add)
+    - submission_type: Filter by submission type (system, region)
+    - start_date, end_date: Date range filter (ISO format)
+    - search: Full-text search across submitter, approver, submission name, and notes
     """
     if not is_super_admin(session):
         raise HTTPException(status_code=403, detail='Super admin access required')
@@ -2812,8 +2942,39 @@ async def get_approval_audit(
             params.append(discord_tag)
 
         if approver:
-            query += ' AND approver_username = ?'
-            params.append(approver)
+            query += ' AND approver_username LIKE ?'
+            params.append(f'%{approver}%')
+
+        if submitter:
+            query += ' AND submitter_username LIKE ?'
+            params.append(f'%{submitter}%')
+
+        if action:
+            query += ' AND action = ?'
+            params.append(action)
+
+        if submission_type:
+            query += ' AND submission_type = ?'
+            params.append(submission_type)
+
+        if start_date:
+            query += ' AND timestamp >= ?'
+            params.append(start_date)
+
+        if end_date:
+            query += ' AND timestamp <= ?'
+            params.append(end_date + 'T23:59:59')
+
+        if search:
+            # Search across multiple fields: submitter, approver, submission name, and notes
+            query += ''' AND (
+                submitter_username LIKE ? OR
+                approver_username LIKE ? OR
+                submission_name LIKE ? OR
+                notes LIKE ?
+            )'''
+            search_term = f'%{search}%'
+            params.extend([search_term, search_term, search_term, search_term])
 
         query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
         params.extend([limit, offset])
@@ -2823,15 +2984,40 @@ async def get_approval_audit(
 
         audit_entries = [dict(row) for row in rows]
 
-        # Get total count for pagination
+        # Get total count for pagination with same filters
         count_query = 'SELECT COUNT(*) FROM approval_audit_log WHERE 1=1'
         count_params = []
         if discord_tag:
             count_query += ' AND submission_discord_tag = ?'
             count_params.append(discord_tag)
         if approver:
-            count_query += ' AND approver_username = ?'
-            count_params.append(approver)
+            count_query += ' AND approver_username LIKE ?'
+            count_params.append(f'%{approver}%')
+        if submitter:
+            count_query += ' AND submitter_username LIKE ?'
+            count_params.append(f'%{submitter}%')
+        if action:
+            count_query += ' AND action = ?'
+            count_params.append(action)
+        if submission_type:
+            count_query += ' AND submission_type = ?'
+            count_params.append(submission_type)
+        if start_date:
+            count_query += ' AND timestamp >= ?'
+            count_params.append(start_date)
+        if end_date:
+            count_query += ' AND timestamp <= ?'
+            count_params.append(end_date + 'T23:59:59')
+        if search:
+            # Search across multiple fields: submitter, approver, submission name, and notes
+            count_query += ''' AND (
+                submitter_username LIKE ? OR
+                approver_username LIKE ? OR
+                submission_name LIKE ? OR
+                notes LIKE ?
+            )'''
+            search_term = f'%{search}%'
+            count_params.extend([search_term, search_term, search_term, search_term])
 
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()[0]
@@ -2842,6 +3028,886 @@ async def get_approval_audit(
             'limit': limit,
             'offset': offset
         }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/approval_audit/export')
+async def export_approval_audit(
+    format: str = 'csv',
+    discord_tag: Optional[str] = None,
+    approver: Optional[str] = None,
+    submitter: Optional[str] = None,
+    action: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Export approval audit data as CSV or JSON (super admin only).
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = 'SELECT * FROM approval_audit_log WHERE 1=1'
+        params = []
+
+        if discord_tag:
+            query += ' AND submission_discord_tag = ?'
+            params.append(discord_tag)
+        if approver:
+            query += ' AND approver_username LIKE ?'
+            params.append(f'%{approver}%')
+        if submitter:
+            query += ' AND submitter_username LIKE ?'
+            params.append(f'%{submitter}%')
+        if action:
+            query += ' AND action = ?'
+            params.append(action)
+        if start_date:
+            query += ' AND timestamp >= ?'
+            params.append(start_date)
+        if end_date:
+            query += ' AND timestamp <= ?'
+            params.append(end_date + 'T23:59:59')
+
+        query += ' ORDER BY timestamp DESC'
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        data = [dict(row) for row in rows]
+
+        if format == 'json':
+            return JSONResponse(content={'data': data, 'count': len(data)})
+        else:
+            # CSV format
+            import io
+            import csv
+            output = io.StringIO()
+            if data:
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            csv_content = output.getvalue()
+            return Response(
+                content=csv_content,
+                media_type='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=approval_audit.csv'}
+            )
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Analytics Endpoints
+# ============================================================================
+
+@app.get('/api/analytics/submission-leaderboard')
+async def get_submission_leaderboard(
+    discord_tag: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    period: Optional[str] = None,
+    limit: int = 50,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get submission leaderboard showing tallies per person.
+    Partners can only see their own community's leaderboard.
+    Super admins can see all.
+
+    Params:
+    - discord_tag: Filter by community (partners automatically filtered)
+    - start_date, end_date: Date range (ISO format)
+    - period: Preset periods (week, month, year, all)
+    - limit: Max results (default 50)
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    # Partners can only see their own community
+    if not is_super and user_discord_tag:
+        discord_tag = user_discord_tag
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build date filter based on period or explicit dates
+        date_filter = ''
+        date_params = []
+
+        if period == 'week':
+            date_filter = " AND submission_date >= date('now', '-7 days')"
+        elif period == 'month':
+            date_filter = " AND submission_date >= date('now', '-30 days')"
+        elif period == 'year':
+            date_filter = " AND submission_date >= date('now', '-365 days')"
+        elif start_date:
+            date_filter = " AND submission_date >= ?"
+            date_params.append(start_date)
+            if end_date:
+                date_filter += " AND submission_date <= ?"
+                date_params.append(end_date + 'T23:59:59')
+
+        # Build community filter
+        tag_filter = ''
+        tag_params = []
+        if discord_tag:
+            tag_filter = ' AND discord_tag = ?'
+            tag_params = [discord_tag]
+
+        # Query for leaderboard from pending_systems (includes both approved and rejected)
+        # Extract username from multiple sources: submitted_by, personal_discord_username, or discovered_by from JSON
+        # Skip 'Anonymous' and 'anonymous' values to find the actual username
+        # Normalize usernames: remove #, strip trailing 4-digit Discord discriminators, lowercase
+        # This consolidates "Obliterated", "Obliterated#4519", "obliterated4519" as the same person
+
+        # Define the raw username extraction
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+
+        # Define normalization: trim whitespace, remove #, strip trailing 4-digit discriminator, lowercase
+        # This handles: "User#1234" -> "user", "User1234" -> "user", "User" -> "user", " User " -> "user"
+        # Step 1: TRIM and REPLACE # with empty string
+        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
+
+        normalized_username = f'''LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))'''
+
+        # Use COALESCE to convert NULL/empty discord_tag to 'Personal' for grouping
+        tag_display = "COALESCE(NULLIF(discord_tag, ''), 'Personal')"
+
+        query = f'''
+            SELECT
+                MAX({raw_username}) as username,
+                {normalized_username} as normalized_name,
+                GROUP_CONCAT(DISTINCT {tag_display}) as discord_tags,
+                COUNT(*) as total_submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                MIN(submission_date) as first_submission,
+                MAX(submission_date) as last_submission
+            FROM pending_systems
+            WHERE 1=1 {tag_filter} {date_filter}
+            GROUP BY {normalized_username}
+            HAVING {normalized_username} != 'unknown'
+            ORDER BY total_submissions DESC
+            LIMIT ?
+        '''
+
+        params = tag_params + date_params + [limit]
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        leaderboard = []
+        for row in rows:
+            entry = dict(row)
+            total = entry['total_submissions']
+            approved = entry['approved'] or 0
+            entry['approval_rate'] = round((approved / total * 100), 1) if total > 0 else 0
+
+            # For users with multiple sources (discord communities or personal), fetch breakdown
+            tags = [t.strip() for t in (entry.get('discord_tags') or '').split(',') if t.strip()]
+            if len(tags) > 1:
+                # Use the normalized_name from the query for accurate matching
+                norm_name = entry.get('normalized_name', '').lower()
+                breakdown_query = f'''
+                    SELECT
+                        {tag_display} as discord_tag,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+                    FROM pending_systems
+                    WHERE {normalized_username} = ?
+                      {date_filter}
+                    GROUP BY {tag_display}
+                    ORDER BY total DESC
+                '''
+                cursor.execute(breakdown_query, [norm_name] + date_params)
+                breakdown_rows = cursor.fetchall()
+                entry['tag_breakdown'] = [dict(b) for b in breakdown_rows]
+
+            # Remove internal normalized_name from response
+            entry.pop('normalized_name', None)
+            leaderboard.append(entry)
+
+        # Get totals
+        totals_query = f'''
+            SELECT
+                COUNT(*) as total_submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as total_rejected
+            FROM pending_systems
+            WHERE 1=1 {tag_filter} {date_filter}
+        '''
+        cursor.execute(totals_query, tag_params + date_params)
+        totals_row = cursor.fetchone()
+
+        return {
+            'leaderboard': leaderboard,
+            'totals': {
+                'total_submissions': totals_row['total_submissions'] or 0,
+                'total_approved': totals_row['total_approved'] or 0,
+                'total_rejected': totals_row['total_rejected'] or 0
+            }
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/analytics/community-stats')
+async def get_community_stats(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    period: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get statistics per community/Discord tag.
+    Super admin only - shows all communities.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build date filter
+        date_filter = ''
+        date_params = []
+
+        if period == 'week':
+            date_filter = " AND submission_date >= date('now', '-7 days')"
+        elif period == 'month':
+            date_filter = " AND submission_date >= date('now', '-30 days')"
+        elif period == 'year':
+            date_filter = " AND submission_date >= date('now', '-365 days')"
+        elif start_date:
+            date_filter = " AND submission_date >= ?"
+            date_params.append(start_date)
+            if end_date:
+                date_filter += " AND submission_date <= ?"
+                date_params.append(end_date + 'T23:59:59')
+
+        # Get community stats from pending_systems
+        # Normalize usernames: trim whitespace, remove #, strip trailing 4-digit Discord discriminators, lowercase
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+
+        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
+
+        normalized_username = f'''LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))'''
+
+        query = f'''
+            SELECT
+                COALESCE(discord_tag, 'Untagged') as discord_tag,
+                COUNT(*) as total_submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as total_rejected,
+                COUNT(DISTINCT {normalized_username}) as unique_submitters
+            FROM pending_systems
+            WHERE 1=1 {date_filter}
+            GROUP BY discord_tag
+            ORDER BY total_submissions DESC
+        '''
+
+        cursor.execute(query, date_params)
+        rows = cursor.fetchall()
+
+        communities = []
+        for row in rows:
+            entry = dict(row)
+            total = entry['total_submissions']
+            approved = entry['total_approved'] or 0
+            entry['approval_rate'] = round((approved / total * 100), 1) if total > 0 else 0
+
+            # Get top submitter for this community (with full normalization)
+            tag = row['discord_tag']
+            if tag and tag != 'Untagged':
+                cursor.execute(f'''
+                    SELECT MAX({raw_username}) as username,
+                           COUNT(*) as count
+                    FROM pending_systems
+                    WHERE discord_tag = ? {date_filter}
+                    GROUP BY {normalized_username}
+                    ORDER BY count DESC
+                    LIMIT 1
+                ''', [tag] + date_params)
+            else:
+                cursor.execute(f'''
+                    SELECT MAX({raw_username}) as username,
+                           COUNT(*) as count
+                    FROM pending_systems
+                    WHERE (discord_tag IS NULL OR discord_tag = '') {date_filter}
+                    GROUP BY {normalized_username}
+                    ORDER BY count DESC
+                    LIMIT 1
+                ''', date_params)
+
+            top_row = cursor.fetchone()
+            entry['top_submitter'] = top_row['username'] if top_row else None
+
+            # Get total systems in the database for this community
+            if tag and tag != 'Untagged':
+                cursor.execute('SELECT COUNT(*) FROM systems WHERE discord_tag = ?', (tag,))
+            else:
+                cursor.execute("SELECT COUNT(*) FROM systems WHERE discord_tag IS NULL OR discord_tag = ''")
+            entry['total_systems'] = cursor.fetchone()[0]
+
+            communities.append(entry)
+
+        return {'communities': communities}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/analytics/submissions-timeline')
+async def get_submissions_timeline(
+    discord_tag: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    granularity: str = 'day',
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get submissions over time for charting.
+    Partners can only see their own community's timeline.
+
+    Params:
+    - discord_tag: Filter by community
+    - start_date, end_date: Date range
+    - granularity: day, week, or month
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    # Partners can only see their own community
+    if not is_super and user_discord_tag:
+        discord_tag = user_discord_tag
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Default to last 30 days if no date range specified
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+        # Build date grouping based on granularity
+        if granularity == 'week':
+            date_format = "strftime('%Y-W%W', submission_date)"
+        elif granularity == 'month':
+            date_format = "strftime('%Y-%m', submission_date)"
+        else:  # day
+            date_format = "date(submission_date)"
+
+        # Build filters
+        tag_filter = ''
+        params = [start_date, end_date + 'T23:59:59']
+
+        if discord_tag:
+            tag_filter = ' AND discord_tag = ?'
+            params.append(discord_tag)
+
+        query = f'''
+            SELECT
+                {date_format} as date,
+                COUNT(*) as submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+            FROM pending_systems
+            WHERE submission_date >= ? AND submission_date <= ? {tag_filter}
+            GROUP BY {date_format}
+            ORDER BY date ASC
+        '''
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        timeline = [dict(row) for row in rows]
+
+        return {'timeline': timeline, 'granularity': granularity}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/analytics/rejection-reasons')
+async def get_rejection_reasons(
+    discord_tag: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get breakdown of rejection reasons.
+    Super admin only.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build filters
+        filters = " AND action = 'rejected' AND notes IS NOT NULL AND notes != ''"
+        params = []
+
+        if discord_tag:
+            filters += ' AND submission_discord_tag = ?'
+            params.append(discord_tag)
+        if start_date:
+            filters += ' AND timestamp >= ?'
+            params.append(start_date)
+        if end_date:
+            filters += ' AND timestamp <= ?'
+            params.append(end_date + 'T23:59:59')
+
+        query = f'''
+            SELECT
+                notes as reason,
+                COUNT(*) as count
+            FROM approval_audit_log
+            WHERE 1=1 {filters}
+            GROUP BY notes
+            ORDER BY count DESC
+            LIMIT 20
+        '''
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        reasons = [dict(row) for row in rows]
+
+        return {'reasons': reasons}
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Events Endpoints (for submission events/competitions)
+# ============================================================================
+
+@app.get('/api/events')
+async def list_events(
+    include_inactive: bool = False,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    List submission events.
+    Partners see their own community's events.
+    Super admins see all.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = 'SELECT * FROM events WHERE 1=1'
+        params = []
+
+        if not is_super and user_discord_tag:
+            query += ' AND discord_tag = ?'
+            params.append(user_discord_tag)
+
+        if not include_inactive:
+            query += ' AND is_active = 1'
+
+        query += ' ORDER BY start_date DESC'
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        events = []
+
+        # Define username extraction (same as Analytics for consistency)
+        # Skip 'Anonymous' and 'anonymous' values to find the actual username
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+        # Normalize: trim, remove #, strip trailing 4-digit Discord discriminator, lowercase
+        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
+        normalized_username = f'''LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))'''
+
+        for row in rows:
+            event = dict(row)
+            # Get submission count and participant count for this event
+            # Use normalized username to get accurate participant count
+            # Exclude "Unknown" from participant count
+            cursor.execute(f'''
+                SELECT COUNT(*) as submissions,
+                       COUNT(DISTINCT CASE WHEN {normalized_username} != 'unknown' THEN {normalized_username} END) as participants
+                FROM pending_systems
+                WHERE discord_tag = ?
+                  AND submission_date >= ?
+                  AND submission_date <= ?
+            ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
+            stats = cursor.fetchone()
+            event['submission_count'] = stats['submissions'] or 0
+            event['participant_count'] = stats['participants'] or 0
+
+            # Check if event is currently active (based on dates)
+            now = datetime.now().isoformat()
+            event['is_current'] = event['start_date'] <= now <= event['end_date'] + 'T23:59:59'
+
+            events.append(event)
+
+        return {'events': events}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/events')
+async def create_event(request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Create a new submission event.
+    Partners can create events for their community.
+    Super admins can create for any community.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    body = await request.json()
+    name = body.get('name')
+    discord_tag = body.get('discord_tag')
+    start_date = body.get('start_date')
+    end_date = body.get('end_date')
+    description = body.get('description', '')
+
+    if not all([name, start_date, end_date]):
+        raise HTTPException(status_code=400, detail='name, start_date, and end_date are required')
+
+    # Partners can only create events for their own community
+    if not is_super:
+        if user_discord_tag:
+            discord_tag = user_discord_tag
+        else:
+            raise HTTPException(status_code=403, detail='Cannot create events without a community')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO events (name, discord_tag, start_date, end_date, description, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, discord_tag, start_date, end_date, description, session_data.get('username')))
+
+        conn.commit()
+        event_id = cursor.lastrowid
+
+        return {'success': True, 'event_id': event_id}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/events/{event_id}')
+async def get_event(event_id: int, session: Optional[str] = Cookie(None)):
+    """Get a single event by ID."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail='Event not found')
+
+        event = dict(row)
+
+        # Check access
+        if not is_super and user_discord_tag != event['discord_tag']:
+            raise HTTPException(status_code=403, detail='Access denied')
+
+        return {'event': event}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/events/{event_id}/leaderboard')
+async def get_event_leaderboard(
+    event_id: int,
+    limit: int = 50,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get leaderboard for a specific event.
+    Shows submissions during the event period for the event's community.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get event details
+        cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+        event_row = cursor.fetchone()
+
+        if not event_row:
+            raise HTTPException(status_code=404, detail='Event not found')
+
+        event = dict(event_row)
+
+        # Check access
+        if not is_super and user_discord_tag != event['discord_tag']:
+            raise HTTPException(status_code=403, detail='Access denied')
+
+        # Get leaderboard for this event's time period and community
+        # Normalize usernames: remove #, strip trailing 4-digit Discord discriminators, lowercase
+        # This consolidates "Obliterated", "Obliterated#4519", "obliterated4519" as the same person
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+
+        # Normalize: trim whitespace, remove #, strip trailing 4-digit discriminator, lowercase
+        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
+
+        normalized_username = f'''LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))'''
+
+        query = f'''
+            SELECT
+                MAX({raw_username}) as username,
+                COUNT(*) as total_submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                MIN(submission_date) as first_submission,
+                MAX(submission_date) as last_submission
+            FROM pending_systems
+            WHERE discord_tag = ?
+              AND submission_date >= ?
+              AND submission_date <= ?
+            GROUP BY {normalized_username}
+            HAVING {normalized_username} != 'unknown'
+            ORDER BY total_submissions DESC
+            LIMIT ?
+        '''
+
+        cursor.execute(query, (event['discord_tag'], event['start_date'],
+                               event['end_date'] + 'T23:59:59', limit))
+        rows = cursor.fetchall()
+
+        leaderboard = []
+        rank = 1
+        for row in rows:
+            entry = dict(row)
+            entry['rank'] = rank
+            total = entry['total_submissions']
+            approved = entry['approved'] or 0
+            entry['approval_rate'] = round((approved / total * 100), 1) if total > 0 else 0
+            leaderboard.append(entry)
+            rank += 1
+
+        # Get totals for the event (use normalized username for accurate participant count)
+        # Exclude "Unknown" from participant count
+        cursor.execute(f'''
+            SELECT
+                COUNT(*) as total_submissions,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+                COUNT(DISTINCT CASE WHEN {normalized_username} != 'unknown' THEN {normalized_username} END) as participants
+            FROM pending_systems
+            WHERE discord_tag = ?
+              AND submission_date >= ?
+              AND submission_date <= ?
+        ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
+        totals_row = cursor.fetchone()
+
+        return {
+            'event': event,
+            'leaderboard': leaderboard,
+            'totals': {
+                'total_submissions': totals_row['total_submissions'] or 0,
+                'total_approved': totals_row['total_approved'] or 0,
+                'participants': totals_row['participants'] or 0
+            }
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/events/{event_id}')
+async def update_event(event_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Update an event."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check event exists and access
+        cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+        event_row = cursor.fetchone()
+
+        if not event_row:
+            raise HTTPException(status_code=404, detail='Event not found')
+
+        if not is_super and user_discord_tag != event_row['discord_tag']:
+            raise HTTPException(status_code=403, detail='Access denied')
+
+        body = await request.json()
+
+        # Build update query
+        updates = []
+        params = []
+
+        for field in ['name', 'start_date', 'end_date', 'description', 'is_active']:
+            if field in body:
+                updates.append(f'{field} = ?')
+                params.append(body[field])
+
+        if updates:
+            params.append(event_id)
+            cursor.execute(f'''
+                UPDATE events SET {', '.join(updates)} WHERE id = ?
+            ''', params)
+            conn.commit()
+
+        return {'success': True}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.delete('/api/events/{event_id}')
+async def delete_event(event_id: int, session: Optional[str] = Cookie(None)):
+    """Delete an event."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check event exists and access
+        cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+        event_row = cursor.fetchone()
+
+        if not event_row:
+            raise HTTPException(status_code=404, detail='Event not found')
+
+        if not is_super and user_discord_tag != event_row['discord_tag']:
+            raise HTTPException(status_code=403, detail='Access denied')
+
+        cursor.execute('DELETE FROM events WHERE id = ?', (event_id,))
+        conn.commit()
+
+        return {'success': True}
     finally:
         if conn:
             conn.close()
@@ -3072,6 +4138,110 @@ async def update_partner_theme(payload: dict, session: Optional[str] = Cookie(No
 
         conn.commit()
         return {'status': 'ok', 'theme': theme}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/partner/region_color')
+async def update_partner_region_color(payload: dict, session: Optional[str] = Cookie(None)):
+    """Update the current partner's region color for the 3D map"""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    # Only partners can set region colors (not super admin or sub-admin)
+    if session_data.get('user_type') != 'partner':
+        raise HTTPException(status_code=403, detail='Only partners can set region colors')
+
+    partner_id = session_data.get('partner_id')
+    if not partner_id:
+        raise HTTPException(status_code=403, detail='Partner access required')
+
+    color = payload.get('color', '#00C2B3')
+
+    # Validate hex color format
+    import re
+    if not re.match(r'^#[0-9A-Fa-f]{6}$', color):
+        raise HTTPException(status_code=400, detail='Invalid color format. Use hex format like #00C2B3')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE partner_accounts
+            SET region_color = ?, updated_at = ?
+            WHERE id = ?
+        ''', (color, datetime.now(timezone.utc).isoformat(), partner_id))
+
+        conn.commit()
+        logger.info(f"Partner {session_data.get('username')} updated region color to {color}")
+        return {'status': 'ok', 'color': color}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/partner/region_color')
+async def get_partner_region_color(session: Optional[str] = Cookie(None)):
+    """Get the current partner's region color"""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    # Only partners have region colors
+    if session_data.get('user_type') != 'partner':
+        return {'color': '#00C2B3'}  # Return default for non-partners
+
+    partner_id = session_data.get('partner_id')
+    if not partner_id:
+        return {'color': '#00C2B3'}
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT region_color FROM partner_accounts WHERE id = ?', (partner_id,))
+        row = cursor.fetchone()
+
+        color = row['region_color'] if row and row['region_color'] else '#00C2B3'
+        return {'color': color}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/discord_tag_colors')
+async def get_discord_tag_colors():
+    """Get all discord tag colors for the 3D map - PUBLIC endpoint"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all active partners with their discord tags and region colors
+        cursor.execute('''
+            SELECT discord_tag, display_name, region_color
+            FROM partner_accounts
+            WHERE is_active = 1 AND discord_tag IS NOT NULL
+        ''')
+
+        colors = {}
+        for row in cursor.fetchall():
+            tag = row['discord_tag']
+            color = row['region_color'] if row['region_color'] else '#00C2B3'
+            colors[tag] = {
+                'color': color,
+                'name': row['display_name'] or tag
+            }
+
+        # Add default Haven color (super admin's systems)
+        colors['Haven'] = {'color': '#00C2B3', 'name': 'Haven'}
+
+        return {'colors': colors}
     finally:
         if conn:
             conn.close()
@@ -5097,6 +6267,8 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
 
     proposed_name = payload.get('proposed_name', '').strip()
     submitted_by = payload.get('submitted_by', 'anonymous').strip() or 'anonymous'
+    discord_tag = payload.get('discord_tag')  # Community tag for routing
+    personal_discord_username = payload.get('personal_discord_username', '').strip() or None  # Discord username for contact
 
     if not proposed_name:
         logger.warning(f"Region name submission rejected - empty proposed_name. Full payload: {payload}")
@@ -5153,9 +6325,9 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
         # Insert the submission
         cursor.execute('''
             INSERT INTO pending_region_names
-            (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip, submission_date, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-        ''', (rx, ry, rz, proposed_name, submitted_by, client_ip, datetime.now(timezone.utc).isoformat()))
+            (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip, submission_date, status, discord_tag, personal_discord_username)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        ''', (rx, ry, rz, proposed_name, submitted_by, client_ip, datetime.now(timezone.utc).isoformat(), discord_tag, personal_discord_username))
 
         conn.commit()
 
@@ -5186,8 +6358,22 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
 
 
 @app.get('/api/pending_region_names')
-async def api_list_pending_region_names():
-    """List all pending region name submissions. Public endpoint."""
+async def api_list_pending_region_names(session: Optional[str] = Cookie(None)):
+    """
+    List pending region name submissions (admin only).
+    - Super admin: sees ALL submissions
+    - Haven sub-admins: sees submissions tagged with "Haven" + additional discord tags
+    - Partners/partner sub-admins: see only submissions tagged with their discord_tag
+    """
+    # Verify admin session and get session data
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False)
+    partner_tag = session_data.get('discord_tag')
+
     conn = None
     try:
         db_path = get_db_path()
@@ -5197,14 +6383,87 @@ async def api_list_pending_region_names():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT * FROM pending_region_names
-            WHERE status = 'pending'
-            ORDER BY submission_date DESC
-        ''')
+        if is_super:
+            # Super admin sees ALL submissions
+            cursor.execute('''
+                SELECT id, region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
+                       submission_date, status, reviewed_by, review_date, review_notes,
+                       discord_tag, personal_discord_username
+                FROM pending_region_names
+                ORDER BY
+                    CASE status
+                        WHEN 'pending' THEN 1
+                        WHEN 'approved' THEN 2
+                        WHEN 'rejected' THEN 3
+                    END,
+                    submission_date DESC
+            ''')
+        elif is_haven_sub_admin:
+            # Haven sub-admins see submissions tagged with "Haven" + any additional discord tags
+            additional_tags = session_data.get('additional_discord_tags', [])
+            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
+            all_tags = ['Haven'] + additional_tags
+
+            # Build dynamic query with placeholders
+            placeholders = ','.join(['?' for _ in all_tags])
+
+            if can_approve_personal:
+                cursor.execute(f'''
+                    SELECT id, region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
+                           submission_date, status, reviewed_by, review_date, review_notes,
+                           discord_tag, personal_discord_username
+                    FROM pending_region_names
+                    WHERE discord_tag IN ({placeholders})
+                       OR discord_tag = 'personal'
+                       OR discord_tag IS NULL
+                    ORDER BY
+                        CASE status
+                            WHEN 'pending' THEN 1
+                            WHEN 'approved' THEN 2
+                            WHEN 'rejected' THEN 3
+                        END,
+                        submission_date DESC
+                ''', all_tags)
+            else:
+                cursor.execute(f'''
+                    SELECT id, region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
+                           submission_date, status, reviewed_by, review_date, review_notes,
+                           discord_tag, personal_discord_username
+                    FROM pending_region_names
+                    WHERE discord_tag IN ({placeholders})
+                       OR discord_tag IS NULL
+                    ORDER BY
+                        CASE status
+                            WHEN 'pending' THEN 1
+                            WHEN 'approved' THEN 2
+                            WHEN 'rejected' THEN 3
+                        END,
+                        submission_date DESC
+                ''', all_tags)
+        else:
+            # Partners and partner sub-admins only see submissions tagged with their discord_tag
+            cursor.execute('''
+                SELECT id, region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
+                       submission_date, status, reviewed_by, review_date, review_notes,
+                       discord_tag, personal_discord_username
+                FROM pending_region_names
+                WHERE discord_tag = ?
+                ORDER BY
+                    CASE status
+                        WHEN 'pending' THEN 1
+                        WHEN 'approved' THEN 2
+                        WHEN 'rejected' THEN 3
+                    END,
+                    submission_date DESC
+            ''', (partner_tag,))
 
         rows = cursor.fetchall()
         pending = [dict(row) for row in rows]
+
+        # Hide personal_discord_username for Haven sub-admins (only super admin sees contact info)
+        if is_haven_sub_admin and not is_super:
+            for submission in pending:
+                submission['personal_discord_username'] = None
 
         return {'pending': pending, 'count': len(pending)}
     except Exception as e:
@@ -5407,10 +6666,7 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
             # space station
             cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (sys_id,))
             station_row = cursor.fetchone()
-            if station_row:
-                system['space_station'] = dict(station_row)
-            else:
-                system['space_station'] = None
+            system['space_station'] = parse_station_data(station_row)
 
             # Apply field restrictions if applicable
             if restriction and restriction.get('hidden_fields'):
@@ -5816,9 +7072,11 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         # Insert space station if present
         if payload.get('space_station'):
             station = payload['space_station']
+            # Convert trade_goods list to JSON string
+            trade_goods_json = json.dumps(station.get('trade_goods', []))
             cursor.execute('''
-                INSERT INTO space_stations (system_id, name, race, x, y, z, sell_percent, buy_percent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO space_stations (system_id, name, race, x, y, z, trade_goods)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 station.get('name', f"{name} Station"),
@@ -5826,8 +7084,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 station.get('x', 0),
                 station.get('y', 0),
                 station.get('z', 0),
-                station.get('sell_percent', 80),
-                station.get('buy_percent', 50)
+                trade_goods_json
             ))
 
         conn.commit()
@@ -5851,7 +7108,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 datetime.now(timezone.utc).isoformat(),
                 action,
                 'system',
-                None,  # No submission_id since this bypasses pending_systems
+                0,  # Use 0 as placeholder for direct saves (bypasses pending_systems)
                 name,
                 current_username,
                 current_user_type,
@@ -5884,8 +7141,15 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             conn.close()
 
 @app.get('/api/db_stats')
-async def db_stats():
-    """Get database statistics"""
+async def db_stats(session: Optional[str] = Cookie(None)):
+    """
+    Get database statistics based on user permission level.
+    - Public (no auth): Basic global stats (systems, planets, moons, regions, planet_pois)
+    - Partners/Sub-admins: Community-filtered stats for their discord_tag
+    - Super Admin: Curated dashboard with admin-specific stats
+    """
+    session_data = get_session(session) if session else None
+
     conn = None
     try:
         db_path = HAVEN_UI_DIR / 'data' / 'haven_ui.db'
@@ -5895,20 +7159,180 @@ async def db_stats():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Determine user type
+        user_type = session_data.get('user_type') if session_data else None
+        is_super = user_type == 'super_admin'
+        is_partner = user_type == 'partner'
+        is_sub_admin = user_type == 'sub_admin'
+        partner_tag = session_data.get('discord_tag') if session_data else None
+
         stats = {}
-        # Get table counts
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
 
-        for table in tables:
-            try:
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                count = cursor.fetchone()[0]
-                stats[table] = count
-            except:
-                pass
+        if is_super:
+            # ============================================
+            # SUPER ADMIN: Curated dashboard with meaningful stats
+            # ============================================
 
-        return {'stats': stats}
+            # Core data stats
+            cursor.execute("SELECT COUNT(*) FROM systems")
+            stats['total_systems'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM planets")
+            stats['total_planets'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM moons")
+            stats['total_moons'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM regions")
+            stats['total_regions'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM space_stations")
+            stats['total_space_stations'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM planet_pois")
+            stats['total_planet_pois'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM discoveries")
+            stats['total_discoveries'] = cursor.fetchone()[0]
+
+            # Unique galaxies
+            cursor.execute("SELECT COUNT(DISTINCT galaxy) FROM systems WHERE galaxy IS NOT NULL")
+            stats['unique_galaxies'] = cursor.fetchone()[0]
+
+            # Admin stats
+            cursor.execute("SELECT COUNT(*) FROM partner_accounts")
+            stats['partner_accounts'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM sub_admin_accounts")
+            stats['sub_admin_accounts'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM api_keys")
+            stats['api_keys'] = cursor.fetchone()[0]
+
+            # Pending approvals
+            cursor.execute("SELECT COUNT(*) FROM pending_systems WHERE status = 'pending'")
+            stats['pending_systems'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM pending_region_names WHERE status = 'pending'")
+            stats['pending_region_names'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM pending_edit_requests WHERE status = 'pending'")
+            stats['pending_edit_requests'] = cursor.fetchone()[0]
+
+            # Audit and activity
+            cursor.execute("SELECT COUNT(*) FROM approval_audit_log")
+            stats['approval_audit_entries'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM activity_logs")
+            stats['activity_log_entries'] = cursor.fetchone()[0]
+
+            # Community breakdown
+            cursor.execute("""
+                SELECT COUNT(DISTINCT discord_tag) FROM systems
+                WHERE discord_tag IS NOT NULL AND discord_tag != ''
+            """)
+            stats['active_communities'] = cursor.fetchone()[0]
+
+            # Data restrictions
+            cursor.execute("SELECT COUNT(*) FROM data_restrictions")
+            stats['data_restrictions'] = cursor.fetchone()[0]
+
+            return {'stats': stats, 'user_type': 'super_admin'}
+
+        elif (is_partner or is_sub_admin) and partner_tag:
+            # ============================================
+            # PARTNER/SUB-ADMIN: Community-filtered stats
+            # ============================================
+
+            # Count systems with partner's tag
+            cursor.execute('SELECT COUNT(*) FROM systems WHERE discord_tag = ?', (partner_tag,))
+            stats['star_systems'] = cursor.fetchone()[0]
+
+            # Count planets in partner's systems
+            cursor.execute('''
+                SELECT COUNT(*) FROM planets p
+                JOIN systems s ON p.system_id = s.id
+                WHERE s.discord_tag = ?
+            ''', (partner_tag,))
+            stats['planets'] = cursor.fetchone()[0]
+
+            # Count moons in partner's systems
+            cursor.execute('''
+                SELECT COUNT(*) FROM moons m
+                JOIN planets p ON m.planet_id = p.id
+                JOIN systems s ON p.system_id = s.id
+                WHERE s.discord_tag = ?
+            ''', (partner_tag,))
+            stats['moons'] = cursor.fetchone()[0]
+
+            # Count space stations in partner's systems
+            cursor.execute('''
+                SELECT COUNT(*) FROM space_stations ss
+                JOIN systems s ON ss.system_id = s.id
+                WHERE s.discord_tag = ?
+            ''', (partner_tag,))
+            stats['space_stations'] = cursor.fetchone()[0]
+
+            # Count regions with partner's tag
+            cursor.execute('SELECT COUNT(*) FROM regions WHERE discord_tag = ?', (partner_tag,))
+            stats['regions'] = cursor.fetchone()[0]
+
+            # Count planet POIs for partner's systems
+            cursor.execute('''
+                SELECT COUNT(*) FROM planet_pois pp
+                JOIN planets p ON pp.planet_id = p.id
+                JOIN systems s ON p.system_id = s.id
+                WHERE s.discord_tag = ?
+            ''', (partner_tag,))
+            stats['planet_pois'] = cursor.fetchone()[0]
+
+            # Count discoveries for partner (join through systems)
+            cursor.execute('''
+                SELECT COUNT(*) FROM discoveries d
+                JOIN systems s ON d.system_id = s.id
+                WHERE s.discord_tag = ?
+            ''', (partner_tag,))
+            stats['discoveries'] = cursor.fetchone()[0]
+
+            # Unique galaxies for partner
+            cursor.execute('''
+                SELECT COUNT(DISTINCT galaxy) FROM systems
+                WHERE discord_tag = ? AND galaxy IS NOT NULL
+            ''', (partner_tag,))
+            stats['galaxies_explored'] = cursor.fetchone()[0]
+
+            # Pending submissions for this community (that they can see - not their own)
+            logged_in_username = normalize_discord_username(session_data.get('username', ''))
+            cursor.execute('''
+                SELECT COUNT(*) FROM pending_systems
+                WHERE status = 'pending' AND discord_tag = ?
+            ''', (partner_tag,))
+            stats['pending_for_review'] = cursor.fetchone()[0]
+
+            return {'stats': stats, 'discord_tag': partner_tag, 'user_type': user_type}
+
+        else:
+            # ============================================
+            # PUBLIC: Basic global stats (no sensitive info)
+            # ============================================
+
+            cursor.execute("SELECT COUNT(*) FROM systems")
+            stats['star_systems'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM planets")
+            stats['planets'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM moons")
+            stats['moons'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM regions")
+            stats['regions'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM planet_pois")
+            stats['planet_pois'] = cursor.fetchone()[0]
+
+            return {'stats': stats, 'user_type': 'public'}
+
     except Exception as e:
         logger.error(f'Error getting db_stats: {e}')
         return {'stats': {}, 'error': str(e)}
@@ -5916,71 +7340,12 @@ async def db_stats():
         if conn:
             conn.close()
 
+
+# Legacy endpoint - redirects to unified db_stats
 @app.get('/api/partner/stats')
 async def partner_stats(session: Optional[str] = Cookie(None)):
-    """Get stats filtered for the current partner's discord_tag"""
-    session_data = get_session(session)
-    if not session_data:
-        raise HTTPException(status_code=401, detail='Authentication required')
-
-    is_super = session_data.get('user_type') == 'super_admin'
-    partner_tag = session_data.get('discord_tag')
-
-    # Super admin gets all stats
-    if is_super:
-        return await db_stats()
-
-    # Partners without a tag get empty stats
-    if not partner_tag:
-        return {'stats': {'systems': 0, 'planets': 0, 'moons': 0, 'regions': 0, 'space_stations': 0}}
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        stats = {}
-
-        # Count systems with partner's tag
-        cursor.execute('SELECT COUNT(*) FROM systems WHERE discord_tag = ?', (partner_tag,))
-        stats['systems'] = cursor.fetchone()[0]
-
-        # Count planets in partner's systems
-        cursor.execute('''
-            SELECT COUNT(*) FROM planets p
-            JOIN systems s ON p.system_id = s.id
-            WHERE s.discord_tag = ?
-        ''', (partner_tag,))
-        stats['planets'] = cursor.fetchone()[0]
-
-        # Count moons in partner's systems
-        cursor.execute('''
-            SELECT COUNT(*) FROM moons m
-            JOIN planets p ON m.planet_id = p.id
-            JOIN systems s ON p.system_id = s.id
-            WHERE s.discord_tag = ?
-        ''', (partner_tag,))
-        stats['moons'] = cursor.fetchone()[0]
-
-        # Count space stations in partner's systems
-        cursor.execute('''
-            SELECT COUNT(*) FROM space_stations ss
-            JOIN systems s ON ss.system_id = s.id
-            WHERE s.discord_tag = ?
-        ''', (partner_tag,))
-        stats['space_stations'] = cursor.fetchone()[0]
-
-        # Count regions with partner's tag
-        cursor.execute('SELECT COUNT(*) FROM regions WHERE discord_tag = ?', (partner_tag,))
-        stats['regions'] = cursor.fetchone()[0]
-
-        return {'stats': stats, 'discord_tag': partner_tag}
-    except Exception as e:
-        logger.error(f'Error getting partner stats: {e}')
-        return {'stats': {}, 'error': str(e)}
-    finally:
-        if conn:
-            conn.close()
+    """Legacy endpoint - redirects to unified /api/db_stats"""
+    return await db_stats(session)
 
 @app.post('/api/generate_map')
 async def generate_map():
@@ -6243,7 +7608,7 @@ async def serve_map_page(page: str):
                         cursor = conn.cursor()
                         cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system.get('id'),))
                         stations_rows = cursor.fetchall()
-                        space_stations = [dict(row) for row in stations_rows]
+                        space_stations = [parse_station_data(row) for row in stations_rows]
                         logger.info(f"Loaded {len(space_stations)} space stations for system {system.get('name')}")
                     except Exception as e:
                         logger.warning(f"Could not load space stations: {e}")
@@ -6379,10 +7744,7 @@ async def get_system_3d_view(system_id: str):
         # Load space station
         cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (sys_id,))
         station_row = cursor.fetchone()
-        if station_row:
-            system['space_station'] = dict(station_row)
-        else:
-            system['space_station'] = None
+        system['space_station'] = parse_station_data(station_row)
 
         # Inject system data into HTML
         # Use ensure_ascii=True to convert unicode chars to \uXXXX escapes
@@ -7241,11 +8603,19 @@ async def submit_system(
                 logger.info(f"Submission for '{system_name}' has glyph_code matching existing system '{existing_glyph_row[1]}' (ID: {existing_glyph_row[0]})")
 
         # Extract discord_tag for filtering (partners only see their tagged submissions)
-        # If submitted via API key, use the API key's discord_tag (auto-tagging)
+        # Priority: 1) Payload, 2) API key, 3) Logged-in user's session
         discord_tag = payload.get('discord_tag')
         if api_key_info and api_key_info.get('discord_tag') and not discord_tag:
             discord_tag = api_key_info['discord_tag']
             logger.info(f"Auto-tagging submission with API key's discord_tag: {discord_tag}")
+
+        # Get submitter identity early so we can use their discord_tag for auto-tagging
+        submitter_identity = get_submitter_identity(session)
+
+        # If still no discord_tag, check if the logged-in user (partner or sub-admin) has one
+        if not discord_tag and submitter_identity.get('discord_tag'):
+            discord_tag = submitter_identity['discord_tag']
+            logger.info(f"Auto-tagging submission with logged-in user's discord_tag: {discord_tag}")
         # Extract personal discord username for non-community submissions
         personal_discord_username = payload.get('personal_discord_username')
 
@@ -7255,9 +8625,6 @@ async def submit_system(
         if not edit_system_id and existing_glyph_system:
             # Glyph code matches existing system - treat as edit
             edit_system_id = existing_glyph_system['id']
-
-        # Get submitter identity for self-approval detection
-        submitter_identity = get_submitter_identity(session)
 
         # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
         cursor.execute('''
@@ -8023,11 +9390,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         # Insert space station if present
         if system_data.get('space_station'):
             station = system_data['space_station']
-            # Use 'or 0' pattern to handle both missing keys AND null values
-            # This fixes cases where coordinates exist but are null (e.g., user cleared input fields)
+            # Convert trade_goods list to JSON string
+            trade_goods_json = json.dumps(station.get('trade_goods', []))
             cursor.execute('''
-                INSERT INTO space_stations (system_id, name, race, x, y, z, sell_percent, buy_percent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO space_stations (system_id, name, race, x, y, z, trade_goods)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 station.get('name') or f"{system_data.get('name')} Station",
@@ -8035,8 +9402,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 station.get('x') or 0,
                 station.get('y') or 0,
                 station.get('z') or 0,
-                station.get('sell_percent') or 80,
-                station.get('buy_percent') or 50
+                trade_goods_json
             ))
 
         # Mark submission as approved (use actual username instead of generic 'admin')
@@ -8611,9 +9977,11 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                 # Insert space station if present
                 if system_data.get('space_station'):
                     station = system_data['space_station']
+                    # Convert trade_goods list to JSON string
+                    trade_goods_json = json.dumps(station.get('trade_goods', []))
                     cursor.execute('''
-                        INSERT INTO space_stations (system_id, name, race, x, y, z, sell_percent, buy_percent)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO space_stations (system_id, name, race, x, y, z, trade_goods)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         station.get('name') or f"{system_data.get('name')} Station",
@@ -8621,8 +9989,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         station.get('x') or 0,
                         station.get('y') or 0,
                         station.get('z') or 0,
-                        station.get('sell_percent') or 80,
-                        station.get('buy_percent') or 50
+                        trade_goods_json
                     ))
 
                 # Mark submission as approved
@@ -8883,8 +10250,138 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
 
 
 # =============================================================================
-# HAVEN EXTRACTOR API ENDPOINT
+# HAVEN EXTRACTOR API ENDPOINTS
 # =============================================================================
+
+@app.post('/api/check_glyph_codes')
+async def check_glyph_codes(
+    payload: dict,
+    request: Request,
+    x_api_key: Optional[str] = Header(None, alias='X-API-Key')
+):
+    """
+    Pre-flight duplicate check for Haven Extractor batch uploads.
+    Checks multiple glyph codes against both approved systems and pending submissions.
+
+    Required permission: check_duplicate
+
+    Request body:
+    {
+        "glyph_codes": ["ABC123DEF456", "111111111111", "222222222222"]
+    }
+
+    Response:
+    {
+        "results": {
+            "ABC123DEF456": {"status": "available", "exists": false},
+            "111111111111": {"status": "already_charted", "exists": true, "location": "approved", ...},
+            "222222222222": {"status": "pending_review", "exists": true, "location": "pending", ...}
+        },
+        "summary": {"available": 1, "already_charted": 1, "pending_review": 1, "total": 3}
+    }
+    """
+    # Validate API key and check for check_duplicate permission
+    api_key_info = verify_api_key(x_api_key) if x_api_key else None
+
+    if not api_key_info:
+        raise HTTPException(status_code=401, detail="API key required for duplicate check")
+
+    permissions = api_key_info.get('permissions', [])
+    if isinstance(permissions, str):
+        try:
+            permissions = json.loads(permissions)
+        except:
+            permissions = []
+
+    if 'check_duplicate' not in permissions and 'submit' not in permissions:
+        raise HTTPException(status_code=403, detail="API key does not have check_duplicate permission")
+
+    glyph_codes = payload.get('glyph_codes', [])
+    if not glyph_codes or not isinstance(glyph_codes, list):
+        raise HTTPException(status_code=400, detail="glyph_codes array is required")
+
+    # Limit to prevent abuse
+    if len(glyph_codes) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 glyph codes per request")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        results = {}
+        summary = {'available': 0, 'already_charted': 0, 'pending_review': 0, 'total': len(glyph_codes)}
+
+        for glyph in glyph_codes:
+            # Validate glyph format
+            if not glyph or len(glyph) != 12:
+                results[glyph] = {'status': 'invalid', 'exists': False, 'error': 'Invalid glyph code format'}
+                continue
+
+            # Check approved systems table first
+            cursor.execute('''
+                SELECT id, name, galaxy, discovered_by, created_at
+                FROM systems
+                WHERE glyph_code = ?
+            ''', (glyph,))
+            approved = cursor.fetchone()
+
+            if approved:
+                results[glyph] = {
+                    'status': 'already_charted',
+                    'exists': True,
+                    'location': 'approved',
+                    'system_id': approved[0],
+                    'system_name': approved[1],
+                    'galaxy': approved[2],
+                    'submitted_by': approved[3],
+                    'approved_date': approved[4]
+                }
+                summary['already_charted'] += 1
+                continue
+
+            # Check pending systems
+            cursor.execute('''
+                SELECT id, system_name, personal_discord_username, submitter_name, submission_date
+                FROM pending_systems
+                WHERE glyph_code = ? AND status = 'pending'
+            ''', (glyph,))
+            pending = cursor.fetchone()
+
+            if pending:
+                submitted_by = pending[2] or pending[3] or 'Unknown'
+                results[glyph] = {
+                    'status': 'pending_review',
+                    'exists': True,
+                    'location': 'pending',
+                    'submission_id': pending[0],
+                    'system_name': pending[1],
+                    'submitted_by': submitted_by,
+                    'submission_date': pending[4]
+                }
+                summary['pending_review'] += 1
+                continue
+
+            # Not found anywhere - available
+            results[glyph] = {'status': 'available', 'exists': False}
+            summary['available'] += 1
+
+        logger.info(f"Duplicate check: {len(glyph_codes)} codes checked - {summary['available']} available, {summary['already_charted']} charted, {summary['pending_review']} pending")
+
+        return JSONResponse({
+            'results': results,
+            'summary': summary
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking glyph codes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
 
 @app.post('/api/extraction')
 async def receive_extraction(
@@ -8896,10 +10393,10 @@ async def receive_extraction(
     Receive extraction data from Haven Extractor (running in-game via pymhf).
     This endpoint accepts the JSON extraction format and converts it to a system submission.
 
-    Expected payload format (from Haven Extractor):
+    Expected payload format (from Haven Extractor v10+):
     {
         "extraction_time": "2024-01-15T12:00:00",
-        "extractor_version": "7.6.0",
+        "extractor_version": "10.0.0",
         "glyph_code": "0123456789AB",
         "galaxy_name": "Euclid",
         "galaxy_index": 0,
@@ -8907,22 +10404,31 @@ async def receive_extraction(
         "voxel_y": 50,
         "voxel_z": -200,
         "solar_system_index": 123,
+        "system_name": "System Name",
         "star_type": "Yellow",
         "economy_type": "Trading",
         "economy_strength": "Wealthy",
         "conflict_level": "Low",
         "dominant_lifeform": "Gek",
+        "reality": "Normal",
+        "discord_username": "TurpitZz",
+        "personal_id": "123456789012345678",
+        "discord_tag": "Haven",
         "planets": [
             {
                 "planet_index": 0,
                 "planet_name": "Planet Name",
                 "biome": "Lush",
+                "biome_subtype": "Standard",
                 "weather": "Pleasant",
                 "sentinel_level": "Low",
                 "flora_level": "High",
                 "fauna_level": "Medium",
-                "is_moon": false,
-                ...
+                "planet_size": "Large",
+                "common_resource": "Copper",
+                "uncommon_resource": "Carbon",
+                "rare_resource": "Gold",
+                "is_moon": false
             }
         ]
     }
@@ -8957,11 +10463,18 @@ async def receive_extraction(
     if not glyph_code or len(glyph_code) != 12:
         raise HTTPException(status_code=400, detail="Invalid or missing glyph_code")
 
+    # Extract user identification fields (new in v10+)
+    discord_username = payload.get('discord_username', '')
+    personal_id = payload.get('personal_id', '')
+    discord_tag = payload.get('discord_tag', 'personal')  # Default to personal if not specified
+    reality = payload.get('reality', 'Normal')
+
     # Convert extraction format to submission format
     submission_data = {
         'name': payload.get('system_name', f"System_{glyph_code}"),
         'glyph_code': glyph_code,
         'galaxy': payload.get('galaxy_name', 'Euclid'),
+        'reality': reality,
         'x': payload.get('voxel_x', 0),
         'y': payload.get('voxel_y', 0),
         'z': payload.get('voxel_z', 0),
@@ -8986,9 +10499,12 @@ async def receive_extraction(
             'biome': planet_data.get('biome', 'Unknown'),
             'biome_subtype': planet_data.get('biome_subtype', 'Unknown'),
             'weather': planet_data.get('weather', 'Unknown'),
+            'climate': planet_data.get('weather', 'Unknown'),  # Alias for Haven UI compatibility
             'sentinels': planet_data.get('sentinel_level', 'Unknown'),
+            'sentinel': planet_data.get('sentinel_level', 'Unknown'),  # Alias for Haven UI compatibility
             'flora': planet_data.get('flora_level', 'Unknown'),
             'fauna': planet_data.get('fauna_level', 'Unknown'),
+            'planet_size': planet_data.get('planet_size', 'Unknown'),
             'resources': [
                 r for r in [
                     planet_data.get('common_resource'),
@@ -8996,6 +10512,13 @@ async def receive_extraction(
                     planet_data.get('rare_resource')
                 ] if r and r != 'Unknown'
             ],
+            'materials': ', '.join([
+                r for r in [
+                    planet_data.get('common_resource'),
+                    planet_data.get('uncommon_resource'),
+                    planet_data.get('rare_resource')
+                ] if r and r != 'Unknown'
+            ]),  # Comma-separated for Haven UI display
         }
 
         if planet_data.get('is_moon', False):
@@ -9012,39 +10535,70 @@ async def receive_extraction(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check for duplicate submission by glyph code
+        # Server-side duplicate check: Check if system already exists in APPROVED systems
+        cursor.execute('''
+            SELECT id, name FROM systems
+            WHERE glyph_code = ?
+        ''', (glyph_code,))
+        existing_approved = cursor.fetchone()
+
+        if existing_approved:
+            logger.info(f"Extraction rejected - system already charted: {glyph_code} as '{existing_approved[1]}'")
+            return JSONResponse({
+                'status': 'already_charted',
+                'message': f'System already exists as "{existing_approved[1]}"',
+                'existing_system_id': existing_approved[0],
+                'glyph_code': glyph_code
+            }, status_code=409)  # Conflict
+
+        # Check for duplicate in pending submissions
         cursor.execute('''
             SELECT id, status FROM pending_systems
             WHERE glyph_code = ? AND status = 'pending'
         ''', (glyph_code,))
-        existing = cursor.fetchone()
+        existing_pending = cursor.fetchone()
 
-        if existing:
-            # Update existing pending submission
+        if existing_pending:
+            # Update existing pending submission with new data
             cursor.execute('''
                 UPDATE pending_systems
-                SET raw_json = ?, submission_timestamp = ?
+                SET raw_json = ?, system_data = ?, submission_timestamp = ?,
+                    discord_tag = ?, personal_discord_username = ?, personal_id = ?
                 WHERE id = ?
-            ''', (json.dumps(submission_data), datetime.now(timezone.utc).isoformat(), existing[0]))
+            ''', (
+                json.dumps(submission_data),
+                json.dumps(submission_data),
+                datetime.now(timezone.utc).isoformat(),
+                discord_tag if discord_tag else None,
+                discord_username if discord_username else None,
+                personal_id if personal_id else None,
+                existing_pending[0]
+            ))
             conn.commit()
 
-            logger.info(f"Updated pending extraction for {glyph_code}")
+            logger.info(f"Updated pending extraction for {glyph_code} (discord_tag={discord_tag})")
             return JSONResponse({
                 'status': 'updated',
                 'message': f'Extraction updated for {glyph_code}',
-                'submission_id': existing[0],
+                'submission_id': existing_pending[0],
                 'planet_count': len(planets),
                 'moon_count': len(moons)
             })
 
-        # Insert new pending submission
+        # Insert new pending submission with all fields
         now = datetime.now(timezone.utc).isoformat()
         raw_json_str = json.dumps(submission_data)
+
+        # Get API key name for tracking (if authenticated)
+        api_key_name = api_key_info.get('name') if api_key_info else None
+
         cursor.execute('''
             INSERT INTO pending_systems (
                 system_name, glyph_code, galaxy, x, y, z,
-                submitter_name, submission_timestamp, submission_date, status, source, raw_json, system_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                submitter_name, submission_timestamp, submission_date, status, source,
+                raw_json, system_data, discord_tag, personal_discord_username, personal_id,
+                submitted_by_ip, api_key_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -9052,18 +10606,23 @@ async def receive_extraction(
             submission_data['x'],
             submission_data['y'],
             submission_data['z'],
-            submission_data['discovered_by'],
+            discord_username if discord_username else 'HavenExtractor',
             now,
             now,  # submission_date
             'pending',
             'haven_extractor',
             raw_json_str,
-            raw_json_str  # system_data (same as raw_json)
+            raw_json_str,  # system_data (same as raw_json)
+            discord_tag if discord_tag else None,
+            discord_username if discord_username else None,
+            personal_id if personal_id else None,
+            client_ip,
+            api_key_name
         ))
         conn.commit()
         submission_id = cursor.lastrowid
 
-        logger.info(f"Received extraction from Haven Extractor: {glyph_code} with {len(planets)} planets, {len(moons)} moons")
+        logger.info(f"Received extraction from Haven Extractor: {glyph_code} with {len(planets)} planets, {len(moons)} moons (discord_tag={discord_tag}, user={discord_username})")
 
         return JSONResponse({
             'status': 'ok',

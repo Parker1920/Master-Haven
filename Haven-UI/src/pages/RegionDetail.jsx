@@ -145,6 +145,11 @@ export default function RegionDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalSystems, setTotalSystems] = useState(0)
+  const systemsPerPage = 100
+
   // Discord tags for filter
   const [discordTags, setDiscordTags] = useState([])
 
@@ -172,12 +177,20 @@ export default function RegionDetail() {
   // Edit region name modal
   const [editNameModalOpen, setEditNameModalOpen] = useState(false)
   const [newRegionName, setNewRegionName] = useState('')
+  const [newRegionDiscordTag, setNewRegionDiscordTag] = useState(null)
+  const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
   const [submittingName, setSubmittingName] = useState(false)
 
-  // Load data
+  // Load data when region changes (reset to page 1)
   useEffect(() => {
-    loadData()
+    setCurrentPage(1)
+    loadRegion()
   }, [rx, ry, rz])
+
+  // Load systems when page changes
+  useEffect(() => {
+    loadSystems()
+  }, [rx, ry, rz, currentPage])
 
   useEffect(() => {
     axios.get('/api/discord_tags').then(r => {
@@ -185,22 +198,36 @@ export default function RegionDetail() {
     }).catch(() => {})
   }, [])
 
-  async function loadData() {
+  async function loadRegion() {
     setLoading(true)
     setError(null)
     try {
-      // Fetch region info and systems in parallel
-      const [regionRes, systemsRes] = await Promise.all([
-        axios.get(`/api/regions/${rx}/${ry}/${rz}`),
-        axios.get(`/api/regions/${rx}/${ry}/${rz}/systems?include_planets=true&limit=500`)
-      ])
+      const regionRes = await axios.get(`/api/regions/${rx}/${ry}/${rz}`)
       setRegion(regionRes.data)
-      setSystems(systemsRes.data.systems || [])
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load region data')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadSystems() {
+    try {
+      const systemsRes = await axios.get(
+        `/api/regions/${rx}/${ry}/${rz}/systems?include_planets=true&limit=${systemsPerPage}&page=${currentPage}`
+      )
+      setSystems(systemsRes.data.systems || [])
+      setTotalSystems(systemsRes.data.total || 0)
+    } catch (err) {
+      console.error('Failed to load systems:', err)
+      setSystems([])
+      setTotalSystems(0)
+    }
+  }
+
+  // Combined reload function for UI buttons
+  async function loadData() {
+    await Promise.all([loadRegion(), loadSystems()])
   }
 
   // Compute stats from loaded systems
@@ -275,6 +302,11 @@ export default function RegionDetail() {
     if (filterDiscordTag !== 'all') count++
     return count
   }, [filterGalaxy, filterStarType, filterDiscordTag])
+
+  // Pagination calculations
+  const totalPages = Math.ceil(totalSystems / systemsPerPage)
+  const startSystem = totalSystems === 0 ? 0 : (currentPage - 1) * systemsPerPage + 1
+  const endSystem = Math.min(currentPage * systemsPerPage, totalSystems)
 
   // Filtered and sorted systems
   const filteredSystems = useMemo(() => {
@@ -362,17 +394,40 @@ export default function RegionDetail() {
     e.preventDefault()
     if (!newRegionName.trim()) return
 
+    // Check if user is logged in (partner/sub-admin) - use their session username
+    const isLoggedIn = auth?.isAdmin && !auth?.isSuperAdmin
+    const effectiveUsername = isLoggedIn ? auth?.user?.username : submitterDiscordUsername.trim()
+
+    // Validation for non-super-admin users
+    if (!auth?.isSuperAdmin) {
+      if (!newRegionDiscordTag) {
+        alert('Please select a Discord Community')
+        return
+      }
+      // Only require manual Discord username for anonymous users
+      if (!isLoggedIn && !submitterDiscordUsername.trim()) {
+        alert('Please enter your Discord Username')
+        return
+      }
+    }
+
     setSubmittingName(true)
     try {
       if (auth?.isSuperAdmin) {
         // Super admin can update directly
         await axios.put(`/api/regions/${rx}/${ry}/${rz}`, { custom_name: newRegionName.trim() })
       } else {
-        // Others submit for approval
-        await axios.post(`/api/regions/${rx}/${ry}/${rz}/submit`, { proposed_name: newRegionName.trim() })
+        // Others submit for approval with Discord info
+        await axios.post(`/api/regions/${rx}/${ry}/${rz}/submit`, {
+          proposed_name: newRegionName.trim(),
+          discord_tag: newRegionDiscordTag,
+          personal_discord_username: effectiveUsername
+        })
       }
       setEditNameModalOpen(false)
       setNewRegionName('')
+      setNewRegionDiscordTag(null)
+      setSubmitterDiscordUsername('')
       loadData()
       alert(auth?.isSuperAdmin ? 'Region name updated!' : 'Name submitted for approval!')
     } catch (err) {
@@ -533,7 +588,7 @@ export default function RegionDetail() {
       <Card className="mb-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <div className="text-center p-3 bg-gray-800 rounded">
-            <div className="text-2xl font-bold text-cyan-400">{stats.systemCount}</div>
+            <div className="text-2xl font-bold text-cyan-400">{totalSystems}</div>
             <div className="text-xs text-gray-400">Systems</div>
           </div>
           <div className="text-center p-3 bg-gray-800 rounded">
@@ -805,16 +860,23 @@ export default function RegionDetail() {
       </Card>
 
       {/* Results count */}
-      <div className="mb-3 text-sm text-gray-400">
-        Showing {filteredSystems.length} of {systems.length} systems
-        {debouncedSearch && ` matching "${debouncedSearch}"`}
+      <div className="mb-3 text-sm text-gray-400 flex flex-wrap items-center justify-between gap-2">
+        <span>
+          Showing {startSystem}-{endSystem} of {totalSystems} systems
+          {debouncedSearch && ` (${filteredSystems.length} matching "${debouncedSearch}")`}
+        </span>
+        {totalPages > 1 && (
+          <span className="text-cyan-400">
+            Page {currentPage} of {totalPages}
+          </span>
+        )}
       </div>
 
       {/* Systems Grid */}
       {filteredSystems.length === 0 ? (
         <Card>
           <div className="text-center py-8 text-gray-400">
-            {systems.length === 0 ? 'No systems in this region' : 'No systems match your filters'}
+            {totalSystems === 0 ? 'No systems in this region' : 'No systems match your filters'}
           </div>
         </Card>
       ) : (
@@ -833,6 +895,91 @@ export default function RegionDetail() {
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          {/* First & Previous */}
+          <Button
+            variant="ghost"
+            className="px-3 py-2"
+            onClick={() => setCurrentPage(1)}
+            disabled={currentPage === 1}
+          >
+            « First
+          </Button>
+          <Button
+            variant="ghost"
+            className="px-3 py-2"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            ‹ Prev
+          </Button>
+
+          {/* Page numbers */}
+          <div className="flex items-center gap-1">
+            {(() => {
+              const pages = []
+              const maxVisible = 5
+              let start = Math.max(1, currentPage - Math.floor(maxVisible / 2))
+              let end = Math.min(totalPages, start + maxVisible - 1)
+
+              if (end - start + 1 < maxVisible) {
+                start = Math.max(1, end - maxVisible + 1)
+              }
+
+              if (start > 1) {
+                pages.push(
+                  <span key="start-ellipsis" className="px-2 text-gray-500">...</span>
+                )
+              }
+
+              for (let i = start; i <= end; i++) {
+                pages.push(
+                  <button
+                    key={i}
+                    onClick={() => setCurrentPage(i)}
+                    className={`px-3 py-1 rounded transition-colors ${
+                      i === currentPage
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {i}
+                  </button>
+                )
+              }
+
+              if (end < totalPages) {
+                pages.push(
+                  <span key="end-ellipsis" className="px-2 text-gray-500">...</span>
+                )
+              }
+
+              return pages
+            })()}
+          </div>
+
+          {/* Next & Last */}
+          <Button
+            variant="ghost"
+            className="px-3 py-2"
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Next ›
+          </Button>
+          <Button
+            variant="ghost"
+            className="px-3 py-2"
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={currentPage === totalPages}
+          >
+            Last »
+          </Button>
         </div>
       )}
 
@@ -859,6 +1006,65 @@ export default function RegionDetail() {
                 </p>
               )}
             </div>
+
+            {/* Discord fields for non-super-admin users */}
+            {!auth?.isSuperAdmin && (
+              <>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">
+                    Discord Community <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    className={`w-full px-3 py-2 rounded border bg-gray-800 focus:outline-none ${
+                      !newRegionDiscordTag ? 'border-red-500' : 'border-gray-600 focus:border-purple-500'
+                    }`}
+                    value={newRegionDiscordTag || ''}
+                    onChange={e => setNewRegionDiscordTag(e.target.value || null)}
+                    required
+                  >
+                    <option value="">-- Select Community (Required) --</option>
+                    {discordTags.map(t => (
+                      <option key={t.tag} value={t.tag}>{t.name} ({t.tag})</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Which Discord community will review this region name?
+                  </p>
+                </div>
+
+                {/* For logged-in users, show their username; for anonymous, show input field */}
+                {auth?.isAdmin ? (
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Submitting As</label>
+                    <div className="w-full px-3 py-2 rounded border border-gray-600 bg-gray-700 text-gray-300">
+                      {auth?.user?.username || 'Unknown'}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Your logged-in username will be used for tracking
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">
+                      Your Discord Username <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={submitterDiscordUsername}
+                      onChange={e => setSubmitterDiscordUsername(e.target.value)}
+                      placeholder="e.g., YourName#1234"
+                      className={`w-full px-3 py-2 rounded border bg-gray-800 focus:outline-none ${
+                        !submitterDiscordUsername.trim() ? 'border-red-500' : 'border-gray-600 focus:border-purple-500'
+                      }`}
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      So we can contact you if needed
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="flex gap-2">
               <Button

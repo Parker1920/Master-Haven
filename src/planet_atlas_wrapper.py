@@ -54,7 +54,7 @@ def generate_planet_html(planet_name: str, planet_id: int, system_name: str, poi
     plot_div = fig.to_html(
         full_html=False,
         include_plotlyjs='cdn',
-        config={'displayModeBar': True, 'scrollZoom': True}
+        config={'displayModeBar': False, 'scrollZoom': False}
     )
 
     # Generate POI list HTML
@@ -156,6 +156,41 @@ def generate_planet_html(planet_name: str, planet_id: int, system_name: str, poi
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }}
+
+        .side-panel.collapsed {{
+            transform: translateX(100%);
+            opacity: 0;
+            pointer-events: none;
+        }}
+
+        .toggle-panel-btn {{
+            position: fixed;
+            top: 80px;
+            right: 360px;
+            width: 32px;
+            height: 32px;
+            background: rgba(26, 92, 107, 0.9);
+            border: 1px solid #22d3ee;
+            border-radius: 4px;
+            color: #22d3ee;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            z-index: 100;
+            transition: all 0.3s ease;
+        }}
+
+        .toggle-panel-btn:hover {{
+            background: #22d3ee;
+            color: #0d1117;
+        }}
+
+        .toggle-panel-btn.panel-hidden {{
+            right: 10px;
         }}
 
         .panel-header {{
@@ -170,6 +205,37 @@ def generate_planet_html(planet_name: str, planet_id: int, system_name: str, poi
             font-size: 14px;
             font-weight: 400;
             letter-spacing: 2px;
+        }}
+
+        .search-box {{
+            margin-top: 12px;
+        }}
+
+        .search-input {{
+            width: 100%;
+            padding: 8px 12px;
+            background: #0f172a;
+            border: 1px solid #1a5c6b;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 12px;
+        }}
+
+        .search-input:focus {{
+            outline: none;
+            border-color: #22d3ee;
+            box-shadow: 0 0 5px rgba(34, 211, 238, 0.3);
+        }}
+
+        .search-input::placeholder {{
+            color: #64748b;
+        }}
+
+        .poi-count {{
+            font-size: 10px;
+            color: #64748b;
+            margin-top: 8px;
         }}
 
         .panel-content {{
@@ -435,11 +501,17 @@ def generate_planet_html(planet_name: str, planet_id: int, system_name: str, poi
             {plot_div}
         </div>
 
-        <div class="side-panel">
+        <button class="toggle-panel-btn" id="toggle-panel" title="Toggle POI Panel">☰</button>
+
+        <div class="side-panel" id="side-panel">
             <div class="panel-header">
                 <h2>POINTS OF INTEREST</h2>
+                <div class="search-box">
+                    <input type="text" class="search-input" id="poi-search" placeholder="Search POIs...">
+                </div>
+                <div class="poi-count" id="poi-count">{len(pois)} POI(s) registered</div>
             </div>
-            <div class="panel-content">
+            <div class="panel-content" id="panel-content">
                 <ul class="poi-list" id="poi-list">
                     {poi_list_html if poi_list_html else """
                     <div class="empty-state">
@@ -508,6 +580,53 @@ def generate_planet_html(planet_name: str, planet_id: int, system_name: str, poi
 
     <script>
         const planetId = {planet_id};
+
+        // --- PANEL TOGGLE ---
+        const toggleBtn = document.getElementById('toggle-panel');
+        const sidePanel = document.getElementById('side-panel');
+        let panelVisible = true;
+
+        toggleBtn.addEventListener('click', () => {{
+            panelVisible = !panelVisible;
+            sidePanel.classList.toggle('collapsed', !panelVisible);
+            toggleBtn.classList.toggle('panel-hidden', !panelVisible);
+            toggleBtn.textContent = panelVisible ? '☰' : '◀';
+            toggleBtn.title = panelVisible ? 'Hide POI Panel' : 'Show POI Panel';
+        }});
+
+        // --- POI SEARCH ---
+        const searchInput = document.getElementById('poi-search');
+        const poiList = document.getElementById('poi-list');
+        const poiCountEl = document.getElementById('poi-count');
+        const allPois = Array.from(poiList.querySelectorAll('.poi-item'));
+
+        searchInput.addEventListener('input', (e) => {{
+            const query = e.target.value.toLowerCase().trim();
+            let visibleCount = 0;
+
+            allPois.forEach(poi => {{
+                const name = poi.querySelector('.poi-name')?.textContent.toLowerCase() || '';
+                const coords = poi.querySelector('.poi-coords')?.textContent.toLowerCase() || '';
+                const matches = name.includes(query) || coords.includes(query);
+                poi.style.display = matches ? 'flex' : 'none';
+                if (matches) visibleCount++;
+            }});
+
+            poiCountEl.textContent = query
+                ? `${{visibleCount}} of {len(pois)} POI(s) shown`
+                : `{len(pois)} POI(s) registered`;
+        }});
+
+        // --- SCROLL EVENT FIX ---
+        // Prevent scroll events on side panel from affecting the globe
+        const panelContent = document.getElementById('panel-content');
+        panelContent.addEventListener('wheel', (e) => {{
+            e.stopPropagation();
+        }}, {{ passive: true }});
+
+        sidePanel.addEventListener('wheel', (e) => {{
+            e.stopPropagation();
+        }}, {{ passive: true }});
 
         // Color palette selection
         document.querySelectorAll('.color-btn').forEach(btn => {{
@@ -683,18 +802,18 @@ def create_planet_figure(planet_name: str, pois: list, biome: str = None) -> go.
 
             fig.add_trace(go.Scatter3d(
                 x=px, y=py, z=pz,
-                mode='markers+text',
+                mode='markers',
                 name=cat,
                 marker=dict(
                     size=sizes,
                     symbol=symbols,
                     color=colors_list,
                     opacity=1.0,
-                    line=dict(color=colors_list, width=4)
+                    line=dict(color=colors_list, width=6)
                 ),
                 text=names,
                 textposition='top center',
-                textfont=dict(size=11, color='#67e8f9'),
+                textfont=dict(size=14, color='#67e8f9'),
                 customdata=[[lats[i], lons[i]] for i in range(len(lats))],
                 hovertemplate='<b>%{text}</b><br>Lat: %{customdata[0]:.2f}<br>Lon: %{customdata[1]:.2f}<extra></extra>'
             ))
@@ -721,8 +840,9 @@ def create_planet_figure(planet_name: str, pois: list, biome: str = None) -> go.
             yaxis=dict(visible=False),
             zaxis=dict(visible=False),
             aspectmode='cube',
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.0))
-        )
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+        ),
+        uirevision='globe'
     )
 
     return fig

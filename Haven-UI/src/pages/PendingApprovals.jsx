@@ -456,15 +456,15 @@ export default function PendingApprovals() {
   return (
     <div className="p-4">
       <Card className="max-w-6xl">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Approvals Queue</h2>
-          <div className="flex items-center space-x-3">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
+          <h2 className="text-xl sm:text-2xl font-bold">Approvals Queue</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             {/* Discord Tag Filter - Super Admin Only */}
             {isSuperAdmin && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm text-gray-300">Filter:</label>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-300 hidden sm:inline">Filter:</label>
                 <select
-                  className="p-2 border rounded bg-gray-700 text-white text-sm"
+                  className="p-2 border rounded bg-gray-700 text-white text-sm flex-1 sm:flex-initial"
                   value={filterTag}
                   onChange={e => setFilterTag(e.target.value)}
                 >
@@ -476,18 +476,20 @@ export default function PendingApprovals() {
                 </select>
               </div>
             )}
-            {/* Batch Mode Toggle - Requires batch_approvals feature */}
-            {canAccess && canAccess(FEATURES.BATCH_APPROVALS) && filteredPendingSubmissions.length > 0 && (
-              <Button
-                className={batchMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}
-                onClick={() => batchMode ? exitBatchMode() : setBatchMode(true)}
-              >
-                {batchMode ? 'Exit Batch Mode' : 'Batch Mode'}
+            <div className="flex gap-2">
+              {/* Batch Mode Toggle - Requires batch_approvals feature */}
+              {canAccess && canAccess(FEATURES.BATCH_APPROVALS) && filteredPendingSubmissions.length > 0 && (
+                <Button
+                  className={`text-sm ${batchMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                  onClick={() => batchMode ? exitBatchMode() : setBatchMode(true)}
+                >
+                  {batchMode ? 'Exit Batch' : 'Batch Mode'}
+                </Button>
+              )}
+              <Button className="bg-gray-200 text-gray-800 text-sm" onClick={() => navigate('/systems')}>
+                Back
               </Button>
-            )}
-            <Button className="bg-gray-200 text-gray-800" onClick={() => navigate('/systems')}>
-              Back to Systems
-            </Button>
+            </div>
           </div>
         </div>
 
@@ -501,28 +503,30 @@ export default function PendingApprovals() {
               {pendingRegions.map(region => (
                 <div
                   key={`region-${region.id}`}
-                  className="border rounded p-3 bg-purple-700 hover:bg-purple-600 flex justify-between items-center"
+                  className="border rounded p-3 bg-purple-700 hover:bg-purple-600"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-lg">{region.proposed_name}</h4>
-                      <span className="px-2 py-1 rounded text-xs font-semibold bg-purple-200 text-purple-800">
-                        REGION NAME
-                      </span>
-                      {getStatusBadge(region.status)}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-200 text-purple-800">
+                          REGION
+                        </span>
+                        {getStatusBadge(region.status)}
+                        {/* Discord Tag Badge */}
+                        {(isSuperAdmin || isHavenSubAdmin) && region.discord_tag && getDiscordTagBadge(region.discord_tag, isSuperAdmin ? region.personal_discord_username : null)}
+                      </div>
+                      <div className="text-sm text-gray-300 mt-1">
+                        <span>Coords: [{region.region_x}, {region.region_y}, {region.region_z}]</span>
+                        <span className="mx-2">•</span>
+                        <span>By: {region.personal_discord_username || region.submitted_by || 'Anonymous'}</span>
+                        <span className="mx-2">•</span>
+                        <span>{new Date(region.submission_date).toLocaleDateString()}</span>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-300 mt-1">
-                      <span>Coordinates: [{region.region_x}, {region.region_y}, {region.region_z}]</span>
-                      <span className="mx-2">•</span>
-                      <span>Submitted by: {region.submitted_by || 'Anonymous'}</span>
-                      <span className="mx-2">•</span>
-                      <span>Date: {new Date(region.submission_date).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
                     <button
                       onClick={() => viewRegion(region)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                      className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
                     >
                       Review
                     </button>
@@ -543,37 +547,37 @@ export default function PendingApprovals() {
               {pendingEdits.map(request => (
                 <div
                   key={`edit-${request.id}`}
-                  className="border rounded p-3 bg-orange-700 hover:bg-orange-600 flex justify-between items-center"
+                  className="border rounded p-3 bg-orange-700 hover:bg-orange-600"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-lg">{request.system_name || 'Unknown System'}</h4>
-                      <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-200 text-orange-800">
-                        PARTNER EDIT
-                      </span>
-                      {getStatusBadge(request.status)}
-                    </div>
-                    <div className="text-sm text-gray-300 mt-1">
-                      <span>Partner: {request.partner_username || 'Unknown'}</span>
-                      {request.partner_discord_tag && (
-                        <>
-                          <span className="mx-2">•</span>
-                          <span className="text-cyan-300">{request.partner_discord_tag}</span>
-                        </>
-                      )}
-                      <span className="mx-2">•</span>
-                      <span>Date: {new Date(request.submitted_at).toLocaleString()}</span>
-                    </div>
-                    {request.explanation && (
-                      <div className="text-sm text-yellow-300 mt-1">
-                        <span className="font-medium">Reason:</span> {request.explanation}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-orange-200 text-orange-800">
+                          EDIT
+                        </span>
+                        {getStatusBadge(request.status)}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex space-x-2">
+                      <div className="text-sm text-gray-300 mt-1">
+                        <span>Partner: {request.partner_username || 'Unknown'}</span>
+                        {request.partner_discord_tag && (
+                          <>
+                            <span className="mx-2">•</span>
+                            <span className="text-cyan-300">{request.partner_discord_tag}</span>
+                          </>
+                        )}
+                        <span className="mx-2">•</span>
+                        <span>{new Date(request.submitted_at).toLocaleDateString()}</span>
+                      </div>
+                      {request.explanation && (
+                        <div className="text-sm text-yellow-300 mt-1 line-clamp-1">
+                          <span className="font-medium">Reason:</span> {request.explanation}
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={() => viewEditRequest(request)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                      className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
                     >
                       Review
                     </button>
@@ -586,44 +590,46 @@ export default function PendingApprovals() {
 
         {/* Batch Action Bar */}
         {batchMode && (
-          <div className="mb-4 p-3 bg-indigo-900 border border-indigo-500 rounded flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <span className="text-white font-semibold">
-                {selectedIds.size} of {filteredPendingSubmissions.filter(s => !isSelfSubmission(s)).length} selected
-              </span>
-              <button
-                onClick={selectAllEligible}
-                className="text-sm text-indigo-300 hover:text-white underline"
-              >
-                Select All Eligible
-              </button>
-              {selectedIds.size > 0 && (
+          <div className="mb-4 p-3 bg-indigo-900 border border-indigo-500 rounded">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                <span className="text-white font-semibold text-sm">
+                  {selectedIds.size}/{filteredPendingSubmissions.filter(s => !isSelfSubmission(s)).length} selected
+                </span>
                 <button
-                  onClick={clearSelection}
+                  onClick={selectAllEligible}
                   className="text-sm text-indigo-300 hover:text-white underline"
                 >
-                  Clear Selection
+                  Select All
                 </button>
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={clearSelection}
+                    className="text-sm text-indigo-300 hover:text-white underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {selectedIds.size > 0 && (
+                <div className="flex gap-2">
+                  <Button
+                    className="bg-green-600 hover:bg-green-700 text-white text-sm flex-1 sm:flex-initial"
+                    onClick={handleBatchApprove}
+                    disabled={batchInProgress}
+                  >
+                    {batchInProgress ? '...' : `Approve (${selectedIds.size})`}
+                  </Button>
+                  <Button
+                    className="bg-red-600 hover:bg-red-700 text-white text-sm flex-1 sm:flex-initial"
+                    onClick={() => setBatchRejectModalOpen(true)}
+                    disabled={batchInProgress}
+                  >
+                    {batchInProgress ? '...' : `Reject (${selectedIds.size})`}
+                  </Button>
+                </div>
               )}
             </div>
-            {selectedIds.size > 0 && (
-              <div className="flex items-center space-x-2">
-                <Button
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                  onClick={handleBatchApprove}
-                  disabled={batchInProgress}
-                >
-                  {batchInProgress ? 'Processing...' : `Approve Selected (${selectedIds.size})`}
-                </Button>
-                <Button
-                  className="bg-red-600 hover:bg-red-700 text-white"
-                  onClick={() => setBatchRejectModalOpen(true)}
-                  disabled={batchInProgress}
-                >
-                  {batchInProgress ? 'Processing...' : `Reject Selected (${selectedIds.size})`}
-                </Button>
-              </div>
-            )}
           </div>
         )}
 
@@ -643,69 +649,69 @@ export default function PendingApprovals() {
               {filteredPendingSubmissions.map(submission => (
                 <div
                   key={submission.id}
-                  className={`border rounded p-3 bg-cyan-700 hover:bg-cyan-600 flex justify-between items-center ${
+                  className={`border rounded p-3 bg-cyan-700 hover:bg-cyan-600 ${
                     batchMode && selectedIds.has(submission.id) ? 'ring-2 ring-indigo-400' : ''
                   }`}
                 >
-                  {/* Batch mode checkbox */}
-                  {batchMode && (
-                    <div className="mr-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(submission.id)}
-                        onChange={() => toggleSelection(submission.id)}
-                        disabled={isSelfSubmission(submission)}
-                        className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={isSelfSubmission(submission) ? 'Cannot select your own submission' : ''}
-                      />
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex items-start gap-3">
+                    {/* Batch mode checkbox */}
+                    {batchMode && (
+                      <div className="flex-shrink-0 pt-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(submission.id)}
+                          onChange={() => toggleSelection(submission.id)}
+                          disabled={isSelfSubmission(submission)}
+                          className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={isSelfSubmission(submission) ? 'Cannot select your own submission' : ''}
+                        />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-lg">{submission.system_name}</h4>
-                      {getStatusBadge(submission.status)}
-                      {/* Edit badge - shows when this is an edit of existing system */}
-                      {submission.edit_system_id && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-500 text-white">
-                          EDIT
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        {getStatusBadge(submission.status)}
+                        {/* Edit badge - shows when this is an edit of existing system */}
+                        {submission.edit_system_id && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-orange-500 text-white">
+                            EDIT
+                          </span>
+                        )}
+                        {/* New badge - shows when this is a new system */}
+                        {!submission.edit_system_id && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-green-500 text-white">
+                            NEW
+                          </span>
+                        )}
+                        {/* Self-submission badge - user cannot approve their own */}
+                        {isSelfSubmission(submission) && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500 text-black">
+                            YOURS
+                          </span>
+                        )}
+                        {/* Discord Tag Badge - shows tag type without personal info */}
+                        {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
+                        {submission.source === 'companion_app' && submission.api_key_name && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-cyan-200 text-cyan-800">
+                            {submission.api_key_name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-300 mt-1">
+                        <span>Galaxy: {submission.system_galaxy || 'Euclid'}</span>
+                        <span className="mx-2">•</span>
+                        <span className={submission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>
+                          {submission.system_data?.reality || 'Normal'}
                         </span>
-                      )}
-                      {/* New badge - shows when this is a new system */}
-                      {!submission.edit_system_id && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
-                          NEW
-                        </span>
-                      )}
-                      {/* Self-submission badge - user cannot approve their own */}
-                      {isSelfSubmission(submission) && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-amber-500 text-black">
-                          YOUR SUBMISSION
-                        </span>
-                      )}
-                      {/* Discord Tag Badge - shows tag type without personal info */}
-                      {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
-                      {submission.source === 'companion_app' && submission.api_key_name && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-cyan-200 text-cyan-800">
-                          {submission.api_key_name}
-                        </span>
-                      )}
+                        <span className="mx-2">•</span>
+                        <span>Submitted by: {submission.personal_discord_username || submission.submitted_by || 'Anonymous'}</span>
+                        <span className="mx-2">•</span>
+                        <span>Date: {new Date(submission.submission_date).toLocaleString()}</span>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-300 mt-1">
-                      <span>Galaxy: {submission.system_galaxy || 'Euclid'}</span>
-                      <span className="mx-2">•</span>
-                      <span className={submission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>
-                        {submission.system_data?.reality || 'Normal'}
-                      </span>
-                      <span className="mx-2">•</span>
-                      <span>Submitted by: {submission.submitted_by || 'Anonymous'}</span>
-                      <span className="mx-2">•</span>
-                      <span>Date: {new Date(submission.submission_date).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
                     <button
                       onClick={() => viewSubmission(submission)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                      className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
                     >
                       Review
                     </button>
@@ -727,38 +733,35 @@ export default function PendingApprovals() {
               {filteredReviewedSubmissions.slice(0, 10).map(submission => (
                 <div
                   key={submission.id}
-                  className="border rounded p-3 bg-cyan-700 flex justify-between items-center"
+                  className="border rounded p-3 bg-cyan-700"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-semibold">{submission.system_name}</h4>
-                      {getStatusBadge(submission.status)}
-                      {/* Edit badge - shows when this was an edit of existing system */}
-                      {submission.edit_system_id && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-500 text-white">
-                          EDIT
-                        </span>
-                      )}
-                      {/* New badge - shows when this was a new system */}
-                      {!submission.edit_system_id && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
-                          NEW
-                        </span>
-                      )}
-                      {/* Discord Tag Badge - shows tag type without personal info */}
-                      {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
-                    </div>
-                    <div className="text-sm text-gray-300 mt-1">
-                      <span>Reviewed by: {submission.reviewed_by || 'Unknown'}</span>
-                      <span className="mx-2">•</span>
-                      <span>Date: {submission.review_date ? new Date(submission.review_date).toLocaleString() : 'Unknown'}</span>
-                      {submission.rejection_reason && (
-                        <>
-                          <span className="mx-2">•</span>
-                          <span>Reason: {submission.rejection_reason}</span>
-                        </>
-                      )}
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-semibold">{submission.system_name}</h4>
+                    {getStatusBadge(submission.status)}
+                    {/* Edit badge - shows when this was an edit of existing system */}
+                    {submission.edit_system_id && (
+                      <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-500 text-white">
+                        EDIT
+                      </span>
+                    )}
+                    {/* New badge - shows when this was a new system */}
+                    {!submission.edit_system_id && (
+                      <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
+                        NEW
+                      </span>
+                    )}
+                    {/* Discord Tag Badge - shows tag type without personal info */}
+                    {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
+                  </div>
+                  <div className="text-sm text-gray-300 mt-1">
+                    <span>By: {submission.reviewed_by || 'Unknown'}</span>
+                    <span className="mx-2">•</span>
+                    <span>{submission.review_date ? new Date(submission.review_date).toLocaleDateString() : 'Unknown'}</span>
+                    {submission.rejection_reason && (
+                      <div className="text-red-300 mt-1 line-clamp-1">
+                        Reason: {submission.rejection_reason}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -783,10 +786,34 @@ export default function PendingApprovals() {
                   <p><strong>Name:</strong> {selectedSubmission.system_data?.name}</p>
                   <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
                   <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>
+                  {selectedSubmission.glyph_code && (
+                    <p><strong>Glyph Code:</strong> <span className="font-mono">{selectedSubmission.glyph_code}</span></p>
+                  )}
                   {selectedSubmission.system_data?.region_x !== null && (
                     <p><strong>Region:</strong> [{selectedSubmission.system_data.region_x}, {selectedSubmission.system_data.region_y}, {selectedSubmission.system_data.region_z}]</p>
                   )}
                   <p><strong>Coordinates:</strong> ({selectedSubmission.system_data?.x || 0}, {selectedSubmission.system_data?.y || 0}, {selectedSubmission.system_data?.z || 0})</p>
+                  {/* Extractor-specific system properties */}
+                  {selectedSubmission.system_data?.star_type && selectedSubmission.system_data.star_type !== 'Unknown' && (
+                    <p><strong>Star Type:</strong> <span className={
+                      selectedSubmission.system_data.star_type === 'Yellow' ? 'text-yellow-400' :
+                      selectedSubmission.system_data.star_type === 'Red' ? 'text-red-400' :
+                      selectedSubmission.system_data.star_type === 'Green' ? 'text-green-400' :
+                      selectedSubmission.system_data.star_type === 'Blue' ? 'text-blue-400' : ''
+                    }>{selectedSubmission.system_data.star_type}</span></p>
+                  )}
+                  {selectedSubmission.system_data?.economy_type && selectedSubmission.system_data.economy_type !== 'Unknown' && (
+                    <p><strong>Economy:</strong> {selectedSubmission.system_data.economy_type} {selectedSubmission.system_data.economy_level && selectedSubmission.system_data.economy_level !== 'Unknown' && `(${selectedSubmission.system_data.economy_level})`}</p>
+                  )}
+                  {selectedSubmission.system_data?.conflict_level && selectedSubmission.system_data.conflict_level !== 'Unknown' && (
+                    <p><strong>Conflict:</strong> <span className={
+                      selectedSubmission.system_data.conflict_level === 'High' ? 'text-red-400' :
+                      selectedSubmission.system_data.conflict_level === 'Low' ? 'text-green-400' : 'text-yellow-400'
+                    }>{selectedSubmission.system_data.conflict_level}</span></p>
+                  )}
+                  {selectedSubmission.system_data?.dominant_lifeform && selectedSubmission.system_data.dominant_lifeform !== 'Unknown' && (
+                    <p><strong>Dominant Lifeform:</strong> {selectedSubmission.system_data.dominant_lifeform}</p>
+                  )}
                   <p><strong>Description:</strong> {selectedSubmission.system_data?.description || 'None'}</p>
                 </div>
               </div>
@@ -802,19 +829,52 @@ export default function PendingApprovals() {
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
                               <p className="font-semibold text-base">{planet.name}</p>
+                              {/* Planet size badge */}
+                              {planet.planet_size && planet.planet_size !== 'Unknown' && (
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  planet.planet_size === 'Large' ? 'bg-purple-600 text-white' :
+                                  planet.planet_size === 'Medium' ? 'bg-blue-600 text-white' :
+                                  planet.planet_size === 'Small' ? 'bg-green-600 text-white' :
+                                  'bg-gray-600 text-white'
+                                }`}>{planet.planet_size}</span>
+                              )}
                             </div>
+                            {/* Biome info (from extractor) */}
+                            {(planet.biome || planet.biome_subtype) && (
+                              <div className="mb-2 text-gray-300">
+                                {planet.biome && planet.biome !== 'Unknown' && (
+                                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${
+                                    planet.biome === 'Lush' ? 'bg-green-700' :
+                                    planet.biome === 'Toxic' ? 'bg-yellow-700' :
+                                    planet.biome === 'Scorched' ? 'bg-orange-700' :
+                                    planet.biome === 'Radioactive' ? 'bg-lime-700' :
+                                    planet.biome === 'Frozen' ? 'bg-cyan-700' :
+                                    planet.biome === 'Barren' ? 'bg-stone-700' :
+                                    planet.biome === 'Dead' ? 'bg-gray-700' :
+                                    planet.biome === 'Weird' ? 'bg-purple-700' :
+                                    planet.biome === 'Swamp' ? 'bg-emerald-800' :
+                                    planet.biome === 'Lava' ? 'bg-red-700' :
+                                    'bg-gray-600'
+                                  }`}>{planet.biome}</span>
+                                )}
+                                {planet.biome_subtype && planet.biome_subtype !== 'Unknown' && planet.biome_subtype !== 'None' && (
+                                  <span className="text-xs text-gray-400">({planet.biome_subtype})</span>
+                                )}
+                              </div>
+                            )}
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
-                              <div><span className="text-gray-400">Sentinel:</span> {planet.sentinel || 'None'}</div>
+                              <div><span className="text-gray-400">Sentinel:</span> {planet.sentinel || planet.sentinels || 'None'}</div>
                               <div><span className="text-gray-400">Fauna:</span> {planet.fauna || 'N/A'}{planet.fauna_count > 0 && ` (${planet.fauna_count})`}</div>
                               <div><span className="text-gray-400">Flora:</span> {planet.flora || 'N/A'}{planet.flora_count > 0 && ` (${planet.flora_count})`}</div>
-                              {planet.climate && <div><span className="text-gray-400">Climate:</span> {planet.climate}</div>}
+                              {(planet.climate || planet.weather) && <div><span className="text-gray-400">Weather:</span> {planet.climate || planet.weather}</div>}
                               {planet.has_water === 1 && <div><span className="text-cyan-300">Has Water</span></div>}
                             </div>
                           </div>
                         </div>
-                        {planet.materials && (
+                        {/* Resources/Materials */}
+                        {(planet.materials || (planet.resources && planet.resources.length > 0)) && (
                           <div className="mt-2 text-gray-300">
-                            <span className="text-gray-400">Materials:</span> {planet.materials}
+                            <span className="text-gray-400">Resources:</span> {planet.materials || planet.resources?.join(', ')}
                           </div>
                         )}
                         {planet.base_location && (
@@ -844,13 +904,47 @@ export default function PendingApprovals() {
                               <div key={j} className="mb-2 text-xs">
                                 <p className="font-medium">{moon.name}</p>
                                 <div className="grid grid-cols-2 gap-1 mt-1 text-gray-300">
-                                  <div>Sentinel: {moon.sentinel || 'None'}</div>
+                                  {moon.biome && moon.biome !== 'Unknown' && <div>Biome: {moon.biome}</div>}
+                                  <div>Sentinel: {moon.sentinel || moon.sentinels || 'None'}</div>
                                   <div>Fauna: {moon.fauna || 'N/A'}</div>
                                   <div>Flora: {moon.flora || 'N/A'}</div>
-                                  {moon.materials && <div className="col-span-2">Materials: {moon.materials}</div>}
+                                  {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
+                                    <div className="col-span-2">Resources: {moon.materials || moon.resources?.join(', ')}</div>
+                                  )}
                                 </div>
                               </div>
                             ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Moons (top-level from extractor - separate from planet.moons) */}
+              {selectedSubmission.system_data?.moons && selectedSubmission.system_data.moons.length > 0 && (
+                <div className="border-b pb-3">
+                  <h4 className="font-semibold mb-2">Moons ({selectedSubmission.system_data.moons.length})</h4>
+                  <div className="space-y-2">
+                    {selectedSubmission.system_data.moons.map((moon, i) => (
+                      <div key={i} className="text-sm bg-gray-700 p-3 rounded">
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="font-semibold">{moon.name}</p>
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-500 text-white">Moon</span>
+                          {moon.biome && moon.biome !== 'Unknown' && (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600">{moon.biome}</span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
+                          <div><span className="text-gray-400">Sentinel:</span> {moon.sentinel || moon.sentinels || 'None'}</div>
+                          <div><span className="text-gray-400">Fauna:</span> {moon.fauna || 'N/A'}</div>
+                          <div><span className="text-gray-400">Flora:</span> {moon.flora || 'N/A'}</div>
+                          {(moon.climate || moon.weather) && <div><span className="text-gray-400">Weather:</span> {moon.climate || moon.weather}</div>}
+                        </div>
+                        {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
+                          <div className="mt-2 text-gray-300">
+                            <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
                           </div>
                         )}
                       </div>
@@ -873,9 +967,28 @@ export default function PendingApprovals() {
 
               {/* Submission Metadata */}
               <div className="text-sm text-gray-600">
-                <p><strong>Submitted by:</strong> {selectedSubmission.submitted_by || 'Anonymous'}</p>
+                <p><strong>Submitted by:</strong> {selectedSubmission.personal_discord_username || selectedSubmission.submitted_by || 'Anonymous'}</p>
+                {/* Personal ID (Discord snowflake) - super admin only */}
+                {isSuperAdmin && selectedSubmission.personal_id && (
+                  <p><strong>Discord ID:</strong> <span className="font-mono text-xs">{selectedSubmission.personal_id}</span></p>
+                )}
                 <p><strong>Submission Date:</strong> {new Date(selectedSubmission.submission_date).toLocaleString()}</p>
-                <p><strong>IP Address:</strong> {selectedSubmission.submitted_by_ip}</p>
+                {/* Source indicator */}
+                {selectedSubmission.source && (
+                  <p><strong>Source:</strong> <span className={`px-2 py-0.5 rounded text-xs ${
+                    selectedSubmission.source === 'haven_extractor' ? 'bg-purple-600 text-white' :
+                    selectedSubmission.source === 'companion_app' ? 'bg-cyan-600 text-white' :
+                    'bg-gray-600 text-white'
+                  }`}>{selectedSubmission.source === 'haven_extractor' ? 'Haven Extractor' : selectedSubmission.source}</span></p>
+                )}
+                {/* API key name if applicable */}
+                {selectedSubmission.api_key_name && (
+                  <p><strong>API Key:</strong> {selectedSubmission.api_key_name}</p>
+                )}
+                {/* IP Address only visible to super admin for security */}
+                {isSuperAdmin && selectedSubmission.submitted_by_ip && (
+                  <p><strong>IP Address:</strong> {selectedSubmission.submitted_by_ip}</p>
+                )}
                 {/* Discord info - shows tag type without personal info */}
                 {(isSuperAdmin || isHavenSubAdmin) && selectedSubmission.discord_tag && (
                   <p className="mt-2">
@@ -896,17 +1009,17 @@ export default function PendingApprovals() {
                       </p>
                     </div>
                   )}
-                  <div className="flex space-x-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <Button
-                      className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
                       onClick={() => approveSubmission(selectedSubmission.id, selectedSubmission.system_name)}
                       disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
                       title={isSelfSubmission(selectedSubmission) ? 'You cannot approve your own submission' : ''}
                     >
-                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Approve' : (actionInProgress ? 'Approving...' : 'Approve System')}
+                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Approve' : (actionInProgress ? 'Approving...' : 'Approve')}
                     </Button>
                     <Button
-                      className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
                       onClick={() => {
                         setViewModalOpen(false)
                         openRejectModal(selectedSubmission)
@@ -914,10 +1027,10 @@ export default function PendingApprovals() {
                       disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
                       title={isSelfSubmission(selectedSubmission) ? 'You cannot reject your own submission' : ''}
                     >
-                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Reject' : 'Reject System'}
+                      {isSelfSubmission(selectedSubmission) ? 'Cannot Reject' : 'Reject'}
                     </Button>
                     <Button
-                      className="bg-gray-200 text-gray-800"
+                      className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                       onClick={() => {
                         setViewModalOpen(false)
                         setSelectedSubmission(null)
@@ -959,16 +1072,16 @@ export default function PendingApprovals() {
                 />
               </div>
 
-              <div className="flex space-x-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Button
-                  className="bg-red-600 text-white hover:bg-red-700"
+                  className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                   onClick={rejectSubmission}
                   disabled={actionInProgress || !rejectionReason.trim()}
                 >
                   {actionInProgress ? 'Rejecting...' : 'Confirm Rejection'}
                 </Button>
                 <Button
-                  className="bg-gray-200 text-gray-800"
+                  className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                   onClick={() => {
                     setRejectModalOpen(false)
                     setRejectionReason('')
@@ -1002,24 +1115,32 @@ export default function PendingApprovals() {
               </div>
 
               <div className="text-sm text-gray-600">
-                <p><strong>Submitted by:</strong> {selectedRegion.submitted_by || 'Anonymous'}</p>
+                <p><strong>Submitted by:</strong> {selectedRegion.personal_discord_username || selectedRegion.submitted_by || 'Anonymous'}</p>
                 <p><strong>Submission Date:</strong> {new Date(selectedRegion.submission_date).toLocaleString()}</p>
-                {selectedRegion.submitted_by_ip && (
+                {/* IP Address only visible to super admin for security */}
+                {isSuperAdmin && selectedRegion.submitted_by_ip && (
                   <p><strong>IP Address:</strong> {selectedRegion.submitted_by_ip}</p>
+                )}
+                {/* Discord info */}
+                {(isSuperAdmin || isHavenSubAdmin) && selectedRegion.discord_tag && (
+                  <p className="mt-2">
+                    <strong>Discord Community:</strong>{' '}
+                    {getDiscordTagBadge(selectedRegion.discord_tag, isSuperAdmin ? selectedRegion.personal_discord_username : null)}
+                  </p>
                 )}
               </div>
 
               {selectedRegion.status === 'pending' && (
-                <div className="flex space-x-2 pt-3 border-t">
+                <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t">
                   <Button
-                    className="btn-primary bg-green-600 hover:bg-green-700"
+                    className="btn-primary bg-green-600 hover:bg-green-700 text-sm w-full sm:w-auto"
                     onClick={() => approveRegion(selectedRegion)}
                     disabled={actionInProgress}
                   >
-                    {actionInProgress ? 'Approving...' : 'Approve Region Name'}
+                    {actionInProgress ? 'Approving...' : 'Approve'}
                   </Button>
                   <Button
-                    className="bg-red-600 text-white hover:bg-red-700"
+                    className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                     onClick={() => {
                       setRegionModalOpen(false)
                       setRejectionReason('')
@@ -1030,7 +1151,7 @@ export default function PendingApprovals() {
                     Reject
                   </Button>
                   <Button
-                    className="bg-gray-200 text-gray-800"
+                    className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                     onClick={() => {
                       setRegionModalOpen(false)
                       setSelectedRegion(null)
@@ -1071,16 +1192,16 @@ export default function PendingApprovals() {
                 />
               </div>
 
-              <div className="flex space-x-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Button
-                  className="bg-red-600 text-white hover:bg-red-700"
+                  className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                   onClick={rejectRegion}
                   disabled={actionInProgress || !rejectionReason.trim()}
                 >
                   {actionInProgress ? 'Rejecting...' : 'Confirm Rejection'}
                 </Button>
                 <Button
-                  className="bg-gray-200 text-gray-800"
+                  className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                   onClick={() => {
                     setRejectModalOpen(false)
                     setRejectionReason('')
@@ -1152,16 +1273,16 @@ export default function PendingApprovals() {
 
               {/* Actions */}
               {selectedEditRequest.status === 'pending' && (
-                <div className="flex space-x-2 pt-3 border-t">
+                <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t">
                   <Button
-                    className="btn-primary bg-green-600 hover:bg-green-700"
+                    className="btn-primary bg-green-600 hover:bg-green-700 text-sm w-full sm:w-auto"
                     onClick={() => approveEditRequest(selectedEditRequest)}
                     disabled={actionInProgress}
                   >
-                    {actionInProgress ? 'Approving...' : 'Approve Edit'}
+                    {actionInProgress ? 'Approving...' : 'Approve'}
                   </Button>
                   <Button
-                    className="bg-red-600 text-white hover:bg-red-700"
+                    className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                     onClick={() => {
                       setEditRequestModalOpen(false)
                       setRejectionReason('')
@@ -1169,10 +1290,10 @@ export default function PendingApprovals() {
                     }}
                     disabled={actionInProgress}
                   >
-                    Reject Edit
+                    Reject
                   </Button>
                   <Button
-                    className="bg-gray-200 text-gray-800"
+                    className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                     onClick={() => {
                       setEditRequestModalOpen(false)
                       setSelectedEditRequest(null)
@@ -1213,16 +1334,16 @@ export default function PendingApprovals() {
                 />
               </div>
 
-              <div className="flex space-x-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Button
-                  className="bg-red-600 text-white hover:bg-red-700"
+                  className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                   onClick={rejectEditRequest}
                   disabled={actionInProgress || !rejectionReason.trim()}
                 >
                   {actionInProgress ? 'Rejecting...' : 'Confirm Rejection'}
                 </Button>
                 <Button
-                  className="bg-gray-200 text-gray-800"
+                  className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                   onClick={() => {
                     setRejectModalOpen(false)
                     setRejectionReason('')
@@ -1262,16 +1383,16 @@ export default function PendingApprovals() {
                 />
               </div>
 
-              <div className="flex space-x-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Button
-                  className="bg-red-600 text-white hover:bg-red-700"
+                  className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto"
                   onClick={handleBatchReject}
                   disabled={batchInProgress || !batchRejectionReason.trim()}
                 >
-                  {batchInProgress ? 'Rejecting...' : `Reject ${selectedIds.size} Submission(s)`}
+                  {batchInProgress ? 'Rejecting...' : `Reject ${selectedIds.size}`}
                 </Button>
                 <Button
-                  className="bg-gray-200 text-gray-800"
+                  className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
                   onClick={() => {
                     setBatchRejectModalOpen(false)
                     setBatchRejectionReason('')

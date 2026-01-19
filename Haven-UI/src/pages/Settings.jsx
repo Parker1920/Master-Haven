@@ -9,8 +9,10 @@ export default function Settings() {
 
   const [settings, setSettings] = useState({})
   const [partnerTheme, setPartnerTheme] = useState({})
+  const [regionColor, setRegionColor] = useState('#00C2B3')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingRegionColor, setSavingRegionColor] = useState(false)
 
   // Change password state
   const [currentPassword, setCurrentPassword] = useState('')
@@ -18,6 +20,11 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [changingPassword, setChangingPassword] = useState(false)
   const [migrating, setMigrating] = useState(false)
+
+  // Change username state (partners)
+  const [newUsername, setNewUsername] = useState('')
+  const [usernamePassword, setUsernamePassword] = useState('')
+  const [changingUsername, setChangingUsername] = useState(false)
 
   useEffect(() => {
     // Load global settings
@@ -27,11 +34,16 @@ export default function Settings() {
       .catch(() => {})
       .finally(() => setLoading(false))
 
-    // Load partner theme if partner
+    // Load partner theme and region color if partner
     if (isPartner) {
       fetch('/api/partner/theme', { credentials: 'include' })
         .then(r => r.json())
         .then(data => setPartnerTheme(data.theme || {}))
+        .catch(() => {})
+
+      fetch('/api/partner/region_color', { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => setRegionColor(data.color || '#00C2B3'))
         .catch(() => {})
     }
   }, [isPartner])
@@ -88,6 +100,26 @@ export default function Settings() {
       alert('Failed to save theme: ' + e)
     }
     setSaving(false)
+  }
+
+  const saveRegionColor = async () => {
+    setSavingRegionColor(true)
+    try {
+      const res = await fetch('/api/partner/region_color', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color: regionColor })
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to save')
+      }
+      alert('Region color saved! The 3D map will now show your regions in this color.')
+    } catch (e) {
+      alert('Failed to save region color: ' + e.message)
+    }
+    setSavingRegionColor(false)
   }
 
   const doBackup = async () => {
@@ -178,6 +210,55 @@ export default function Settings() {
     }
   }
 
+  const changeUsername = async () => {
+    if (!usernamePassword) {
+      alert('Please enter your current password')
+      return
+    }
+    if (!newUsername || newUsername.length < 3) {
+      alert('New username must be at least 3 characters')
+      return
+    }
+    if (newUsername.length > 50) {
+      alert('Username must be 50 characters or less')
+      return
+    }
+    // Basic validation - alphanumeric, underscores, hyphens
+    if (!/^[a-zA-Z0-9_-]+$/.test(newUsername)) {
+      alert('Username can only contain letters, numbers, underscores, and hyphens')
+      return
+    }
+
+    setChangingUsername(true)
+    try {
+      const res = await fetch('/api/change_username', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: usernamePassword,
+          new_username: newUsername
+        })
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to change username')
+      }
+
+      alert('Username changed successfully! Please log in again with your new username.')
+      // Clear form
+      setNewUsername('')
+      setUsernamePassword('')
+      // Log out so user has to re-authenticate with new username
+      logout()
+    } catch (e) {
+      alert('Failed to change username: ' + e.message)
+    } finally {
+      setChangingUsername(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-64">
@@ -255,6 +336,55 @@ export default function Settings() {
         </Card>
       )}
 
+      {/* Change Username (Partners only) */}
+      {isPartner && (
+        <Card className="bg-gray-800/50">
+          <div className="p-4">
+            <h3 className="text-lg font-semibold text-white mb-2">Change Username</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Update your login username. You will be logged out after changing your username.
+            </p>
+
+            <div className="space-y-4 max-w-md">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Current Username</label>
+                <p className="text-white font-medium">{user?.username || ''}</p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">New Username</label>
+                <input
+                  type="text"
+                  value={newUsername}
+                  onChange={e => setNewUsername(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  placeholder="Enter new username (min 3 characters)"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Letters, numbers, underscores, and hyphens only
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Current Password</label>
+                <input
+                  type="password"
+                  value={usernamePassword}
+                  onChange={e => setUsernamePassword(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  placeholder="Enter your password to confirm"
+                />
+              </div>
+
+              <Button
+                onClick={changeUsername}
+                disabled={changingUsername || !newUsername || !usernamePassword}
+              >
+                {changingUsername ? 'Changing...' : 'Change Username'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Partner Theme Settings */}
       {isPartner && (
         <Card className="bg-gray-800/50">
@@ -305,6 +435,66 @@ export default function Settings() {
 
             <Button className="mt-4" onClick={savePartnerTheme} disabled={saving}>
               {saving ? 'Saving...' : 'Save Your Theme'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Partner: Region Color for 3D Map */}
+      {isPartner && (
+        <Card className="bg-gray-800/50">
+          <div className="p-4">
+            <h3 className="text-lg font-semibold text-white mb-2">3D Galaxy Map - Region Color</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Choose a custom color for your community's regions on the 3D galaxy map.
+              This color will be visible to everyone viewing the map.
+            </p>
+
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Region Point Color</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={regionColor}
+                    onChange={e => setRegionColor(e.target.value)}
+                    className="w-16 h-10 rounded cursor-pointer border-2 border-gray-600"
+                  />
+                  <input
+                    type="text"
+                    value={regionColor}
+                    onChange={e => {
+                      const val = e.target.value
+                      if (/^#[0-9A-Fa-f]{0,6}$/.test(val)) {
+                        setRegionColor(val)
+                      }
+                    }}
+                    placeholder="#00C2B3"
+                    className="w-28 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* Color preview */}
+              <div className="flex-1">
+                <label className="block text-sm text-gray-300 mb-1">Preview</label>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-8 h-8 rounded-full shadow-lg"
+                    style={{
+                      backgroundColor: regionColor,
+                      boxShadow: `0 0 15px ${regionColor}80`
+                    }}
+                  />
+                  <span className="text-sm text-gray-400">
+                    This is how your regions will appear on the map
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <Button className="mt-4" onClick={saveRegionColor} disabled={savingRegionColor}>
+              {savingRegionColor ? 'Saving...' : 'Save Region Color'}
             </Button>
           </div>
         </Card>

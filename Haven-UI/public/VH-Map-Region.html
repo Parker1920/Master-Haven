@@ -371,6 +371,43 @@
             color: #f0ad4e;
             margin-left: 4px;
         }
+        /* Discord fields for region name submission */
+        #region-name-edit select,
+        #region-name-edit .discord-input {
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #00C2B3;
+            border-radius: 4px;
+            color: white;
+            width: 100%;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        #region-name-edit select option {
+            background: #1a1a2e;
+            color: white;
+        }
+        .discord-fields {
+            margin-top: 8px;
+        }
+        .discord-fields label {
+            display: block;
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .discord-fields .required {
+            color: #ff6b6b;
+        }
+        .submitting-as {
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #aaa;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
 
         /* View mode toggle */
         #view-controls {
@@ -437,8 +474,27 @@
         <!-- Edit Input (hidden by default) -->
         <div id="region-name-edit">
             <input type="text" id="region-name-input" placeholder="Enter region name..." maxlength="50">
-            <button class="save-btn" onclick="saveRegionName()">Save</button>
-            <button class="cancel-btn" onclick="cancelEditRegionName()">Cancel</button>
+            <!-- Discord fields for non-super-admin users -->
+            <div id="discord-fields" class="discord-fields" style="display: none;">
+                <label>Discord Community <span class="required">*</span></label>
+                <select id="discord-tag-select">
+                    <option value="">-- Select Community --</option>
+                </select>
+                <!-- For logged-in users, show their username -->
+                <div id="submitting-as-container" style="display: none;">
+                    <label>Submitting As</label>
+                    <div class="submitting-as" id="submitting-as-display">Unknown</div>
+                </div>
+                <!-- For anonymous users, show input field -->
+                <div id="discord-username-container" style="display: none;">
+                    <label>Your Discord Username <span class="required">*</span></label>
+                    <input type="text" id="discord-username-input" class="discord-input" placeholder="e.g., YourName#1234" maxlength="50">
+                </div>
+            </div>
+            <div style="margin-top: 8px;">
+                <button class="save-btn" onclick="saveRegionName()">Save</button>
+                <button class="cancel-btn" onclick="cancelEditRegionName()">Cancel</button>
+            </div>
         </div>
         <div class="region-coords" id="region-coords">[0, 0, 0]</div>
         <div class="stat">Star Systems: <span id="system-count">0</span></div>
@@ -519,13 +575,60 @@
 
         // Region Name Editing State
         let isAdmin = false;
+        let isSuperAdmin = false;
+        let isLoggedIn = false;
+        let loggedInUsername = null;
         let currentRegionName = null;
         let hasPendingName = false;
         let pendingName = null;
+        let discordTags = [];
 
-        // Check admin status from cookie
-        function checkAdminStatus() {
+        // Check admin status from API
+        async function checkAdminStatus() {
+            // Legacy cookie check for basic admin detection
             isAdmin = document.cookie.includes('admin_password=');
+
+            // Fetch detailed status from API
+            try {
+                const response = await fetch('/api/admin/status', { credentials: 'include' });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.logged_in) {
+                        isLoggedIn = true;
+                        loggedInUsername = data.username;
+                        isSuperAdmin = data.user_type === 'super_admin';
+                        isAdmin = true; // Any logged in user is admin-level
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to check admin status:', error);
+            }
+        }
+
+        // Fetch discord tags for dropdown
+        async function loadDiscordTags() {
+            try {
+                const response = await fetch('/api/discord_tags');
+                if (response.ok) {
+                    const data = await response.json();
+                    discordTags = data.tags || [];
+                    populateDiscordTagDropdown();
+                }
+            } catch (error) {
+                console.error('Failed to load discord tags:', error);
+            }
+        }
+
+        // Populate discord tag dropdown
+        function populateDiscordTagDropdown() {
+            const select = document.getElementById('discord-tag-select');
+            select.innerHTML = '<option value="">-- Select Community --</option>';
+            discordTags.forEach(tag => {
+                const option = document.createElement('option');
+                option.value = tag.tag;
+                option.textContent = `${tag.name} (${tag.tag})`;
+                select.appendChild(option);
+            });
         }
 
         // Load region name from API
@@ -573,6 +676,30 @@
             const input = document.getElementById('region-name-input');
             input.value = currentRegionName || '';
             input.focus();
+
+            // Show/hide Discord fields based on user type
+            const discordFields = document.getElementById('discord-fields');
+            const submittingAsContainer = document.getElementById('submitting-as-container');
+            const discordUsernameContainer = document.getElementById('discord-username-container');
+
+            if (isSuperAdmin) {
+                // Super admin can save directly - no Discord fields needed
+                discordFields.style.display = 'none';
+            } else {
+                // Everyone else needs Discord fields
+                discordFields.style.display = 'block';
+
+                if (isLoggedIn && loggedInUsername) {
+                    // Logged-in user - show their username, hide input
+                    submittingAsContainer.style.display = 'block';
+                    document.getElementById('submitting-as-display').textContent = loggedInUsername;
+                    discordUsernameContainer.style.display = 'none';
+                } else {
+                    // Anonymous user - show username input
+                    submittingAsContainer.style.display = 'none';
+                    discordUsernameContainer.style.display = 'block';
+                }
+            }
         }
 
         // Save region name
@@ -585,8 +712,8 @@
 
             const region = getRegionFromURL();
 
-            // If admin, directly save. Otherwise, submit for approval.
-            if (isAdmin) {
+            // If super admin, directly save. Otherwise, submit for approval with Discord info.
+            if (isSuperAdmin) {
                 const response = await fetch(`/api/regions/${region.region_x}/${region.region_y}/${region.region_z}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -604,11 +731,34 @@
                     alert(error.detail || 'Failed to save region name');
                 }
             } else {
-                // Submit for approval
+                // Validate Discord fields
+                const discordTag = document.getElementById('discord-tag-select').value;
+                if (!discordTag) {
+                    alert('Please select a Discord Community');
+                    return;
+                }
+
+                // Get effective username: logged-in user's username or manual input
+                let effectiveUsername;
+                if (isLoggedIn && loggedInUsername) {
+                    effectiveUsername = loggedInUsername;
+                } else {
+                    effectiveUsername = document.getElementById('discord-username-input').value.trim();
+                    if (!effectiveUsername) {
+                        alert('Please enter your Discord Username');
+                        return;
+                    }
+                }
+
+                // Submit for approval with Discord info
                 const response = await fetch(`/api/regions/${region.region_x}/${region.region_y}/${region.region_z}/submit`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proposed_name: newName })
+                    body: JSON.stringify({
+                        proposed_name: newName,
+                        discord_tag: discordTag,
+                        personal_discord_username: effectiveUsername
+                    })
                 });
 
                 if (response.ok) {
@@ -628,6 +778,9 @@
         function cancelEditRegionName() {
             document.getElementById('region-name-edit').style.display = 'none';
             document.getElementById('region-name-container').style.display = 'flex';
+            // Reset Discord fields
+            document.getElementById('discord-tag-select').value = '';
+            document.getElementById('discord-username-input').value = '';
         }
 
         // Parse URL parameters for region coordinates and highlight system
@@ -675,12 +828,13 @@
             return window.REGION_DATA;
         }
 
-        function init() {
+        async function init() {
             console.log('Initializing Region View...');
 
-            // Check admin status and load region name
-            checkAdminStatus();
-            loadRegionName();
+            // Check admin status, load discord tags, and load region name
+            await checkAdminStatus();
+            loadDiscordTags();  // Don't need to await, can load in background
+            loadRegionName();   // Don't need to await, can load in background
 
             // Scene
             scene = new THREE.Scene();

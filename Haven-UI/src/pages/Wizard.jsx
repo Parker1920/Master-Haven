@@ -7,7 +7,8 @@ import PlanetEditor from '../components/PlanetEditor'
 import Modal from '../components/Modal'
 import GlyphPicker from '../components/GlyphPicker'
 import { AuthContext } from '../utils/AuthContext'
-import { generateRandomStationPosition } from '../utils/stationPlacement'
+import { generateStationPosition } from '../utils/stationPlacement'
+import { getTradeGoodsForEconomy, getTradeGoodsForEconomyAndTier } from '../utils/economyTradeGoods'
 import SearchableSelect from '../components/SearchableSelect'
 import { GALAXIES, REALITIES } from '../data/galaxies'
 
@@ -30,6 +31,10 @@ export default function Wizard(){
   const [originalTag, setOriginalTag] = useState(null)
   // Discord username for all submissions (required for self-submission detection)
   const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
+  // Personal discord username for non-community submissions
+  const [personalDiscordUsername, setPersonalDiscordUsername] = useState('')
+  const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
+  const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
 
   // Fetch available discord tags for dropdown (all users can assign tags)
   useEffect(() => {
@@ -88,6 +93,13 @@ export default function Wizard(){
       return;
     }
 
+    // If personal is selected, personal discord username is required
+    if (system.discord_tag === 'personal' && !personalDiscordUsername.trim()) {
+      alert('Discord username is required for personal submissions.');
+      setPersonalDiscordModalOpen(true);
+      return;
+    }
+
     setIsSubmitting(true)
     try{
       if(isAdmin){
@@ -112,6 +124,10 @@ export default function Wizard(){
         // Always include submitter discord username for self-submission detection
         if (submitterDiscordUsername.trim()) {
           payload.personal_discord_username = submitterDiscordUsername.trim()
+        }
+        // Include personal discord username if personal tag selected
+        if (system.discord_tag === 'personal' && personalDiscordUsername.trim()) {
+          payload.personal_discord_username = personalDiscordUsername.trim()
         }
         const r = await axios.post('/api/submit_system', payload);
         alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
@@ -210,13 +226,14 @@ export default function Wizard(){
   function toggleStation(checked){
     setHasStation(checked)
     if(checked){
-      // Generate random position for station
-      const position = generateRandomStationPosition(system.planets || [])
+      // Auto-generate safe orbital position for station
+      const position = generateStationPosition(system.planets || [])
+      // Get available trade goods based on economy type AND tier (wealth level)
+      const economyGoods = getTradeGoodsForEconomyAndTier(system.economy_type || 'None', system.economy_level || 'T3')
       setSystem({...system, space_station: {
         name: `${system.name || 'System'} Station`,
-        race: 'Gek',
-        sell_percent: 80,
-        buy_percent: 50,
+        race: system.dominant_lifeform || 'Gek',
+        trade_goods: economyGoods.map(g => g.id), // Default: all goods available for this tier
         ...position
       }})
     } else {
@@ -224,15 +241,14 @@ export default function Wizard(){
     }
   }
 
-  function regenerateStationPosition(){
-    if(hasStation && system.space_station){
-      const position = generateRandomStationPosition(system.planets || [])
-      setSystem({...system, space_station: {
-        ...system.space_station,
-        ...position
-      }})
-      alert(`New position generated:\nX: ${position.x}\nY: ${position.y}\nZ: ${position.z}\nAttempts: ${position.attempts}${position.fallback ? ' (fallback used)' : ''}`)
-    }
+  // Toggle a single trade good in the station
+  function toggleTradeGood(goodId){
+    if(!system.space_station) return
+    const currentGoods = system.space_station.trade_goods || []
+    const newGoods = currentGoods.includes(goodId)
+      ? currentGoods.filter(id => id !== goodId)
+      : [...currentGoods, goodId]
+    setSystem({...system, space_station: {...system.space_station, trade_goods: newGoods}})
   }
 
   function setStationField(k,v){
@@ -320,13 +336,20 @@ export default function Wizard(){
                 value={system.star_type || ''}
                 onChange={e => setField('star_type', e.target.value)}
                 required
+                style={{
+                  color: system.star_type === 'Yellow' ? '#fbbf24' :
+                         system.star_type === 'Red' ? '#ef4444' :
+                         system.star_type === 'Green' ? '#22c55e' :
+                         system.star_type === 'Blue' ? '#3b82f6' :
+                         system.star_type === 'Purple' ? '#a855f7' : 'inherit'
+                }}
               >
-                <option value="">-- Select --</option>
-                <option value="Yellow">Yellow</option>
-                <option value="Red">Red</option>
-                <option value="Green">Green</option>
-                <option value="Blue">Blue</option>
-                <option value="Purple">Purple</option>
+                <option value="" style={{ color: '#9ca3af' }}>-- Select --</option>
+                <option value="Yellow" style={{ color: '#fbbf24' }}>☀ Yellow</option>
+                <option value="Red" style={{ color: '#ef4444' }}>🔴 Red</option>
+                <option value="Green" style={{ color: '#22c55e' }}>🟢 Green</option>
+                <option value="Blue" style={{ color: '#3b82f6' }}>🔵 Blue</option>
+                <option value="Purple" style={{ color: '#a855f7' }}>🟣 Purple</option>
               </select>
             </div>
 
@@ -342,15 +365,17 @@ export default function Wizard(){
                 required
               >
                 <option value="">-- Select --</option>
-                <option value="Trading">Trading</option>
-                <option value="Mining">Mining</option>
-                <option value="Manufacturing">Manufacturing</option>
-                <option value="Technology">Technology</option>
-                <option value="Scientific">Scientific</option>
-                <option value="Power Generation">Power Generation</option>
-                <option value="Mass Production">Mass Production</option>
-                <option value="Pirate">Pirate</option>
-                <option value="None">None (Abandoned)</option>
+                <option value="Trading">⚖️ Trading</option>
+                <option value="Mining">⛏️ Mining</option>
+                <option value="Manufacturing">🏭 Manufacturing</option>
+                <option value="Technology">💻 Technology</option>
+                <option value="Scientific">🔬 Scientific</option>
+                <option value="Power Generation">⚡ Power Generation</option>
+                <option value="Mass Production">📦 Mass Production</option>
+                <option value="Advanced Materials">🔧 Advanced Materials</option>
+                <option value="Pirate">☠️ Pirate</option>
+                <option value="None">⭕ None</option>
+                <option value="Abandoned">🚫 Abandoned</option>
               </select>
             </div>
 
@@ -366,10 +391,10 @@ export default function Wizard(){
                 required
               >
                 <option value="">-- Select --</option>
-                <option value="T1">T1 (Low)</option>
-                <option value="T2">T2 (Medium)</option>
-                <option value="T3">T3 (High)</option>
-                <option value="T4">T4 (Pirate)</option>
+                <option value="T1">★ (Low)</option>
+                <option value="T2">★★ (Medium)</option>
+                <option value="T3">★★★ (High)</option>
+                <option value="T4">☠ (Pirate)</option>
               </select>
             </div>
 
@@ -385,9 +410,9 @@ export default function Wizard(){
                 required
               >
                 <option value="">-- Select --</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
+                <option value="Low">🔥 Low</option>
+                <option value="Medium">🔥🔥 Medium</option>
+                <option value="High">🔥🔥🔥 High</option>
               </select>
             </div>
 
@@ -403,10 +428,10 @@ export default function Wizard(){
                 required
               >
                 <option value="">-- Select --</option>
-                <option value="Gek">Gek</option>
-                <option value="Vy'keen">Vy'keen</option>
-                <option value="Korvax">Korvax</option>
-                <option value="None">None (Abandoned)</option>
+                <option value="Gek">🐸 Gek</option>
+                <option value="Vy'keen">⚔️ Vy'keen</option>
+                <option value="Korvax">🤖 Korvax</option>
+                <option value="None">👻 None (Abandoned)</option>
               </select>
             </div>
           </div>
@@ -420,7 +445,20 @@ export default function Wizard(){
           <select
             className={`w-full p-2 border rounded bg-gray-700 ${!system.discord_tag ? 'border-red-500' : ''}`}
             value={system.discord_tag || ''}
-            onChange={e => setField('discord_tag', e.target.value || null)}
+            onChange={e => {
+              const value = e.target.value
+              if (value === 'personal') {
+                // Open modal to collect discord username
+                setPersonalDiscordModalOpen(true)
+                setPendingPersonalSelection(true)
+              } else {
+                setField('discord_tag', value || null)
+                // Clear personal discord username if switching away from personal
+                if (system.discord_tag === 'personal') {
+                  setPersonalDiscordUsername('')
+                }
+              }
+            }}
             required
           >
             <option value="">-- Select a Community (Required) --</option>
@@ -432,6 +470,21 @@ export default function Wizard(){
           <p className="text-xs text-gray-500 mt-1">
             Select which Discord community this system belongs to, or "Personal" if not affiliated with a community.
           </p>
+          {/* Show personal discord username if personal is selected */}
+          {system.discord_tag === 'personal' && personalDiscordUsername && (
+            <div className="mt-2 p-2 bg-fuchsia-900/30 border border-fuchsia-500 rounded flex justify-between items-center">
+              <span className="text-fuchsia-300">
+                Discord Username: <strong>{personalDiscordUsername}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPersonalDiscordModalOpen(true)}
+                className="text-xs px-2 py-1 bg-fuchsia-600 text-white rounded hover:bg-fuchsia-700"
+              >
+                Edit
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Your Discord Username - REQUIRED for all submissions */}
@@ -481,8 +534,8 @@ export default function Wizard(){
             {(system.planets || []).map((p, i) => (
               <div key={i} className="mb-2">
                 <PlanetEditor index={i} planet={p} onChange={updatePlanet} onRemove={removePlanet} />
-                <div className="mt-1 flex space-x-2">
-                  <button className="px-3 py-1 bg-sky-600 text-white rounded" onClick={() => editPlanet(i)}>Edit</button>
+                <div className="mt-1">
+                  <button className="px-3 py-1.5 bg-sky-600 text-white rounded text-sm" onClick={() => editPlanet(i)}>Edit</button>
                 </div>
               </div>
             ))}
@@ -501,12 +554,12 @@ export default function Wizard(){
               onChange={(e) => toggleStation(e.target.checked)}
               className="w-4 h-4"
             />
-            <span>🛸 Has Space Station (randomly placed)</span>
+            <span>🛸 Has Space Station</span>
           </label>
 
           {hasStation && system.space_station && (
             <div className="ml-6 p-3 bg-purple-900/30 rounded border border-purple-700">
-              <div className="mb-2">
+              <div className="mb-3">
                 <label className="block text-sm">Station Name</label>
                 <input
                   className="w-full mt-1"
@@ -516,7 +569,7 @@ export default function Wizard(){
                 />
               </div>
 
-              <div className="mb-2">
+              <div className="mb-3">
                 <label className="block text-sm">Race</label>
                 <select
                   className="w-full mt-1"
@@ -530,53 +583,59 @@ export default function Wizard(){
                 </select>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mb-2">
-                <div>
-                  <label className="block text-sm">X</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="w-full mt-1 bg-gray-100"
-                    value={system.space_station.x || 0}
-                    onChange={(e) => setStationField('x', parseFloat(e.target.value))}
-                    readOnly={false}
-                  />
+              {/* Orbital Position (auto-calculated, read-only) */}
+              <div className="mb-3 p-2 bg-gray-800 rounded border border-gray-600">
+                <div className="text-sm text-gray-400 mb-1">Orbital Position (auto-calculated)</div>
+                <div className="text-sm">
+                  <span className="text-cyan-300">Distance:</span> {system.space_station.orbitalRadius?.toFixed(1) || '?'} units from star
                 </div>
-                <div>
-                  <label className="block text-sm">Y</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="w-full mt-1 bg-gray-100"
-                    value={system.space_station.y || 0}
-                    onChange={(e) => setStationField('y', parseFloat(e.target.value))}
-                    readOnly={false}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm">Z</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="w-full mt-1 bg-gray-100"
-                    value={system.space_station.z || 0}
-                    onChange={(e) => setStationField('z', parseFloat(e.target.value))}
-                    readOnly={false}
-                  />
-                </div>
+                {system.space_station.slot && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    Placement: {system.space_station.slot}
+                  </div>
+                )}
               </div>
 
-              <button
-                type="button"
-                onClick={regenerateStationPosition}
-                className="px-3 py-1 bg-purple-600 text-white rounded text-sm"
-              >
-                🎲 Regenerate Random Position
-              </button>
+              {/* Trade Goods - based on economy type */}
+              <div className="mb-2">
+                <label className="block text-sm font-medium mb-2">
+                  Trade Goods Sold
+                  {system.economy_type && system.economy_level && (
+                    <span className="text-xs text-gray-400 ml-2">
+                      ({system.economy_type} economy, {system.economy_level === 'T3' ? 'High' : system.economy_level === 'T2' ? 'Medium' : system.economy_level === 'T1' ? 'Low' : 'Pirate'} wealth)
+                    </span>
+                  )}
+                </label>
+                {!system.economy_type || system.economy_type === 'None' || system.economy_type === 'Abandoned' ? (
+                  <div className="text-xs text-gray-500 italic">
+                    No trade goods available (abandoned system or no economy type selected)
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-48 overflow-y-auto p-2 bg-gray-800 rounded">
+                    {getTradeGoodsForEconomyAndTier(system.economy_type, system.economy_level).map(good => (
+                      <label key={good.id} className="flex items-center space-x-2 text-sm cursor-pointer hover:bg-gray-700 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={(system.space_station.trade_goods || []).includes(good.id)}
+                          onChange={() => toggleTradeGood(good.id)}
+                          className="w-3 h-3"
+                        />
+                        <span className="text-gray-200">
+                          {good.name}
+                          <span className="text-xs text-gray-500 ml-1">(T{good.tier})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Select which trade goods this station sells (based on economy tier)
+                </p>
+              </div>
 
               {system.space_station.fallback && (
                 <div className="mt-2 text-xs text-yellow-300 bg-yellow-900/30 border border-yellow-700 p-2 rounded">
-                  ⚠️ Fallback position used - couldn't find collision-free spot after 100 attempts
+                  Station placed in fallback position - system has unusual planet configuration
                 </div>
               )}
             </div>
@@ -589,11 +648,11 @@ export default function Wizard(){
               Note: You are not logged in as admin. Your system will be submitted for approval.
             </div>
           )}
-          <div className="flex space-x-2">
-            <Button className="btn-primary" type="submit" onClick={() => { explicitSubmitRef.current = true }} disabled={isSubmitting}>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button className="btn-primary w-full sm:w-auto" type="submit" onClick={() => { explicitSubmitRef.current = true }} disabled={isSubmitting}>
               {isSubmitting ? 'Submitting...' : (isAdmin ? 'Save System' : 'Submit for Approval')}
             </Button>
-            <Button className="bg-gray-200 text-gray-800" onClick={()=> navigate('/systems')} disabled={isSubmitting}>Cancel</Button>
+            <Button className="bg-gray-200 text-gray-800 w-full sm:w-auto" onClick={()=> navigate('/systems')} disabled={isSubmitting}>Cancel</Button>
           </div>
         </div>
         {planetModalOpen && (
@@ -602,6 +661,69 @@ export default function Wizard(){
         </Modal>
       )}
 
+        {/* Personal Discord Username Modal */}
+        {personalDiscordModalOpen && (
+          <Modal
+            title="Personal Discord Username"
+            onClose={() => {
+              setPersonalDiscordModalOpen(false)
+              // If they cancel without entering a username, don't set personal tag
+              if (pendingPersonalSelection && !personalDiscordUsername.trim()) {
+                setPendingPersonalSelection(false)
+              }
+            }}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-300">
+                Since you selected "Personal" (no community affiliation), please provide your Discord username
+                so we can contact you if we need more information about your submission.
+              </p>
+              <div>
+                <label className="block text-sm font-semibold mb-2">
+                  Discord Username <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-2 border rounded bg-gray-700 text-white"
+                  value={personalDiscordUsername}
+                  onChange={e => setPersonalDiscordUsername(e.target.value)}
+                  placeholder="e.g., username or username#1234"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter your Discord username so we can DM you if needed.
+                </p>
+              </div>
+              <div className="flex space-x-2">
+                <Button
+                  className="btn-primary bg-fuchsia-600 hover:bg-fuchsia-700"
+                  onClick={() => {
+                    if (!personalDiscordUsername.trim()) {
+                      alert('Discord username is required')
+                      return
+                    }
+                    // Set the discord_tag to personal and close modal
+                    setField('discord_tag', 'personal')
+                    setPendingPersonalSelection(false)
+                    setPersonalDiscordModalOpen(false)
+                  }}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  className="bg-gray-600 text-white hover:bg-gray-500"
+                  onClick={() => {
+                    setPersonalDiscordModalOpen(false)
+                    setPendingPersonalSelection(false)
+                    setPersonalDiscordUsername('')
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
         </form>
       </Card>
     </div>

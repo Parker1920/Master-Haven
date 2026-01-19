@@ -5,22 +5,28 @@
 # start_exe = true
 # ///
 """
-Haven Extractor v9.0.0 - Batch Mode
+Haven Extractor v10.0.0 - Direct API Integration
 
-Extracts planet data from NMS and sends it to Haven UI via API.
-Works with ngrok for remote connections.
-
-BATCH MODE:
-- Warp to systems - planet data captured automatically via hook
-- All visited systems stored in memory
-- Click "Export Batch" to save ALL systems to a single JSON
-- Click "Batch Status" to see collection progress
+Extracts planet data from NMS and sends directly to Haven UI via API.
+Features session configuration for user identification and community routing.
 
 WORKFLOW:
-1. Run the extractor and start NMS
-2. Warp to a system - data captured automatically
-3. Continue warping to more systems
-4. Click "Export Batch" when ready to save all data
+1. Run the extractor - Config GUI appears on first launch
+2. Enter Discord Username, Discord ID, Community Tag, Reality
+3. Start the game and warp to systems - data captured automatically
+4. Click "Export to Haven UI" to upload systems
+
+GUI BUTTONS:
+- Check System Data: Shows current system info in log
+- Check Batch Data: Shows batch collection status in log
+- Export to Haven UI: Opens export dialog with duplicate check
+
+FEATURES:
+- Direct API integration (no watcher needed)
+- Pre-flight duplicate checking
+- User identification (Discord username + ID)
+- Community tag routing (Haven, IEA, personal, etc.)
+- Reality mode support (Normal/Permadeath)
 
 Data extracted per system:
 - star_type, economy_type, economy_strength, conflict_level
@@ -31,15 +37,6 @@ Data extracted per planet:
 - flora_level, fauna_level, sentinel_level
 - common_resource, uncommon_resource, rare_resource
 - is_moon, planet_size, planet_name
-
-SETUP:
-1. Create config.json in Documents/Haven-Extractor/ with your API URL:
-   {"api_url": "https://your-ngrok-url.ngrok-free.app"}
-2. Or place haven_config.json in the same folder as this mod
-
-Data is:
-- Saved locally as backup in Documents/Haven-Extractor/
-- Sent to Haven UI API automatically (if configured)
 """
 
 
@@ -50,13 +47,14 @@ import ctypes
 import urllib.request
 import urllib.error
 import ssl
+import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, List, Dict
 
 from pymhf import Mod
 from pymhf.core.memutils import map_struct, get_addressof
-from pymhf.gui.decorators import gui_button
+from pymhf.gui.decorators import gui_button, gui_combobox, gui_variable
 import nmspy.data.types as nms
 import nmspy.data.exported_types as nmse
 from nmspy.decorators import on_state_change
@@ -66,30 +64,39 @@ from ctypes import c_uint64, pointer, sizeof
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# API CONFIGURATION
+# API CONFIGURATION - HARDCODED FOR DIST VERSION
 # =============================================================================
-# The extractor will POST extraction data to {API_BASE_URL}/api/extraction
-#
-# Configuration is loaded from (in order of priority):
-# 1. haven_config.json in the same folder as the mod
-# 2. %USERPROFILE%\Documents\Haven-Extractor\config.json
-# 3. Hardcoded defaults below
-#
-# Example haven_config.json:
-# {
-#     "api_url": "https://abc123.ngrok-free.app",
-#     "api_key": "your-api-key-here"
-# }
+# Direct API integration with Haven UI
+# API key is embedded for the official Haven Extractor distribution
 # =============================================================================
-DEFAULT_API_URL = "https://voyagers-haven-3dmap.ngrok.io"  # Voyagers Haven API
-DEFAULT_API_KEY = ""  # Optional: API key for authentication
+DEFAULT_API_URL = "https://voyagers-haven-3dmap.ngrok.io"
+HAVEN_EXTRACTOR_API_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"
+
+# Default user config (populated by config GUI)
+DEFAULT_USER_CONFIG = {
+    "discord_username": "",
+    "personal_id": "",
+    "discord_tag": "personal",
+    "reality": "Normal",
+}
 
 
-def load_config() -> dict:
-    """Load configuration from config file or use defaults."""
+# Note: Config GUI now uses pymhf's native DearPyGUI via gui_variable and gui_combobox decorators
+# in the HavenExtractorMod class. See the class definition for config fields.
+
+
+def load_config_from_file() -> dict:
+    """
+    Load configuration from config file only - NO GUI.
+    This is safe to call at module load time.
+    """
     config = {
         "api_url": DEFAULT_API_URL,
-        "api_key": DEFAULT_API_KEY,
+        "api_key": HAVEN_EXTRACTOR_API_KEY,
+        "discord_username": "",
+        "personal_id": "",
+        "discord_tag": "personal",
+        "reality": "Normal",
     }
 
     # Try loading from various locations
@@ -103,10 +110,10 @@ def load_config() -> dict:
             if config_path.exists():
                 with open(config_path, 'r', encoding='utf-8') as f:
                     file_config = json.load(f)
-                    if file_config.get("api_url"):
-                        config["api_url"] = file_config["api_url"]
-                    if file_config.get("api_key"):
-                        config["api_key"] = file_config["api_key"]
+                    # Load all config fields
+                    for key in config:
+                        if key in file_config and file_config[key]:
+                            config[key] = file_config[key]
                     logger.info(f"Loaded config from: {config_path}")
                     break
         except Exception as e:
@@ -115,10 +122,28 @@ def load_config() -> dict:
     return config
 
 
-# Load config at module level
-_config = load_config()
+def save_config(config: dict):
+    """Save configuration to file."""
+    save_path = Path.home() / "Documents" / "Haven-Extractor" / "config.json"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(save_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
+    logger.info(f"Saved user config to: {save_path}")
+
+
+def config_needs_setup(config: dict) -> bool:
+    """Check if configuration needs user setup (missing required fields)."""
+    return not config.get("discord_username")
+
+
+# Load config at module level - NO GUI (deferred to button/export)
+_config = load_config_from_file()
 API_BASE_URL = _config["api_url"]
 API_KEY = _config["api_key"]
+USER_DISCORD_USERNAME = _config.get("discord_username", "")
+USER_PERSONAL_ID = _config.get("personal_id", "")
+USER_DISCORD_TAG = _config.get("discord_tag", "personal")
+USER_REALITY = _config.get("reality", "Normal")
 
 # =============================================================================
 # MEMORY OFFSET CONSTANTS (from MBINCompiler / NMS 4.13 PDB)
@@ -426,7 +451,7 @@ def clean_weather_string(weather_str: str) -> str:
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "9.0.0"
+    __version__ = "10.0.0"
     __description__ = "Batch mode planet data extraction"
 
     # Mapping for flora/fauna levels (NMS adjectives)
@@ -437,10 +462,79 @@ class HavenExtractorMod(Mod):
     # Sentinel activity levels
     SENTINEL_LEVELS = {0: "Minimal", 1: "Limited", 2: "High", 3: "Aggressive"}
 
+    # =========================================================================
+    # CONFIG GUI FIELDS - Using pymhf's native DearPyGUI
+    # These appear as editable fields in the mod's GUI tab
+    # =========================================================================
+
+    @property
+    @gui_variable.STRING(label="Discord Username")
+    def discord_username(self) -> str:
+        return self._discord_username
+
+    @discord_username.setter
+    def discord_username(self, value: str):
+        global USER_DISCORD_USERNAME
+        self._discord_username = value
+        USER_DISCORD_USERNAME = value
+        self._save_config_to_file()
+
+    @property
+    @gui_variable.STRING(label="Discord ID (18-digit)")
+    def personal_id(self) -> str:
+        return self._personal_id
+
+    @personal_id.setter
+    def personal_id(self, value: str):
+        global USER_PERSONAL_ID
+        self._personal_id = value
+        USER_PERSONAL_ID = value
+        self._save_config_to_file()
+
+    @gui_combobox("Community Tag", items=["personal", "Haven", "IEA"])
+    def set_discord_tag(self, tag: str):
+        """Called when user selects a community tag from dropdown."""
+        global USER_DISCORD_TAG
+        self._discord_tag = tag
+        USER_DISCORD_TAG = tag
+        self._save_config_to_file()
+        logger.info(f"[CONFIG] Community tag set to: {tag}")
+
+    @gui_combobox("Reality Mode", items=["Normal", "Permadeath"])
+    def set_reality(self, reality: str):
+        """Called when user selects reality mode from dropdown."""
+        global USER_REALITY
+        self._reality = reality
+        USER_REALITY = reality
+        self._save_config_to_file()
+        logger.info(f"[CONFIG] Reality mode set to: {reality}")
+
+    def _save_config_to_file(self):
+        """Save current config to file."""
+        try:
+            config = {
+                "api_url": DEFAULT_API_URL,
+                "api_key": HAVEN_EXTRACTOR_API_KEY,
+                "discord_username": self._discord_username,
+                "personal_id": self._personal_id,
+                "discord_tag": self._discord_tag,
+                "reality": self._reality,
+            }
+            save_config(config)
+        except Exception as e:
+            logger.debug(f"Could not save config: {e}")
+
     def __init__(self):
         super().__init__()
         self._output_dir = Path.home() / "Documents" / "Haven-Extractor"
         self._output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize config fields from loaded config
+        self._discord_username = USER_DISCORD_USERNAME
+        self._personal_id = USER_PERSONAL_ID
+        self._discord_tag = USER_DISCORD_TAG
+        self._reality = USER_REALITY
+
         self._pending_extraction = False
         self._last_extracted_seed = None
         self._cached_solar_system = None
@@ -475,14 +569,21 @@ class HavenExtractorMod(Mod):
 
 
         logger.info("=" * 60)
-        logger.info("Haven Extractor v9.0.0 - Batch Mode")
+        logger.info("Haven Extractor v10.0.0 - Direct API Integration")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
-        logger.info("*** BATCH MODE ***")
-        logger.info("1. Warp to system - data captured automatically")
-        logger.info("2. Continue warping - all systems saved to batch")
-        logger.info("3. Click 'Export Batch' to save ALL systems to JSON")
+        logger.info("*** CONFIGURATION ***")
+        logger.info("Use the text fields and dropdowns above to set:")
+        logger.info("  - Discord Username (required)")
+        logger.info("  - Discord ID (18-digit, optional)")
+        logger.info("  - Community Tag (dropdown)")
+        logger.info("  - Reality Mode (dropdown)")
+        logger.info("")
+        logger.info("*** WORKFLOW ***")
+        logger.info("1. Enter your Discord username above")
+        logger.info("2. Warp to systems - data captured automatically")
+        logger.info("3. Click 'Export to Haven UI' when ready")
         logger.info("=" * 60)
 
 
@@ -698,7 +799,7 @@ class HavenExtractorMod(Mod):
 
             system_data = {
                 "extraction_time": datetime.now().isoformat(),
-                "extractor_version": "8.3.0",
+                "extractor_version": "10.0.0",
                 "trigger": "batch_auto_save",
                 "source": "live_extraction",
                 "data_source": data_source,
@@ -1144,8 +1245,8 @@ class HavenExtractorMod(Mod):
     # GUI BUTTONS
     # =========================================================================
 
-    @gui_button("Check Planet Data")
-    def check_planet_data(self):
+    @gui_button("Check System Data")
+    def check_system_data(self):
         """
         Check planet data status - shows both mPlanetData AND captured hook data.
         """
@@ -1276,98 +1377,20 @@ class HavenExtractorMod(Mod):
 
         logger.info("=" * 60)
 
-    @gui_button("Extract Now")
-    def manual_extract(self):
-        """
-        Click this button to extract planet data.
-        v8.1.4: Uses direct memory reads + captured hook data + weather.
-        """
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> EXTRACTION TRIGGERED (v8.1.4) <<<")
-        logger.info(f">>> Using direct memory read + {len(self._captured_planets)} captured planets <<<")
-        logger.info("=" * 60)
-
-        self._do_extraction(force=True, trigger=f"manual_extract_{len(self._captured_planets)}_captured")
-
     # =========================================================================
-    # v8.2.0: BATCH MODE GUI BUTTONS
+    # v10.0.0: STREAMLINED GUI BUTTONS
     # =========================================================================
 
-    @gui_button("Export Batch")
-    def export_batch(self):
-        """
-        Export ALL systems collected in batch to a single JSON file.
-        v8.2.0: Allows multi-system collection before export.
-        """
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> BATCH EXPORT TRIGGERED (v8.2.0) <<<")
-        logger.info("=" * 60)
-
-        # First, save the current system to batch if there's captured data
-        if self._captured_planets:
-            logger.info("[BATCH] Saving current system to batch before export...")
-            self._save_current_system_to_batch()
-
-        if not self._batch_systems:
-            logger.warning("[BATCH] No systems in batch to export!")
-            logger.info("[BATCH] Visit some systems first, then click 'Export Batch'")
-            return
-
-        # Build batch export data
-        total_planets = sum(sys.get('planet_count', 0) for sys in self._batch_systems)
-
-        batch_data = {
-            "batch_mode": True,
-            "extraction_time": datetime.now().isoformat(),
-            "extractor_version": "8.3.0",
-            "trigger": "batch_export",
-            "total_systems": len(self._batch_systems),
-            "total_planets": total_planets,
-            "discoverer_name": "HavenExtractor",
-            "discovery_timestamp": int(datetime.now().timestamp()),
-            "systems": self._batch_systems,
-        }
-
-        self._write_batch_extraction(batch_data)
-
-        logger.info("")
-        logger.info("*" * 60)
-        logger.info(f">>> BATCH EXPORT COMPLETE! <<<")
-        logger.info(f"    Systems exported: {len(self._batch_systems)}")
-        logger.info(f"    Total planets: {total_planets}")
-        logger.info("*" * 60)
-        logger.info("")
-
-    @gui_button("Clear Batch")
-    def clear_batch(self):
-        """
-        Clear all systems from batch storage.
-        Use this to start a fresh batch collection.
-        """
-        count = len(self._batch_systems)
-        self._batch_systems.clear()
-
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(f">>> BATCH CLEARED! <<<")
-        logger.info(f"    Removed {count} systems from batch")
-        logger.info("    Ready to start fresh collection")
-        logger.info("=" * 60)
-        logger.info("")
-
-    @gui_button("Batch Status")
-    def batch_status(self):
+    @gui_button("Check Batch Data")
+    def check_batch_data(self):
         """
         Show current batch status - how many systems are stored.
         """
         logger.info("")
         logger.info("=" * 60)
-        logger.info(">>> BATCH STATUS (v8.2.0) <<<")
+        logger.info(">>> BATCH DATA STATUS (v10.0.0) <<<")
         logger.info("=" * 60)
 
-        logger.info(f"  Batch mode enabled: {self._batch_mode_enabled}")
         logger.info(f"  Systems in batch: {len(self._batch_systems)}")
 
         if self._batch_systems:
@@ -1389,10 +1412,259 @@ class HavenExtractorMod(Mod):
         logger.info("  Current system:")
         logger.info(f"    Captured planets: {len(self._captured_planets)}")
         if self._captured_planets:
-            logger.info("    (Will be added to batch on next warp or Export Batch)")
+            logger.info("    (Will be added to batch on Export)")
+
+        logger.info("")
+        logger.info("  User config:")
+        logger.info(f"    Discord: {USER_DISCORD_USERNAME}")
+        logger.info(f"    Community: {USER_DISCORD_TAG}")
+        logger.info(f"    Reality: {USER_REALITY}")
 
         logger.info("=" * 60)
         logger.info("")
+
+    @gui_button("Show Config Status")
+    def show_config_status(self):
+        """
+        v10.0.0: Display current configuration in log.
+        Config fields are editable in the GUI above (Discord Username, Discord ID, dropdowns).
+        """
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(">>> CURRENT CONFIGURATION <<<")
+        logger.info("=" * 60)
+        logger.info(f"  Discord Username: {self._discord_username or '(not set)'}")
+        logger.info(f"  Discord ID:       {self._personal_id or '(not set)'}")
+        logger.info(f"  Community Tag:    {self._discord_tag}")
+        logger.info(f"  Reality Mode:     {self._reality}")
+        logger.info("=" * 60)
+        if not self._discord_username:
+            logger.warning("[CONFIG] Discord Username is required for export!")
+            logger.info("[CONFIG] Enter your Discord username in the text field above.")
+        else:
+            logger.info("[CONFIG] Configuration is complete. Ready to export!")
+        logger.info("")
+
+    @gui_button("Export to Haven UI")
+    def export_to_haven_ui(self):
+        """
+        v10.0.0: Export systems directly to Haven UI with duplicate checking.
+        Uploads all collected systems in batch with progress logging.
+        """
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(">>> EXPORT TO HAVEN UI (v10.0.0) <<<")
+        logger.info("=" * 60)
+
+        # Check if config is complete
+        if not self._discord_username:
+            logger.error("[EXPORT] Configuration incomplete!")
+            logger.error("[EXPORT] Please enter your Discord Username in the text field above.")
+            logger.info("[EXPORT] Use the 'Show Config Status' button to verify your settings.")
+            return
+
+        # First, save current system to batch if there's data
+        if self._captured_planets:
+            logger.info("[EXPORT] Saving current system to batch...")
+            self._save_current_system_to_batch()
+
+        if not self._batch_systems:
+            logger.warning("[EXPORT] No systems to export!")
+            logger.info("[EXPORT] Visit some systems first, then click 'Export to Haven UI'")
+            return
+
+        total = len(self._batch_systems)
+        logger.info(f"[EXPORT] Preparing to export {total} system(s)...")
+
+        # Run export in a thread to avoid blocking the game
+        def run_export():
+            try:
+                self._run_export_flow()
+            except Exception as e:
+                logger.error(f"Export failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+        thread = threading.Thread(target=run_export, daemon=True)
+        thread.start()
+
+    def _run_export_flow(self):
+        """
+        Run the full export flow with log-based progress.
+        No tkinter dialogs - all output goes to the pymhf log window.
+        """
+        systems_to_export = self._batch_systems.copy()
+        total_systems = len(systems_to_export)
+
+        if total_systems == 0:
+            logger.warning("[EXPORT] No systems to export!")
+            return
+
+        logger.info(f"[EXPORT] Starting export of {total_systems} system(s)...")
+        logger.info("")
+
+        # Step 1: Pre-flight duplicate check
+        logger.info("[EXPORT] Running pre-flight duplicate check...")
+        glyph_codes = [sys.get('glyph_code') for sys in systems_to_export if sys.get('glyph_code')]
+
+        check_result = self._check_duplicates(glyph_codes)
+        if not check_result:
+            logger.warning("[EXPORT] Could not verify duplicates with Haven UI")
+            logger.info("[EXPORT] Proceeding with export anyway...")
+            check_result = {"results": {}, "summary": {"available": len(glyph_codes), "already_charted": 0, "pending_review": 0}}
+
+        summary = check_result.get("summary", {})
+        results = check_result.get("results", {})
+
+        available_count = summary.get("available", 0)
+        charted_count = summary.get("already_charted", 0)
+        pending_count = summary.get("pending_review", 0)
+
+        logger.info("")
+        logger.info("--- DUPLICATE CHECK RESULTS ---")
+        logger.info(f"  Ready to submit: {available_count}")
+        logger.info(f"  Already charted: {charted_count}")
+        logger.info(f"  Pending review:  {pending_count}")
+        logger.info("")
+
+        # Show details for duplicates
+        if charted_count > 0 or pending_count > 0:
+            for glyph, info in results.items():
+                status = info.get('status', 'unknown')
+                if status == 'already_charted':
+                    name = info.get('system_name', 'Unknown')
+                    logger.info(f"  [CHARTED] {glyph} - \"{name}\"")
+                elif status == 'pending_review':
+                    by = info.get('submitted_by', 'Unknown')
+                    logger.info(f"  [PENDING] {glyph} - by {by}")
+            logger.info("")
+
+        # Step 2: Filter to only new systems (skip already charted/pending)
+        if charted_count > 0 or pending_count > 0:
+            systems_to_export = [
+                sys for sys in systems_to_export
+                if results.get(sys.get('glyph_code'), {}).get('status') == 'available'
+            ]
+            logger.info(f"[EXPORT] Exporting {len(systems_to_export)} new systems (skipping duplicates)")
+        else:
+            logger.info(f"[EXPORT] Exporting all {len(systems_to_export)} systems")
+
+        # Step 3: Upload systems
+        if not systems_to_export:
+            logger.info("[EXPORT] No new systems to export after filtering duplicates")
+            return
+
+        self._upload_systems_to_api_log(systems_to_export)
+
+    def _check_duplicates(self, glyph_codes: list) -> dict:
+        """Check which systems already exist in Haven."""
+        try:
+            url = f"{API_BASE_URL}/api/check_glyph_codes"
+            payload = json.dumps({"glyph_codes": glyph_codes}).encode('utf-8')
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
+                'User-Agent': 'HavenExtractor/10.0.0',
+            })
+
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                return json.loads(response.read().decode('utf-8'))
+
+        except Exception as e:
+            logger.error(f"Duplicate check failed: {e}")
+            return None
+
+    def _upload_systems_to_api_log(self, systems: list):
+        """Upload systems to Haven UI API with log-based progress (no tkinter)."""
+        total = len(systems)
+        results = {"submitted": 0, "skipped": 0, "failed": 0, "errors": []}
+
+        logger.info("")
+        logger.info("--- UPLOADING TO HAVEN UI ---")
+        logger.info("")
+
+        for i, system in enumerate(systems):
+            glyph = system.get('glyph_code', 'Unknown')
+            logger.info(f"[{i+1}/{total}] Uploading {glyph}...")
+
+            try:
+                # Add user config to system data
+                system['discord_username'] = self._discord_username
+                system['personal_id'] = self._personal_id
+                system['discord_tag'] = self._discord_tag
+                system['reality'] = self._reality
+
+                result = self._send_single_system_to_api(system)
+                if result.get('status') == 'ok':
+                    logger.info(f"  [OK] {glyph} - submitted")
+                    results["submitted"] += 1
+                elif result.get('status') == 'updated':
+                    logger.info(f"  [OK] {glyph} - updated")
+                    results["submitted"] += 1
+                elif result.get('status') == 'already_charted':
+                    logger.info(f"  [SKIP] {glyph} - already charted")
+                    results["skipped"] += 1
+                else:
+                    error_msg = result.get('message', 'unknown error')
+                    logger.warning(f"  [FAIL] {glyph} - {error_msg}")
+                    results["failed"] += 1
+                    results["errors"].append(f"{glyph}: {error_msg}")
+
+            except Exception as e:
+                logger.error(f"  [FAIL] {glyph} - {str(e)}")
+                results["failed"] += 1
+                results["errors"].append(f"{glyph}: {str(e)}")
+
+        # Show final results
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(">>> EXPORT COMPLETE <<<")
+        logger.info("=" * 60)
+        logger.info(f"  Submitted: {results['submitted']}")
+        logger.info(f"  Skipped:   {results['skipped']}")
+        logger.info(f"  Failed:    {results['failed']}")
+        logger.info("=" * 60)
+
+        # Clear batch after successful export
+        if results["submitted"] > 0:
+            self._batch_systems.clear()
+            logger.info("[EXPORT] Batch cleared after successful export")
+            logger.info("[EXPORT] Your submissions are now pending admin review!")
+        logger.info("")
+
+    def _send_single_system_to_api(self, system: dict) -> dict:
+        """Send a single system to the Haven UI API."""
+        try:
+            url = f"{API_BASE_URL}/api/extraction"
+            payload = json.dumps(system, default=str).encode('utf-8')
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
+                'User-Agent': 'HavenExtractor/10.0.0',
+            })
+
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                return json.loads(response.read().decode('utf-8'))
+
+        except urllib.error.HTTPError as e:
+            try:
+                error_body = json.loads(e.read().decode('utf-8'))
+                return error_body
+            except:
+                return {"status": "error", "message": f"HTTP {e.code}"}
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     # =========================================================================
     # EXTRACTION LOGIC

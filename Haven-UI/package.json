@@ -14,12 +14,15 @@
     "@react-three/drei": "^9.120.0",
     "@react-three/fiber": "^8.17.0",
     "axios": "^1.4.0",
+    "date-fns": "^4.1.0",
     "esbuild": "^0.27.0",
     "react": "^18.2.0",
+    "react-datepicker": "^9.1.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.1",
     "react-select": "^5.10.2",
     "react-window": "^1.8.10",
+    "recharts": "^3.6.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

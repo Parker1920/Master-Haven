@@ -604,3 +604,227 @@ def migration_1_16_0_personal_uploads(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.16.0")
+
+
+@register_migration("1.17.0", "Submission events tracking system")
+def migration_1_17_0_events(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Submission Events Tracking System.
+
+    Adds:
+    - events table for tracking Discord submission events/competitions
+    - Enables time-boxed leaderboards and event-specific analytics
+    """
+    cursor = conn.cursor()
+
+    # Check if events table already exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='events'
+    """)
+    if not cursor.fetchone():
+        cursor.execute('''
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                discord_tag TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                description TEXT,
+                created_by TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        cursor.execute('CREATE INDEX idx_events_discord_tag ON events(discord_tag)')
+        cursor.execute('CREATE INDEX idx_events_dates ON events(start_date, end_date)')
+        cursor.execute('CREATE INDEX idx_events_active ON events(is_active)')
+        logger.info("Created events table with indexes")
+    else:
+        logger.info("events table already exists")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.17.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.17.0")
+
+
+@register_migration("1.18.0", "Space station trade goods")
+def migration_1_18_0_station_trade_goods(conn: sqlite3.Connection):
+    """
+    Add trade_goods column to space_stations table.
+    This stores a JSON array of trade good IDs that the station sells.
+    The sell_percent and buy_percent columns are deprecated but kept for backwards compatibility.
+    """
+    cursor = conn.cursor()
+
+    # Check if trade_goods column exists
+    cursor.execute("PRAGMA table_info(space_stations)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if 'trade_goods' not in columns:
+        cursor.execute('ALTER TABLE space_stations ADD COLUMN trade_goods TEXT DEFAULT "[]"')
+        logger.info("Added trade_goods column to space_stations table")
+    else:
+        logger.info("trade_goods column already exists in space_stations")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.18.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.18.0")
+
+
+@register_migration("1.19.0", "Backfill anonymous submissions with IP-matched usernames")
+def migration_1_19_0_backfill_anonymous_usernames(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Backfill Anonymous Submission Usernames.
+
+    Identifies anonymous submissions that can be attributed to known users
+    based on IP address matching. Updates personal_discord_username field
+    for submissions where:
+    - submitted_by is NULL, 'Anonymous', or empty
+    - personal_discord_username is NULL or empty
+    - Same IP has other submissions with a known username
+    """
+    cursor = conn.cursor()
+
+    # Find IP addresses that have both anonymous and identified submissions
+    cursor.execute('''
+        SELECT DISTINCT submitted_by_ip
+        FROM pending_systems
+        WHERE submitted_by_ip IS NOT NULL
+          AND submitted_by_ip != ''
+          AND (submitted_by IS NULL OR submitted_by = 'Anonymous' OR submitted_by = 'anonymous' OR submitted_by = '')
+          AND (personal_discord_username IS NULL OR personal_discord_username = '')
+    ''')
+    anonymous_ips = [row[0] for row in cursor.fetchall()]
+
+    total_updated = 0
+    ip_username_map = {}
+
+    for ip in anonymous_ips:
+        # Find if this IP has any identified submissions
+        cursor.execute('''
+            SELECT personal_discord_username, submitted_by, COUNT(*) as cnt
+            FROM pending_systems
+            WHERE submitted_by_ip = ?
+              AND (
+                (personal_discord_username IS NOT NULL AND personal_discord_username != '' AND personal_discord_username NOT IN ('None', 'null'))
+                OR (submitted_by IS NOT NULL AND submitted_by != '' AND submitted_by NOT IN ('Anonymous', 'anonymous', 'None', 'null', ''))
+              )
+            GROUP BY personal_discord_username, submitted_by
+            ORDER BY cnt DESC
+            LIMIT 1
+        ''', (ip,))
+
+        match = cursor.fetchone()
+        if match:
+            # Prefer personal_discord_username, fallback to submitted_by
+            username = match[0] if match[0] and match[0] not in ('None', 'null', '') else match[1]
+            if username and username not in ('Anonymous', 'anonymous', 'None', 'null', ''):
+                ip_username_map[ip] = username
+
+    # Update anonymous submissions with matched usernames
+    for ip, username in ip_username_map.items():
+        cursor.execute('''
+            UPDATE pending_systems
+            SET personal_discord_username = ?
+            WHERE submitted_by_ip = ?
+              AND (submitted_by IS NULL OR submitted_by = 'Anonymous' OR submitted_by = 'anonymous' OR submitted_by = '')
+              AND (personal_discord_username IS NULL OR personal_discord_username = '' OR personal_discord_username = 'None')
+        ''', (username, ip))
+
+        updated = cursor.rowcount
+        if updated > 0:
+            total_updated += updated
+            logger.info(f"Updated {updated} anonymous submissions from IP {ip[:20]}... to username '{username}'")
+
+    logger.info(f"Backfill complete: Updated {total_updated} anonymous submissions with IP-matched usernames")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.19.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.19.0")
+
+
+@register_migration("1.20.0", "Haven Extractor API integration - personal_id field and API key")
+def migration_1_20_0_haven_extractor_integration(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Haven Extractor API Integration.
+
+    Adds personal_id field for Discord snowflake ID tracking and creates
+    the Haven Extractor API key for direct mod-to-API communication.
+
+    Changes:
+    - Add personal_id column to pending_systems (Discord snowflake ID)
+    - Add personal_id column to systems (for approved systems)
+    - Create 'Haven Extractor' API key with submit + check_duplicate permissions
+    """
+    import hashlib
+
+    cursor = conn.cursor()
+
+    # Add personal_id to pending_systems (Discord snowflake ID - 18 digit string)
+    cursor.execute("PRAGMA table_info(pending_systems)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'personal_id' not in columns:
+        cursor.execute("ALTER TABLE pending_systems ADD COLUMN personal_id TEXT")
+        logger.info("Added personal_id column to pending_systems")
+
+    # Add personal_id to systems table (for approved systems)
+    cursor.execute("PRAGMA table_info(systems)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'personal_id' not in columns:
+        cursor.execute("ALTER TABLE systems ADD COLUMN personal_id TEXT")
+        logger.info("Added personal_id column to systems")
+
+    # Create Haven Extractor API key
+    api_key = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    key_prefix = api_key[:24]  # "vh_live_HvnXtr8k9Lm2NpQ4"
+
+    # Check if key already exists (by name or hash)
+    cursor.execute("SELECT id FROM api_keys WHERE name = 'Haven Extractor' OR key_hash = ?", (key_hash,))
+    existing_key = cursor.fetchone()
+
+    if not existing_key:
+        cursor.execute('''
+            INSERT INTO api_keys (key_hash, key_prefix, name, created_at, permissions, rate_limit, is_active, created_by, discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 'system', NULL)
+        ''', (key_hash, key_prefix, 'Haven Extractor', datetime.now().isoformat(), '["submit", "check_duplicate"]', 1000))
+        logger.info("Created 'Haven Extractor' API key with rate_limit=1000")
+    else:
+        logger.info("Haven Extractor API key already exists, skipping creation")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.20.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.20.0")

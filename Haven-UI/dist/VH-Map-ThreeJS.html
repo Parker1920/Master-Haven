@@ -644,12 +644,107 @@
         }
         @media (max-width: 768px) {
             #filter-controls {
-                top: auto;
-                bottom: 120px;
-                right: 10px;
-                left: 10px;
-                min-width: auto;
+                display: none; /* Hide filter controls on mobile - moved into search panel */
             }
+            /* Mobile search panel - full redesign */
+            #search-panel {
+                top: auto;
+                bottom: 75px;
+                left: 10px;
+                right: 70px;
+                width: auto;
+                transform: none;
+                max-height: 60vh;
+                overflow: hidden;
+            }
+            #search-panel.collapsed {
+                transform: translateY(calc(100% - 44px));
+                max-height: 44px;
+            }
+            #search-panel-header {
+                padding: 10px 12px;
+            }
+            #search-panel-header h3 {
+                font-size: 13px;
+            }
+            #search-panel-content {
+                padding: 10px;
+                max-height: calc(60vh - 44px);
+                overflow-y: auto;
+            }
+            #search-panel.collapsed #search-panel-content {
+                display: none;
+            }
+            #search-input-container {
+                flex-wrap: wrap;
+            }
+            #system-search-input {
+                flex: 1 1 100%;
+                margin-bottom: 8px;
+            }
+            #search-btn {
+                flex: 1;
+            }
+            /* Mobile filter controls inside search panel */
+            #mobile-filters {
+                display: block !important;
+                margin-bottom: 12px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid rgba(0, 194, 179, 0.2);
+            }
+            #mobile-filters .filter-row {
+                margin: 8px 0;
+            }
+            #mobile-filters .filter-row label {
+                display: block;
+                color: #888;
+                font-size: 10px;
+                margin-bottom: 4px;
+            }
+            #mobile-filters .filter-btn-group {
+                display: flex;
+                gap: 4px;
+            }
+            #mobile-filters .filter-btn {
+                flex: 1;
+                padding: 8px 6px;
+                background: rgba(40, 40, 60, 0.8);
+                border: 1px solid #444;
+                border-radius: 4px;
+                color: #888;
+                cursor: pointer;
+                font-size: 11px;
+                transition: all 0.2s;
+            }
+            #mobile-filters .filter-btn.active {
+                background: #9d4edd;
+                border-color: #9d4edd;
+                color: white;
+            }
+            #mobile-filters select {
+                width: 100%;
+                padding: 8px;
+                background: rgba(40, 40, 60, 0.8);
+                border: 1px solid #444;
+                border-radius: 4px;
+                color: white;
+                font-size: 12px;
+            }
+            #mobile-filters #mobile-filter-status {
+                font-size: 10px;
+                color: #00C2B3;
+                margin-top: 8px;
+                padding: 6px;
+                background: rgba(0, 194, 179, 0.1);
+                border-radius: 4px;
+            }
+            #search-results {
+                max-height: 200px;
+            }
+        }
+        /* Hide mobile filters on desktop */
+        #mobile-filters {
+            display: none;
         }
     </style>
 </head>
@@ -729,12 +824,30 @@
     </div>
 
     <!-- Collapsible Search Panel - Left Side -->
-    <div id="search-panel">
+    <div id="search-panel" class="collapsed">
         <div id="search-panel-header" onclick="toggleSearchPanel()">
             <h3>🔍 Search Systems</h3>
             <button id="search-panel-toggle">◀</button>
         </div>
         <div id="search-panel-content">
+            <!-- Mobile-only filters (hidden on desktop) -->
+            <div id="mobile-filters">
+                <div class="filter-row">
+                    <label>Reality</label>
+                    <div class="filter-btn-group">
+                        <button class="filter-btn active" id="mobile-filter-reality-all" onclick="setRealityFilter(null)">All</button>
+                        <button class="filter-btn" id="mobile-filter-reality-normal" onclick="setRealityFilter('Normal')">Normal</button>
+                        <button class="filter-btn" id="mobile-filter-reality-perma" onclick="setRealityFilter('Permadeath')">Perma</button>
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <label>Galaxy</label>
+                    <select id="mobile-filter-galaxy" onchange="setGalaxyFilter(this.value)">
+                        <option value="">All Galaxies</option>
+                    </select>
+                </div>
+                <div id="mobile-filter-status">Showing all data</div>
+            </div>
             <div id="search-input-container">
                 <input type="text" id="system-search-input" placeholder="System or planet name..." onkeydown="if(event.key==='Enter')performSearch()">
                 <button id="search-btn" onclick="performSearch()">Search</button>
@@ -874,14 +987,29 @@
 
         function populateGalaxyDropdown() {
             const select = document.getElementById('filter-galaxy');
-            if (!select) return;
-            select.innerHTML = '<option value="">All Galaxies</option>';
-            galaxiesData.forEach(g => {
-                const opt = document.createElement('option');
-                opt.value = g.name;
-                opt.textContent = `${g.index}: ${g.name}`;
-                select.appendChild(opt);
-            });
+            const mobileSelect = document.getElementById('mobile-filter-galaxy');
+
+            // Populate desktop dropdown
+            if (select) {
+                select.innerHTML = '<option value="">All Galaxies</option>';
+                galaxiesData.forEach(g => {
+                    const opt = document.createElement('option');
+                    opt.value = g.name;
+                    opt.textContent = `${g.index}: ${g.name}`;
+                    select.appendChild(opt);
+                });
+            }
+
+            // Populate mobile dropdown
+            if (mobileSelect) {
+                mobileSelect.innerHTML = '<option value="">All Galaxies</option>';
+                galaxiesData.forEach(g => {
+                    const opt = document.createElement('option');
+                    opt.value = g.name;
+                    opt.textContent = `${g.index}: ${g.name}`;
+                    mobileSelect.appendChild(opt);
+                });
+            }
         }
 
         function filterGalaxyOptions(search) {
@@ -902,16 +1030,19 @@
 
         function setRealityFilter(reality) {
             filterReality = reality;
-            // Update button states
+            // Update all button states (desktop and mobile)
             document.querySelectorAll('.filter-btn-group .filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             if (reality === null) {
-                document.getElementById('filter-reality-all').classList.add('active');
+                document.getElementById('filter-reality-all')?.classList.add('active');
+                document.getElementById('mobile-filter-reality-all')?.classList.add('active');
             } else if (reality === 'Normal') {
-                document.getElementById('filter-reality-normal').classList.add('active');
+                document.getElementById('filter-reality-normal')?.classList.add('active');
+                document.getElementById('mobile-filter-reality-normal')?.classList.add('active');
             } else {
-                document.getElementById('filter-reality-perma').classList.add('active');
+                document.getElementById('filter-reality-perma')?.classList.add('active');
+                document.getElementById('mobile-filter-reality-perma')?.classList.add('active');
             }
             // Reload map data with new filter
             loadAndCreateSystems();
@@ -919,20 +1050,27 @@
 
         function setGalaxyFilter(galaxy) {
             filterGalaxy = galaxy || null;
+            // Sync both dropdowns
+            const desktopSelect = document.getElementById('filter-galaxy');
+            const mobileSelect = document.getElementById('mobile-filter-galaxy');
+            if (desktopSelect) desktopSelect.value = galaxy || '';
+            if (mobileSelect) mobileSelect.value = galaxy || '';
             // Reload map data with new filter
             loadAndCreateSystems();
         }
 
         function updateFilterStatus(totalSystems, totalRegions) {
-            const statusEl = document.getElementById('filter-status');
-            if (!statusEl) return;
-
             let status = '';
             if (filterReality) status += filterReality + ' ';
             if (filterGalaxy) status += 'in ' + filterGalaxy + ' ';
             if (!filterReality && !filterGalaxy) status = 'All data ';
             status += `(${totalSystems} systems, ${totalRegions} regions)`;
-            statusEl.textContent = status;
+
+            // Update both desktop and mobile status
+            const statusEl = document.getElementById('filter-status');
+            const mobileStatusEl = document.getElementById('mobile-filter-status');
+            if (statusEl) statusEl.textContent = status;
+            if (mobileStatusEl) mobileStatusEl.textContent = status;
         }
 
         // Apply embed mode settings - hide UI and set defaults
@@ -999,7 +1137,7 @@
         // Region size in coordinate units (matches NMS 128-unit regions)
         const REGION_SIZE = 128;
 
-        // Galaxy colors by type
+        // Galaxy colors by type (fallback only)
         const GALAXY_COLORS = {
             'Euclid': 0x00C2B3,
             'Hilbert': 0x9d4edd,
@@ -1007,6 +1145,25 @@
             'Eissentam': 0x4ecdc4,
             'Elkupalos': 0xffd93d
         };
+
+        // Default region color (used when no discord tag color is set)
+        const DEFAULT_REGION_COLOR = 0x00C2B3;
+
+        // Discord tag colors for custom region coloring (fetched from API)
+        let discordTagColors = {};
+
+        // Fetch discord tag colors for region coloring
+        async function loadDiscordTagColors() {
+            try {
+                const response = await fetch('/api/discord_tag_colors');
+                const data = await response.json();
+                discordTagColors = data.colors || {};
+                console.log('Loaded discord tag colors:', Object.keys(discordTagColors).length, 'tags');
+            } catch (error) {
+                console.warn('Failed to load discord tag colors, using defaults:', error);
+                discordTagColors = {};
+            }
+        }
 
         // Store fetched region data globally
         let regionsData = [];
@@ -1038,12 +1195,16 @@
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;  // Keep same damping for smooth feel
-            controls.minDistance = 1;       // Allow microscopic zoom for region separation
+            controls.minDistance = 1;       // Allow very close approach for "fly through" feeling
             controls.maxDistance = 10000;   // Scaled 5x to see entire larger map
             controls.target.set(0, 0, 0);
             controls.autoRotate = autoRotate;
             controls.autoRotateSpeed = 0.5;
             controls.zoomSpeed = scrollZoomSpeed;  // Apply initial zoom speed
+            // Polar angle limits to prevent camera flip when orbiting
+            // Stricter limits (0.2 radians = ~11°) to prevent flip at close distances
+            controls.minPolarAngle = 0.2;           // ~11° from top (prevents going over)
+            controls.maxPolarAngle = Math.PI - 0.2; // ~11° from bottom (prevents going under)
 
             // Custom scroll wheel handler for adjustable zoom speed
             renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
@@ -1064,6 +1225,9 @@
             // Load galaxies for filter dropdown
             loadGalaxies();
 
+            // Load discord tag colors for region coloring
+            await loadDiscordTagColors();
+
             // Load and create systems asynchronously
             await loadAndCreateSystems();
             console.log('Systems created, scene children:', scene.children.length);
@@ -1079,6 +1243,10 @@
             renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
             renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
             renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
+
+            // Keyboard event listeners for WASD translation (smooth continuous movement)
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
 
             // Update stats
             updateStats();
@@ -1098,6 +1266,12 @@
 
             // Apply embed mode if active (hides UI, enables rotation, sets defaults)
             applyEmbedMode();
+
+            // On desktop, expand search panel by default; on mobile, keep it collapsed
+            const searchPanel = document.getElementById('search-panel');
+            if (searchPanel && window.innerWidth > 768) {
+                searchPanel.classList.remove('collapsed');
+            }
 
             // Start animation
             animate();
@@ -1348,7 +1522,8 @@
                     display_z: region.display_z || 0,
                     system_count: region.system_count,
                     galaxies: new Set(region.galaxies || ['Euclid']),
-                    region_name: region.region_name || null
+                    region_name: region.region_name || null,
+                    dominant_tag: region.dominant_tag || null
                 });
             });
 
@@ -1358,6 +1533,10 @@
             const positions = [];
             const colors = [];
             const sizes = [];
+            const densities = [];
+
+            // Calculate density map for clustering visualization
+            const densityMap = calculateRegionDensity(regionMap);
 
             let index = 0;
             regionMap.forEach((region, regionKey) => {
@@ -1371,11 +1550,17 @@
 
                 positions.push(x, y, z);
 
-                // Color based on dominant galaxy in region - brighter for visibility
-                const dominantGalaxy = Array.from(region.galaxies)[0] || 'Euclid';
-                const color = new THREE.Color(
-                    GALAXY_COLORS[dominantGalaxy] || 0x00C2B3
-                );
+                // Color based on discord tag (community) - use custom color if set
+                let regionColorHex = DEFAULT_REGION_COLOR;
+
+                if (region.dominant_tag && discordTagColors[region.dominant_tag]) {
+                    // Use custom color from discord tag (API returns {color: '#RRGGBB', name: '...'})
+                    const customColor = discordTagColors[region.dominant_tag].color;
+                    // Convert hex string (#RRGGBB) to hex number
+                    regionColorHex = parseInt(customColor.replace('#', ''), 16);
+                }
+
+                const color = new THREE.Color(regionColorHex);
                 colors.push(color.r, color.g, color.b);
 
                 // Size based on number of systems in region (more systems = larger)
@@ -1383,6 +1568,9 @@
                 const systemCount = region.system_count || 1;
                 const size = 8 + Math.min(systemCount * 3, 15);  // Larger points for visibility
                 sizes.push(size);
+
+                // Add density value for clustering visualization
+                densities.push(densityMap.get(regionKey) || 0);
 
                 // Store region data for raycasting
                 systemData.push({
@@ -1400,7 +1588,7 @@
             document.getElementById('system-count').textContent = `${totalSystems} systems in ${regionMap.size} regions`;
 
             // Create the 3D geometry using shared function
-            createPointsGeometry(positions, colors, sizes);
+            createPointsGeometry(positions, colors, sizes, densities);
         }
 
         function createStarTexture() {
@@ -1409,18 +1597,69 @@
             canvas.height = 64;
             const ctx = canvas.getContext('2d');
 
-            // Create radial gradient for star
+            // Create clean circle with slight anti-aliasing at edge (no glow)
             const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
             gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
-            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
-            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            gradient.addColorStop(0.7, 'rgba(255, 255, 255, 1)');  // Solid until 70%
+            gradient.addColorStop(0.85, 'rgba(255, 255, 255, 0.8)');  // Slight anti-alias
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');  // Fade at edge
 
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 64, 64);
 
             const texture = new THREE.CanvasTexture(canvas);
             return texture;
+        }
+
+        // Calculate neighbor density for each region using spatial hashing
+        function calculateRegionDensity(regionMap, searchRadius = 300) {
+            const CELL_SIZE = searchRadius;
+            const spatialHash = new Map();
+            const regionList = [];
+
+            // Build spatial hash
+            regionMap.forEach((region, key) => {
+                const x = region.display_x * DISPLAY_SCALE;
+                const y = region.display_y * DISPLAY_SCALE;
+                const z = region.display_z * DISPLAY_SCALE;
+
+                const cellX = Math.floor(x / CELL_SIZE);
+                const cellY = Math.floor(y / CELL_SIZE);
+                const cellZ = Math.floor(z / CELL_SIZE);
+                const cellKey = `${cellX},${cellY},${cellZ}`;
+
+                if (!spatialHash.has(cellKey)) spatialHash.set(cellKey, []);
+                spatialHash.get(cellKey).push({ x, y, z, key, region });
+                regionList.push({ x, y, z, key, region, cellX, cellY, cellZ });
+            });
+
+            // Count neighbors for each region
+            const densityMap = new Map();
+            const radiusSq = searchRadius * searchRadius;
+
+            regionList.forEach(r => {
+                let neighborCount = 0;
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dz = -1; dz <= 1; dz++) {
+                            const neighbors = spatialHash.get(`${r.cellX+dx},${r.cellY+dy},${r.cellZ+dz}`) || [];
+                            neighbors.forEach(n => {
+                                if (n.key !== r.key) {
+                                    const distSq = (n.x-r.x)**2 + (n.y-r.y)**2 + (n.z-r.z)**2;
+                                    if (distSq < radiusSq) neighborCount++;
+                                }
+                            });
+                        }
+                    }
+                }
+                densityMap.set(r.key, neighborCount);
+            });
+
+            // Normalize to 0-1 range
+            let maxDensity = Math.max(1, ...densityMap.values());
+            const normalized = new Map();
+            densityMap.forEach((d, key) => normalized.set(key, d / maxDensity));
+            return normalized;
         }
 
         function updateStats() {
@@ -1493,7 +1732,11 @@
             const positions = [];
             const colors = [];
             const sizes = [];
+            const densities = [];
             let index = 0;
+
+            // Calculate density map for clustering visualization
+            const densityMap = calculateRegionDensity(regionMap);
 
             regionMap.forEach((region, regionKey) => {
                 const x = region.display_x * DISPLAY_SCALE;
@@ -1502,13 +1745,23 @@
 
                 positions.push(x, y, z);
 
-                const dominantGalaxy = Array.from(region.galaxies)[0] || 'Euclid';
-                const color = new THREE.Color(GALAXY_COLORS[dominantGalaxy] || 0x00C2B3);
+                // Color based on discord tag (community) - use custom color if set
+                let regionColorHex = DEFAULT_REGION_COLOR;
+
+                if (region.dominant_tag && discordTagColors[region.dominant_tag]) {
+                    const customColor = discordTagColors[region.dominant_tag].color;
+                    regionColorHex = parseInt(customColor.replace('#', ''), 16);
+                }
+
+                const color = new THREE.Color(regionColorHex);
                 colors.push(color.r, color.g, color.b);
 
                 const systemCount = region.system_count || 1;
                 const size = 8 + Math.min(systemCount * 3, 15);
                 sizes.push(size);
+
+                // Add density value for clustering visualization
+                densities.push(densityMap.get(regionKey) || 0);
 
                 systemData.push({
                     index: index,
@@ -1522,11 +1775,11 @@
 
             const totalSystems = regionsData.reduce((sum, r) => sum + (r.system_count || 0), 0);
             document.getElementById('system-count').textContent = `${totalSystems} systems in ${regionMap.size} regions`;
-            createPointsGeometry(positions, colors, sizes);
+            createPointsGeometry(positions, colors, sizes, densities);
         }
 
         // Create the Three.js geometry from arrays
-        function createPointsGeometry(positions, colors, sizes) {
+        function createPointsGeometry(positions, colors, sizes, densities = null) {
             // Remove old points from scene before creating new ones
             if (systemPoints) {
                 scene.remove(systemPoints);
@@ -1540,7 +1793,11 @@
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
 
-            // Custom shader material with additive blending for glowing effect
+            // Add density attribute for clustering visualization
+            const densityArray = densities || new Float32Array(positions.length / 3).fill(0);
+            geometry.setAttribute('density', new THREE.Float32BufferAttribute(densityArray, 1));
+
+            // Custom shader material - clean points up close, cluster glow when zoomed out
             const material = new THREE.ShaderMaterial({
                 uniforms: {
                     pointTexture: { value: createStarTexture() },
@@ -1549,25 +1806,47 @@
                 },
                 vertexShader: `
                     attribute float size;
+                    attribute float density;
                     uniform float sizeMultiplier;
                     varying vec3 vColor;
+                    varying float vDensity;
+                    varying float vCameraDist;
+
                     void main() {
                         vColor = color;
+                        vDensity = density;
+
                         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
                         float dist = -mvPosition.z;
-                        float crossover = 500.0;
+                        vCameraDist = dist;  // Pass to fragment shader
+
+                        // Density boost: up to 30% larger in dense areas (only when zoomed out)
+                        float densityBoost = smoothstep(500.0, 2000.0, dist) * density * 0.3;
+                        float scaledSize = size * sizeMultiplier * (1.0 + densityBoost);
+
+                        // Three-zone smooth scaling for better zoom behavior
+                        float nearZone = 200.0;
+                        float midZone = 500.0;
+                        float farZone = 3000.0;
+
                         float pointSize;
-                        float scaledSize = size * sizeMultiplier;
-                        if (dist > crossover) {
-                            // Normal behavior: grow as camera approaches
+                        if (dist < nearZone) {
+                            // Close: smooth shrink to prevent overlap
+                            float t = smoothstep(0.0, nearZone, dist);
+                            pointSize = mix(scaledSize * 0.15, scaledSize * 0.6, t);
+                        } else if (dist < midZone) {
+                            // Transition: smooth interpolation
+                            float t = smoothstep(nearZone, midZone, dist);
+                            pointSize = mix(scaledSize * 0.6, scaledSize * 0.6, t);
+                        } else if (dist < farZone) {
+                            // Normal: perspective scaling
                             pointSize = scaledSize * (300.0 / dist);
                         } else {
-                            // Microscopic zoom: shrink as camera gets closer
-                            float maxSize = scaledSize * (300.0 / crossover);
-                            float shrinkFactor = dist / crossover;
-                            pointSize = maxSize * shrinkFactor;
+                            // Far: maintain minimum visibility
+                            pointSize = max(scaledSize * (300.0 / farZone), 3.0);
                         }
-                        gl_PointSize = max(pointSize, 2.0);
+
+                        gl_PointSize = clamp(pointSize, 2.0, 64.0);
                         gl_Position = projectionMatrix * mvPosition;
                     }
                 `,
@@ -1575,18 +1854,35 @@
                     uniform sampler2D pointTexture;
                     uniform float brightness;
                     varying vec3 vColor;
+                    varying float vDensity;
+                    varying float vCameraDist;
+
                     void main() {
-                        // Apply brightness multiplier to color (clamped to prevent overflow)
+                        vec4 texColor = texture2D(pointTexture, gl_PointCoord);
+
+                        // Base color with brightness (PRESERVES Discord colors)
                         vec3 brightColor = min(vColor * brightness, vec3(1.0));
-                        gl_FragColor = vec4(brightColor, 1.0);
-                        gl_FragColor = gl_FragColor * texture2D(pointTexture, gl_PointCoord);
-                        // Boost alpha based on brightness for more visible glow
-                        gl_FragColor.a = min(gl_FragColor.a * brightness, 1.0);
+
+                        // Density glow: ONLY when zoomed out (dist > 1500)
+                        // Smoothly fade in glow between 1500-3000 distance
+                        float glowFactor = smoothstep(1500.0, 3000.0, vCameraDist);
+                        float centerDist = length(gl_PointCoord - vec2(0.5)) * 2.0;
+                        float glowFalloff = 1.0 - smoothstep(0.0, 0.6, centerDist);
+                        float glowIntensity = vDensity * 0.4 * glowFactor;
+
+                        vec3 finalColor = min(brightColor + vec3(glowIntensity * glowFalloff), vec3(1.0));
+
+                        gl_FragColor = vec4(finalColor, 1.0) * texColor;
+
+                        // Alpha: clean when close, slight density boost when far
+                        float alphaBoost = 1.0 + vDensity * 0.3 * glowFactor;
+                        gl_FragColor.a = min(gl_FragColor.a * brightness * alphaBoost, 1.0);
+
                         if (gl_FragColor.a < 0.05) discard;
                     }
                 `,
-                blending: THREE.AdditiveBlending,
-                depthTest: false,
+                blending: THREE.NormalBlending,
+                depthTest: true,
                 transparent: true,
                 vertexColors: true
             });
@@ -2055,8 +2351,8 @@
             // Remove any existing highlight
             removeHighlight();
 
-            // Create a pulsing highlight ring - small base size, will scale with camera distance
-            const geometry = new THREE.RingGeometry(1, 1.5, 32);
+            // Create a pulsing highlight ring - matches point size scaling
+            const geometry = new THREE.RingGeometry(1, 1.4, 32);
             const material = new THREE.MeshBasicMaterial({
                 color: 0x00ff00,
                 side: THREE.DoubleSide,
@@ -2072,24 +2368,42 @@
             // Store target position for distance calculation
             const targetPos = new THREE.Vector3(x, y, z);
 
-            // Animate the highlight with zoom-responsive scaling
+            // Animate the highlight with zoom-responsive scaling that MATCHES point shader
             let pulse = 0;
             const animateHighlight = () => {
                 if (!highlightedMesh) return;
 
                 pulse += 0.05;
 
-                // Calculate scale based on camera distance to the highlight
-                // Closer camera = smaller ring, farther camera = larger ring
+                // Calculate scale using SAME zones as point shader
                 const distance = camera.position.distanceTo(targetPos);
-                const baseScale = distance * 0.015;  // Scale factor relative to distance
-                const minScale = 2;   // Minimum size when very close
-                const maxScale = 30;  // Maximum size when far away
-                const zoomScale = Math.max(minScale, Math.min(maxScale, baseScale));
+                const nearZone = 200.0;
+                const midZone = 500.0;
+                const farZone = 3000.0;
 
-                // Add pulse animation on top of zoom scale
-                const pulseScale = 1 + Math.sin(pulse) * 0.2;
-                const finalScale = zoomScale * pulseScale;
+                // Base size matches point base size (around 12 for typical regions)
+                const baseSize = 12 * pointSizeMultiplier;
+                let pointScale;
+
+                if (distance < nearZone) {
+                    // Close: match shader's shrink behavior
+                    const t = Math.min(1, Math.max(0, (distance / nearZone)));
+                    const smoothT = t * t * (3 - 2 * t);  // smoothstep approximation
+                    pointScale = baseSize * (0.15 + smoothT * 0.45);  // 0.15 to 0.6
+                } else if (distance < midZone) {
+                    pointScale = baseSize * 0.6;
+                } else if (distance < farZone) {
+                    pointScale = baseSize * (300.0 / distance);
+                } else {
+                    pointScale = Math.max(baseSize * (300.0 / farZone), 3.0);
+                }
+
+                // Scale ring to be slightly larger than the point (1.5x)
+                const ringScale = pointScale * 1.5;
+
+                // Add pulse animation on top
+                const pulseScale = 1 + Math.sin(pulse) * 0.15;
+                const finalScale = ringScale * pulseScale;
 
                 highlightedMesh.scale.set(finalScale, finalScale, finalScale);
                 highlightedMesh.material.opacity = 0.6 + Math.sin(pulse) * 0.2;
@@ -2188,8 +2502,53 @@
         }
 
         function centerOnGalaxy() {
-            controls.target.set(0, 0, 0);
-            controls.update();
+            // Smooth animation to center on galaxy
+            const wasAutoRotating = controls.autoRotate;
+            controls.autoRotate = false;
+
+            const galaxyCenter = new THREE.Vector3(0, 0, 0);
+            const startTargetPos = controls.target.clone();
+            const startCameraPos = camera.position.clone();
+
+            // Calculate a good viewing position for the galaxy
+            const viewDistance = 2500;  // Default viewing distance
+            const targetCameraPos = new THREE.Vector3(0, 1000, viewDistance);
+
+            const startTime = performance.now();
+            const duration = 1000;  // 1 second animation
+
+            if (cameraAnimation) {
+                cancelAnimationFrame(cameraAnimation);
+            }
+
+            function easeOutCubic(t) {
+                return 1 - Math.pow(1 - t, 3);
+            }
+
+            function animateToCenter() {
+                const elapsed = performance.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const eased = easeOutCubic(progress);
+
+                // Interpolate target to galaxy center
+                controls.target.lerpVectors(startTargetPos, galaxyCenter, eased);
+
+                // Interpolate camera position to default view
+                camera.position.lerpVectors(startCameraPos, targetCameraPos, eased);
+
+                controls.update();
+
+                if (progress < 1) {
+                    cameraAnimation = requestAnimationFrame(animateToCenter);
+                } else {
+                    cameraAnimation = null;
+                    if (wasAutoRotating) {
+                        setTimeout(() => { controls.autoRotate = true; }, 500);
+                    }
+                }
+            }
+
+            cameraAnimation = requestAnimationFrame(animateToCenter);
         }
 
         // ========== ZOOM SPEED CONTROLS ==========
@@ -2530,22 +2889,25 @@
         let touchCount = 0;
         let initialPinchDistance = 0;
         let lastPinchDistance = 0;
+        let lastTouchCentroid = { x: 0, y: 0 };  // Track center of two fingers for panning
 
         function onTouchStart(event) {
             touchCount = event.touches.length;
             touchStartTime = Date.now();
 
             if (touchCount === 1) {
-                // Single finger - prepare for tap or drag
+                // Single finger - prepare for tap or drag (orbit)
                 touchStartPos.x = event.touches[0].clientX;
                 touchStartPos.y = event.touches[0].clientY;
                 lastTouchPos.x = touchStartPos.x;
                 lastTouchPos.y = touchStartPos.y;
                 isTouchDragging = false;
             } else if (touchCount === 2) {
-                // Two fingers - pinch zoom
+                // Two fingers - pinch zoom + pan translation
                 initialPinchDistance = getPinchDistance(event.touches);
                 lastPinchDistance = initialPinchDistance;
+                // Track centroid for two-finger pan
+                lastTouchCentroid = getTouchCentroid(event.touches);
             }
         }
 
@@ -2553,10 +2915,8 @@
             event.preventDefault(); // Prevent page scroll
 
             if (touchCount === 1 && event.touches.length === 1) {
-                // Single finger drag - orbit camera
+                // Single finger drag - orbit camera (handled by OrbitControls)
                 const touch = event.touches[0];
-                const deltaX = touch.clientX - lastTouchPos.x;
-                const deltaY = touch.clientY - lastTouchPos.y;
 
                 // Check if we've moved enough to consider it a drag
                 const totalDeltaX = touch.clientX - touchStartPos.x;
@@ -2569,18 +2929,25 @@
                 lastTouchPos.y = touch.clientY;
 
             } else if (event.touches.length === 2) {
-                // Two finger pinch - zoom only (no panning)
+                // Two fingers - handle BOTH pinch zoom AND pan translation
                 const currentDistance = getPinchDistance(event.touches);
-                const delta = currentDistance - lastPinchDistance;
+                const currentCentroid = getTouchCentroid(event.touches);
 
-                if (Math.abs(delta) > 2) {
+                // Calculate pinch delta for zoom
+                const pinchDelta = currentDistance - lastPinchDistance;
+
+                // Calculate pan delta for translation
+                const panDeltaX = currentCentroid.x - lastTouchCentroid.x;
+                const panDeltaY = currentCentroid.y - lastTouchCentroid.y;
+
+                // Handle pinch zoom
+                if (Math.abs(pinchDelta) > 2) {
                     // Zoom in/out based on pinch with speed multiplier
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
 
                     // Move camera along look direction (scaled by pinch speed)
-                    // Scaled 5x (50 instead of 10) for larger map
-                    const baseMoveAmount = delta > 0 ? 50 : -50;
+                    const baseMoveAmount = pinchDelta > 0 ? 50 : -50;
                     const moveAmount = baseMoveAmount * pinchZoomSpeed;
                     camera.position.addScaledVector(direction, moveAmount);
 
@@ -2595,9 +2962,18 @@
                             direction.clone().multiplyScalar(-controls.maxDistance)
                         );
                     }
-
-                    lastPinchDistance = currentDistance;
                 }
+
+                // Handle two-finger pan for translation (fly through)
+                if (Math.abs(panDeltaX) > 2 || Math.abs(panDeltaY) > 2) {
+                    // Convert screen pixels to world movement
+                    // Sensitivity scaled for good feel - negative to match drag direction
+                    const panSensitivity = 2.0;
+                    translateCamera(-panDeltaX * panSensitivity, panDeltaY * panSensitivity, 0);
+                }
+
+                lastPinchDistance = currentDistance;
+                lastTouchCentroid = currentCentroid;
             }
         }
 
@@ -2622,6 +2998,14 @@
             const dx = touches[0].clientX - touches[1].clientX;
             const dy = touches[0].clientY - touches[1].clientY;
             return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function getTouchCentroid(touches) {
+            // Calculate center point between two touches
+            return {
+                x: (touches[0].clientX + touches[1].clientX) / 2,
+                y: (touches[0].clientY + touches[1].clientY) / 2
+            };
         }
 
         function handleTap(clientX, clientY) {
@@ -2649,37 +3033,104 @@
             }
         }
 
+        // ========== TRANSLATION CONTROLS (NMS-style fly through) ==========
+        // Moves BOTH camera AND target together for seamless navigation
+        // Scaled for larger map (100/150 base units)
+
+        function translateCamera(deltaX, deltaY, deltaZ) {
+            // Move both camera and target together to maintain orbit relationship
+            // This creates the "fly through" feeling where you can pass by points
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+
+            const right = new THREE.Vector3();
+            right.crossVectors(direction, camera.up).normalize();
+
+            const up = camera.up.clone().normalize();
+
+            // Calculate movement vector
+            const movement = new THREE.Vector3();
+
+            // Forward/backward (Z axis in camera space)
+            if (deltaZ !== 0) {
+                movement.addScaledVector(direction, deltaZ);
+            }
+
+            // Left/right (X axis in camera space)
+            if (deltaX !== 0) {
+                movement.addScaledVector(right, deltaX);
+            }
+
+            // Up/down (Y axis in camera space)
+            if (deltaY !== 0) {
+                movement.addScaledVector(up, deltaY);
+            }
+
+            // Apply movement to BOTH camera and target
+            camera.position.add(movement);
+            controls.target.add(movement);
+            controls.update();
+        }
+
+        // WASD keyboard state tracking for smooth continuous movement
+        const keysPressed = new Set();
+        const MOVE_KEYS = ['w', 'a', 's', 'd', 'q', 'e'];
+
+        function onKeyDown(event) {
+            // Don't capture keys when typing in input fields
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            const key = event.key.toLowerCase();
+            if (MOVE_KEYS.includes(key)) {
+                keysPressed.add(key);
+                event.preventDefault();
+            }
+        }
+
+        function onKeyUp(event) {
+            const key = event.key.toLowerCase();
+            keysPressed.delete(key);
+        }
+
+        // Process keyboard movement each frame for smooth motion
+        function processKeyboardMovement() {
+            if (keysPressed.size === 0) return;
+
+            const moveSpeed = 3;  // Smaller per-frame speed for smooth motion
+
+            let deltaX = 0, deltaY = 0, deltaZ = 0;
+
+            if (keysPressed.has('w')) deltaZ += moveSpeed;  // Forward
+            if (keysPressed.has('s')) deltaZ -= moveSpeed;  // Backward
+            if (keysPressed.has('a')) deltaX -= moveSpeed;  // Left
+            if (keysPressed.has('d')) deltaX += moveSpeed;  // Right
+            if (keysPressed.has('q')) deltaY += moveSpeed;  // Up
+            if (keysPressed.has('e')) deltaY -= moveSpeed;  // Down
+
+            if (deltaX !== 0 || deltaY !== 0 || deltaZ !== 0) {
+                translateCamera(deltaX, deltaY, deltaZ);
+            }
+        }
+
         // ========== PAN CONTROLS (for button controls) ==========
-        // Scaled 5x for larger map (100/150 instead of 20/30)
+        // Now uses translateCamera for consistent "fly through" behavior
 
         function panUp() {
-            controls.target.y += 100;
-            controls.update();
+            translateCamera(0, 100, 0);
         }
 
         function panDown() {
-            controls.target.y -= 100;
-            controls.update();
+            translateCamera(0, -100, 0);
         }
 
         function panLeft() {
-            // Pan left relative to camera view
-            const direction = new THREE.Vector3();
-            camera.getWorldDirection(direction);
-            const right = new THREE.Vector3();
-            right.crossVectors(direction, camera.up).normalize();
-            controls.target.addScaledVector(right, -150);
-            controls.update();
+            translateCamera(-150, 0, 0);
         }
 
         function panRight() {
-            // Pan right relative to camera view
-            const direction = new THREE.Vector3();
-            camera.getWorldDirection(direction);
-            const right = new THREE.Vector3();
-            right.crossVectors(direction, camera.up).normalize();
-            controls.target.addScaledVector(right, 150);
-            controls.update();
+            translateCamera(150, 0, 0);
         }
 
         function animate() {
@@ -2694,6 +3145,13 @@
                 frameCount = 0;
                 lastTime = currentTime;
             }
+
+            // Process smooth WASD keyboard movement
+            processKeyboardMovement();
+
+            // Force camera up vector to always be (0, 1, 0) to prevent flip
+            // This ensures consistent "north is up" orientation
+            camera.up.set(0, 1, 0);
 
             // Update direction labels based on camera position
             updateDirectionLabels();

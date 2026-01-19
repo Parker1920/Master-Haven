@@ -4,6 +4,7 @@ import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import { AuthContext } from '../utils/AuthContext'
+import { getTradeGoodById } from '../utils/economyTradeGoods'
 
 // Helper to normalize photo paths - handles "photos\file.jpg", "photos/file.jpg", or just "file.jpg"
 function getPhotoUrl(photo) {
@@ -145,7 +146,7 @@ export default function SystemDetail() {
         </div>
 
         {/* Coordinates */}
-        <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-gray-800 rounded">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 p-4 bg-gray-800 rounded">
           <div>
             <div className="text-xs text-gray-400">X Coordinate</div>
             <div className="text-lg font-mono">{system.x || '0'}</div>
@@ -220,7 +221,7 @@ export default function SystemDetail() {
         <Card className="mb-6">
           <h2 className="text-2xl font-bold mb-4">Space Station</h2>
           <div className="bg-purple-900/30 border border-purple-600 rounded p-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
               <div>
                 <div className="text-xs text-gray-400">Name</div>
                 <div className="font-semibold">{system.space_station.name}</div>
@@ -230,14 +231,36 @@ export default function SystemDetail() {
                 <div>{system.space_station.race || 'Unknown'}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-400">Sell %</div>
-                <div>{system.space_station.sell_percent || '80'}%</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">Buy %</div>
-                <div>{system.space_station.buy_percent || '50'}%</div>
+                <div className="text-xs text-gray-400">Economy</div>
+                <div>{system.economy_type || 'Unknown'}</div>
               </div>
             </div>
+
+            {/* Trade Goods */}
+            {system.space_station.trade_goods && system.space_station.trade_goods.length > 0 && (
+              <div>
+                <div className="text-xs text-gray-400 mb-2">Trade Goods Available</div>
+                <div className="flex flex-wrap gap-2">
+                  {system.space_station.trade_goods.map(goodId => {
+                    const good = getTradeGoodById(goodId)
+                    return (
+                      <span
+                        key={goodId}
+                        className="px-2 py-1 bg-purple-800/50 border border-purple-500 rounded text-sm"
+                        title={good?.description || ''}
+                      >
+                        {good?.name || goodId}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            {(!system.space_station.trade_goods || system.space_station.trade_goods.length === 0) && (
+              <div className="text-xs text-gray-500 italic">
+                No trade goods recorded for this station
+              </div>
+            )}
           </div>
         </Card>
       )}
@@ -436,7 +459,7 @@ export default function SystemDetail() {
                     {(planet.hazard_temperature !== 0 || planet.hazard_radiation !== 0 || planet.hazard_toxicity !== 0) && (
                       <div className="mb-4 p-3 bg-red-900/20 border border-red-800/50 rounded">
                         <div className="text-xs text-gray-400 mb-2 font-semibold">Environmental Hazards</div>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           {planet.hazard_temperature !== 0 && (
                             <div>
                               <div className="text-xs text-gray-400">Temperature</div>

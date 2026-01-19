@@ -15,6 +15,8 @@ import ApiKeys from './pages/ApiKeys'
 import PartnerManagement from './pages/PartnerManagement'
 import SubAdminManagement from './pages/SubAdminManagement'
 import ApprovalAudit from './pages/ApprovalAudit'
+import Analytics from './pages/Analytics'
+import Events from './pages/Events'
 import CsvImport from './pages/CsvImport'
 import DataRestrictions from './pages/DataRestrictions'
 import Navbar from './components/Navbar'
@@ -86,6 +88,10 @@ export default function App() {
             <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
             <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
             <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
+
+            {/* Analytics (admin or partner) */}
+            <Route path="/analytics" element={<RequireAdmin><Analytics /></RequireAdmin>} />
+            <Route path="/events" element={<RequireAdmin><Events /></RequireAdmin>} />
 
             {/* Partners can manage their own sub-admins */}
             <Route path="/admin/sub-admins" element={<RequireAdmin><SubAdminManagement /></RequireAdmin>} />
