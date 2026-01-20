@@ -5376,6 +5376,7 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             # Fast path: return just region summaries without nested data
             # BUT we need accurate counts, so fetch minimal system data for restriction checks
             region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
+            visible_counts = {}  # Initialize before conditional to avoid NameError
 
             if region_coords:
                 # Build WHERE clause for all regions
@@ -5395,10 +5396,14 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 visible_systems = apply_data_restrictions(all_systems, session_data)
 
                 # Count visible systems per region
-                visible_counts = {}
+                # Note: systems with 'coordinates' restriction may have region fields stripped
                 for system in visible_systems:
-                    key = (system['region_x'], system['region_y'], system['region_z'])
-                    visible_counts[key] = visible_counts.get(key, 0) + 1
+                    rx = system.get('region_x')
+                    ry = system.get('region_y')
+                    rz = system.get('region_z')
+                    if rx is not None and ry is not None and rz is not None:
+                        key = (rx, ry, rz)
+                        visible_counts[key] = visible_counts.get(key, 0) + 1
 
             for region_row in region_rows:
                 region = dict(region_row)
@@ -5409,8 +5414,8 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 else:
                     region['display_name'] = f"Region ({rx}, {ry}, {rz})"
 
-                # Use accurate visible count
-                region['system_count'] = visible_counts.get((rx, ry, rz), 0) if region_coords else 0
+                # Use accurate visible count (visible_counts is always defined now)
+                region['system_count'] = visible_counts.get((rx, ry, rz), 0)
                 region['systems'] = []  # Empty for now, lazy-load via separate endpoint
                 regions.append(region)
 
@@ -5542,7 +5547,9 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         return {'regions': regions, 'total_regions': total_regions}
 
     except Exception as e:
+        import traceback
         logger.error(f"Error fetching grouped regions: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
@@ -9367,7 +9374,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             ))
             planet_id = cursor.lastrowid
 
-            # Insert moons
+            # Insert moons (nested under planet)
             for moon in planet.get('moons', []):
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
@@ -9379,6 +9386,32 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     moon.get('orbit_speed', 0),
                     moon.get('climate'),
                     moon.get('sentinel', 'None'),
+                    moon.get('fauna', 'N/A'),
+                    moon.get('flora', 'N/A'),
+                    moon.get('materials'),
+                    moon.get('notes'),
+                    moon.get('description', ''),
+                    moon.get('photo')
+                ))
+
+        # Handle root-level moons (from Haven Extractor which sends moons as flat list)
+        # These moons are sent with is_moon=true but stored at root level by extraction API
+        root_moons = system_data.get('moons', [])
+        if root_moons and planet_id:
+            # Attach root-level moons to the last inserted planet
+            # (In NMS, moons orbit their closest planet, so this is a reasonable default)
+            logger.info(f"Processing {len(root_moons)} root-level moons for system {system_id}")
+            for moon in root_moons:
+                cursor.execute('''
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    planet_id,  # Attach to last planet
+                    moon.get('name'),
+                    moon.get('orbit_radius', 0.5),
+                    moon.get('orbit_speed', 0),
+                    moon.get('climate') or moon.get('weather'),
+                    moon.get('sentinel') or moon.get('sentinels', 'None'),
                     moon.get('fauna', 'N/A'),
                     moon.get('flora', 'N/A'),
                     moon.get('materials'),
@@ -10463,11 +10496,24 @@ async def receive_extraction(
     if not glyph_code or len(glyph_code) != 12:
         raise HTTPException(status_code=400, detail="Invalid or missing glyph_code")
 
+    # Decode glyph to get region coordinates
+    try:
+        glyph_coords = decode_glyph_to_coords(glyph_code)
+        region_x = glyph_coords.get('region_x', 0)
+        region_y = glyph_coords.get('region_y', 0)
+        region_z = glyph_coords.get('region_z', 0)
+    except Exception as e:
+        logger.warning(f"Failed to decode glyph {glyph_code}: {e}")
+        region_x = region_y = region_z = 0
+
     # Extract user identification fields (new in v10+)
     discord_username = payload.get('discord_username', '')
     personal_id = payload.get('personal_id', '')
     discord_tag = payload.get('discord_tag', 'personal')  # Default to personal if not specified
     reality = payload.get('reality', 'Normal')
+
+    # Accept both star_color (v10+) and star_type (legacy)
+    star_color = payload.get('star_color') or payload.get('star_type', 'Yellow')
 
     # Convert extraction format to submission format
     submission_data = {
@@ -10478,8 +10524,11 @@ async def receive_extraction(
         'x': payload.get('voxel_x', 0),
         'y': payload.get('voxel_y', 0),
         'z': payload.get('voxel_z', 0),
+        'region_x': region_x,
+        'region_y': region_y,
+        'region_z': region_z,
         'glyph_solar_system': payload.get('solar_system_index', 1),
-        'star_type': payload.get('star_type', 'Yellow'),
+        'star_color': star_color,
         'economy_type': payload.get('economy_type', 'Unknown'),
         'economy_level': payload.get('economy_strength', 'Unknown'),
         'conflict_level': payload.get('conflict_level', 'Unknown'),
@@ -10563,7 +10612,9 @@ async def receive_extraction(
             cursor.execute('''
                 UPDATE pending_systems
                 SET raw_json = ?, system_data = ?, submission_timestamp = ?,
-                    discord_tag = ?, personal_discord_username = ?, personal_id = ?
+                    discord_tag = ?, personal_discord_username = ?, personal_id = ?,
+                    system_name = ?, galaxy = ?, region_x = ?, region_y = ?, region_z = ?,
+                    x = ?, y = ?, z = ?
                 WHERE id = ?
             ''', (
                 json.dumps(submission_data),
@@ -10572,6 +10623,14 @@ async def receive_extraction(
                 discord_tag if discord_tag else None,
                 discord_username if discord_username else None,
                 personal_id if personal_id else None,
+                submission_data['name'],
+                submission_data['galaxy'],
+                region_x,
+                region_y,
+                region_z,
+                submission_data['x'],
+                submission_data['y'],
+                submission_data['z'],
                 existing_pending[0]
             ))
             conn.commit()
@@ -10595,10 +10654,11 @@ async def receive_extraction(
         cursor.execute('''
             INSERT INTO pending_systems (
                 system_name, glyph_code, galaxy, x, y, z,
+                region_x, region_y, region_z,
                 submitter_name, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
                 submitted_by_ip, api_key_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -10606,6 +10666,9 @@ async def receive_extraction(
             submission_data['x'],
             submission_data['y'],
             submission_data['z'],
+            region_x,
+            region_y,
+            region_z,
             discord_username if discord_username else 'HavenExtractor',
             now,
             now,  # submission_date

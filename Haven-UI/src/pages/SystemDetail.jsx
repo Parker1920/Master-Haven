@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
+import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext } from '../utils/AuthContext'
 import { getTradeGoodById } from '../utils/economyTradeGoods'
 
@@ -116,8 +117,9 @@ export default function SystemDetail() {
             </div>
             {/* Glyph Code */}
             {system.glyph_code && (
-              <div className="mt-2">
-                <span className="text-purple-400 font-mono text-lg tracking-wider">{system.glyph_code}</span>
+              <div className="mt-2 flex items-center gap-3">
+                <GlyphDisplay glyphCode={system.glyph_code} size="large" />
+                <span className="text-purple-400 font-mono text-sm">({system.glyph_code})</span>
               </div>
             )}
           </div>

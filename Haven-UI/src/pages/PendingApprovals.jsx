@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
+import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
 
 export default function PendingApprovals() {
@@ -787,21 +788,33 @@ export default function PendingApprovals() {
                   <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
                   <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>
                   {selectedSubmission.glyph_code && (
-                    <p><strong>Glyph Code:</strong> <span className="font-mono">{selectedSubmission.glyph_code}</span></p>
+                    <div className="mb-2">
+                      <strong>Glyph Code:</strong>
+                      <div className="mt-1 flex items-center gap-2">
+                        <GlyphDisplay glyphCode={selectedSubmission.glyph_code} size="medium" />
+                        <span className="font-mono text-xs text-gray-400">({selectedSubmission.glyph_code})</span>
+                      </div>
+                    </div>
                   )}
-                  {selectedSubmission.system_data?.region_x !== null && (
+                  {(selectedSubmission.system_data?.region_x !== undefined && selectedSubmission.system_data?.region_x !== null) && (
                     <p><strong>Region:</strong> [{selectedSubmission.system_data.region_x}, {selectedSubmission.system_data.region_y}, {selectedSubmission.system_data.region_z}]</p>
                   )}
                   <p><strong>Coordinates:</strong> ({selectedSubmission.system_data?.x || 0}, {selectedSubmission.system_data?.y || 0}, {selectedSubmission.system_data?.z || 0})</p>
-                  {/* Extractor-specific system properties */}
-                  {selectedSubmission.system_data?.star_type && selectedSubmission.system_data.star_type !== 'Unknown' && (
-                    <p><strong>Star Type:</strong> <span className={
-                      selectedSubmission.system_data.star_type === 'Yellow' ? 'text-yellow-400' :
-                      selectedSubmission.system_data.star_type === 'Red' ? 'text-red-400' :
-                      selectedSubmission.system_data.star_type === 'Green' ? 'text-green-400' :
-                      selectedSubmission.system_data.star_type === 'Blue' ? 'text-blue-400' : ''
-                    }>{selectedSubmission.system_data.star_type}</span></p>
-                  )}
+                  {/* Extractor-specific system properties - star_color (v10+) or star_type (legacy) */}
+                  {(() => {
+                    const starColor = selectedSubmission.system_data?.star_color || selectedSubmission.system_data?.star_type;
+                    if (starColor && starColor !== 'Unknown') {
+                      return (
+                        <p><strong>Star Color:</strong> <span className={
+                          starColor === 'Yellow' ? 'text-yellow-400' :
+                          starColor === 'Red' ? 'text-red-400' :
+                          starColor === 'Green' ? 'text-green-400' :
+                          starColor === 'Blue' ? 'text-blue-400' : ''
+                        }>{starColor}</span></p>
+                      );
+                    }
+                    return null;
+                  })()}
                   {selectedSubmission.system_data?.economy_type && selectedSubmission.system_data.economy_type !== 'Unknown' && (
                     <p><strong>Economy:</strong> {selectedSubmission.system_data.economy_type} {selectedSubmission.system_data.economy_level && selectedSubmission.system_data.economy_level !== 'Unknown' && `(${selectedSubmission.system_data.economy_level})`}</p>
                   )}
@@ -922,18 +935,33 @@ export default function PendingApprovals() {
                 </div>
               )}
 
-              {/* Moons (top-level from extractor - separate from planet.moons) */}
+              {/* Moons (top-level from extractor - shown indented under planets) */}
               {selectedSubmission.system_data?.moons && selectedSubmission.system_data.moons.length > 0 && (
-                <div className="border-b pb-3">
-                  <h4 className="font-semibold mb-2">Moons ({selectedSubmission.system_data.moons.length})</h4>
+                <div className="border-b pb-3 ml-4 border-l-2 border-gray-600 pl-4">
+                  <h4 className="font-semibold mb-2 text-gray-300">
+                    <span className="text-gray-500">↳</span> System Moons ({selectedSubmission.system_data.moons.length})
+                  </h4>
                   <div className="space-y-2">
                     {selectedSubmission.system_data.moons.map((moon, i) => (
-                      <div key={i} className="text-sm bg-gray-700 p-3 rounded">
+                      <div key={i} className="text-sm bg-gray-700/70 p-3 rounded">
                         <div className="flex items-center gap-2 mb-2">
                           <p className="font-semibold">{moon.name}</p>
                           <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-500 text-white">Moon</span>
+                          {moon.planet_size && moon.planet_size !== 'Unknown' && (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600">{moon.planet_size}</span>
+                          )}
                           {moon.biome && moon.biome !== 'Unknown' && (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600">{moon.biome}</span>
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              moon.biome === 'Lush' ? 'bg-green-700' :
+                              moon.biome === 'Toxic' ? 'bg-yellow-700' :
+                              moon.biome === 'Scorched' ? 'bg-orange-700' :
+                              moon.biome === 'Radioactive' ? 'bg-lime-700' :
+                              moon.biome === 'Frozen' ? 'bg-cyan-700' :
+                              moon.biome === 'Barren' ? 'bg-stone-700' :
+                              moon.biome === 'Dead' ? 'bg-gray-700' :
+                              moon.biome === 'Weird' ? 'bg-purple-700' :
+                              'bg-gray-600'
+                            }`}>{moon.biome}</span>
                           )}
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">

@@ -1,5 +1,5 @@
 @echo off
-title NMS Memory Browser v3.8.4
+title NMS Memory Browser v3.8.5
 REM ============================================================
 REM NMS Memory Browser Launcher
 REM This script launches the Memory Browser mod using pymhf
@@ -7,7 +7,7 @@ REM Must be run from a native Windows command prompt (cmd.exe)
 REM ============================================================
 
 echo ============================================================
-echo   NMS MEMORY BROWSER v3.8.4 - DEEP Base Search
+echo   NMS MEMORY BROWSER v3.8.5 - Memory View Only
 echo   For No Man's Sky
 echo ============================================================
 echo.

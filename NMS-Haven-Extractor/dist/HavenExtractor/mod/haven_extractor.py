@@ -5,7 +5,7 @@
 # start_exe = true
 # ///
 """
-Haven Extractor v10.0.0 - Direct API Integration
+Haven Extractor v10.1.4 - Display formatting fixes for weather/biome
 
 Extracts planet data from NMS and sends directly to Haven UI via API.
 Features session configuration for user identification and community routing.
@@ -44,6 +44,7 @@ import json
 import logging
 import time
 import ctypes
+import re
 import urllib.request
 import urllib.error
 import ssl
@@ -60,6 +61,14 @@ import nmspy.data.exported_types as nmse
 from nmspy.decorators import on_state_change
 from nmspy.common import gameData
 from ctypes import c_uint64, pointer, sizeof
+
+# NMS procedural name generation (ported from nms_namegen)
+try:
+    from nms_namegen.system import systemName as nms_system_name
+    from nms_namegen.region import regionName as nms_region_name
+    NMS_NAMEGEN_AVAILABLE = True
+except ImportError:
+    NMS_NAMEGEN_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +166,7 @@ class SolarSystemDataOffsets:
     PRIME_PLANETS = 0x2268        # int - non-moon planet count
     STAR_CLASS = 0x224C           # GcSolarSystemClass enum
     STAR_TYPE = 0x2270            # GcGalaxyStarTypes enum
+    NAME = 0x2274                 # cTkFixedString0x80 - system name (128 bytes)
     TRADING_DATA = 0x2240         # GcPlanetTradingData struct
     CONFLICT_DATA = 0x2250        # GcPlayerConflictData struct
     INHABITING_RACE = 0x2254      # GcAlienRace enum
@@ -200,39 +210,40 @@ BIOME_TYPES = {
 }
 
 # GcBiomeSubType enum values (from MBINCompiler/libMBIN - full 32 value enum)
+# Mapped to user-friendly display names
 BIOME_SUBTYPES = {
-    0: "None",          # None_
+    0: "Standard",      # None_ -> Standard for display
     1: "Standard",      # Standard
-    2: "HighQuality",   # HighQuality
-    3: "Structure",     # Structure
-    4: "Beam",          # Beam
-    5: "Hexagon",       # Hexagon
-    6: "FractCube",     # FractCube
-    7: "Bubble",        # Bubble
-    8: "Shards",        # Shards
-    9: "Contour",       # Contour
-    10: "Shell",        # Shell
-    11: "BoneSpire",    # BoneSpire
-    12: "WireCell",     # WireCell
-    13: "HydroGarden",  # HydroGarden
-    14: "HugePlant",    # HugePlant
-    15: "HugeLush",     # HugeLush
-    16: "HugeRing",     # HugeRing
-    17: "HugeRock",     # HugeRock
-    18: "HugeScorch",   # HugeScorch
-    19: "HugeToxic",    # HugeToxic
-    20: "Variant_A",    # Variant_A
-    21: "Variant_B",    # Variant_B
-    22: "Variant_C",    # Variant_C
-    23: "Variant_D",    # Variant_D
+    2: "High Quality",  # HighQuality
+    3: "Exotic",        # Structure (exotic planet type)
+    4: "Exotic",        # Beam (exotic planet type)
+    5: "Exotic",        # Hexagon (exotic planet type)
+    6: "Exotic",        # FractCube (exotic planet type)
+    7: "Exotic",        # Bubble (exotic planet type)
+    8: "Exotic",        # Shards (exotic planet type)
+    9: "Exotic",        # Contour (exotic planet type)
+    10: "Exotic",       # Shell (exotic planet type)
+    11: "Exotic",       # BoneSpire (exotic planet type)
+    12: "Exotic",       # WireCell (exotic planet type)
+    13: "Exotic",       # HydroGarden (exotic planet type)
+    14: "Mega Flora",   # HugePlant - large plants
+    15: "Mega Flora",   # HugeLush - large lush vegetation
+    16: "Mega Fauna",   # HugeRing - large ring formations
+    17: "Mega Terrain", # HugeRock - large rock formations
+    18: "Mega Terrain", # HugeScorch - large scorched terrain
+    19: "Mega Toxic",   # HugeToxic - large toxic formations
+    20: "Variant A",    # Variant_A
+    21: "Variant B",    # Variant_B
+    22: "Variant C",    # Variant_C
+    23: "Variant D",    # Variant_D
     24: "Infested",     # Infested
     25: "Swamp",        # Swamp
     26: "Lava",         # Lava
     27: "Worlds",       # Worlds
-    28: "Remix_A",      # Remix_A
-    29: "Remix_B",      # Remix_B
-    30: "Remix_C",      # Remix_C
-    31: "Remix_D",      # Remix_D
+    28: "Remix A",      # Remix_A
+    29: "Remix B",      # Remix_B
+    30: "Remix C",      # Remix_C
+    31: "Remix D",      # Remix_D
 }
 
 PLANET_SIZES = {
@@ -253,13 +264,13 @@ CONFLICT_LEVELS = {
 }
 
 ALIEN_RACES = {
-    0: "Traders",    # Gek
-    1: "Warriors",   # Vy'keen
-    2: "Explorers",  # Korvax
-    3: "Robots",     # Sentinel/Atlas
-    4: "Atlas",
-    5: "Diplomats",
-    6: "None"
+    0: "Gek",
+    1: "Vy'keen",
+    2: "Korvax",
+    3: "None",       # Robots/Sentinel systems
+    4: "None",       # Atlas
+    5: "None",       # Diplomats (unused)
+    6: "None"        # Uninhabited
 }
 
 STAR_TYPES = {
@@ -386,81 +397,322 @@ def translate_resource(resource_id: str) -> str:
 
 
 def clean_weather_string(weather_str: str) -> str:
-    """Clean raw weather strings like 'weather_glitch 6' to readable names."""
+    """Clean raw weather strings like 'weather_glitch 6' to readable names.
+
+    Maps raw game weather values to EXACT adjectives from Haven UI's
+    weatherAdjectives list (adjectives.js) for consistent display.
+
+    Valid weatherAdjectives include: Pleasant, Temperate, Hot, Extreme Heat,
+    Humid, Frozen, Freezing, Radioactive, Anomalous, Arid, Airless, Clear, etc.
+    """
     if not weather_str or weather_str == "Unknown" or weather_str == "":
         return weather_str
 
-    # Already a clean name from WEATHER_OPTIONS
-    clean_names = ["Clear", "Dust", "Humid", "Snow", "Toxic", "Scorched",
-                   "Radioactive", "RedWeather", "GreenWeather", "BlueWeather",
-                   "Swamp", "Lava", "Bubble", "Weird", "Fire", "ClearCold", "GasGiant"]
-    if weather_str in clean_names:
+    # Values that are already valid weatherAdjectives (from adjectives.js)
+    # Only include values that ACTUALLY exist in the weatherAdjectives list
+    valid_adjectives = [
+        "Clear", "Humid", "Radioactive", "Pleasant", "Temperate", "Mild",
+        "Beautiful", "Blissful", "Balmy", "Frozen", "Freezing", "Cold", "Icy",
+        "Arid", "Parched", "Hot", "Heated", "Extreme Heat", "Anomalous",
+        "Airless", "No Atmosphere", "Inferno", "Toxic Rain", "Extreme Toxicity"
+    ]
+    if weather_str in valid_adjectives:
         return weather_str
 
-    # Map raw weather string prefixes to readable names
-    weather_mappings = {
-        "weather_glitch": "Glitch",
-        "weather_lava": "Lava",
-        "weather_frozen": "Frozen",
-        "weather_cold": "Cold",
-        "weather_hot": "Scorched",
-        "weather_toxic": "Toxic",
+    # Normalize: lowercase and replace spaces with underscores for matching
+    normalized = weather_str.lower().replace(' ', '_')
+
+    # Map raw weather values to EXACT weatherAdjectives from adjectives.js
+    # These must match entries in Haven-UI/src/data/adjectives.js weatherAdjectives
+    exact_mappings = {
+        # Lush planet weather
+        "weather_lush": "Pleasant",
+        "weather lush": "Pleasant",
+        "lush": "Pleasant",
+        # Toxic planet weather
+        "weather_toxic": "Toxic Rain",
+        "toxic": "Toxic Rain",
+        # Scorched/Hot planet weather
+        "weather_scorched": "Extreme Heat",
+        "weather_hot": "Extreme Heat",
+        "weather_fire": "Inferno",
+        "scorched": "Extreme Heat",
+        # Radioactive planet weather
         "weather_radioactive": "Radioactive",
-        "weather_dust": "Dusty",
-        "weather_humid": "Humid",
-        "weather_scorched": "Scorched",
-        "weather_swamp": "Swamp",
-        "weather_bubble": "Bubble",
-        "weather_weird": "Weird",
-        "weather_fire": "Fire",
-        "weather_storm": "Stormy",
-        "weather_clear": "Clear",
-        "weather_normal": "Normal",
-        "weather_snow": "Snow",
-        "weather_blizzard": "Blizzard",
-        "weather_extreme": "Extreme",
-        "lush": "Lush",
-        "toxic": "Toxic",
-        "scorched": "Scorched",
+        "radioactive": "Radioactive",
+        # Frozen/Cold planet weather
+        "weather_frozen": "Frozen",
+        "weather_cold": "Freezing",
+        "weather_snow": "Frozen",
+        "weather_blizzard": "Freezing",
         "frozen": "Frozen",
-        "barren": "Barren",
-        "dead": "Dead",
-        "weird": "Weird",
-        "red": "Red",
-        "green": "Green",
-        "blue": "Blue",
+        "cold": "Freezing",
+        # Barren/Dust planet weather
+        "weather_barren": "Arid",
+        "weather_dust": "Arid",
+        "barren": "Arid",
+        "dust": "Arid",
+        # Dead planet weather
+        "weather_dead": "Airless",
+        "dead": "Airless",
+        # Weird/Exotic planet weather
+        "weather_weird": "Anomalous",
+        "weather_glitch": "Anomalous",
+        "weather_bubble": "Anomalous",
+        "weird": "Anomalous",
+        "glitch": "Anomalous",
+        # Swamp planet weather
+        "weather_swamp": "Humid",
+        "swamp": "Humid",
+        # Lava planet weather
+        "weather_lava": "Inferno",
+        "lava": "Inferno",
+        # Humid weather
+        "weather_humid": "Humid",
+        "humid": "Humid",
+        # Clear/Normal weather
+        "weather_clear": "Clear",
+        "weather_normal": "Temperate",
+        "clear": "Clear",
+        "normal": "Temperate",
+        # Extreme weather
+        "weather_extreme": "Extreme Heat",
+        # Color-based exotic weather
+        "redweather": "Anomalous",
+        "greenweather": "Anomalous",
+        "blueweather": "Anomalous",
     }
 
-    # Convert to lowercase for matching
-    lower_weather = weather_str.lower()
+    if normalized in exact_mappings:
+        return exact_mappings[normalized]
 
-    # Try to match prefix
-    for prefix, readable in weather_mappings.items():
-        if lower_weather.startswith(prefix):
+    # Try prefix matching for partial matches
+    weather_prefix_mappings = {
+        "weather_glitch": "Anomalous",
+        "weather_lava": "Inferno",
+        "weather_frozen": "Frozen",
+        "weather_cold": "Freezing",
+        "weather_hot": "Extreme Heat",
+        "weather_toxic": "Toxic Rain",
+        "weather_radioactive": "Radioactive",
+        "weather_dust": "Arid",
+        "weather_humid": "Humid",
+        "weather_scorched": "Extreme Heat",
+        "weather_swamp": "Humid",
+        "weather_bubble": "Anomalous",
+        "weather_weird": "Anomalous",
+        "weather_fire": "Inferno",
+        "weather_clear": "Clear",
+        "weather_normal": "Temperate",
+        "weather_snow": "Frozen",
+        "weather_blizzard": "Freezing",
+        "weather_extreme": "Extreme Heat",
+        "weather_lush": "Pleasant",
+    }
+
+    for prefix, readable in weather_prefix_mappings.items():
+        if normalized.startswith(prefix):
             return readable
+
+    # Biome-based weather fallbacks using valid weatherAdjectives
+    biome_weather_defaults = {
+        "lush": "Pleasant",
+        "toxic": "Toxic Rain",
+        "scorched": "Extreme Heat",
+        "radioactive": "Radioactive",
+        "frozen": "Frozen",
+        "barren": "Arid",
+        "dead": "Airless",
+        "weird": "Anomalous",
+        "swamp": "Humid",
+        "lava": "Inferno",
+    }
+
+    for biome, weather in biome_weather_defaults.items():
+        if biome in normalized:
+            return weather
 
     # Try to extract meaningful part (remove numbers and underscores)
     import re
     cleaned = re.sub(r'[_\d]+$', '', weather_str)  # Remove trailing numbers and underscores
-    cleaned = cleaned.replace('_', ' ').title()
-    if cleaned and cleaned != weather_str:
-        return cleaned
+    cleaned = cleaned.replace('_', ' ').strip()
+
+    # Title case and return if we got something different
+    if cleaned and cleaned.lower() != weather_str.lower():
+        return cleaned.title()
 
     return weather_str
 
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "10.0.0"
-    __description__ = "Batch mode planet data extraction"
+    __version__ = "10.2.0"
+    __description__ = "Batch mode planet data extraction with contextual adjectives"
 
-    # Mapping for flora/fauna levels (NMS adjectives)
+    # ==========================================================================
+    # CONTEXTUAL ADJECTIVE MAPPINGS (v10.2.0)
+    # Uses valid adjectives from Haven UI's adjectives.js for variety
+    # Selection is based on biome type + level for contextual accuracy
+    # ==========================================================================
+
+    # Flora level adjectives by biome type (from floraAdjectives in adjectives.js)
+    FLORA_BY_BIOME = {
+        # Lush biomes - varied vegetation descriptions
+        "Lush": {0: "Absent", 1: "Occasional", 2: "Frequent", 3: "Lush"},
+        "Swamp": {0: "Devoid", 1: "Sparse", 2: "Ample", 3: "Abundant"},
+        # Harsh biomes - survival-focused descriptions
+        "Toxic": {0: "None", 1: "Deficient", 2: "Limited", 3: "Moderate"},
+        "Scorched": {0: "Nonexistent", 1: "Rare", 2: "Sparse", 3: "Typical"},
+        "Radioactive": {0: "Absent", 1: "Uncommon", 2: "Regular", 3: "Common"},
+        "Frozen": {0: "Empty", 1: "Lacking", 2: "Fair", 3: "Average"},
+        # Barren/Dead - minimal vegetation
+        "Barren": {0: "None", 1: "Sporadic", 2: "Infrequent", 3: "Occasional"},
+        "Dead": {0: "Nonexistent", 1: "Not Present", 2: "Sparse", 3: "Rare"},
+        # Exotic/Weird - unusual descriptions
+        "Weird": {0: "Undetected", 1: "Unusual", 2: "Moderate", 3: "Bountiful"},
+        "Red": {0: "Absent", 1: "Intermittent", 2: "Average", 3: "Rich"},
+        "Green": {0: "Empty", 1: "Sparse", 2: "Regular", 3: "Generous"},
+        "Blue": {0: "Devoid", 1: "Infrequent", 2: "Frequent", 3: "Full"},
+        # Special biomes
+        "Lava": {0: "None", 1: "Rare", 2: "Uncommon", 3: "Occasional"},
+        "Waterworld": {0: "Absent", 1: "Sparse", 2: "Moderate", 3: "Copious"},
+        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    }
+
+    # Fauna level adjectives by biome type (from faunaAdjectives in adjectives.js)
+    FAUNA_BY_BIOME = {
+        # Lush biomes - abundant wildlife
+        "Lush": {0: "Absent", 1: "Occasional", 2: "Frequent", 3: "Bountiful"},
+        "Swamp": {0: "Devoid", 1: "Uncommon", 2: "Common", 3: "Copious"},
+        # Harsh biomes - survival adaptations
+        "Toxic": {0: "None", 1: "Rare", 2: "Average", 3: "Ample"},
+        "Scorched": {0: "Empty", 1: "Sparse", 2: "Limited", 3: "Moderate"},
+        "Radioactive": {0: "Nonexistent", 1: "Deficient", 2: "Regular", 3: "Typical"},
+        "Frozen": {0: "Absent", 1: "Infrequent", 2: "Fair", 3: "Generous"},
+        # Barren/Dead - minimal life
+        "Barren": {0: "None", 1: "Rare", 2: "Sporadic", 3: "Occasional"},
+        "Dead": {0: "Not Present", 1: "Lacking", 2: "Sparse", 3: "Few"},
+        # Exotic/Weird - unusual fauna
+        "Weird": {0: "Undetected", 1: "Unusual", 2: "Intermittent", 3: "Rich"},
+        "Red": {0: "Empty", 1: "Uncommon", 2: "Average", 3: "Numerous"},
+        "Green": {0: "Devoid", 1: "Infrequent", 2: "Frequent", 3: "Abundant"},
+        "Blue": {0: "Absent", 1: "Sparse", 2: "Regular", 3: "Full"},
+        # Special biomes
+        "Lava": {0: "None", 1: "Rare", 2: "Sporadic", 3: "Few"},
+        "Waterworld": {0: "Empty", 1: "Occasional", 2: "Common", 3: "Copious"},
+        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    }
+
+    # Sentinel level adjectives by biome type (from sentinelAdjectives in adjectives.js)
+    SENTINEL_BY_BIOME = {
+        # Lush biomes - typically lower security
+        "Lush": {0: "None Present", 1: "Low Security", 2: "Observant", 3: "Aggressive"},
+        "Swamp": {0: "Absent", 1: "Few", 2: "Frequent", 3: "Hateful"},
+        # Harsh biomes - often higher security
+        "Toxic": {0: "Missing", 1: "Infrequent", 2: "Attentive", 3: "Frenzied"},
+        "Scorched": {0: "Not Present", 1: "Sparse", 2: "Regular Patrols", 3: "Threatening"},
+        "Radioactive": {0: "None", 1: "Limited", 2: "Hostile Patrols", 3: "Zealous"},
+        "Frozen": {0: "Absent", 1: "Intermittent", 2: "High Security", 3: "Enforcing"},
+        # Barren/Dead - variable
+        "Barren": {0: "Missing", 1: "Remote", 2: "Spread Thin", 3: "Unwavering"},
+        "Dead": {0: "None Present", 1: "Isolated", 2: "Infrequent", 3: "Hateful"},
+        # Exotic/Weird - unusual behavior
+        "Weird": {0: "Forsaken", 1: "Irregular Patrols", 2: "Normal", 3: "Malicious"},
+        "Red": {0: "Absent", 1: "Low", 2: "Observant", 3: "Aggressive"},
+        "Green": {0: "Not Present", 1: "Few", 2: "Attentive", 3: "Zealous"},
+        "Blue": {0: "None", 1: "Sparse", 2: "Frequent", 3: "Threatening"},
+        # Special biomes
+        "Lava": {0: "Missing", 1: "Few", 2: "Hostile Patrols", 3: "Frenzied"},
+        "Waterworld": {0: "Absent", 1: "Low", 2: "Limited", 3: "Enforcing"},
+        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    }
+
+    # Weather adjectives by biome + storm frequency (from weatherAdjectives in adjectives.js)
+    # Key: (biome, weather_enum, storm_frequency) -> adjective
+    # Storm frequency: 0=None, 1=Low, 2=High, 3=Always
+    WEATHER_CONTEXTUAL = {
+        # Lush biomes
+        ("Lush", 0, 0): "Peaceful",       # Clear, no storms
+        ("Lush", 0, 1): "Mild",           # Clear, low storms
+        ("Lush", 2, 0): "Humid",          # Humid, no storms
+        ("Lush", 2, 1): "Tropical Storms", # Humid, low storms
+        ("Lush", 2, 2): "Heavy Rain",     # Humid, high storms
+        # Toxic biomes
+        ("Toxic", 4, 0): "Toxic Clouds",  # Toxic, no storms
+        ("Toxic", 4, 1): "Toxic Rain",    # Toxic, low storms
+        ("Toxic", 4, 2): "Toxic Superstorms", # Toxic, high storms
+        ("Toxic", 4, 3): "Extreme Toxicity", # Toxic, constant storms
+        # Scorched biomes
+        ("Scorched", 5, 0): "Hot",        # Scorched, no storms
+        ("Scorched", 5, 1): "Heated Atmosphere", # Scorched, low storms
+        ("Scorched", 5, 2): "Firestorms", # Scorched, high storms
+        ("Scorched", 5, 3): "Inferno",    # Scorched, constant storms
+        ("Scorched", 14, 2): "Walls of Flame", # Fire weather
+        ("Scorched", 14, 3): "Colossal Firestorms",
+        # Radioactive biomes
+        ("Radioactive", 6, 0): "Radioactive",
+        ("Radioactive", 6, 1): "Irradiated",
+        ("Radioactive", 6, 2): "Radioactive Storms",
+        ("Radioactive", 6, 3): "Extreme Radioactivity",
+        # Frozen biomes
+        ("Frozen", 3, 0): "Frozen",       # Snow, no storms
+        ("Frozen", 3, 1): "Freezing",     # Snow, low storms
+        ("Frozen", 3, 2): "Blizzard",     # Snow, high storms
+        ("Frozen", 3, 3): "Extreme Cold", # Snow, constant storms
+        ("Frozen", 15, 0): "Icy",         # ClearCold
+        ("Frozen", 15, 1): "Frozen Clouds",
+        # Barren/Dead
+        ("Barren", 1, 0): "Arid",         # Dust, no storms
+        ("Barren", 1, 1): "Dusty",        # Dust, low storms
+        ("Barren", 1, 2): "Sandstorms",   # Dust, high storms
+        ("Dead", 0, 0): "Airless",
+        ("Dead", 0, 1): "No Atmosphere",
+        # Swamp
+        ("Swamp", 10, 0): "Humid",
+        ("Swamp", 10, 1): "Damp",
+        ("Swamp", 10, 2): "Monsoon",
+        ("Swamp", 10, 3): "Choking Humidity",
+        # Lava
+        ("Lava", 11, 0): "Molten",
+        ("Lava", 11, 1): "Magma Geysers",
+        ("Lava", 11, 2): "Magma Rain",
+        ("Lava", 11, 3): "Inferno",
+        # Exotic/Weird
+        ("Weird", 13, 0): "Anomalous",
+        ("Weird", 13, 1): "Unstable",
+        ("Weird", 13, 2): "Unfathomable Storms",
+        ("Weird", 12, 0): "Anomalous",    # Bubble weather
+    }
+
+    # Fallback mappings (simple level-based, used when biome not found)
     FLORA_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Bountiful"}
     FAUNA_LEVELS = {0: "None", 1: "Scarce", 2: "Regular", 3: "Copious"}
     # Legacy mapping for compatibility
     LIFE_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Abundant"}
     # Sentinel activity levels
     SENTINEL_LEVELS = {0: "Minimal", 1: "Limited", 2: "High", 3: "Aggressive"}
+
+    # v10.2.0: Convert WEATHER_OPTIONS internal names to user-friendly adjectives
+    # Used when WEATHER_CONTEXTUAL doesn't have a specific entry
+    WEATHER_FALLBACK = {
+        "Clear": "Pleasant",
+        "Dust": "Arid",
+        "Humid": "Humid",
+        "Snow": "Frozen",
+        "Toxic": "Toxic Rain",
+        "Scorched": "Extreme Heat",
+        "Radioactive": "Radioactive",
+        "RedWeather": "Anomalous",
+        "GreenWeather": "Anomalous",
+        "BlueWeather": "Anomalous",
+        "Swamp": "Humid",
+        "Lava": "Inferno",
+        "Bubble": "Anomalous",
+        "Weird": "Anomalous",
+        "Fire": "Inferno",
+        "ClearCold": "Icy",
+        "GasGiant": "No Atmosphere",
+    }
 
     # =========================================================================
     # CONFIG GUI FIELDS - Using pymhf's native DearPyGUI
@@ -479,35 +731,97 @@ class HavenExtractorMod(Mod):
         USER_DISCORD_USERNAME = value
         self._save_config_to_file()
 
-    @property
-    @gui_variable.STRING(label="Discord ID (18-digit)")
-    def personal_id(self) -> str:
-        return self._personal_id
+    # All community partner tags - alphabetically sorted by display name
+    COMMUNITY_TAGS = [
+        "personal",      # Independent Explorers (default)
+        "Haven",         # Haven Hub
+        "AGT",           # Alliance of Galactic Travelers
+        "ARCH",          # ARCH
+        "AA",            # AstroAcutioneer
+        "AP",            # Aurelis Prime
+        "B.E.S",         # B.E.S
+        "YGS",           # Circle of Yggdrasil
+        "CR",            # Crimson Runners
+        "EVRN",          # EVRN
+        "GHUB",          # Galactic Hub Project
+        "IEA",           # IEA
+        "NEO",           # Neo Terra Collective
+        "O.Q",           # Outskirt Queers
+        "Ph-Z0",         # Phantom-Zer0
+        "QRR",           # The Quasar Republic Reforged
+        "RwR",           # Red Water Runners
+        "SHDW",          # Shadow Worlds
+        "Veil1",         # Soren Veil
+        "TBH",           # T-BH (The Black Hole)
+        "INDM",          # The Indominus Legion
+        "TMA",           # The Mourning Amity
+        "UFE",           # UltimateFeudEnterprise
+        "VCTH",          # Void Citadel
+        "ZBA",           # Zabia
+    ]
 
-    @personal_id.setter
-    def personal_id(self, value: str):
-        global USER_PERSONAL_ID
-        self._personal_id = value
-        USER_PERSONAL_ID = value
-        self._save_config_to_file()
-
-    @gui_combobox("Community Tag", items=["personal", "Haven", "IEA"])
-    def set_discord_tag(self, tag: str):
-        """Called when user selects a community tag from dropdown."""
+    @gui_combobox("Community Tag", items=COMMUNITY_TAGS)
+    def set_discord_tag(self, sender, app_data, user_data=None):
+        """Called when user selects a community tag from dropdown.
+        DearPyGUI callback signature: (sender, app_data, user_data)
+        app_data contains the selected string value.
+        """
         global USER_DISCORD_TAG
+        tag = app_data  # The selected tag string
         self._discord_tag = tag
         USER_DISCORD_TAG = tag
         self._save_config_to_file()
         logger.info(f"[CONFIG] Community tag set to: {tag}")
 
     @gui_combobox("Reality Mode", items=["Normal", "Permadeath"])
-    def set_reality(self, reality: str):
-        """Called when user selects reality mode from dropdown."""
+    def set_reality(self, sender, app_data, user_data=None):
+        """Called when user selects reality mode from dropdown.
+        DearPyGUI callback signature: (sender, app_data, user_data)
+        app_data contains the selected string value.
+        """
         global USER_REALITY
+        reality = app_data  # The selected reality string
         self._reality = reality
         USER_REALITY = reality
         self._save_config_to_file()
         logger.info(f"[CONFIG] Reality mode set to: {reality}")
+
+    # =========================================================================
+    # MANUAL SYSTEM NAME INPUT
+    # Since automatic name extraction doesn't work reliably, users can manually
+    # enter the system name they see in-game.
+    # =========================================================================
+
+    @property
+    @gui_variable.STRING(label="Manual System Name")
+    def manual_system_name(self) -> str:
+        return getattr(self, '_manual_system_name', '')
+
+    @manual_system_name.setter
+    def manual_system_name(self, value: str):
+        self._manual_system_name = value
+
+    @gui_button("Apply System Name")
+    def apply_manual_system_name(self):
+        """Apply the manually entered system name to the current system."""
+        name = getattr(self, '_manual_system_name', '').strip()
+        if not name:
+            logger.warning("[MANUAL] No system name entered. Type the name in 'Manual System Name' field first.")
+            return
+
+        # Update the current system coordinates
+        if self._current_system_coords:
+            old_name = self._current_system_coords.get('system_name', 'Unknown')
+            self._current_system_coords['system_name'] = name
+            logger.info(f"[MANUAL] System name updated: '{old_name}' -> '{name}'")
+            logger.info(f"[MANUAL] This name will be used when the system is saved to batch.")
+        else:
+            logger.warning("[MANUAL] No current system data. Warp to a system first.")
+            return
+
+        # Clear the input field
+        self._manual_system_name = ''
+        logger.info(f"[MANUAL] System name '{name}' applied successfully!")
 
     def _save_config_to_file(self):
         """Save current config to file."""
@@ -531,9 +845,10 @@ class HavenExtractorMod(Mod):
 
         # Initialize config fields from loaded config
         self._discord_username = USER_DISCORD_USERNAME
-        self._personal_id = USER_PERSONAL_ID
+        self._personal_id = USER_PERSONAL_ID  # Discord snowflake ID for tracking
         self._discord_tag = USER_DISCORD_TAG
         self._reality = USER_REALITY
+        self._manual_system_name = ''  # For manual system name input
 
         self._pending_extraction = False
         self._last_extracted_seed = None
@@ -567,9 +882,8 @@ class HavenExtractorMod(Mod):
         # =====================================================
         self._system_saved_to_batch = False
 
-
         logger.info("=" * 60)
-        logger.info("Haven Extractor v10.0.0 - Direct API Integration")
+        logger.info("Haven Extractor v10.1.4 - Direct API Integration")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
@@ -633,7 +947,8 @@ class HavenExtractorMod(Mod):
     def _read_system_data_direct(self, sys_data_addr: int) -> dict:
         """Read solar system data using direct memory offsets."""
         result = {
-            "star_type": "Unknown",
+            "system_name": "",
+            "star_color": "Unknown",
             "economy_type": "Unknown",
             "economy_strength": "Unknown",
             "conflict_level": "Unknown",
@@ -644,15 +959,21 @@ class HavenExtractorMod(Mod):
         }
 
         try:
+            # Read system name (128-byte fixed string at offset 0x2274)
+            system_name = self._read_string(sys_data_addr, SolarSystemDataOffsets.NAME, max_len=128)
+            if system_name:
+                result["system_name"] = system_name
+                logger.info(f"  [DIRECT] System name: {system_name}")
+
             # Read planet counts
             result["planet_count"] = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PLANETS_COUNT)
             result["prime_planets"] = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PRIME_PLANETS)
             logger.info(f"  [DIRECT] Planet count: {result['planet_count']}, Prime: {result['prime_planets']}")
 
-            # Read star type
+            # Read star type (now called star_color)
             star_type_val = self._read_uint32(sys_data_addr, SolarSystemDataOffsets.STAR_TYPE)
-            result["star_type"] = STAR_TYPES.get(star_type_val, f"Unknown({star_type_val})")
-            logger.info(f"  [DIRECT] Star type: {result['star_type']} (raw: {star_type_val})")
+            result["star_color"] = STAR_TYPES.get(star_type_val, f"Unknown({star_type_val})")
+            logger.info(f"  [DIRECT] Star color: {result['star_color']} (raw: {star_type_val})")
 
             # Read trading data (economy)
             trading_addr = sys_data_addr + SolarSystemDataOffsets.TRADING_DATA
@@ -797,6 +1118,13 @@ class HavenExtractorMod(Mod):
             # Build the system extraction
             data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
 
+            # Get system properties (includes system_name from memory)
+            sys_props = self._extract_system_properties(sys_data)
+
+            # Preserve manual system name from coords if set (takes priority over memory read)
+            manual_name = coords.get('system_name', '')
+            has_manual_name = manual_name and not manual_name.startswith('System_')
+
             system_data = {
                 "extraction_time": datetime.now().isoformat(),
                 "extractor_version": "10.0.0",
@@ -806,11 +1134,42 @@ class HavenExtractorMod(Mod):
                 "captured_planet_count": len(self._captured_planets),
                 "discoverer_name": "HavenExtractor",
                 "discovery_timestamp": int(datetime.now().timestamp()),
-                **coords,
-                **self._extract_system_properties(sys_data),
+                **sys_props,  # System properties from memory first
+                **coords,     # Coords AFTER so manual name overwrites
                 "planets": self._extract_planets(self._cached_solar_system),
             }
             system_data["planet_count"] = len(system_data["planets"])
+
+            # If we have a manual name, use it and skip other lookups
+            if has_manual_name:
+                system_data['system_name'] = manual_name
+                logger.info(f"[BATCH] Using manual system name: '{manual_name}'")
+            # Otherwise try to get actual system name (might be populated by batch save time)
+            elif not system_data.get('system_name') or system_data['system_name'].startswith('System_'):
+                # Try reading from Name field (might be populated now)
+                actual_name = self._get_actual_system_name()
+                if actual_name:
+                    system_data['system_name'] = actual_name
+                    logger.info(f"[BATCH] Got actual system name: '{actual_name}'")
+                else:
+                    # Try game state notification string
+                    try:
+                        game_state = gameData.game_state
+                        if game_state:
+                            gs_addr = get_addressof(game_state)
+                            if gs_addr:
+                                notif = self._read_string(gs_addr, 0x38, max_len=256)
+                                if notif:
+                                    match = re.match(r"In the (.+) system", notif)
+                                    if match:
+                                        system_data['system_name'] = match.group(1).strip()
+                                        logger.info(f"[BATCH] Got name from game state: '{system_data['system_name']}'")
+                    except Exception:
+                        pass
+
+            # Use glyph-based fallback if system_name is still empty
+            if not system_data.get('system_name') or system_data['system_name'].startswith('System_'):
+                system_data['system_name'] = f"System_{glyph_code}"
 
             # Add to batch
             self._batch_systems.append(system_data)
@@ -832,31 +1191,185 @@ class HavenExtractorMod(Mod):
     @nms.cGcSolarSystem.Generate.after
     def on_system_generate(self, this, lbUseSettingsFile, lSeed):
         """Fires AFTER solar system generation - data is now ready."""
-        logger.info("=" * 40)
-        logger.info("=== SYSTEM GENERATE COMPLETE ===")
-        logger.info(f"  this pointer: {this}")
-        logger.info(f"  lSeed: {lSeed}")
-        logger.info("=" * 40)
+        logger.info("")
+        logger.info("=== NEW SYSTEM DETECTED ===")
 
         # =====================================================
         # v8.2.0: BATCH MODE - Save previous system BEFORE clearing!
         # This preserves the data from the system we just left
         # =====================================================
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
-            logger.info("  [BATCH] Saving previous system to batch before clearing...")
+            logger.info("  Saving previous system to batch...")
             self._save_current_system_to_batch()
 
         addr = get_addressof(this)
         if addr == 0:
-            logger.warning("Generate hook: this pointer is NULL")
             return
-
-        logger.info(f"  this address: 0x{addr:X}")
 
         try:
             self._cached_solar_system = map_struct(addr, nms.cGcSolarSystem)
-            logger.info(f"  Cached solar system: {self._cached_solar_system}")
             self._pending_extraction = True
+
+            # =====================================================
+            # v10.0.7: Try multiple sources for coordinates
+            # 1. gameData.player_state.mLocation (if available)
+            # 2. mUniverseAddress from planet discovery data (packed uint64)
+            # =====================================================
+            self._current_system_coords = None
+            self._current_system_name = None  # v10.0.7: Store system name separately
+
+            # v10.0.12: System name is procedurally generated from seed, not stored in Name field
+            # The Name field is only populated for user-renamed systems
+            # We'll use the glyph code as the system identifier
+            self._current_system_name = None  # Will be set from glyph code later
+
+            galaxy_names = {
+                0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
+                3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
+                6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
+                9: "Eissentam", 10: "Elkupalos",
+            }
+
+            # Method 1: Try player_state (usually None during warp)
+            try:
+                player_state = gameData.player_state
+                if player_state:
+                    location = player_state.mLocation
+                    galactic_addr = location.GalacticAddress
+
+                    voxel_x = self._safe_int(galactic_addr.VoxelX)
+                    voxel_y = self._safe_int(galactic_addr.VoxelY)
+                    voxel_z = self._safe_int(galactic_addr.VoxelZ)
+                    system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
+                    planet_idx = self._safe_int(galactic_addr.PlanetIndex)
+                    galaxy_idx = self._safe_int(location.RealityIndex)
+
+                    # DEBUG: Log raw values from GalacticAddress struct
+                    logger.info(f"  [DEBUG] GalacticAddress struct fields:")
+                    logger.info(f"    VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
+                    logger.info(f"    SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
+                    # Calculate what portal/region values these produce
+                    dbg_px = (voxel_x + 2047) & 0xFFF
+                    dbg_py = (voxel_y + 127) & 0xFF
+                    dbg_pz = (voxel_z + 2047) & 0xFFF
+                    logger.info(f"    -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+
+                    if galaxy_idx < 0 or galaxy_idx > 255:
+                        galaxy_idx = 0
+
+                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                    glyph_code = self._coords_to_glyphs(planet_idx, system_idx, voxel_x, voxel_y, voxel_z)
+
+                    # Get actual system name from mGameState
+                    system_name = self._get_actual_system_name()
+                    if not system_name:
+                        system_name = f"System_{glyph_code}"
+                    region_name = f"Region_{glyph_code[:4]}"
+                    self._current_system_coords = {
+                        "system_name": system_name,
+                        "region_name": region_name,
+                        "glyph_code": glyph_code,
+                        "galaxy_name": galaxy_name,
+                        "galaxy_index": galaxy_idx,
+                        "voxel_x": voxel_x,
+                        "voxel_y": voxel_y,
+                        "voxel_z": voxel_z,
+                        "solar_system_index": system_idx,
+                    }
+                    logger.info(f"  [SUCCESS via Method 1] Cached coords: '{system_name}' in '{region_name}' @ {glyph_code} ({galaxy_name})")
+            except Exception as e:
+                logger.debug(f"  [v10.0.5] player_state method failed: {e}")
+
+            # Method 2: Try mUniverseAddress from planet discovery data (packed uint64)
+            # Note: Planets may not be fully initialized at this point - that's OK, we'll try again later
+            if self._current_system_coords is None:
+                try:
+                    # Access first planet's discovery data
+                    planets = self._cached_solar_system.maPlanets
+                    first_planet = planets[0]
+                    discovery_data = first_planet.mPlanetDiscoveryData
+
+                    # mUniverseAddress is a packed c_uint64, not a struct pointer
+                    universe_addr = self._safe_int(discovery_data.mUniverseAddress)
+
+                    # Skip if uninitialized (all 1s or 0) - expected during system generate
+                    if universe_addr == 0 or universe_addr == 0xFFFFFFFFFFFFFFFF:
+                        raise ValueError("Uninitialized mUniverseAddress")
+
+                    # v10.1.0: CORRECT bit layout for mUniverseAddress (verified via diagnostic)
+                    # mUniverseAddress stores REGION coordinates DIRECTLY, not signed voxel offsets!
+                    # Diagnostic proved: 0x001126000193DFA9 contains Sea of Gidzenuf [4009, 1, 2365]
+                    #
+                    # Bits 0-11:  X region (direct, 0-4095)
+                    # Bits 12-23: Z region (direct, 0-4095)
+                    # Bits 24-31: Y region (direct, 0-255)
+                    # Bits 32-39: (padding/unused)
+                    # Bits 40-51: SolarSystemIndex (12 bits)
+                    # Bits 52-55: PlanetIndex + 1 (4 bits, stored as planet+1)
+                    # Bits 56-63: Galaxy index (8 bits)
+
+                    x_region = universe_addr & 0xFFF
+                    z_region = (universe_addr >> 12) & 0xFFF
+                    y_region = (universe_addr >> 24) & 0xFF
+                    system_idx = (universe_addr >> 40) & 0xFFF
+                    planet_idx_raw = (universe_addr >> 52) & 0xF
+                    planet_idx = max(0, planet_idx_raw - 1)  # Stored as planet+1
+                    galaxy_idx = (universe_addr >> 56) & 0xFF
+
+                    # DEBUG: Log raw packed address decode
+                    logger.info(f"  [DEBUG] mUniverseAddress packed decode (Method 2) - v10.1.0 CORRECT layout:")
+                    logger.info(f"    Raw addr: 0x{universe_addr:016X}")
+                    logger.info(f"    x_region={x_region} (0x{x_region:03X}), y_region={y_region} (0x{y_region:02X}), z_region={z_region} (0x{z_region:03X})")
+                    logger.info(f"    system_idx={system_idx} (0x{system_idx:03X}), planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
+
+                    # Sanity check - region coords must be in valid range
+                    if (0 <= x_region <= 4095 and 0 <= y_region <= 255 and 0 <= z_region <= 4095 and
+                        0 <= system_idx <= 4095 and 0 <= galaxy_idx <= 255):
+
+                        galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+
+                        # Construct glyph DIRECTLY from region coords (no conversion needed!)
+                        # Format: P-SSS-YY-ZZZ-XXX
+                        glyph_code = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
+
+                        # Convert to signed voxel coords using SIGNED HEX formula (must match glyph_decoder.py!)
+                        # X/Z: 0x000-0x7FF = 0 to +2047, 0x800-0xFFF = -2048 to -1
+                        # Y:   0x00-0x7F = 0 to +127, 0x80-0xFF = -128 to -1
+                        voxel_x = x_region if x_region <= 0x7FF else x_region - 0x1000
+                        voxel_y = y_region if y_region <= 0x7F else y_region - 0x100
+                        voxel_z = z_region if z_region <= 0x7FF else z_region - 0x1000
+
+                        # Get actual system name from mGameState
+                        system_name = self._get_actual_system_name()
+                        if not system_name:
+                            system_name = f"System_{glyph_code}"
+                        region_name = f"Region_{glyph_code[:4]}"
+                        self._current_system_coords = {
+                            "system_name": system_name,
+                            "region_name": region_name,
+                            "glyph_code": glyph_code,
+                            "galaxy_name": galaxy_name,
+                            "galaxy_index": galaxy_idx,
+                            "voxel_x": voxel_x,
+                            "voxel_y": voxel_y,
+                            "voxel_z": voxel_z,
+                            "region_x": x_region,
+                            "region_y": y_region,
+                            "region_z": z_region,
+                            "solar_system_index": system_idx,
+                        }
+                        logger.info(f"  [SUCCESS via Method 2] System: '{system_name}' @ {glyph_code} ({galaxy_name})")
+                        logger.info(f"    Voxel coords (signed): [{voxel_x}, {voxel_y}, {voxel_z}]")
+                        logger.info(f"    Region coords (raw): [{x_region}, {y_region}, {z_region}]")
+                    else:
+                        logger.info(f"  [DEBUG] Method 2 failed sanity check: x_region={x_region}, y_region={y_region}, z_region={z_region}")
+                except Exception as e:
+                    # "Uninitialized mUniverseAddress" is expected - skip quietly
+                    if "Uninitialized" not in str(e):
+                        logger.debug(f"  mUniverseAddress decode failed: {e}")
+
+            if self._current_system_coords is None:
+                logger.info("  [DEBUG] No coordinates yet - will try again during planet capture")
 
             # =====================================================
             # v8.1.0: Clear captured planets for new system
@@ -898,64 +1411,95 @@ class HavenExtractorMod(Mod):
         fires for nearby systems during galaxy discovery. Only the first 6
         belong to the current system.
         """
-        # v9.0.0: CRITICAL - Cache coordinates from lUA for batch mode
-        # This runs even when _capture_enabled is False (e.g., loading into a save)
-        if not self._current_system_coords:
-            try:
-                # lUA is a GcUniverseAddressData struct (same structure as player_state.mLocation)
-                # It has .GalacticAddress and .RealityIndex properties
-                galaxy_idx = 0
-                voxel_x = voxel_y = voxel_z = system_idx = 0
-
-                # Try to access the struct directly (lUA might be already mapped)
-                if hasattr(lUA, 'GalacticAddress'):
-                    ga = lUA.GalacticAddress
-                    voxel_x = self._safe_int(ga.VoxelX)
-                    voxel_y = self._safe_int(ga.VoxelY)
-                    voxel_z = self._safe_int(ga.VoxelZ)
-                    system_idx = self._safe_int(ga.SolarSystemIndex)
-                    if hasattr(lUA, 'RealityIndex'):
-                        galaxy_idx = self._safe_int(lUA.RealityIndex)
-                else:
-                    # Try mapping the pointer to the struct
-                    ua_addr = get_addressof(lUA)
-                    if ua_addr != 0:
-                        # Use nmse.cGcUniverseAddressData from exported_types
-                        ua_struct = map_struct(ua_addr, nmse.cGcUniverseAddressData)
-                        if hasattr(ua_struct, 'GalacticAddress'):
-                            ga = ua_struct.GalacticAddress
-                            voxel_x = self._safe_int(ga.VoxelX)
-                            voxel_y = self._safe_int(ga.VoxelY)
-                            voxel_z = self._safe_int(ga.VoxelZ)
-                            system_idx = self._safe_int(ga.SolarSystemIndex)
-                        if hasattr(ua_struct, 'RealityIndex'):
-                            galaxy_idx = self._safe_int(ua_struct.RealityIndex)
-
-                # Only cache if we got valid data
-                if voxel_x != 0 or voxel_y != 0 or voxel_z != 0:
-                    galaxy_names = {
-                        0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-                        3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-                    }
-                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
-                    glyph_code = self._coords_to_glyphs(0, system_idx, voxel_x, voxel_y, voxel_z)
-
-                    self._current_system_coords = {
-                        "voxel_x": voxel_x,
-                        "voxel_y": voxel_y,
-                        "voxel_z": voxel_z,
-                        "system_index": system_idx,
-                        "planet_index": 0,
-                        "galaxy_index": galaxy_idx,
-                        "galaxy_name": galaxy_name,
-                        "glyph_code": glyph_code,
-                    }
-                    logger.info(f"[v9.0.0] Cached coords from GenerateCreatureRoles: {glyph_code} in {galaxy_name}")
-            except Exception as e:
-                logger.info(f"[v9.0.0] Could not cache coords from lUA: {e}")
+        # v10.0.3: lUA parameter is unreliable - gives garbage values when dereferenced
+        # v10.1.0: Use mUniverseAddress from planet discovery data instead (PROVEN CORRECT)
 
         if not self._capture_enabled:
             return
+
+        # v10.1.0: Extract coordinates from planet discovery data mUniverseAddress
+        # This is the ONLY reliable source - diagnostic proved it contains correct region coords
+        if self._current_system_coords is None and len(self._captured_planets) == 0:
+            try:
+                if self._cached_solar_system is not None:
+                    # Access first planet's discovery data
+                    planets = self._cached_solar_system.maPlanets
+                    first_planet = planets[0]
+                    discovery_data = first_planet.mPlanetDiscoveryData
+                    universe_addr = self._safe_int(discovery_data.mUniverseAddress)
+
+                    # Skip if uninitialized
+                    if universe_addr != 0 and universe_addr != 0xFFFFFFFFFFFFFFFF:
+                        # v10.1.0: CORRECT bit layout for mUniverseAddress
+                        # Bits 0-11:  X region (direct, 0-4095)
+                        # Bits 12-23: Z region (direct, 0-4095)
+                        # Bits 24-31: Y region (direct, 0-255)
+                        # Bits 40-51: SolarSystemIndex (12 bits)
+                        # Bits 52-55: PlanetIndex + 1 (stored as planet+1)
+                        # Bits 56-63: Galaxy index (8 bits)
+
+                        x_region = universe_addr & 0xFFF
+                        z_region = (universe_addr >> 12) & 0xFFF
+                        y_region = (universe_addr >> 24) & 0xFF
+                        system_idx = (universe_addr >> 40) & 0xFFF
+                        planet_idx_raw = (universe_addr >> 52) & 0xF
+                        planet_idx = max(0, planet_idx_raw - 1)
+                        galaxy_idx = (universe_addr >> 56) & 0xFF
+
+                        logger.info(f"  [DEBUG] GenerateCreatureRoles mUniverseAddress decode (v10.1.0):")
+                        logger.info(f"    Raw addr: 0x{universe_addr:016X}")
+                        logger.info(f"    x_region={x_region}, y_region={y_region}, z_region={z_region}")
+                        logger.info(f"    system_idx={system_idx}, planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
+
+                        # Sanity check
+                        if (0 <= x_region <= 4095 and 0 <= y_region <= 255 and 0 <= z_region <= 4095 and
+                            0 <= system_idx <= 4095 and 0 <= galaxy_idx <= 255):
+
+                            galaxy_names = {
+                                0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
+                                3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
+                                6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
+                                9: "Eissentam", 10: "Elkupalos",
+                            }
+                            galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+
+                            # Construct glyph DIRECTLY from region coords
+                            glyph_code = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
+
+                            # Convert to signed voxel coords using SIGNED HEX formula (must match glyph_decoder.py!)
+                            # X/Z: 0x000-0x7FF = 0 to +2047, 0x800-0xFFF = -2048 to -1
+                            # Y:   0x00-0x7F = 0 to +127, 0x80-0xFF = -128 to -1
+                            voxel_x = x_region if x_region <= 0x7FF else x_region - 0x1000
+                            voxel_y = y_region if y_region <= 0x7F else y_region - 0x100
+                            voxel_z = z_region if z_region <= 0x7FF else z_region - 0x1000
+
+                            # Get actual system name
+                            system_name = self._get_actual_system_name()
+                            if not system_name:
+                                system_name = f"System_{glyph_code}"
+                            region_name = f"Region_{glyph_code[:4]}"
+
+                            self._current_system_coords = {
+                                "system_name": system_name,
+                                "region_name": region_name,
+                                "glyph_code": glyph_code,
+                                "galaxy_name": galaxy_name,
+                                "galaxy_index": galaxy_idx,
+                                "voxel_x": voxel_x,
+                                "voxel_y": voxel_y,
+                                "voxel_z": voxel_z,
+                                "region_x": x_region,
+                                "region_y": y_region,
+                                "region_z": z_region,
+                                "solar_system_index": system_idx,
+                            }
+                            logger.info(f"  [SUCCESS via GenerateCreatureRoles] System: '{system_name}' @ {glyph_code} ({galaxy_name})")
+                            logger.info(f"    Voxel coords (signed): [{voxel_x}, {voxel_y}, {voxel_z}]")
+                            logger.info(f"    Region coords (raw): [{x_region}, {y_region}, {z_region}]")
+                        else:
+                            logger.debug(f"  [DEBUG] GenerateCreatureRoles sanity failed: region=[{x_region},{y_region},{z_region}]")
+            except Exception as e:
+                logger.debug(f"  [DEBUG] GenerateCreatureRoles coord extraction failed: {e}")
 
         # CRITICAL: Limit to 6 planets max (NMS max planets per system)
         # After APPVIEW, the hook fires for nearby systems - ignore those!
@@ -1071,7 +1615,7 @@ class HavenExtractorMod(Mod):
                             planet_size_raw = int(size_val) if size_val is not None else -1
                         planet_size_name = PLANET_SIZES.get(planet_size_raw, f"Unknown({planet_size_raw})")
                         is_moon = (planet_size_raw == 3)  # Moon = 3
-                    logger.info(f"    [HOOK] GenerationData: Biome={biome_name}({biome_raw}), SubType={biome_subtype_name}({biome_subtype_raw}), Size={planet_size_name}({planet_size_raw})")
+                    logger.debug(f"    Biome={biome_name}, SubType={biome_subtype_name}, Size={planet_size_name}")
             except Exception as e:
                 logger.debug(f"Biome extraction from GenerationData failed: {e}")
 
@@ -1105,6 +1649,7 @@ class HavenExtractorMod(Mod):
             weather = ""
             weather_raw = -1
             storm_frequency = ""
+            storm_raw = -1  # v10.2.0: Store raw value for contextual weather lookup
             try:
                 if hasattr(planet_data, 'Weather'):
                     weather_data = planet_data.Weather
@@ -1116,7 +1661,7 @@ class HavenExtractorMod(Mod):
                         else:
                             weather_raw = int(weather_val) if weather_val is not None else -1
                         weather = WEATHER_OPTIONS.get(weather_raw, f"Unknown({weather_raw})")
-                        logger.info(f"    [HOOK] Weather from cGcPlanetWeatherData: {weather} (raw: {weather_raw})")
+                        logger.debug(f"    Weather: {weather}")
                     # Also get storm frequency
                     if hasattr(weather_data, 'StormFrequency'):
                         storm_val = weather_data.StormFrequency
@@ -1139,7 +1684,7 @@ class HavenExtractorMod(Mod):
                             if fallback_weather and len(fallback_weather) >= 2 and fallback_weather != "None":
                                 # Clean up raw weather strings like "weather_glitch 6"
                                 weather = clean_weather_string(fallback_weather)
-                                logger.info(f"    [HOOK] Weather fallback from PlanetInfo: {weather} (raw: {fallback_weather})")
+                                logger.debug(f"    Weather (fallback): {weather}")
                 except Exception as e:
                     logger.debug(f"Weather fallback extraction failed: {e}")
 
@@ -1157,7 +1702,7 @@ class HavenExtractorMod(Mod):
                         if planet_name and (len(planet_name) < 2 or planet_name == "None"):
                             planet_name = ""
                         if planet_name:
-                            logger.info(f"    [HOOK] Planet Name from cGcPlanetData: '{planet_name}'")
+                            logger.info(f"  Planet: '{planet_name}'")
             except Exception as e:
                 logger.debug(f"Planet name extraction failed: {e}")
 
@@ -1182,6 +1727,7 @@ class HavenExtractorMod(Mod):
                 'weather': weather,
                 'weather_raw': weather_raw,
                 'storm_frequency': storm_frequency,
+                'storm_raw': storm_raw,  # v10.2.0: Raw value for contextual weather lookup
                 'planet_name': planet_name,
             }
 
@@ -1200,6 +1746,74 @@ class HavenExtractorMod(Mod):
             logger.info(f"    Total captured: {len(self._captured_planets)} planets")
             logger.info("*" * 60)
             logger.info("")
+
+            # =====================================================
+            # v10.0.2: Cache coordinates after first planet capture
+            # player_state is often None during on_system_generate but
+            # should be available by the time planets are generating
+            # =====================================================
+            if self._current_system_coords is None:
+                logger.info(f"    [DEBUG] Attempting planet capture fallback for coordinates...")
+                try:
+                    player_state = gameData.player_state
+                    logger.info(f"    [DEBUG] player_state = {player_state}")
+                    if player_state:
+                        location = player_state.mLocation
+                        galactic_addr = location.GalacticAddress
+
+                        voxel_x = self._safe_int(galactic_addr.VoxelX)
+                        voxel_y = self._safe_int(galactic_addr.VoxelY)
+                        voxel_z = self._safe_int(galactic_addr.VoxelZ)
+                        system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
+                        planet_idx_coord = self._safe_int(galactic_addr.PlanetIndex)
+                        galaxy_idx = self._safe_int(location.RealityIndex)
+
+                        # DEBUG: Log raw values from GalacticAddress struct (planet capture fallback)
+                        logger.info(f"    [DEBUG] GalacticAddress struct (planet capture fallback):")
+                        logger.info(f"      VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
+                        logger.info(f"      SolarSystemIndex={system_idx}, PlanetIndex={planet_idx_coord}, Galaxy={galaxy_idx}")
+                        dbg_px = (voxel_x + 2047) & 0xFFF
+                        dbg_py = (voxel_y + 127) & 0xFF
+                        dbg_pz = (voxel_z + 2047) & 0xFFF
+                        logger.info(f"      -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+
+                        # Sanity check galaxy index
+                        if galaxy_idx < 0 or galaxy_idx > 255:
+                            logger.warning(f"    [v10.0.2] Invalid galaxy_idx {galaxy_idx}, defaulting to 0 (Euclid)")
+                            galaxy_idx = 0
+
+                        galaxy_names = {
+                            0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
+                            3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
+                            6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
+                            9: "Eissentam", 10: "Elkupalos",
+                        }
+                        galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+
+                        glyph_code = self._coords_to_glyphs(planet_idx_coord, system_idx, voxel_x, voxel_y, voxel_z)
+
+                        # Get actual system name from mGameState
+                        system_name = self._get_actual_system_name()
+                        if not system_name:
+                            system_name = f"System_{glyph_code}"
+                        region_name = f"Region_{glyph_code[:4]}"
+
+                        self._current_system_coords = {
+                            "system_name": system_name,
+                            "region_name": region_name,
+                            "glyph_code": glyph_code,
+                            "galaxy_name": galaxy_name,
+                            "galaxy_index": galaxy_idx,
+                            "voxel_x": voxel_x,
+                            "voxel_y": voxel_y,
+                            "voxel_z": voxel_z,
+                            "solar_system_index": system_idx,
+                        }
+                        logger.info(f"    [SUCCESS via Planet Capture Fallback] Cached coords: '{system_name}' in '{region_name}' @ {glyph_code} ({galaxy_name})")
+                    else:
+                        logger.info("    [DEBUG] player_state is None during planet capture")
+                except Exception as e:
+                    logger.info(f"    [DEBUG] Planet capture fallback failed: {e}")
 
         except Exception as e:
             logger.error(f"GenerateCreatureRoles capture failed: {e}")
@@ -1228,6 +1842,70 @@ class HavenExtractorMod(Mod):
         logger.info("=== APPVIEW STATE - SYSTEM READY ===")
         logger.info("=" * 40)
 
+        # v10.0.13: Extract coordinates from player_state NOW since it's available
+        if self._current_system_coords is None:
+            logger.info("[APPVIEW] Getting coordinates from player_state...")
+            try:
+                player_state = gameData.player_state
+                logger.info(f"[APPVIEW] player_state = {player_state}")
+                if player_state:
+                    location = player_state.mLocation
+                    galactic_addr = location.GalacticAddress
+
+                    voxel_x = self._safe_int(galactic_addr.VoxelX)
+                    voxel_y = self._safe_int(galactic_addr.VoxelY)
+                    voxel_z = self._safe_int(galactic_addr.VoxelZ)
+                    system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
+                    planet_idx = self._safe_int(galactic_addr.PlanetIndex)
+                    galaxy_idx = self._safe_int(location.RealityIndex)
+
+                    # DEBUG: Log values
+                    logger.info(f"[APPVIEW] GalacticAddress fields:")
+                    logger.info(f"  VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
+                    logger.info(f"  SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
+                    dbg_px = (voxel_x + 2047) & 0xFFF
+                    dbg_py = (voxel_y + 127) & 0xFF
+                    dbg_pz = (voxel_z + 2047) & 0xFFF
+                    logger.info(f"  -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+
+                    # Sanity check galaxy index
+                    if galaxy_idx < 0 or galaxy_idx > 255:
+                        logger.warning(f"[APPVIEW] Invalid galaxy_idx {galaxy_idx}, defaulting to 0")
+                        galaxy_idx = 0
+
+                    galaxy_names = {
+                        0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
+                        3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
+                        6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
+                        9: "Eissentam", 10: "Elkupalos",
+                    }
+                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+
+                    glyph_code = self._coords_to_glyphs(planet_idx, system_idx, voxel_x, voxel_y, voxel_z)
+
+                    # Get actual system name
+                    system_name = self._get_actual_system_name()
+                    if not system_name:
+                        system_name = f"System_{glyph_code}"
+                    region_name = f"Region_{glyph_code[:4]}"
+
+                    self._current_system_coords = {
+                        "system_name": system_name,
+                        "region_name": region_name,
+                        "glyph_code": glyph_code,
+                        "galaxy_name": galaxy_name,
+                        "galaxy_index": galaxy_idx,
+                        "voxel_x": voxel_x,
+                        "voxel_y": voxel_y,
+                        "voxel_z": voxel_z,
+                        "solar_system_index": system_idx,
+                    }
+                    logger.info(f"[APPVIEW SUCCESS] Coords: '{system_name}' @ {glyph_code} in {region_name} ({galaxy_name})")
+                else:
+                    logger.warning("[APPVIEW] player_state is still None!")
+            except Exception as e:
+                logger.error(f"[APPVIEW] Failed to get coordinates: {e}")
+
         # Auto-save to batch when APPVIEW fires (if not already saved)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
             logger.info("[BATCH] Auto-saving system to batch...")
@@ -1244,6 +1922,156 @@ class HavenExtractorMod(Mod):
     # =========================================================================
     # GUI BUTTONS
     # =========================================================================
+
+    @gui_button("Get Coordinates")
+    def get_coordinates_button(self):
+        """
+        Diagnostic: Dump ALL possible coordinate sources.
+        For Sea of Gidzenuf: region [4009, 1, 2365] = [0xFA9, 0x01, 0x93D]
+        """
+        import ctypes
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(">>> COORDINATE SOURCE DIAGNOSTIC <<<")
+        logger.info(">>> Sea of Gidzenuf target: [4009, 1, 2365] = [0xFA9, 0x01, 0x93D] <<<")
+        logger.info("=" * 70)
+
+        planet_count = len(self._captured_planets)
+        logger.info(f"Captured planet count: {planet_count}")
+
+        # =====================================================
+        # SOURCE 1: player_state.mLocation.GalacticAddress
+        # =====================================================
+        logger.info("")
+        logger.info("--- SOURCE 1: player_state.mLocation.GalacticAddress ---")
+        try:
+            player_state = gameData.player_state
+            if player_state:
+                location = player_state.mLocation
+                galactic_addr = location.GalacticAddress
+                logger.info(f"  VoxelX = {self._safe_int(galactic_addr.VoxelX)}")
+                logger.info(f"  VoxelY = {self._safe_int(galactic_addr.VoxelY)}")
+                logger.info(f"  VoxelZ = {self._safe_int(galactic_addr.VoxelZ)}")
+                logger.info(f"  SolarSystemIndex = {self._safe_int(galactic_addr.SolarSystemIndex)}")
+                logger.info(f"  PlanetIndex = {self._safe_int(galactic_addr.PlanetIndex)}")
+                logger.info(f"  RealityIndex = {self._safe_int(location.RealityIndex)}")
+            else:
+                logger.info("  player_state is None")
+        except Exception as e:
+            logger.info(f"  Failed: {e}")
+
+        # =====================================================
+        # SOURCE 2: Solar System mSolarSystemData.Seed
+        # =====================================================
+        logger.info("")
+        logger.info("--- SOURCE 2: Solar System Seed ---")
+        try:
+            solar_system = self._cached_solar_system
+            if solar_system:
+                solar_data = solar_system.mSolarSystemData
+                if hasattr(solar_data, 'Seed'):
+                    seed = self._safe_int(solar_data.Seed)
+                    logger.info(f"  Seed = {seed} (0x{seed:016X})")
+                    # Try decoding seed as coordinates
+                    logger.info(f"    Low 12 bits (X?): {seed & 0xFFF}")
+                    logger.info(f"    Bits 12-19 (Y?): {(seed >> 12) & 0xFF}")
+                    logger.info(f"    Bits 20-31 (Z?): {(seed >> 20) & 0xFFF}")
+                    logger.info(f"    Bits 32-43 (Sys?): {(seed >> 32) & 0xFFF}")
+        except Exception as e:
+            logger.info(f"  Failed: {e}")
+
+        # =====================================================
+        # SOURCE 3: Planet mUniverseAddress raw values
+        # v10.1.0: Using CORRECT bit layout (verified working!)
+        # =====================================================
+        logger.info("")
+        logger.info("--- SOURCE 3: Planet Discovery mUniverseAddress (v10.1.0 CORRECT decode) ---")
+        try:
+            if self._cached_solar_system:
+                planets = self._cached_solar_system.maPlanets
+                for i in range(min(2, 6)):  # Just check first 2
+                    try:
+                        planet = planets[i]
+                        if planet:
+                            discovery = planet.mPlanetDiscoveryData
+                            addr = self._safe_int(discovery.mUniverseAddress)
+                            if addr != 0:
+                                logger.info(f"  Planet {i} mUniverseAddress = 0x{addr:016X}")
+                                # v10.1.0: CORRECT bit layout
+                                x_region = addr & 0xFFF
+                                z_region = (addr >> 12) & 0xFFF
+                                y_region = (addr >> 24) & 0xFF
+                                system_idx = (addr >> 40) & 0xFFF
+                                planet_idx_raw = (addr >> 52) & 0xF
+                                planet_idx = max(0, planet_idx_raw - 1)
+                                galaxy_idx = (addr >> 56) & 0xFF
+                                glyph = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
+                                logger.info(f"    X region: {x_region} (0x{x_region:03X})")
+                                logger.info(f"    Y region: {y_region} (0x{y_region:02X})")
+                                logger.info(f"    Z region: {z_region} (0x{z_region:03X})")
+                                logger.info(f"    System index: {system_idx} (0x{system_idx:03X})")
+                                logger.info(f"    Planet index: {planet_idx}")
+                                logger.info(f"    Galaxy: {galaxy_idx}")
+                                logger.info(f"    => GLYPH: {glyph}")
+                                logger.info(f"    => Region coords: [{x_region}, {y_region}, {z_region}]")
+                    except:
+                        pass
+        except Exception as e:
+            logger.info(f"  Failed: {e}")
+
+        # =====================================================
+        # SOURCE 4: Raw memory scan of solar system struct
+        # =====================================================
+        logger.info("")
+        logger.info("--- SOURCE 4: Raw Memory Scan (looking for 0xFA9, 0x93D) ---")
+        try:
+            if self._cached_solar_system:
+                base = get_addressof(self._cached_solar_system)
+                logger.info(f"  Solar system base: 0x{base:X}")
+
+                # Scan for values that might be our coords
+                # Looking for 4009 (0xFA9), 1 (0x01), 2365 (0x93D)
+                for offset in range(0, 0x100, 4):
+                    try:
+                        val32 = ctypes.c_uint32.from_address(base + offset).value
+                        val16 = ctypes.c_uint16.from_address(base + offset).value
+
+                        # Check if this looks like our target coords
+                        if val16 == 4009 or val16 == 2365 or val32 == 4009 or val32 == 2365:
+                            logger.info(f"    Offset 0x{offset:04X}: u32={val32}, u16={val16} ** POTENTIAL MATCH **")
+                        elif val16 in range(4000, 4020) or val16 in range(2360, 2370):
+                            logger.info(f"    Offset 0x{offset:04X}: u32={val32}, u16={val16} (close)")
+                    except:
+                        pass
+
+                # Also check specific known offsets in cGcSolarSystemData
+                logger.info("  Checking specific offsets:")
+                for offset, name in [(0x0, "start"), (0x8, "+8"), (0x10, "+16"),
+                                      (0x2270, "Name area"), (0x2280, "+2280")]:
+                    try:
+                        val64 = ctypes.c_uint64.from_address(base + offset).value
+                        logger.info(f"    0x{offset:04X} ({name}): 0x{val64:016X}")
+                    except:
+                        pass
+        except Exception as e:
+            logger.info(f"  Failed: {e}")
+
+        # =====================================================
+        # SOURCE 5: Check if there's a region name string
+        # =====================================================
+        logger.info("")
+        logger.info("--- SOURCE 5: Region/System Name from memory ---")
+        try:
+            system_name = self._get_actual_system_name()
+            logger.info(f"  System name: {system_name or '(not found)'}")
+        except Exception as e:
+            logger.info(f"  Failed: {e}")
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(">>> Look for values matching: 4009, 2365, 0xFA9, 0x93D <<<")
+        logger.info("=" * 70)
 
     @gui_button("Check System Data")
     def check_system_data(self):
@@ -1377,6 +2205,47 @@ class HavenExtractorMod(Mod):
 
         logger.info("=" * 60)
 
+    def _read_bytes(self, base_addr: int, offset: int, size: int) -> bytes:
+        """Read raw bytes from memory."""
+        try:
+            import ctypes
+            addr = base_addr + offset
+            buffer = (ctypes.c_char * size)()
+            ctypes.memmove(buffer, addr, size)
+            return bytes(buffer)
+        except Exception:
+            return None
+
+    def _read_uint64(self, base_addr: int, offset: int) -> int:
+        """Read uint64 from memory."""
+        try:
+            import ctypes
+            addr = base_addr + offset
+            return ctypes.cast(addr, ctypes.POINTER(ctypes.c_uint64)).contents.value
+        except Exception:
+            return 0
+
+    def _read_uint32(self, base_addr: int, offset: int) -> int:
+        """Read uint32 from memory."""
+        try:
+            import ctypes
+            addr = base_addr + offset
+            return ctypes.cast(addr, ctypes.POINTER(ctypes.c_uint32)).contents.value
+        except Exception:
+            return 0
+
+    def _read_string(self, base_addr: int, offset: int, max_len: int = 128) -> str:
+        """Read null-terminated string from memory."""
+        try:
+            raw = self._read_bytes(base_addr, offset, max_len)
+            if raw:
+                null_pos = raw.find(b'\x00')
+                if null_pos > 0:
+                    return raw[:null_pos].decode('utf-8', errors='ignore')
+            return ""
+        except Exception:
+            return ""
+
     # =========================================================================
     # v10.0.0: STREAMLINED GUI BUTTONS
     # =========================================================================
@@ -1434,7 +2303,6 @@ class HavenExtractorMod(Mod):
         logger.info(">>> CURRENT CONFIGURATION <<<")
         logger.info("=" * 60)
         logger.info(f"  Discord Username: {self._discord_username or '(not set)'}")
-        logger.info(f"  Discord ID:       {self._personal_id or '(not set)'}")
         logger.info(f"  Community Tag:    {self._discord_tag}")
         logger.info(f"  Reality Mode:     {self._reality}")
         logger.info("=" * 60)
@@ -1539,15 +2407,19 @@ class HavenExtractorMod(Mod):
                     logger.info(f"  [PENDING] {glyph} - by {by}")
             logger.info("")
 
-        # Step 2: Filter to only new systems (skip already charted/pending)
-        if charted_count > 0 or pending_count > 0:
+        # Step 2: Filter out only already_charted systems (approved duplicates)
+        # Pending systems are allowed through - server will update them
+        if charted_count > 0:
             systems_to_export = [
                 sys for sys in systems_to_export
-                if results.get(sys.get('glyph_code'), {}).get('status') == 'available'
+                if results.get(sys.get('glyph_code'), {}).get('status') != 'already_charted'
             ]
-            logger.info(f"[EXPORT] Exporting {len(systems_to_export)} new systems (skipping duplicates)")
+            logger.info(f"[EXPORT] Exporting {len(systems_to_export)} systems (skipping {charted_count} already charted)")
         else:
             logger.info(f"[EXPORT] Exporting all {len(systems_to_export)} systems")
+
+        if pending_count > 0:
+            logger.info(f"[EXPORT] Note: {pending_count} pending system(s) will be updated with new data")
 
         # Step 3: Upload systems
         if not systems_to_export:
@@ -1766,11 +2638,15 @@ class HavenExtractorMod(Mod):
 
     def _get_current_coordinates(self) -> Optional[dict]:
         """Get current galactic coordinates from player state or solar system."""
+        # All 256 NMS galaxies (first 10 are well-known, rest are procedural)
         galaxy_names = {
             0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
             3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
             6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-            9: "Eissentam", 10: "Elkupalos"
+            9: "Eissentam", 10: "Elkupalos", 11: "Aptarkaba",
+            12: "Ontiniangp", 13: "Odiwagiri", 14: "Ogtialabi",
+            15: "Muhacksonto", 16: "Hitonskyer", 17: "Reaboranxu",
+            18: "Isdoraijung", 19: "Doctilusda", 20: "Loychazinq",
         }
 
         # Method 1: Try player_state (most reliable when available)
@@ -1787,16 +2663,32 @@ class HavenExtractorMod(Mod):
                 voxel_z = self._safe_int(galactic_addr.VoxelZ)
                 system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
                 planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-                galaxy_idx = self._safe_int(location.RealityIndex)
 
-                logger.info(f"  [player_state] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}, Sys={system_idx}")
+                # Debug log the raw reality index
+                raw_reality = location.RealityIndex
+                logger.info(f"  [player_state] Raw RealityIndex: {raw_reality}, type: {type(raw_reality)}")
+                galaxy_idx = self._safe_int(raw_reality)
+
+                # Sanity check: galaxy index should be 0-255
+                if galaxy_idx < 0 or galaxy_idx > 255:
+                    logger.warning(f"  [player_state] Invalid galaxy_idx {galaxy_idx}, defaulting to 0 (Euclid)")
+                    galaxy_idx = 0
+
+                logger.info(f"  [player_state] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}, Sys={system_idx}, Galaxy={galaxy_idx}")
 
                 glyph_code = self._coords_to_glyphs(
                     planet_idx, system_idx, voxel_x, voxel_y, voxel_z
                 )
 
+                # Get actual system name from mGameState
+                system_name = self._get_actual_system_name()
+                if not system_name:
+                    system_name = f"System_{glyph_code}"
+                region_name = f"Region_{glyph_code[:4]}"
+
                 return {
-                    "system_name": f"System_{glyph_code}",
+                    "system_name": system_name,
+                    "region_name": region_name,
                     "glyph_code": glyph_code,
                     "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
                     "galaxy_index": galaxy_idx,
@@ -1808,153 +2700,25 @@ class HavenExtractorMod(Mod):
         except Exception as e:
             logger.info(f"  [player_state] EXCEPTION: {e}")
 
-        # Method 2: Try getting from simulation/solar system discovery data
-        try:
-            simulation = gameData.simulation
-            logger.info(f"  Method 2 - simulation: {simulation}")
-            if simulation:
-                solar_system_ptr = simulation.mpSolarSystem
-                logger.info(f"  Method 2 - mpSolarSystem: {solar_system_ptr}")
-                if solar_system_ptr:
-                    addr = get_addressof(solar_system_ptr)
-                    logger.info(f"  Method 2 - solar system addr: 0x{addr:X}")
-                    if addr != 0:
-                        solar_system = map_struct(addr, nms.cGcSolarSystem)
-                        discovery_data = solar_system.mSolarSystemDiscoveryData
-
-                        # Get galactic address from discovery data
-                        galactic_addr = discovery_data.UniverseLocation.GalacticAddress
-
-                        voxel_x = self._safe_int(galactic_addr.VoxelX)
-                        voxel_y = self._safe_int(galactic_addr.VoxelY)
-                        voxel_z = self._safe_int(galactic_addr.VoxelZ)
-                        system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
-                        planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-                        galaxy_idx = self._safe_int(discovery_data.UniverseLocation.RealityIndex)
-
-                        logger.info(f"  [simulation] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}, Sys={system_idx}")
-
-                        glyph_code = self._coords_to_glyphs(
-                            planet_idx, system_idx, voxel_x, voxel_y, voxel_z
-                        )
-
-                        return {
-                            "system_name": f"System_{glyph_code}",
-                            "glyph_code": glyph_code,
-                            "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
-                            "galaxy_index": galaxy_idx,
-                            "voxel_x": voxel_x,
-                            "voxel_y": voxel_y,
-                            "voxel_z": voxel_z,
-                            "solar_system_index": system_idx,
-                        }
-        except Exception as e:
-            logger.info(f"  [simulation] EXCEPTION: {e}")
-
-        # Method 3: Check if we have cached coordinates from previous extraction
-        logger.info(f"  Method 3 - cached coords: {self._current_system_coords}")
+        # Method 2: Check if we have cached coordinates from on_system_generate
+        # v10.0.1: This is the primary fallback - coords are cached when system generates
+        logger.info(f"  Method 2 - cached coords: {self._current_system_coords}")
         if self._current_system_coords:
-            logger.info("  [cached] SUCCESS: Using cached coordinates from previous extraction")
+            cached_glyph = self._current_system_coords.get('glyph_code', 'Unknown')
+            cached_name = self._current_system_coords.get('system_name', 'Unknown')
+            logger.warning(f"  [cached] WARNING: Using CACHED coords (player_state was None)")
+            logger.warning(f"  [cached] Cached system: '{cached_name}' @ {cached_glyph}")
+            logger.warning(f"  [cached] If this is wrong, try warping to a system and waiting before export")
             return self._current_system_coords
-
-        # Method 4: Try cGcApplication global (should always be available)
-        logger.info("  Method 4 - trying cGcApplication global...")
-        try:
-            # Try to access the global GcApplication instance
-            if hasattr(nms, 'cGcApplication') and hasattr(nms.cGcApplication, 'instance'):
-                app = nms.cGcApplication.instance()
-                logger.info(f"  Method 4 - cGcApplication.instance(): {app}")
-                if app:
-                    # Try to get simulation from app
-                    if hasattr(app, 'mpSimulation'):
-                        sim = app.mpSimulation
-                        logger.info(f"  Method 4 - mpSimulation: {sim}")
-                        if sim:
-                            sim_addr = get_addressof(sim)
-                            if sim_addr != 0:
-                                simulation = map_struct(sim_addr, nms.cGcSimulation)
-                                if hasattr(simulation, 'mpSolarSystem'):
-                                    ss_ptr = simulation.mpSolarSystem
-                                    ss_addr = get_addressof(ss_ptr)
-                                    if ss_addr != 0:
-                                        solar_system = map_struct(ss_addr, nms.cGcSolarSystem)
-                                        discovery_data = solar_system.mSolarSystemDiscoveryData
-                                        galactic_addr = discovery_data.UniverseLocation.GalacticAddress
-
-                                        voxel_x = self._safe_int(galactic_addr.VoxelX)
-                                        voxel_y = self._safe_int(galactic_addr.VoxelY)
-                                        voxel_z = self._safe_int(galactic_addr.VoxelZ)
-                                        system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
-                                        planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-                                        galaxy_idx = self._safe_int(discovery_data.UniverseLocation.RealityIndex)
-
-                                        logger.info(f"  [cGcApplication] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}")
-
-                                        glyph_code = self._coords_to_glyphs(
-                                            planet_idx, system_idx, voxel_x, voxel_y, voxel_z
-                                        )
-
-                                        return {
-                                            "system_name": f"System_{glyph_code}",
-                                            "glyph_code": glyph_code,
-                                            "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
-                                            "galaxy_index": galaxy_idx,
-                                            "voxel_x": voxel_x,
-                                            "voxel_y": voxel_y,
-                                            "voxel_z": voxel_z,
-                                            "solar_system_index": system_idx,
-                                        }
-        except Exception as e:
-            logger.info(f"  [cGcApplication] EXCEPTION: {e}")
-
-        # Method 5: Try gameData.game (alternative singleton access)
-        logger.info("  Method 5 - trying gameData.game...")
-        try:
-            if hasattr(gameData, 'game') and gameData.game:
-                game = gameData.game
-                logger.info(f"  Method 5 - gameData.game: {game}")
-                if hasattr(game, 'simulation') and game.simulation:
-                    sim = game.simulation
-                    if hasattr(sim, 'mpSolarSystem') and sim.mpSolarSystem:
-                        ss_addr = get_addressof(sim.mpSolarSystem)
-                        if ss_addr != 0:
-                            solar_system = map_struct(ss_addr, nms.cGcSolarSystem)
-                            discovery_data = solar_system.mSolarSystemDiscoveryData
-                            galactic_addr = discovery_data.UniverseLocation.GalacticAddress
-
-                            voxel_x = self._safe_int(galactic_addr.VoxelX)
-                            voxel_y = self._safe_int(galactic_addr.VoxelY)
-                            voxel_z = self._safe_int(galactic_addr.VoxelZ)
-                            system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
-                            planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-                            galaxy_idx = self._safe_int(discovery_data.UniverseLocation.RealityIndex)
-
-                            logger.info(f"  [gameData.game] SUCCESS: X={voxel_x}, Y={voxel_y}, Z={voxel_z}")
-
-                            glyph_code = self._coords_to_glyphs(
-                                planet_idx, system_idx, voxel_x, voxel_y, voxel_z
-                            )
-
-                            return {
-                                "system_name": f"System_{glyph_code}",
-                                "glyph_code": glyph_code,
-                                "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
-                                "galaxy_index": galaxy_idx,
-                                "voxel_x": voxel_x,
-                                "voxel_y": voxel_y,
-                                "voxel_z": voxel_z,
-                                "solar_system_index": system_idx,
-                            }
-        except Exception as e:
-            logger.info(f"  [gameData.game] EXCEPTION: {e}")
 
         logger.warning("  All coordinate methods failed - are you in a star system?")
         return None
 
     def _extract_system_properties(self, sys_data) -> dict:
-        """Extract system-level properties using direct memory + NMS.py fallback."""
+        """Extract system-level properties from game memory."""
         result = {
-            "star_type": "Unknown",
+            "system_name": "",
+            "star_color": "Unknown",
             "economy_type": "Unknown",
             "economy_strength": "Unknown",
             "conflict_level": "Unknown",
@@ -1962,68 +2726,87 @@ class HavenExtractorMod(Mod):
             "system_seed": 0,
         }
 
-        # Try direct memory reads first (most reliable)
-        if self._cached_sys_data_addr:
-            logger.info("  Attempting DIRECT memory read for system properties...")
-            direct_data = self._read_system_data_direct(self._cached_sys_data_addr)
-
-            # Use direct data if we got valid results
-            if direct_data.get("economy_type") != "Unknown":
-                result["economy_type"] = direct_data["economy_type"]
-            if direct_data.get("economy_strength") != "Unknown":
-                result["economy_strength"] = direct_data["economy_strength"]
-            if direct_data.get("conflict_level") != "Unknown":
-                result["conflict_level"] = direct_data["conflict_level"]
-            if direct_data.get("dominant_lifeform") != "Unknown":
-                result["dominant_lifeform"] = direct_data["dominant_lifeform"]
-            if direct_data.get("star_type") != "Unknown":
-                result["star_type"] = direct_data["star_type"]
-
-        # Fallback to NMS.py struct access for anything still Unknown
-        logger.info("  Attempting NMS.py struct access for remaining properties...")
-
+        # =====================================================
+        # Get system name from mGameState notification string
+        # The game stores "In the {system_name} system" at offset 0x38
+        # =====================================================
         try:
-            if result["star_type"] == "Unknown" and hasattr(sys_data, 'Class'):
-                result["star_type"] = self._safe_enum(sys_data.Class)
-                logger.info(f"  [NMSPY] Star class: {result['star_type']}")
+            game_state = gameData.game_state
+            if game_state:
+                game_state_addr = get_addressof(game_state)
+                if game_state_addr and game_state_addr != 0:
+                    notification_str = self._read_string(game_state_addr, 0x38, max_len=256)
+                    if notification_str:
+                        match = re.match(r"In the (.+) system", notification_str)
+                        if match:
+                            extracted_name = match.group(1).strip()
+                            if extracted_name:
+                                result["system_name"] = extracted_name
+                                logger.info(f"  System name: '{extracted_name}'")
         except Exception as e:
-            logger.debug(f"Class extraction failed: {e}")
+            logger.debug(f"System name extraction failed: {e}")
+
+        # Star color mapping (enum names to clean values)
+        STAR_COLOR_MAP = {
+            'Yellow': 'Yellow', 'Yellow_': 'Yellow', 'yellow': 'Yellow', '0': 'Yellow',
+            'Red': 'Red', 'Red_': 'Red', 'red': 'Red', '1': 'Red',
+            'Green': 'Green', 'Green_': 'Green', 'green': 'Green', '2': 'Green',
+            'Blue': 'Blue', 'Blue_': 'Blue', 'blue': 'Blue', '3': 'Blue',
+            'Default': 'Yellow', 'Default_': 'Yellow',  # Default is Yellow
+        }
+
+        # Dominant lifeform mapping (enum names to clean values)
+        LIFEFORM_MAP = {
+            'Traders': 'Gek', 'Traders_': 'Gek', 'Gek': 'Gek', '0': 'Gek',
+            'Warriors': "Vy'keen", 'Warriors_': "Vy'keen", "Vy'keen": "Vy'keen", 'Vykeen': "Vy'keen", '1': "Vy'keen",
+            'Explorers': 'Korvax', 'Explorers_': 'Korvax', 'Korvax': 'Korvax', '2': 'Korvax',
+            'Robots': 'None', 'Robots_': 'None', '3': 'None',
+            'Atlas': 'None', 'Atlas_': 'None', '4': 'None',
+            'Diplomats': 'None', 'Diplomats_': 'None', '5': 'None',
+            'None': 'None', 'None_': 'None', '6': 'None',
+        }
+
+        # Get other properties from NMS.py struct access
+        try:
+            if result["star_color"] == "Unknown" and hasattr(sys_data, 'Class'):
+                raw_star = self._safe_enum(sys_data.Class)
+                result["star_color"] = STAR_COLOR_MAP.get(raw_star, STAR_COLOR_MAP.get(raw_star.rstrip('_'), 'Yellow'))
+                logger.debug(f"  Star color: raw='{raw_star}' -> '{result['star_color']}'")
+        except Exception:
+            pass
 
         try:
             if hasattr(sys_data, 'TradingData'):
                 trading = sys_data.TradingData
                 if result["economy_type"] == "Unknown" and hasattr(trading, 'TradingClass'):
                     result["economy_type"] = self._safe_enum(trading.TradingClass)
-                    logger.info(f"  [NMSPY] Economy type: {result['economy_type']}")
                 if result["economy_strength"] == "Unknown" and hasattr(trading, 'WealthClass'):
                     result["economy_strength"] = self._safe_enum(trading.WealthClass)
-                    logger.info(f"  [NMSPY] Wealth class: {result['economy_strength']}")
                 if result["conflict_level"] == "Unknown" and hasattr(trading, 'ConflictLevel'):
                     result["conflict_level"] = self._safe_enum(trading.ConflictLevel)
-        except Exception as e:
-            logger.debug(f"TradingData extraction failed: {e}")
+        except Exception:
+            pass
 
         try:
             if result["conflict_level"] == "Unknown" and hasattr(sys_data, 'ConflictData'):
                 result["conflict_level"] = self._safe_enum(sys_data.ConflictData)
-                logger.info(f"  [NMSPY] Conflict: {result['conflict_level']}")
-        except Exception as e:
-            logger.debug(f"ConflictData extraction failed: {e}")
+        except Exception:
+            pass
 
         try:
             if hasattr(sys_data, 'InhabitingRace') and result["dominant_lifeform"] == "Unknown":
-                result["dominant_lifeform"] = self._safe_enum(sys_data.InhabitingRace)
-                logger.info(f"  [NMSPY] Race: {result['dominant_lifeform']}")
-        except Exception as e:
-            logger.debug(f"InhabitingRace extraction failed: {e}")
+                raw_race = self._safe_enum(sys_data.InhabitingRace)
+                result["dominant_lifeform"] = LIFEFORM_MAP.get(raw_race, LIFEFORM_MAP.get(raw_race.rstrip('_'), 'None'))
+                logger.debug(f"  Dominant lifeform: raw='{raw_race}' -> '{result['dominant_lifeform']}'")
+        except Exception:
+            pass
 
         try:
             if hasattr(sys_data, 'Seed') and hasattr(sys_data.Seed, 'Seed'):
                 result["system_seed"] = self._safe_int(sys_data.Seed.Seed)
-        except Exception as e:
-            logger.debug(f"Seed extraction failed: {e}")
+        except Exception:
+            pass
 
-        logger.info(f"  FINAL system properties: {result}")
         return result
 
     def _extract_planets(self, solar_system) -> list:
@@ -2192,10 +2975,30 @@ class HavenExtractorMod(Mod):
                     result["is_moon"] = captured.get('is_moon', False)
                     logger.info(f"    [CAPTURED] PlanetSize = {result['planet_size']} (raw: {captured.get('planet_size_raw')}, is_moon: {result['is_moon']})")
 
-                # Apply captured flora/fauna/sentinel data
-                result["flora_level"] = captured.get('flora', 'Unknown')
-                result["fauna_level"] = captured.get('fauna', 'Unknown')
-                result["sentinel_level"] = captured.get('sentinel', 'Unknown')
+                # Apply captured flora/fauna/sentinel data with CONTEXTUAL adjectives
+                # v10.2.0: Use biome-specific mappings for variety
+                biome_key = result["biome"]  # Already determined above
+
+                # Flora - use biome-specific mapping if available
+                flora_raw = captured.get('flora_raw', -1)
+                if flora_raw >= 0 and biome_key in self.FLORA_BY_BIOME:
+                    result["flora_level"] = self.FLORA_BY_BIOME[biome_key].get(flora_raw, captured.get('flora', 'Unknown'))
+                else:
+                    result["flora_level"] = captured.get('flora', 'Unknown')
+
+                # Fauna - use biome-specific mapping if available
+                fauna_raw = captured.get('fauna_raw', -1)
+                if fauna_raw >= 0 and biome_key in self.FAUNA_BY_BIOME:
+                    result["fauna_level"] = self.FAUNA_BY_BIOME[biome_key].get(fauna_raw, captured.get('fauna', 'Unknown'))
+                else:
+                    result["fauna_level"] = captured.get('fauna', 'Unknown')
+
+                # Sentinel - use biome-specific mapping if available
+                sentinel_raw = captured.get('sentinel_raw', -1)
+                if sentinel_raw >= 0 and biome_key in self.SENTINEL_BY_BIOME:
+                    result["sentinel_level"] = self.SENTINEL_BY_BIOME[biome_key].get(sentinel_raw, captured.get('sentinel', 'Unknown'))
+                else:
+                    result["sentinel_level"] = captured.get('sentinel', 'Unknown')
 
                 # Apply captured resources if not already set from direct read (translate to readable names)
                 if result["common_resource"] == "Unknown" and captured.get('common_resource'):
@@ -2205,19 +3008,34 @@ class HavenExtractorMod(Mod):
                 if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
                     result["rare_resource"] = translate_resource(captured['rare_resource'])
 
-                # v8.1.8: Apply captured weather from cGcPlanetWeatherData.WeatherType
-                # This is reliable for ALL planets (not just visited ones)
+                # v10.2.0: Apply captured weather with CONTEXTUAL adjectives
+                # Uses biome + weather_raw + storm_raw for variety
                 if captured.get('weather') and captured.get('weather_raw', -1) >= 0:
-                    result["weather"] = captured['weather']
+                    weather_raw = captured.get('weather_raw', -1)
+                    storm_raw = captured.get('storm_raw', 0)
                     storm_info = captured.get('storm_frequency', '')
-                    if storm_info:
-                        logger.info(f"    [CAPTURED] Weather = {result['weather']} (storms: {storm_info})")
+
+                    # Try contextual weather lookup: (biome, weather_enum, storm_frequency)
+                    weather_key = (biome_key, weather_raw, storm_raw)
+                    contextual_weather = self.WEATHER_CONTEXTUAL.get(weather_key)
+
+                    if contextual_weather:
+                        result["weather"] = contextual_weather
+                        logger.info(f"    [CAPTURED] Weather = {result['weather']} (contextual: biome={biome_key}, weather={weather_raw}, storm={storm_raw})")
                     else:
-                        logger.info(f"    [CAPTURED] Weather = {result['weather']}")
+                        # v10.2.0: Convert internal weather name to user-friendly adjective
+                        raw_weather_name = captured['weather']
+                        result["weather"] = self.WEATHER_FALLBACK.get(raw_weather_name, raw_weather_name)
+                        if storm_info:
+                            logger.info(f"    [CAPTURED] Weather = {result['weather']} (from {raw_weather_name}, storms: {storm_info})")
+                        else:
+                            logger.info(f"    [CAPTURED] Weather = {result['weather']}")
                 elif result["weather"] == "Unknown" and captured.get('weather'):
                     # Fallback to any weather value if raw not available
-                    result["weather"] = captured['weather']
-                    logger.info(f"    [CAPTURED] Weather = {result['weather']} (fallback)")
+                    # v10.2.0: Still convert to user-friendly adjective
+                    raw_weather_name = captured['weather']
+                    result["weather"] = self.WEATHER_FALLBACK.get(raw_weather_name, raw_weather_name)
+                    logger.info(f"    [CAPTURED] Weather = {result['weather']} (fallback from {raw_weather_name})")
 
                 # v8.1.7: Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires
@@ -2414,6 +3232,133 @@ class HavenExtractorMod(Mod):
             return glyph.upper()
         except Exception:
             return "000000000000"
+
+    def _glyph_to_portal_code(self, glyph: str) -> int:
+        """Convert glyph string (e.g., '00940F34B00A') to portal code integer."""
+        try:
+            return int(glyph, 16)
+        except (ValueError, TypeError):
+            return 0
+
+    def _coords_to_portal_code(self, system_idx: int, x: int, y: int, z: int, planet: int = 0) -> int:
+        """Convert coordinates to full 48-bit portal code for name generation.
+
+        IMPORTANT: Uses full 12-bit system index, not 9-bit glyph version.
+        Standard portal glyphs only encode 9 bits (max 511), but NMS uses
+        full 12-bit system indices (max 4095) for name generation.
+        """
+        portal_x = (x + 2047) & 0xFFF      # 12 bits
+        portal_y = (y + 127) & 0xFF        # 8 bits
+        portal_z = (z + 2047) & 0xFFF      # 12 bits
+        portal_sys = system_idx & 0xFFF    # 12 bits (FULL, not 9-bit truncated!)
+        portal_planet = planet & 0xF       # 4 bits
+
+        # Build 48-bit portal code: PSSS YYZZ ZXXX (but with 12-bit system)
+        portal_code = (portal_planet << 44) | (portal_sys << 32) | (portal_y << 24) | (portal_z << 12) | portal_x
+        return portal_code
+
+    def _get_actual_system_name(self) -> str:
+        """Get the actual in-game system name from solar system data.
+
+        Reads directly from cGcSolarSystemData.Name at offset 0x2274.
+        Note: This field may be empty during planet generation and
+        only gets populated later. Call this during export, not capture.
+
+        Returns:
+            System name string, or empty string if not found
+        """
+        # Try reading from cached solar system's Name field
+        if self._cached_solar_system:
+            try:
+                solar_sys_addr = get_addressof(self._cached_solar_system)
+                # Name is at offset 0x2274 from solar system start
+                name_addr = solar_sys_addr + 0x2274
+
+                # Read 128 bytes (cTkFixedString<0x80>)
+                buffer = (ctypes.c_char * 128)()
+                ctypes.memmove(buffer, name_addr, 128)
+                raw = bytes(buffer)
+
+                # Find null terminator
+                null_idx = raw.find(b'\x00')
+                if null_idx > 0:
+                    name = raw[:null_idx].decode('utf-8', errors='ignore').strip()
+                    if name:
+                        logger.info(f"  [SYSNAME] Got: '{name}'")
+                        return name
+
+            except Exception as e:
+                logger.debug(f"  [SYSNAME] Read failed: {e}")
+
+        return ""
+
+    def _generate_system_name(self, glyph_code: str, galaxy_idx: int = 0,
+                               system_idx: int = None, x: int = None, y: int = None, z: int = None) -> str:
+        """Generate procedural system name using NMS algorithm.
+
+        Args:
+            glyph_code: 12-character hex glyph string (fallback identifier)
+            galaxy_idx: Galaxy index (0 = Euclid, 1 = Hilbert, etc.)
+            system_idx: Full 12-bit system index (if available)
+            x, y, z: Voxel coordinates (if available)
+
+        Returns:
+            Procedurally generated system name, or fallback if generation fails
+        """
+        if not NMS_NAMEGEN_AVAILABLE:
+            return f"System_{glyph_code}"
+
+        try:
+            # Use full coordinates if provided (preferred - uses 12-bit system index)
+            if system_idx is not None and x is not None and y is not None and z is not None:
+                portal_code = self._coords_to_portal_code(system_idx, x, y, z)
+            else:
+                # Fallback to glyph code (only 9-bit system index)
+                portal_code = self._glyph_to_portal_code(glyph_code)
+
+            if portal_code == 0:
+                return f"System_{glyph_code}"
+
+            name = nms_system_name(portal_code, galaxy_idx)
+            logger.debug(f"  [v10.1.1] Generated system name: '{name}' (sys_idx={system_idx})")
+            return name
+        except Exception as e:
+            logger.debug(f"  [v10.1.1] System name generation failed: {e}")
+            return f"System_{glyph_code}"
+
+    def _generate_region_name(self, glyph_code: str, galaxy_idx: int = 0,
+                               system_idx: int = None, x: int = None, y: int = None, z: int = None) -> str:
+        """Generate procedural region name using NMS algorithm.
+
+        Args:
+            glyph_code: 12-character hex glyph string (fallback identifier)
+            galaxy_idx: Galaxy index (0 = Euclid, 1 = Hilbert, etc.)
+            system_idx: Full 12-bit system index (if available)
+            x, y, z: Voxel coordinates (if available)
+
+        Returns:
+            Procedurally generated region name, or fallback if generation fails
+        """
+        if not NMS_NAMEGEN_AVAILABLE:
+            return f"Region_{glyph_code[:8]}"
+
+        try:
+            # Use full coordinates if provided (preferred - uses 12-bit system index)
+            if system_idx is not None and x is not None and y is not None and z is not None:
+                portal_code = self._coords_to_portal_code(system_idx, x, y, z)
+            else:
+                # Fallback to glyph code (only 9-bit system index)
+                portal_code = self._glyph_to_portal_code(glyph_code)
+
+            if portal_code == 0:
+                return f"Region_{glyph_code[:8]}"
+
+            name = nms_region_name(portal_code, galaxy_idx)
+            logger.debug(f"  [v10.1.1] Generated region name: '{name}' (sys_idx={system_idx})")
+            return name
+        except Exception as e:
+            logger.debug(f"  [v10.1.1] Region name generation failed: {e}")
+            return f"Region_{glyph_code[:8]}"
 
     def _write_extraction(self, data: dict):
         """Save extraction data locally (NO auto-send to API - use Save Watcher for manual upload)."""

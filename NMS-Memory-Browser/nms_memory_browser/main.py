@@ -3,6 +3,11 @@
 This is a pyMHF mod that provides a GUI for browsing game memory.
 Launch with: pymhf run c:\\Master-Haven\\NMS-Memory-Browser
 
+v3.8.5 - Memory View Only (Fast Startup)
+- DISABLED: Deep base search that caused slow startup
+- Now focuses on memory viewing without heavy scanning
+- Base scan can be re-enabled by setting ENABLE_EXPERIMENTAL_BASE_SCAN = True
+
 v3.8.4 - DEEP Base Search (game_state + BaseBuildingManager)
 - NEW: Probes game_state in ADDITION to player_state for base arrays
 - NEW: Explores mBaseBuildingManager structure for base data
@@ -146,7 +151,7 @@ GALAXY_NAMES = {
 # These features use raw memory access and may cause crashes in some game states
 # Set to True to enable experimental features (at your own risk)
 # =============================================================================
-ENABLE_EXPERIMENTAL_BASE_SCAN = True  # Scan PersistentPlayerBases from PlayerStateData
+ENABLE_EXPERIMENTAL_BASE_SCAN = False  # Scan PersistentPlayerBases from PlayerStateData (DISABLED - slow startup)
 ENABLE_EXPERIMENTAL_NETWORK_SCAN = False  # Scan network player state data
 
 # =============================================================================
@@ -3614,6 +3619,334 @@ class NMSMemoryBrowser(Mod):
         log_flush("=" * 60)
         log_flush("=== END DEBUG ===")
         log_flush("=" * 60)
+
+    @gui_button("DEBUG: System Name")
+    def debug_system_name(self):
+        """Debug button to find and read system name from memory."""
+        log_flush("")
+        log_flush("=" * 60)
+        log_flush("=== DEBUG: System Name Search ===")
+        log_flush("=" * 60)
+
+        try:
+            from nmspy.common import gameData
+
+            # Get solar system
+            simulation = gameData.simulation
+            if not simulation:
+                log_flush("ERROR: No simulation available", "error")
+                return
+
+            solar_system = simulation.mpSolarSystem
+            if not solar_system:
+                log_flush("ERROR: No solar system available - are you in a system?", "error")
+                return
+
+            ss_addr = get_addressof(solar_system)
+            log_flush(f"cGcSolarSystem address: 0x{ss_addr:X}")
+
+            # Get mSolarSystemData
+            sys_data = solar_system.mSolarSystemData
+            sys_data_addr = get_addressof(sys_data)
+            log_flush(f"mSolarSystemData address: 0x{sys_data_addr:X}")
+
+            # Read Name at offset 0x2274 (cTkFixedString<0x80> - 128 bytes)
+            NAME_OFFSET = 0x2274
+            name_addr = sys_data_addr + NAME_OFFSET
+            log_flush(f"Name field address (0x2274): 0x{name_addr:X}")
+
+            # Read raw bytes using ctypes
+            import ctypes
+            try:
+                buffer = (ctypes.c_char * 128)()
+                ctypes.memmove(buffer, name_addr, 128)
+                raw_bytes = bytes(buffer)
+
+                # Find null terminator
+                null_pos = raw_bytes.find(b'\x00')
+                if null_pos > 0:
+                    name_str = raw_bytes[:null_pos].decode('utf-8', errors='ignore')
+                    log_flush(f"*** SYSTEM NAME: '{name_str}' ***")
+                elif null_pos == 0:
+                    log_flush(f"Name field is EMPTY (first byte is null)")
+                else:
+                    log_flush(f"Name field has no null terminator")
+
+                log_flush(f"Raw bytes (first 32): {raw_bytes[:32].hex()}")
+            except Exception as e:
+                log_flush(f"Failed to read Name field: {e}", "error")
+
+            # Also try reading via struct accessor
+            log_flush("")
+            log_flush("--- Trying struct accessor ---")
+            if hasattr(sys_data, 'Name'):
+                try:
+                    raw_name = sys_data.Name
+                    log_flush(f"sys_data.Name type: {type(raw_name)}")
+                    if hasattr(raw_name, 'value'):
+                        name_bytes = bytes(raw_name.value)
+                        null_pos = name_bytes.find(b'\x00')
+                        if null_pos > 0:
+                            log_flush(f"*** Name.value: '{name_bytes[:null_pos].decode('utf-8', errors='ignore')}' ***")
+                        else:
+                            log_flush(f"Name.value is empty or all nulls")
+                except Exception as e:
+                    log_flush(f"Struct accessor failed: {e}")
+            else:
+                log_flush("sys_data does not have 'Name' attribute")
+
+            # Read some other known fields to validate memory access works
+            log_flush("")
+            log_flush("--- Validating memory access with known fields ---")
+
+            # InhabitingRace at 0x2254
+            try:
+                race_ptr = ctypes.cast(sys_data_addr + 0x2254, ctypes.POINTER(ctypes.c_uint32))
+                race_val = race_ptr.contents.value
+                RACES = {0: "Gek", 1: "Vy'keen", 2: "Korvax", 3: "Robots", 4: "Atlas", 5: "Diplomats", 6: "None"}
+                log_flush(f"InhabitingRace (0x2254): {RACES.get(race_val, 'Unknown')} (raw: {race_val})")
+            except Exception as e:
+                log_flush(f"Failed to read InhabitingRace: {e}")
+
+            # Planet count at 0x2264
+            try:
+                count_ptr = ctypes.cast(sys_data_addr + 0x2264, ctypes.POINTER(ctypes.c_int32))
+                planet_count = count_ptr.contents.value
+                log_flush(f"Planet count (0x2264): {planet_count}")
+            except Exception as e:
+                log_flush(f"Failed to read planet count: {e}")
+
+            # List all name-related attributes on sys_data
+            log_flush("")
+            log_flush("--- Searching for name-related attributes ---")
+            all_attrs = [a for a in dir(sys_data) if not a.startswith('_')]
+            name_attrs = [a for a in all_attrs if 'name' in a.lower()]
+            if name_attrs:
+                log_flush(f"Name-related attributes: {name_attrs}")
+                for attr in name_attrs:
+                    try:
+                        val = getattr(sys_data, attr)
+                        log_flush(f"  {attr}: {val}")
+                    except Exception as e:
+                        log_flush(f"  {attr}: ERROR - {e}")
+            else:
+                log_flush("No name-related attributes found")
+
+            log_flush(f"Total attributes on mSolarSystemData: {len(all_attrs)}")
+
+        except Exception as e:
+            log_flush(f"Debug system name failed: {e}", "error")
+            log_flush(traceback.format_exc(), "error")
+
+        log_flush("=" * 60)
+
+    @gui_button("DUMP: ALL GAME DATA")
+    def dump_all_game_data(self):
+        """Dump EVERYTHING - all game objects, all struct types, all fields recursively to JSON."""
+        import json
+        from datetime import datetime
+        from pathlib import Path
+        import ctypes
+        import inspect
+
+        log_flush("")
+        log_flush("=" * 60)
+        log_flush("=== DUMPING ALL GAME DATA TO JSON ===")
+        log_flush("This will take a moment...")
+        log_flush("=" * 60)
+
+        dump_data = {
+            'timestamp': datetime.now().isoformat(),
+            'version': 'full_dump_v1.0',
+            'game_objects': {},
+            'struct_types': [],
+        }
+
+        visited = set()
+
+        def serialize_value(val, depth=0, max_depth=8, path=""):
+            """Recursively serialize ANY value to JSON."""
+            if depth > max_depth:
+                return f"<MAX_DEPTH:{type(val).__name__}>"
+            if val is None:
+                return None
+
+            val_id = id(val)
+            if val_id in visited and depth > 2:
+                return f"<CIRCULAR:{type(val).__name__}>"
+            visited.add(val_id)
+
+            try:
+                # Primitives
+                if isinstance(val, (bool, int, float)):
+                    return val
+                if isinstance(val, str):
+                    return val
+                if isinstance(val, bytes):
+                    null_pos = val.find(b'\x00')
+                    if 0 < null_pos < 256:
+                        try:
+                            return {'_bytes_as_string': val[:null_pos].decode('utf-8', errors='ignore')}
+                        except:
+                            pass
+                    return {'_hex': val[:256].hex(), '_len': len(val)}
+
+                # ctypes arrays (strings, etc)
+                if hasattr(val, '_length_') and hasattr(val, '_type_'):
+                    try:
+                        raw = bytes(val)
+                        null_pos = raw.find(b'\x00')
+                        if 0 < null_pos < 512:
+                            decoded = raw[:null_pos].decode('utf-8', errors='ignore')
+                            return {'_string': decoded, '_hex': raw[:64].hex()}
+                        return {'_array_hex': raw[:256].hex(), '_len': len(raw)}
+                    except:
+                        return f"<ARRAY[{getattr(val, '_length_', '?')}]>"
+
+                # Lists/tuples
+                if isinstance(val, (list, tuple)):
+                    return [serialize_value(v, depth+1, max_depth, f"{path}[{i}]") for i, v in enumerate(val[:50])]
+
+                # Dicts
+                if isinstance(val, dict):
+                    return {str(k): serialize_value(v, depth+1, max_depth, f"{path}.{k}") for k, v in list(val.items())[:100]}
+
+                # ctypes Structure - expand ALL fields
+                if isinstance(val, ctypes.Structure):
+                    result = {'_type': type(val).__name__}
+                    try:
+                        result['_addr'] = f"0x{ctypes.addressof(val):X}"
+                        result['_size'] = ctypes.sizeof(val)
+                    except:
+                        pass
+                    if hasattr(val, '_fields_'):
+                        for fname, ftype in val._fields_:
+                            try:
+                                fval = getattr(val, fname)
+                                result[fname] = serialize_value(fval, depth+1, max_depth, f"{path}.{fname}")
+                            except Exception as e:
+                                result[fname] = f"<ERR:{e}>"
+                    return result
+
+                # Any object with attributes - expand ALL
+                attrs = []
+                try:
+                    attrs = [a for a in dir(val) if not a.startswith('_')]
+                except:
+                    pass
+
+                if attrs:
+                    result = {'_type': type(val).__name__}
+                    try:
+                        result['_addr'] = f"0x{get_addressof(val):X}"
+                    except:
+                        pass
+                    for attr in attrs:
+                        try:
+                            av = getattr(val, attr, None)
+                            if av is not None and not callable(av):
+                                result[attr] = serialize_value(av, depth+1, max_depth, f"{path}.{attr}")
+                        except Exception as e:
+                            result[attr] = f"<ERR:{e}>"
+                    return result
+
+                return str(val)
+            except Exception as e:
+                return f"<SERIALIZE_ERR:{e}>"
+            finally:
+                visited.discard(val_id)
+
+        try:
+            from nmspy.common import gameData
+            import nmspy.data.types as nms_types
+            import nmspy.data.exported_types as nms_exported
+
+            # =====================================================
+            # 1. DUMP ALL gameData OBJECTS RECURSIVELY
+            # =====================================================
+            log_flush("Step 1: Dumping all gameData objects recursively...")
+            all_attrs = [a for a in dir(gameData) if not a.startswith('_')]
+            log_flush(f"  Found {len(all_attrs)} top-level gameData attributes")
+
+            for i, attr_name in enumerate(all_attrs):
+                try:
+                    attr_val = getattr(gameData, attr_name, None)
+                    if attr_val is not None and not callable(attr_val):
+                        log_flush(f"  [{i+1}/{len(all_attrs)}] Serializing: {attr_name}")
+                        visited.clear()
+                        dump_data['game_objects'][attr_name] = serialize_value(attr_val, depth=0, max_depth=8, path=attr_name)
+                except Exception as e:
+                    dump_data['game_objects'][attr_name] = f"<TOP_ERR:{e}>"
+                    log_flush(f"  Error on {attr_name}: {e}")
+
+            # =====================================================
+            # 2. DUMP ALL STRUCT TYPE DEFINITIONS
+            # =====================================================
+            log_flush("Step 2: Dumping all struct type definitions...")
+            struct_count = 0
+            field_count = 0
+
+            for module_name, module in [('types', nms_types), ('exported_types', nms_exported)]:
+                log_flush(f"  Scanning module: {module_name}")
+                for name, obj in inspect.getmembers(module):
+                    if inspect.isclass(obj) and issubclass(obj, ctypes.Structure) and obj is not ctypes.Structure:
+                        try:
+                            size = ctypes.sizeof(obj)
+                            fields = []
+                            if hasattr(obj, '_fields_'):
+                                for field_name, field_type in obj._fields_:
+                                    try:
+                                        fd = getattr(obj, field_name)
+                                        fields.append({
+                                            'name': field_name,
+                                            'offset': fd.offset,
+                                            'offset_hex': f"0x{fd.offset:X}",
+                                            'size': fd.size,
+                                            'type': getattr(field_type, '__name__', str(field_type)),
+                                        })
+                                        field_count += 1
+                                    except:
+                                        fields.append({'name': field_name, 'type': str(field_type)})
+                            dump_data['struct_types'].append({
+                                'name': name,
+                                'module': module_name,
+                                'size': size,
+                                'size_hex': f"0x{size:X}",
+                                'fields': fields,
+                            })
+                            struct_count += 1
+                        except:
+                            pass
+
+            log_flush(f"  Dumped {struct_count} struct types, {field_count} fields")
+
+            # =====================================================
+            # 3. SAVE TO FILE
+            # =====================================================
+            output_dir = Path.home() / "Documents" / "NMS-Memory-Browser"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"FULL_GAME_DUMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            filepath = output_dir / filename
+
+            log_flush(f"Step 3: Writing JSON to {filepath}...")
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(dump_data, f, indent=2, default=str)
+
+            file_size = filepath.stat().st_size / (1024 * 1024)
+
+            log_flush("")
+            log_flush("=" * 60)
+            log_flush("*** DUMP COMPLETE ***")
+            log_flush(f"File: {filepath}")
+            log_flush(f"Size: {file_size:.2f} MB")
+            log_flush(f"Game objects dumped: {len(dump_data['game_objects'])}")
+            log_flush(f"Struct types dumped: {len(dump_data['struct_types'])}")
+            log_flush("=" * 60)
+
+        except Exception as e:
+            log_flush(f"DUMP FAILED: {e}", "error")
+            log_flush(traceback.format_exc(), "error")
 
 
 # Alternative standalone launcher (without pyMHF)

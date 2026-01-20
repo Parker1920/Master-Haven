@@ -197,11 +197,11 @@ def run_pending_migrations(db_path: Path) -> Tuple[int, List[str]]:
                 migration.up(conn)
                 conn.commit()
 
-                # Record success
+                # Record success (use INSERT OR REPLACE to handle retry scenarios)
                 elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO schema_migrations
+                    INSERT OR REPLACE INTO schema_migrations
                     (version, migration_name, applied_at, execution_time_ms, success)
                     VALUES (?, ?, ?, ?, 1)
                 ''', (migration.version, migration.name,
@@ -828,3 +828,282 @@ def migration_1_20_0_haven_extractor_integration(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.20.0")
+
+
+@register_migration("1.21.0", "Haven Extractor - pending_systems schema fix")
+def migration_1_21_0_pending_systems_schema(conn: sqlite3.Connection):
+    """
+    Jan 19, 2026 - Fix pending_systems table schema for Haven Extractor.
+
+    The API code expects many columns that were never added to the table.
+    This migration adds all missing columns required for the extraction API.
+
+    Changes:
+    - Add glyph_code column (required for duplicate checking)
+    - Add galaxy column
+    - Add coordinate columns (x, y, z, region_x, region_y, region_z)
+    - Add submitter_name, submission_timestamp columns
+    - Add source column (tracks where submission came from)
+    - Add raw_json column (original JSON payload)
+    - Add discord_tag, personal_discord_username columns
+    - Add api_key_name column (for API key tracking)
+    """
+    cursor = conn.cursor()
+
+    # Get current columns in pending_systems
+    cursor.execute("PRAGMA table_info(pending_systems)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    # Define all columns that should exist with their SQL types
+    required_columns = {
+        'glyph_code': 'TEXT',
+        'galaxy': 'TEXT',
+        'x': 'INTEGER',
+        'y': 'INTEGER',
+        'z': 'INTEGER',
+        'region_x': 'INTEGER',
+        'region_y': 'INTEGER',
+        'region_z': 'INTEGER',
+        'submitter_name': 'TEXT',
+        'submission_timestamp': 'TEXT',
+        'source': 'TEXT',
+        'raw_json': 'TEXT',
+        'discord_tag': 'TEXT',
+        'personal_discord_username': 'TEXT',
+        'api_key_name': 'TEXT',
+    }
+
+    # Add missing columns
+    for column, col_type in required_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE pending_systems ADD COLUMN {column} {col_type}")
+            logger.info(f"Added {column} column to pending_systems")
+
+    # Create index on glyph_code for faster duplicate checking
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pending_systems_glyph_code
+        ON pending_systems(glyph_code)
+    """)
+    logger.info("Created index on pending_systems.glyph_code")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.21.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.21.0")
+
+
+@register_migration("1.22.0", "Clean up weather and biome_subtype display values")
+def migration_1_22_0_clean_weather_biome_subtype(conn: sqlite3.Connection):
+    """
+    Jan 19, 2026 - Clean Up Weather and Biome Subtype Display Values.
+
+    Updates existing planet/moon records with cleaner display values:
+    - Climate/Weather: Maps raw values like "Weather Lush" to proper adjectives like "Pleasant"
+    - Biome Subtype: Maps raw enum names like "HugePlant" to user-friendly names like "Mega Flora"
+
+    This matches the new formatting in Haven Extractor v10.1.4.
+
+    Note: Only updates columns that exist in each table.
+    """
+    cursor = conn.cursor()
+
+    # Helper to get columns in a table
+    def get_table_columns(table: str) -> set:
+        cursor.execute(f"PRAGMA table_info({table})")
+        return {row[1] for row in cursor.fetchall()}
+
+    # Weather value mappings (raw -> EXACT weatherAdjectives from adjectives.js)
+    # Values like "Superheated", "Dusty", "Toxic", "Volatile" are NOT in weatherAdjectives
+    weather_mappings = {
+        # Lush planet weather -> Pleasant
+        "Weather Lush": "Pleasant",
+        "weather_lush": "Pleasant",
+        "weather lush": "Pleasant",
+        "Lush": "Pleasant",
+        # Toxic planet weather -> Toxic Rain (not just "Toxic")
+        "Weather Toxic": "Toxic Rain",
+        "weather_toxic": "Toxic Rain",
+        "Toxic": "Toxic Rain",
+        # Scorched/Hot planet weather -> Extreme Heat
+        "Weather Scorched": "Extreme Heat",
+        "weather_scorched": "Extreme Heat",
+        "Scorched": "Extreme Heat",
+        "Weather Hot": "Extreme Heat",
+        "weather_hot": "Extreme Heat",
+        "Superheated": "Extreme Heat",
+        # Fire -> Inferno
+        "Weather Fire": "Inferno",
+        "weather_fire": "Inferno",
+        # Radioactive -> Radioactive (exists in list)
+        "Weather Radioactive": "Radioactive",
+        "weather_radioactive": "Radioactive",
+        # Frozen/Cold -> Frozen or Freezing
+        "Weather Frozen": "Frozen",
+        "weather_frozen": "Frozen",
+        "Weather Cold": "Freezing",
+        "weather_cold": "Freezing",
+        "Weather Snow": "Frozen",
+        "weather_snow": "Frozen",
+        "Weather Blizzard": "Freezing",
+        "weather_blizzard": "Freezing",
+        # Barren/Dust -> Arid (not "Dusty")
+        "Weather Barren": "Arid",
+        "weather_barren": "Arid",
+        "Weather Dust": "Arid",
+        "weather_dust": "Arid",
+        "Dusty": "Arid",
+        # Dead -> Airless
+        "Weather Dead": "Airless",
+        "weather_dead": "Airless",
+        # Weird/Exotic -> Anomalous
+        "Weather Weird": "Anomalous",
+        "weather_weird": "Anomalous",
+        "Weather Glitch": "Anomalous",
+        "weather_glitch": "Anomalous",
+        "Weather Bubble": "Anomalous",
+        "weather_bubble": "Anomalous",
+        # Swamp/Humid -> Humid
+        "Weather Swamp": "Humid",
+        "weather_swamp": "Humid",
+        "Weather Humid": "Humid",
+        "weather_humid": "Humid",
+        # Lava -> Inferno
+        "Weather Lava": "Inferno",
+        "weather_lava": "Inferno",
+        # Clear/Normal
+        "Weather Clear": "Clear",
+        "weather_clear": "Clear",
+        "Weather Normal": "Temperate",
+        "weather_normal": "Temperate",
+        # Extreme
+        "Weather Extreme": "Extreme Heat",
+        "weather_extreme": "Extreme Heat",
+        # Invalid values we created earlier - fix them
+        "Volatile": "Temperate",
+        # Color-based weather (exotic planets)
+        "RedWeather": "Anomalous",
+        "GreenWeather": "Anomalous",
+        "BlueWeather": "Anomalous",
+    }
+
+    # Biome subtype mappings (raw enum name -> display)
+    biome_subtype_mappings = {
+        # None/Standard variants
+        "None_": "Standard",
+        "None": "Standard",
+        "HighQuality": "High Quality",
+        # Exotic planet subtypes
+        "Structure": "Exotic",
+        "Beam": "Exotic",
+        "Hexagon": "Exotic",
+        "FractCube": "Exotic",
+        "Bubble": "Exotic",
+        "Shards": "Exotic",
+        "Contour": "Exotic",
+        "Shell": "Exotic",
+        "BoneSpire": "Exotic",
+        "WireCell": "Exotic",
+        "HydroGarden": "Exotic",
+        # Mega/Huge variants
+        "HugePlant": "Mega Flora",
+        "HugeLush": "Mega Flora",
+        "HugeRing": "Mega Fauna",
+        "HugeRock": "Mega Terrain",
+        "HugeScorch": "Mega Terrain",
+        "HugeToxic": "Mega Toxic",
+        # Variants with underscores
+        "Variant_A": "Variant A",
+        "Variant_B": "Variant B",
+        "Variant_C": "Variant C",
+        "Variant_D": "Variant D",
+        "Remix_A": "Remix A",
+        "Remix_B": "Remix B",
+        "Remix_C": "Remix C",
+        "Remix_D": "Remix D",
+    }
+
+    # Get columns for each table
+    planets_columns = get_table_columns('planets')
+    moons_columns = get_table_columns('moons')
+
+    logger.info(f"Planets columns: {planets_columns}")
+    logger.info(f"Moons columns: {moons_columns}")
+
+    # Update planets table - climate (always exists)
+    planets_climate_updated = 0
+    if 'climate' in planets_columns:
+        for old_val, new_val in weather_mappings.items():
+            cursor.execute("UPDATE planets SET climate = ? WHERE climate = ?", (new_val, old_val))
+            planets_climate_updated += cursor.rowcount
+        logger.info(f"Updated {planets_climate_updated} climate values in planets table")
+
+    # Update planets table - weather (may not exist)
+    planets_weather_updated = 0
+    if 'weather' in planets_columns:
+        for old_val, new_val in weather_mappings.items():
+            cursor.execute("UPDATE planets SET weather = ? WHERE weather = ?", (new_val, old_val))
+            planets_weather_updated += cursor.rowcount
+        logger.info(f"Updated {planets_weather_updated} weather values in planets table")
+    else:
+        logger.info("planets.weather column does not exist, skipping")
+
+    # Update planets table - biome_subtype (may not exist)
+    planets_subtype_updated = 0
+    if 'biome_subtype' in planets_columns:
+        for old_val, new_val in biome_subtype_mappings.items():
+            cursor.execute("UPDATE planets SET biome_subtype = ? WHERE biome_subtype = ?", (new_val, old_val))
+            planets_subtype_updated += cursor.rowcount
+        logger.info(f"Updated {planets_subtype_updated} biome_subtype values in planets table")
+    else:
+        logger.info("planets.biome_subtype column does not exist, skipping")
+
+    # Update moons table - climate (always exists)
+    moons_climate_updated = 0
+    if 'climate' in moons_columns:
+        for old_val, new_val in weather_mappings.items():
+            cursor.execute("UPDATE moons SET climate = ? WHERE climate = ?", (new_val, old_val))
+            moons_climate_updated += cursor.rowcount
+        logger.info(f"Updated {moons_climate_updated} climate values in moons table")
+
+    # Update moons table - weather (may not exist)
+    moons_weather_updated = 0
+    if 'weather' in moons_columns:
+        for old_val, new_val in weather_mappings.items():
+            cursor.execute("UPDATE moons SET weather = ? WHERE weather = ?", (new_val, old_val))
+            moons_weather_updated += cursor.rowcount
+        logger.info(f"Updated {moons_weather_updated} weather values in moons table")
+    else:
+        logger.info("moons.weather column does not exist, skipping")
+
+    # Update moons table - biome_subtype (may not exist)
+    moons_subtype_updated = 0
+    if 'biome_subtype' in moons_columns:
+        for old_val, new_val in biome_subtype_mappings.items():
+            cursor.execute("UPDATE moons SET biome_subtype = ? WHERE biome_subtype = ?", (new_val, old_val))
+            moons_subtype_updated += cursor.rowcount
+        logger.info(f"Updated {moons_subtype_updated} biome_subtype values in moons table")
+    else:
+        logger.info("moons.biome_subtype column does not exist, skipping")
+
+    total_updated = (planets_climate_updated + planets_weather_updated + planets_subtype_updated +
+                     moons_climate_updated + moons_weather_updated + moons_subtype_updated)
+    logger.info(f"Total display value updates: {total_updated}")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.22.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.22.0")
