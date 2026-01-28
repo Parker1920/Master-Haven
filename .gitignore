@@ -112,6 +112,10 @@ yarn-error.log*
 # Claude Code
 .claude/
 
+# CLAUDE.md documentation (private/local only)
+CLAUDE.md
+**/CLAUDE.md
+
 # -----------------
 # OS FILES
 # -----------------

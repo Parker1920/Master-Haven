@@ -827,6 +827,21 @@ export default function PendingApprovals() {
                   {selectedSubmission.system_data?.dominant_lifeform && selectedSubmission.system_data.dominant_lifeform !== 'Unknown' && (
                     <p><strong>Dominant Lifeform:</strong> {selectedSubmission.system_data.dominant_lifeform}</p>
                   )}
+                  {selectedSubmission.system_data?.stellar_classification && (
+                    <p><strong>Spectral Class:</strong> <span className={`font-mono ${
+                      (() => {
+                        const firstChar = selectedSubmission.system_data.stellar_classification[0]?.toUpperCase();
+                        switch(firstChar) {
+                          case 'O': case 'B': return 'text-blue-300';
+                          case 'F': case 'G': return 'text-yellow-300';
+                          case 'K': case 'M': return 'text-red-400';
+                          case 'E': return 'text-green-400';
+                          case 'X': case 'Y': return 'text-purple-400';
+                          default: return 'text-gray-300';
+                        }
+                      })()
+                    }`}>{selectedSubmission.system_data.stellar_classification}</span></p>
+                  )}
                   <p><strong>Description:</strong> {selectedSubmission.system_data?.description || 'None'}</p>
                 </div>
               </div>

@@ -1,12 +1,14 @@
 import React, { useState, useContext } from 'react'
 import Modal from './Modal'
 import AuthContext from '../utils/AuthContext'
+import axios from 'axios'
 
 export default function AdminLoginModal({ open, onClose }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loginType, setLoginType] = useState('admin') // 'admin' or 'correspondent'
   const auth = useContext(AuthContext)
 
   if (!open) return null
@@ -16,12 +18,26 @@ export default function AdminLoginModal({ open, onClose }) {
     setError('')
     setLoading(true)
     try {
-      await auth.login(username, password)
-      setUsername('')
-      setPassword('')
-      onClose()
+      if (loginType === 'correspondent') {
+        // Use correspondent login endpoint
+        const response = await axios.post('/api/warroom/correspondents/login', {
+          username,
+          password
+        })
+        // Refresh auth state after correspondent login
+        await auth.refreshAuth()
+        setUsername('')
+        setPassword('')
+        onClose()
+      } else {
+        await auth.login(username, password)
+        setUsername('')
+        setPassword('')
+        onClose()
+      }
     } catch (e) {
-      setError(e.message || 'Login failed')
+      const message = e.response?.data?.detail || e.message || 'Login failed'
+      setError(message)
     } finally {
       setLoading(false)
     }
@@ -37,6 +53,32 @@ export default function AdminLoginModal({ open, onClose }) {
     <Modal title="Login" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-4">
+          {/* Login type selector */}
+          <div className="flex gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setLoginType('admin')}
+              className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
+                loginType === 'admin'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Admin / Partner
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoginType('correspondent')}
+              className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
+                loginType === 'correspondent'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              War Correspondent
+            </button>
+          </div>
+
           <div>
             <label className="block text-sm font-medium mb-1">Username</label>
             <input

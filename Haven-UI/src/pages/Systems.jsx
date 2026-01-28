@@ -3,8 +3,18 @@ import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import FormField from '../components/FormField'
-import { Squares2X2Icon, ListBulletIcon, MagnifyingGlassIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { Link, useNavigate } from 'react-router-dom'
+import RealitySelector from '../components/RealitySelector'
+import GalaxyGrid from '../components/GalaxyGrid'
+import RegionBrowser from '../components/RegionBrowser'
+import SystemsList from '../components/SystemsList'
+import {
+  MagnifyingGlassIcon,
+  ChevronRightIcon,
+  HomeIcon,
+  XMarkIcon,
+  FunnelIcon
+} from '@heroicons/react/24/outline'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthContext } from '../utils/AuthContext'
 
 // Custom debounce hook for search performance
@@ -24,14 +34,6 @@ function useDebounce(value, delay) {
   return debouncedValue
 }
 
-// Directional/cardinal region names to optionally hide
-const DIRECTIONAL_REGIONS = [
-  'Center Bottom', 'Center Top',
-  'East Core', 'North Core', 'South Core', 'West Core',
-  'North-East Top', 'North-West Bottom', 'North-West Top',
-  'South-East Bottom', 'South-East Top', 'South-West Bottom', 'South-West Top'
-]
-
 // Discord tag badge
 function getDiscordTagBadge(tag) {
   if (!tag) return null
@@ -50,15 +52,38 @@ function getDiscordTagBadge(tag) {
   return <span className={`text-xs px-1.5 py-0.5 rounded ${colorClass}`}>{tag}</span>
 }
 
+/**
+ * Containerized Systems Page
+ *
+ * Hierarchy: Reality → Galaxy → Region → System
+ * Each level loads data lazily when selected.
+ */
 export default function Systems() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
-  const [regions, setRegions] = useState([])
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Hierarchy state - can be controlled via URL params
+  const [selectedReality, setSelectedReality] = useState(searchParams.get('reality') || null)
+  const [selectedGalaxy, setSelectedGalaxy] = useState(searchParams.get('galaxy') || null)
+  const [selectedRegion, setSelectedRegion] = useState(() => {
+    const rx = searchParams.get('rx')
+    const ry = searchParams.get('ry')
+    const rz = searchParams.get('rz')
+    if (rx && ry && rz) {
+      return {
+        region_x: parseInt(rx),
+        region_y: parseInt(ry),
+        region_z: parseInt(rz),
+        display_name: searchParams.get('rname') || null
+      }
+    }
+    return null
+  })
+
+  // Search state
   const [q, setQ] = useState('')
   const debouncedQuery = useDebounce(q, 300)
-  const [loading, setLoading] = useState(true)
-
-  // Backend search results
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
 
@@ -66,22 +91,11 @@ export default function Systems() {
   const [discordTags, setDiscordTags] = useState([])
   const [filterTag, setFilterTag] = useState('all')
 
-  // Toggle to hide directional/cardinal regions
-  const [hideDirectional, setHideDirectional] = useState(false)
-
-  // View mode toggle: 'list' or 'grid'
-  const [viewMode, setViewMode] = useState('list')
+  // View All Systems mode - shows all systems for a discord tag across all regions
+  const [viewAllSystems, setViewAllSystems] = useState(false)
 
   // Mobile filter panel toggle
   const [showFilters, setShowFilters] = useState(false)
-
-  // Count active filters for badge
-  const activeFilterCount = useMemo(() => {
-    let count = 0
-    if (filterTag !== 'all') count++
-    if (hideDirectional) count++
-    return count
-  }, [filterTag, hideDirectional])
 
   // Fetch discord tags for filter dropdown
   useEffect(() => {
@@ -89,9 +103,6 @@ export default function Systems() {
       setDiscordTags(r.data.tags || [])
     }).catch(() => {})
   }, [])
-
-  // Load regions on mount and when filterTag changes
-  useEffect(() => { load() }, [filterTag])
 
   // Backend search when query changes
   useEffect(() => {
@@ -107,80 +118,121 @@ export default function Systems() {
       .finally(() => setIsSearching(false))
   }, [debouncedQuery])
 
-  // Load region summaries (without systems) - fast initial load
-  async function load() {
-    setLoading(true)
-    try {
-      // Build query params including discord_tag filter
-      const params = new URLSearchParams({ include_systems: 'false' })
-      if (filterTag && filterTag !== 'all') {
-        params.append('discord_tag', filterTag)
+  // Update URL when selection changes
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (selectedReality) params.set('reality', selectedReality)
+    if (selectedGalaxy) params.set('galaxy', selectedGalaxy)
+    if (selectedRegion) {
+      params.set('rx', selectedRegion.region_x.toString())
+      params.set('ry', selectedRegion.region_y.toString())
+      params.set('rz', selectedRegion.region_z.toString())
+      if (selectedRegion.display_name) {
+        params.set('rname', selectedRegion.display_name)
       }
-      const r = await axios.get(`/api/regions/grouped?${params.toString()}`)
-      setRegions(r.data.regions || [])
-    } catch (e) {
-      console.error('Failed to load regions:', e)
-      setRegions([])
-    } finally {
-      setLoading(false)
+    }
+    setSearchParams(params, { replace: true })
+  }, [selectedReality, selectedGalaxy, selectedRegion])
+
+  // Selection handlers with hierarchy reset
+  function handleRealitySelect(reality) {
+    setSelectedReality(reality)
+    setSelectedGalaxy(null)
+    setSelectedRegion(null)
+  }
+
+  function handleGalaxySelect(galaxy) {
+    setSelectedGalaxy(galaxy)
+    setSelectedRegion(null)
+  }
+
+  function handleRegionSelect(region) {
+    setSelectedRegion(region)
+    setViewAllSystems(false) // Exit view all mode when selecting a region
+  }
+
+  // Handler for View All Systems button in RegionBrowser
+  function handleViewAllSystems() {
+    setViewAllSystems(true)
+    setSelectedRegion(null) // Clear any selected region
+  }
+
+  // Breadcrumb navigation
+  function goToLevel(level) {
+    if (level === 'root') {
+      setSelectedReality(null)
+      setSelectedGalaxy(null)
+      setSelectedRegion(null)
+      setViewAllSystems(false)
+    } else if (level === 'reality') {
+      setSelectedGalaxy(null)
+      setSelectedRegion(null)
+      setViewAllSystems(false)
+    } else if (level === 'galaxy') {
+      setSelectedRegion(null)
+      setViewAllSystems(false)
+    } else if (level === 'viewAll') {
+      // Go back to region browser from view all systems
+      setViewAllSystems(false)
     }
   }
 
-  // Filtered regions (client-side filtering of region list)
-  const filteredRegions = useMemo(() => {
-    let filtered = regions
+  // Determine current hierarchy depth
+  const currentLevel = useMemo(() => {
+    if (viewAllSystems) return 'viewAllSystems'
+    if (selectedRegion) return 'systems'
+    if (selectedGalaxy) return 'regions'
+    if (selectedReality) return 'galaxies'
+    return 'realities'
+  }, [selectedReality, selectedGalaxy, selectedRegion, viewAllSystems])
 
-    // Filter out directional/cardinal regions if toggle is enabled
-    if (hideDirectional) {
-      filtered = filtered.filter(region => {
-        const regionName = region.custom_name || ''
-        return !DIRECTIONAL_REGIONS.includes(regionName)
+  // Breadcrumb items
+  const breadcrumbs = useMemo(() => {
+    const items = [
+      { label: 'Systems', level: 'root', active: currentLevel === 'realities' }
+    ]
+
+    if (selectedReality) {
+      items.push({
+        label: selectedReality,
+        level: 'reality',
+        active: currentLevel === 'galaxies'
       })
     }
 
-    // Filter regions by name if searching (but keep showing search results above)
-    if (debouncedQuery.trim()) {
-      const query = debouncedQuery.toLowerCase().trim()
-      filtered = filtered.filter(region => {
-        if (region.display_name?.toLowerCase().includes(query)) return true
-        if (region.custom_name?.toLowerCase().includes(query)) return true
-        // Match on coordinates too
-        const coordStr = `${region.region_x},${region.region_y},${region.region_z}`
-        if (coordStr.includes(query)) return true
-        return false
+    if (selectedGalaxy) {
+      items.push({
+        label: selectedGalaxy,
+        level: 'galaxy',
+        active: currentLevel === 'regions'
       })
     }
 
-    return filtered
-  }, [regions, hideDirectional, debouncedQuery])
+    if (viewAllSystems) {
+      items.push({
+        label: `All ${filterTag} Systems`,
+        level: 'viewAll',
+        active: currentLevel === 'viewAllSystems'
+      })
+    } else if (selectedRegion) {
+      const regionName = selectedRegion.display_name || selectedRegion.custom_name ||
+        `(${selectedRegion.region_x}, ${selectedRegion.region_y}, ${selectedRegion.region_z})`
+      items.push({
+        label: regionName,
+        level: 'region',
+        active: currentLevel === 'systems'
+      })
+    }
 
-  // Count total systems across filtered regions
-  const totalSystemsCount = useMemo(() => {
-    return filteredRegions.reduce((sum, region) => sum + (region.system_count || 0), 0)
-  }, [filteredRegions])
-
-  // Navigate to region detail page
-  function openRegion(region) {
-    navigate(`/regions/${region.region_x}/${region.region_y}/${region.region_z}`)
-  }
-
-  if (loading) {
-    return (
-      <div className="p-6">
-        <Card>
-          <div className="text-center py-8">Loading systems...</div>
-        </Card>
-      </div>
-    )
-  }
+    return items
+  }, [selectedReality, selectedGalaxy, selectedRegion, currentLevel, viewAllSystems, filterTag])
 
   return (
-    <div>
-      {/* Search and Actions Bar - Mobile Optimized */}
-      <div className="mb-6 space-y-3">
-        {/* Top Row: Search + Filter Toggle (mobile) / Full controls (desktop) */}
+    <div className="space-y-6">
+      {/* Header with Search and Breadcrumbs */}
+      <div className="space-y-4">
+        {/* Search Bar */}
         <div className="flex gap-2">
-          {/* Search Input - Always visible */}
           <FormField className="flex-1">
             <div className="relative">
               <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -189,7 +241,7 @@ export default function Systems() {
                 className="w-full pl-10 pr-3 py-2 rounded bg-gray-800 border border-gray-700 focus:border-cyan-500 focus:outline-none"
                 value={q}
                 onChange={e => setQ(e.target.value)}
-                placeholder="Search systems..."
+                placeholder="Search all systems..."
               />
               {isSearching && (
                 <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-cyan-400 text-sm">
@@ -199,38 +251,20 @@ export default function Systems() {
             </div>
           </FormField>
 
-          {/* Mobile: Filter toggle button */}
+          {/* Mobile filter toggle */}
           <button
             className={`lg:hidden px-3 py-2 rounded border transition-colors flex items-center gap-1.5 ${
-              showFilters || activeFilterCount > 0
+              showFilters || filterTag !== 'all'
                 ? 'bg-cyan-600 border-cyan-500 text-white'
                 : 'bg-gray-700 border-gray-600 text-gray-300'
             }`}
             onClick={() => setShowFilters(!showFilters)}
           >
             {showFilters ? <XMarkIcon className="w-5 h-5" /> : <FunnelIcon className="w-5 h-5" />}
-            {activeFilterCount > 0 && !showFilters && (
-              <span className="bg-white text-cyan-600 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                {activeFilterCount}
-              </span>
-            )}
           </button>
 
-          {/* Desktop: Inline filter controls */}
+          {/* Desktop filter */}
           <div className="hidden lg:flex gap-2">
-            {/* Hide Directional Regions Toggle */}
-            <button
-              className={`px-3 py-2 rounded border transition-colors ${
-                hideDirectional
-                  ? 'bg-purple-600 border-purple-500 text-white'
-                  : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
-              }`}
-              onClick={() => setHideDirectional(!hideDirectional)}
-              title="Hide directional region names (Center Top, North-East Bottom, etc.)"
-            >
-              {hideDirectional ? '🧭 Named Only' : '🧭 Show All'}
-            </button>
-            {/* Discord Tag Filter */}
             <select
               className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
               value={filterTag}
@@ -243,76 +277,15 @@ export default function Systems() {
                 <option key={t.tag} value={t.tag}>{t.name}</option>
               ))}
             </select>
-            {/* View Mode Toggle */}
-            <div className="flex rounded border border-gray-600 overflow-hidden">
-              <button
-                className={`px-3 py-2 flex items-center gap-1 transition-colors ${
-                  viewMode === 'list'
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                onClick={() => setViewMode('list')}
-                title="List view"
-              >
-                <ListBulletIcon className="w-4 h-4" />
-              </button>
-              <button
-                className={`px-3 py-2 flex items-center gap-1 transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                onClick={() => setViewMode('grid')}
-                title="Grid view"
-              >
-                <Squares2X2Icon className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Desktop: Action buttons */}
-          <div className="hidden lg:flex gap-2">
-            <Button onClick={() => { setQ(''); setFilterTag('all'); setHideDirectional(false) }} variant="ghost">Clear</Button>
-            <Button onClick={load} variant="ghost">Reload</Button>
-            <Link to="/wizard"><Button variant="neutral">New</Button></Link>
+            <Link to="/wizard"><Button variant="neutral">New System</Button></Link>
           </div>
         </div>
 
-        {/* Mobile: Collapsible Filter Panel */}
+        {/* Mobile filter panel */}
         {showFilters && (
           <div className="lg:hidden bg-gray-800/50 rounded-lg p-4 space-y-4 border border-gray-700">
-            {/* View Mode Toggle */}
             <div>
-              <label className="block text-xs text-gray-400 mb-2">View Mode</label>
-              <div className="flex rounded border border-gray-600 overflow-hidden w-fit">
-                <button
-                  className={`px-4 py-2 flex items-center gap-2 transition-colors ${
-                    viewMode === 'list'
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300'
-                  }`}
-                  onClick={() => setViewMode('list')}
-                >
-                  <ListBulletIcon className="w-4 h-4" />
-                  <span>List</span>
-                </button>
-                <button
-                  className={`px-4 py-2 flex items-center gap-2 transition-colors ${
-                    viewMode === 'grid'
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300'
-                  }`}
-                  onClick={() => setViewMode('grid')}
-                >
-                  <Squares2X2Icon className="w-4 h-4" />
-                  <span>Grid</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Community Filter */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2">Community</label>
+              <label className="block text-xs text-gray-400 mb-2">Community Filter</label>
               <select
                 className="w-full px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
                 value={filterTag}
@@ -326,50 +299,57 @@ export default function Systems() {
                 ))}
               </select>
             </div>
-
-            {/* Region Type Toggle */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2">Region Type</label>
-              <button
-                className={`w-full px-3 py-2 rounded border transition-colors text-left ${
-                  hideDirectional
-                    ? 'bg-purple-600 border-purple-500 text-white'
-                    : 'bg-gray-700 border-gray-600 text-gray-300'
-                }`}
-                onClick={() => setHideDirectional(!hideDirectional)}
-              >
-                {hideDirectional ? '🧭 Named Regions Only' : '🧭 Show All Regions'}
-              </button>
-            </div>
-
-            {/* Action Buttons */}
             <div className="flex gap-2 pt-2 border-t border-gray-700">
               <Button
-                onClick={() => { setQ(''); setFilterTag('all'); setHideDirectional(false) }}
+                onClick={() => setFilterTag('all')}
                 variant="ghost"
                 className="flex-1"
               >
-                Clear All
+                Clear Filter
               </Button>
-              <Button onClick={load} variant="ghost" className="flex-1">Reload</Button>
               <Link to="/wizard" className="flex-1">
-                <Button variant="neutral" className="w-full">New</Button>
+                <Button variant="neutral" className="w-full">New System</Button>
               </Link>
             </div>
           </div>
         )}
+
+        {/* Breadcrumb Navigation */}
+        <nav className="flex items-center gap-1 text-sm flex-wrap">
+          {breadcrumbs.map((item, idx) => (
+            <React.Fragment key={item.level}>
+              {idx > 0 && (
+                <ChevronRightIcon className="w-4 h-4 text-gray-500 shrink-0" />
+              )}
+              {item.active ? (
+                <span className="px-2 py-1 rounded bg-cyan-600 text-white font-medium">
+                  {idx === 0 && <HomeIcon className="w-4 h-4 inline mr-1" />}
+                  {item.label}
+                </span>
+              ) : (
+                <button
+                  onClick={() => goToLevel(item.level)}
+                  className="px-2 py-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                >
+                  {idx === 0 && <HomeIcon className="w-4 h-4 inline mr-1" />}
+                  {item.label}
+                </button>
+              )}
+            </React.Fragment>
+          ))}
+        </nav>
       </div>
 
-      {/* Search Results Section */}
+      {/* Search Results (always visible when searching) */}
       {debouncedQuery.trim() && (searchResults.length > 0 || isSearching) && (
-        <Card className="mb-6">
+        <Card className="border-cyan-500/50">
           <h3 className="text-lg font-semibold mb-3 text-cyan-400">
-            System Search Results {searchResults.length > 0 && `(${searchResults.length})`}
+            Search Results {searchResults.length > 0 && `(${searchResults.length})`}
           </h3>
           {isSearching ? (
             <div className="text-gray-400 py-4 text-center">Searching...</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-96 overflow-y-auto">
               {searchResults.map(system => (
                 <div
                   key={system.id}
@@ -399,13 +379,13 @@ export default function Systems() {
                         <span>Region ({system.region_x}, {system.region_y}, {system.region_z})</span>
                       )}
                       <span className="ml-2">• {system.galaxy || 'Euclid'}</span>
-                      <span className="ml-2">• {system.planet_count || 0} planets</span>
+                      <span className="ml-2">• {system.reality || 'Normal'}</span>
                       {system.glyph_code && (
                         <span className="ml-2 font-mono text-purple-400">({system.glyph_code})</span>
                       )}
                     </div>
                   </div>
-                  <Button variant="ghost" className="text-sm">View →</Button>
+                  <Button variant="ghost" className="text-sm shrink-0">View →</Button>
                 </div>
               ))}
             </div>
@@ -413,120 +393,53 @@ export default function Systems() {
         </Card>
       )}
 
-      {/* Results Summary */}
-      <div className="mb-4 text-sm text-gray-400">
-        {filteredRegions.length} region{filteredRegions.length !== 1 ? 's' : ''}
-        {' '}({totalSystemsCount} systems)
-        {debouncedQuery && searchResults.length === 0 && !isSearching && ` • No systems match "${debouncedQuery}"`}
-        {hideDirectional && (
-          <span className="ml-2">
-            • <span className="text-purple-400">Hiding directional regions</span>
-          </span>
+      {/* Hierarchy Content */}
+      <div className="min-h-[400px]">
+        {currentLevel === 'realities' && (
+          <RealitySelector
+            onSelect={handleRealitySelect}
+            selectedReality={selectedReality}
+          />
         )}
-        {filterTag !== 'all' && (
-          <span className="ml-2">
-            • Filtered by: <span className="text-cyan-400">{filterTag === 'untagged' ? 'Untagged' : filterTag === 'personal' ? 'Personal' : filterTag}</span>
-          </span>
+
+        {currentLevel === 'galaxies' && (
+          <GalaxyGrid
+            reality={selectedReality}
+            onSelect={handleGalaxySelect}
+            selectedGalaxy={selectedGalaxy}
+          />
+        )}
+
+        {currentLevel === 'regions' && (
+          <RegionBrowser
+            reality={selectedReality}
+            galaxy={selectedGalaxy}
+            onSelect={handleRegionSelect}
+            selectedRegion={selectedRegion}
+            discordTag={filterTag}
+            onViewAllSystems={handleViewAllSystems}
+          />
+        )}
+
+        {currentLevel === 'systems' && (
+          <SystemsList
+            reality={selectedReality}
+            galaxy={selectedGalaxy}
+            region={selectedRegion}
+            discordTag={filterTag}
+          />
+        )}
+
+        {currentLevel === 'viewAllSystems' && (
+          <SystemsList
+            reality={selectedReality}
+            galaxy={selectedGalaxy}
+            discordTag={filterTag}
+            globalMode={true}
+            globalModeTitle={`All ${filterTag} Systems in ${selectedGalaxy}`}
+          />
         )}
       </div>
-
-      {/* Regions Display */}
-      {filteredRegions.length === 0 ? (
-        <Card>
-          <div className="text-center py-8 text-gray-400">
-            {q ? 'No regions match your search' : 'No regions found'}
-          </div>
-        </Card>
-      ) : viewMode === 'grid' ? (
-        /* Grid View - Region Cards */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredRegions.map(region => {
-            const regionKey = `${region.region_x},${region.region_y},${region.region_z}`
-            const isDirectional = DIRECTIONAL_REGIONS.includes(region.custom_name || '')
-
-            return (
-              <Card
-                key={regionKey}
-                className="p-4 cursor-pointer hover:bg-gray-800 transition-colors border-l-4 border-l-purple-500"
-                onClick={() => openRegion(region)}
-              >
-                <div className="mb-3">
-                  <h3 className="font-semibold text-lg truncate">
-                    {region.custom_name ? (
-                      <span className={isDirectional ? 'text-gray-400' : 'text-purple-400'}>
-                        {region.custom_name}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">
-                        ({region.region_x}, {region.region_y}, {region.region_z})
-                      </span>
-                    )}
-                  </h3>
-                  {region.custom_name && (
-                    <div className="text-xs text-gray-500 font-mono">
-                      [{region.region_x}, {region.region_y}, {region.region_z}]
-                    </div>
-                  )}
-                </div>
-
-                {/* Stats */}
-                <div className="flex items-center justify-between">
-                  <div className="text-2xl font-bold text-cyan-400">{region.system_count || 0}</div>
-                  <div className="text-sm text-gray-400">systems</div>
-                </div>
-
-                <div className="mt-3 text-xs text-gray-500 text-center">
-                  Click to view details →
-                </div>
-              </Card>
-            )
-          })}
-        </div>
-      ) : (
-        /* List View - Clickable region rows */
-        <div className="space-y-2">
-          {filteredRegions.map(region => {
-            const regionKey = `${region.region_x},${region.region_y},${region.region_z}`
-            const isDirectional = DIRECTIONAL_REGIONS.includes(region.custom_name || '')
-
-            return (
-              <Card
-                key={regionKey}
-                className="p-4 cursor-pointer hover:bg-gray-800 transition-colors flex items-center justify-between"
-                onClick={() => openRegion(region)}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="text-2xl font-bold text-cyan-400 w-16 text-center">
-                    {region.system_count || 0}
-                  </div>
-                  <div>
-                    <div className="text-lg font-semibold">
-                      {region.custom_name ? (
-                        <span className={isDirectional ? 'text-gray-400' : 'text-purple-400'}>
-                          {region.custom_name}
-                        </span>
-                      ) : (
-                        <span className="text-gray-300">
-                          Region ({region.region_x}, {region.region_y}, {region.region_z})
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-400">
-                      {region.system_count || 0} system{(region.system_count || 0) !== 1 ? 's' : ''}
-                      {region.custom_name && (
-                        <span className="ml-2">• Coords: [{region.region_x}, {region.region_y}, {region.region_z}]</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-gray-500">
-                  View →
-                </div>
-              </Card>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }

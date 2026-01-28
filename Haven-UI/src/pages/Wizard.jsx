@@ -20,7 +20,7 @@ export default function Wizard(){
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isPartner, user } = auth || {}
   const edit = query.get('edit')
-  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', reality:'Normal', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '' })
+  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', reality:'Normal', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '', stellar_classification: '' })
   const [planetModalOpen, setPlanetModalOpen] = useState(false)
   const [editingPlanetIndex, setEditingPlanetIndex] = useState(null)
   const [editingPlanet, setEditingPlanet] = useState(null)
@@ -433,6 +433,76 @@ export default function Wizard(){
                 <option value="Korvax">🤖 Korvax</option>
                 <option value="None">👻 None (Abandoned)</option>
               </select>
+            </div>
+
+            {/* Stellar Classification */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Spectral Class
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="w-full p-2 border rounded bg-gray-700 border-gray-600 font-mono uppercase"
+                  value={system.stellar_classification || ''}
+                  onChange={e => setField('stellar_classification', e.target.value.toUpperCase().slice(0, 6))}
+                  placeholder="e.g. G2pf, M7, O3f"
+                  style={{
+                    color: (() => {
+                      const firstChar = (system.stellar_classification || '')[0]?.toUpperCase();
+                      switch(firstChar) {
+                        case 'O': return '#9999ff';
+                        case 'B': return '#aaaaff';
+                        case 'A': return '#caf0f8';
+                        case 'F': return '#ffffcc';
+                        case 'G': return '#fbbf24';
+                        case 'K': return '#fb923c';
+                        case 'M': return '#ef4444';
+                        case 'E': return '#22c55e';
+                        case 'X': case 'Y': return '#a855f7';
+                        default: return 'inherit';
+                      }
+                    })()
+                  }}
+                />
+                {system.stellar_classification && (
+                  <span className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                    (() => {
+                      const firstChar = (system.stellar_classification || '')[0]?.toUpperCase();
+                      switch(firstChar) {
+                        case 'O': case 'B': return 'bg-blue-900 text-blue-200';
+                        case 'F': case 'G': return 'bg-yellow-900 text-yellow-200';
+                        case 'K': case 'M': return 'bg-red-900 text-red-200';
+                        case 'E': return 'bg-green-900 text-green-200';
+                        case 'X': case 'Y': return 'bg-purple-900 text-purple-200';
+                        default: return 'bg-gray-700 text-gray-300';
+                      }
+                    })()
+                  }`}>
+                    {(() => {
+                      const firstChar = (system.stellar_classification || '')[0]?.toUpperCase();
+                      switch(firstChar) {
+                        case 'O': case 'B': return '🔵 Blue';
+                        case 'F': case 'G': return '🟡 Yellow';
+                        case 'K': case 'M': return '🔴 Red';
+                        case 'E': return '🟢 Green';
+                        case 'X': case 'Y': return '🟣 Purple';
+                        default: return '';
+                      }
+                    })()}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Format: Letter + Number (0-9) + Suffix. Examples: G2pf, M7, O3f, E5p
+              </p>
+              <div className="text-xs text-gray-600 mt-1">
+                <span className="text-blue-400">O/B</span>=Blue,
+                <span className="text-yellow-400 ml-1">F/G</span>=Yellow,
+                <span className="text-red-400 ml-1">K/M</span>=Red,
+                <span className="text-green-400 ml-1">E</span>=Green,
+                <span className="text-purple-400 ml-1">X/Y</span>=Purple
+              </div>
             </div>
           </div>
         </div>

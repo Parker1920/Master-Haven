@@ -1107,3 +1107,782 @@ def migration_1_22_0_clean_weather_biome_subtype(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.22.0")
+
+
+@register_migration("1.23.0", "Hierarchy indexes for containerized queries")
+def migration_1_23_0_hierarchy_indexes(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Database Optimization for Containerized Systems Page.
+
+    Part 2 of the Systems Page overhaul. Adds indexes to support the new
+    hierarchical lazy-loading pattern (Reality → Galaxy → Region → System).
+
+    Indexes added:
+    - idx_systems_hierarchy: Compound index for containerized queries
+    - idx_systems_reality_galaxy: For galaxy summary queries
+    - idx_pending_ip_date: For submission rate limiting
+    - idx_systems_discord_created: For partner filtering with date ordering
+
+    These indexes dramatically improve query performance for:
+    - /api/realities/summary
+    - /api/galaxies/summary
+    - /api/regions/grouped
+    - /api/systems (with hierarchy filters)
+    """
+    cursor = conn.cursor()
+
+    # Index 1: Primary hierarchy index for containerized navigation
+    # Covers: SELECT ... WHERE reality=? AND galaxy=? AND region_x=? AND region_y=? AND region_z=?
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_systems_hierarchy
+        ON systems(reality, galaxy, region_x, region_y, region_z)
+    """)
+    logger.info("Created idx_systems_hierarchy compound index")
+
+    # Index 2: Reality-Galaxy index for summary queries
+    # Covers: SELECT galaxy, COUNT(*) FROM systems WHERE reality=? GROUP BY galaxy
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_systems_reality_galaxy
+        ON systems(reality, galaxy)
+    """)
+    logger.info("Created idx_systems_reality_galaxy index")
+
+    # Index 3: Rate limiting index for pending submissions
+    # Covers: SELECT COUNT(*) FROM pending_systems WHERE submitted_by_ip=? AND submission_date > ?
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pending_ip_date
+        ON pending_systems(submitted_by_ip, submission_date)
+    """)
+    logger.info("Created idx_pending_ip_date index")
+
+    # Index 4: Discord tag with date ordering for partner filtering
+    # Covers: SELECT * FROM systems WHERE discord_tag=? ORDER BY created_at DESC
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_systems_discord_created
+        ON systems(discord_tag, created_at DESC)
+    """)
+    logger.info("Created idx_systems_discord_created index")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.23.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.23.0")
+
+
+@register_migration("1.24.0", "Stellar classification field for systems")
+def migration_1_24_0_stellar_classification(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Add stellar classification field to systems.
+
+    Stellar classification follows the Harvard spectral classification system
+    used in No Man's Sky: O, B, A, F, G, K, M, E (exotic).
+
+    Changes:
+    - Add stellar_classification column to systems table
+    - Add stellar_classification column to pending_systems table
+    """
+    cursor = conn.cursor()
+
+    # Add to systems table
+    cursor.execute("PRAGMA table_info(systems)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'stellar_classification' not in columns:
+        cursor.execute('''
+            ALTER TABLE systems ADD COLUMN stellar_classification TEXT
+        ''')
+        logger.info("Added stellar_classification column to systems table")
+    else:
+        logger.info("stellar_classification column already exists in systems")
+
+    # Add to pending_systems table (stores system_data as JSON but we track it separately for filtering)
+    cursor.execute("PRAGMA table_info(pending_systems)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'stellar_classification' not in columns:
+        cursor.execute('''
+            ALTER TABLE pending_systems ADD COLUMN stellar_classification TEXT
+        ''')
+        logger.info("Added stellar_classification column to pending_systems table")
+    else:
+        logger.info("stellar_classification column already exists in pending_systems")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.24.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.24.0")
+
+
+@register_migration("1.25.0", "War Room feature - territorial conflict tracking system")
+def migration_1_25_0_war_room(conn: sqlite3.Connection):
+    """
+    Jan 2026 - War Room Feature.
+
+    A military command center-style feature for tracking territorial conflicts
+    between enrolled No Man's Sky civilizations. Includes territory claims,
+    conflict declarations, live feeds, statistics, and news system.
+
+    Tables added:
+    - war_room_enrollment: Civs enrolled in War Room
+    - territorial_claims: System ownership claims
+    - conflicts: Attack declarations and resolutions
+    - conflict_events: Timeline of conflict actions
+    - war_news: Correspondent articles
+    - war_correspondents: Users who can post news
+    - current_debrief: Mission objectives (single row)
+    - war_statistics: Cached calculated stats
+    - war_notifications: Pending in-app notifications
+    - discord_webhooks: Per-civ webhook URLs for notifications
+    """
+    cursor = conn.cursor()
+
+    # Table 1: war_room_enrollment - Civs enrolled in War Room
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_room_enrollment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            partner_id INTEGER NOT NULL UNIQUE,
+            enrolled_at TEXT DEFAULT (datetime('now')),
+            enrolled_by TEXT,
+            is_active INTEGER DEFAULT 1,
+            notification_settings TEXT DEFAULT '{}',
+            FOREIGN KEY (partner_id) REFERENCES partner_accounts(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_enrollment_partner ON war_room_enrollment(partner_id)')
+    logger.info("Created war_room_enrollment table")
+
+    # Table 2: territorial_claims - System ownership
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS territorial_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            system_id TEXT NOT NULL,
+            claimant_partner_id INTEGER NOT NULL,
+            claimed_at TEXT DEFAULT (datetime('now')),
+            claim_type TEXT DEFAULT 'controlled',
+            region_x INTEGER,
+            region_y INTEGER,
+            region_z INTEGER,
+            galaxy TEXT DEFAULT 'Euclid',
+            reality TEXT DEFAULT 'Normal',
+            notes TEXT,
+            FOREIGN KEY (claimant_partner_id) REFERENCES partner_accounts(id),
+            UNIQUE(system_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_territorial_claims_partner ON territorial_claims(claimant_partner_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_territorial_claims_region ON territorial_claims(region_x, region_y, region_z)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_territorial_claims_system ON territorial_claims(system_id)')
+    logger.info("Created territorial_claims table")
+
+    # Table 3: conflicts - Attack declarations
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conflicts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_system_id TEXT NOT NULL,
+            target_system_name TEXT,
+            attacker_partner_id INTEGER NOT NULL,
+            defender_partner_id INTEGER NOT NULL,
+            declared_at TEXT DEFAULT (datetime('now')),
+            declared_by TEXT,
+            acknowledged_at TEXT,
+            acknowledged_by TEXT,
+            resolved_at TEXT,
+            resolved_by TEXT,
+            status TEXT DEFAULT 'pending',
+            resolution TEXT,
+            victor_partner_id INTEGER,
+            notes TEXT,
+            FOREIGN KEY (attacker_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (defender_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (victor_partner_id) REFERENCES partner_accounts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflicts_attacker ON conflicts(attacker_partner_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflicts_defender ON conflicts(defender_partner_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflicts_declared ON conflicts(declared_at DESC)')
+    logger.info("Created conflicts table")
+
+    # Table 4: conflict_events - Timeline of conflict actions
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conflict_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conflict_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            event_at TEXT DEFAULT (datetime('now')),
+            actor_partner_id INTEGER,
+            actor_username TEXT,
+            details TEXT,
+            FOREIGN KEY (conflict_id) REFERENCES conflicts(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_partner_id) REFERENCES partner_accounts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflict_events_conflict ON conflict_events(conflict_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflict_events_time ON conflict_events(event_at DESC)')
+    logger.info("Created conflict_events table")
+
+    # Table 5: war_news - Correspondent articles
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_news (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            headline TEXT NOT NULL,
+            body TEXT NOT NULL,
+            author_id INTEGER,
+            author_username TEXT NOT NULL,
+            author_type TEXT NOT NULL,
+            related_conflict_id INTEGER,
+            published_at TEXT DEFAULT (datetime('now')),
+            is_pinned INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (related_conflict_id) REFERENCES conflicts(id) ON DELETE SET NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_news_published ON war_news(published_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_news_pinned ON war_news(is_pinned, published_at DESC)')
+    logger.info("Created war_news table")
+
+    # Table 6: war_correspondents - Users who can post news
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_correspondents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            created_by TEXT
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_correspondents_username ON war_correspondents(username)')
+    logger.info("Created war_correspondents table")
+
+    # Table 7: current_debrief - Mission objectives (single row)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS current_debrief (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            objectives TEXT DEFAULT '[]',
+            updated_at TEXT DEFAULT (datetime('now')),
+            updated_by TEXT
+        )
+    ''')
+    cursor.execute('INSERT OR IGNORE INTO current_debrief (id, objectives) VALUES (1, "[]")')
+    logger.info("Created current_debrief table with initial row")
+
+    # Table 8: war_statistics - Cached calculated stats
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_statistics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stat_type TEXT NOT NULL UNIQUE,
+            partner_id INTEGER,
+            partner_display_name TEXT,
+            value INTEGER,
+            value_unit TEXT,
+            details TEXT,
+            calculated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (partner_id) REFERENCES partner_accounts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_statistics_type ON war_statistics(stat_type)')
+    logger.info("Created war_statistics table")
+
+    # Table 9: war_notifications - Pending in-app notifications
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipient_partner_id INTEGER NOT NULL,
+            notification_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT,
+            related_conflict_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now')),
+            read_at TEXT,
+            dismissed_at TEXT,
+            FOREIGN KEY (recipient_partner_id) REFERENCES partner_accounts(id) ON DELETE CASCADE,
+            FOREIGN KEY (related_conflict_id) REFERENCES conflicts(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_notifications_recipient ON war_notifications(recipient_partner_id, read_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_notifications_created ON war_notifications(created_at DESC)')
+    logger.info("Created war_notifications table")
+
+    # Table 10: discord_webhooks - Per-civ webhook URLs
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS discord_webhooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            partner_id INTEGER NOT NULL UNIQUE,
+            webhook_url TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            last_triggered_at TEXT,
+            FOREIGN KEY (partner_id) REFERENCES partner_accounts(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_discord_webhooks_partner ON discord_webhooks(partner_id)')
+    logger.info("Created discord_webhooks table")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.25.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.25.0")
+
+
+@register_migration("1.26.0", "War Room - add home region tracking for enrolled civilizations")
+def migration_1_26_0_home_regions(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Add home region tracking for War Room.
+
+    Adds home region fields to war_room_enrollment so each civilization
+    can have a designated home region displayed differently on the war map.
+    """
+    cursor = conn.cursor()
+
+    # Add home region fields to war_room_enrollment
+    try:
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN home_region_x INTEGER')
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN home_region_y INTEGER')
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN home_region_z INTEGER')
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN home_region_name TEXT')
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN home_galaxy TEXT DEFAULT "Euclid"')
+        logger.info("Added home region columns to war_room_enrollment")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column name' in str(e).lower():
+            logger.info("Home region columns already exist in war_room_enrollment")
+        else:
+            raise
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.26.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.26.0")
+
+
+@register_migration("1.27.0", "War Room v2 - Multi-party conflicts, activity feed, media, and reporting organizations")
+def migration_1_27_0_war_room_v2(conn: sqlite3.Connection):
+    """
+    Jan 2026 - War Room v2 Major Update.
+
+    Adds support for:
+    - Multi-party conflicts (alliances, multiple civs per side)
+    - Public activity feed for all war events
+    - Media uploads (war pictures, screenshots)
+    - Reporting organizations (Discord-based news teams)
+    - Expanded news system with full articles and battle reports
+    - Mutual agreement conflict resolution
+
+    Tables added:
+    - conflict_parties: Tracks which civs are on which side of a conflict
+    - war_activity_feed: Public log of all war events
+    - war_media: Stores images/screenshots
+    - reporting_organizations: News organizations that can post
+    - reporting_org_members: Members of reporting organizations
+
+    Tables modified:
+    - conflicts: Add conflict_type, resolution fields
+    - war_news: Add article_type, featured_image_id
+    """
+    cursor = conn.cursor()
+
+    # Table 1: conflict_parties - Multi-party support
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conflict_parties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conflict_id INTEGER NOT NULL,
+            partner_id INTEGER NOT NULL,
+            side TEXT NOT NULL CHECK (side IN ('attacker', 'defender')),
+            joined_at TEXT DEFAULT (datetime('now')),
+            joined_by TEXT,
+            is_primary INTEGER DEFAULT 0,
+            resolution_agreed INTEGER DEFAULT 0,
+            resolution_agreed_at TEXT,
+            FOREIGN KEY (conflict_id) REFERENCES conflicts(id) ON DELETE CASCADE,
+            FOREIGN KEY (partner_id) REFERENCES partner_accounts(id),
+            UNIQUE(conflict_id, partner_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflict_parties_conflict ON conflict_parties(conflict_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_conflict_parties_partner ON conflict_parties(partner_id)')
+    logger.info("Created conflict_parties table")
+
+    # Table 2: war_activity_feed - Public activity log
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_activity_feed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            event_at TEXT DEFAULT (datetime('now')),
+            actor_partner_id INTEGER,
+            actor_name TEXT,
+            target_partner_id INTEGER,
+            target_name TEXT,
+            conflict_id INTEGER,
+            system_id TEXT,
+            system_name TEXT,
+            region_name TEXT,
+            headline TEXT NOT NULL,
+            details TEXT,
+            is_public INTEGER DEFAULT 1,
+            FOREIGN KEY (actor_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (target_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (conflict_id) REFERENCES conflicts(id) ON DELETE SET NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_feed_time ON war_activity_feed(event_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_feed_type ON war_activity_feed(event_type)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_feed_conflict ON war_activity_feed(conflict_id)')
+    logger.info("Created war_activity_feed table")
+
+    # Table 3: war_media - Images and screenshots
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS war_media (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            original_filename TEXT,
+            file_path TEXT NOT NULL,
+            file_size INTEGER,
+            mime_type TEXT,
+            uploaded_by_id INTEGER,
+            uploaded_by_username TEXT,
+            uploaded_by_type TEXT,
+            uploaded_at TEXT DEFAULT (datetime('now')),
+            caption TEXT,
+            related_conflict_id INTEGER,
+            related_news_id INTEGER,
+            is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (uploaded_by_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (related_conflict_id) REFERENCES conflicts(id) ON DELETE SET NULL,
+            FOREIGN KEY (related_news_id) REFERENCES war_news(id) ON DELETE SET NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_media_uploaded ON war_media(uploaded_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_media_conflict ON war_media(related_conflict_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_war_media_news ON war_media(related_news_id)')
+    logger.info("Created war_media table")
+
+    # Table 4: reporting_organizations - News organizations
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reporting_organizations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            discord_server_id TEXT,
+            discord_server_name TEXT,
+            logo_url TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            created_by TEXT
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reporting_orgs_name ON reporting_organizations(name)')
+    logger.info("Created reporting_organizations table")
+
+    # Table 5: reporting_org_members - Members of reporting orgs
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reporting_org_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            role TEXT DEFAULT 'reporter',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            created_by TEXT,
+            last_login_at TEXT,
+            FOREIGN KEY (org_id) REFERENCES reporting_organizations(id) ON DELETE CASCADE,
+            UNIQUE(org_id, username)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reporting_members_org ON reporting_org_members(org_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reporting_members_username ON reporting_org_members(username)')
+    logger.info("Created reporting_org_members table")
+
+    # Modify conflicts table - add new columns
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN conflict_type TEXT DEFAULT "invasion"')
+        logger.info("Added conflict_type to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN conflict_name TEXT')
+        logger.info("Added conflict_name to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN resolution_proposed_by INTEGER')
+        logger.info("Added resolution_proposed_by to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN resolution_proposed_at TEXT')
+        logger.info("Added resolution_proposed_at to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN resolution_summary TEXT')
+        logger.info("Added resolution_summary to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Modify war_news table - add article type and media
+    try:
+        cursor.execute('ALTER TABLE war_news ADD COLUMN article_type TEXT DEFAULT "headline"')
+        logger.info("Added article_type to war_news")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE war_news ADD COLUMN featured_image_id INTEGER REFERENCES war_media(id)')
+        logger.info("Added featured_image_id to war_news")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE war_news ADD COLUMN reporting_org_id INTEGER REFERENCES reporting_organizations(id)')
+        logger.info("Added reporting_org_id to war_news")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE war_news ADD COLUMN view_count INTEGER DEFAULT 0')
+        logger.info("Added view_count to war_news")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.27.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.27.0")
+
+
+@register_migration("1.28.0", "War Room v3 - Peace treaty system, territory integration with systems.discord_tag")
+def migration_1_28_0_peace_treaties(conn: sqlite3.Connection):
+    """
+    Jan 2026 - War Room v3: Peace Treaty System.
+
+    Implements Civ6-style peace negotiations:
+    - Peace proposals with demands (systems/regions)
+    - Counter-offer system (2 max per civ)
+    - Walk-away option to continue fighting
+    - Auto-news generation for war events
+    - Territory based on systems.discord_tag
+    - HQ protection mechanics
+
+    Tables added:
+    - peace_proposals: Treaty proposals between warring parties
+    - proposal_items: Systems/regions being offered or demanded
+    - auto_news_events: Tracks which events have auto-generated news
+
+    Tables modified:
+    - conflicts: Add negotiation state tracking
+    - war_room_enrollment: Add is_hq flag for home region protection
+    """
+    cursor = conn.cursor()
+
+    # Table 1: peace_proposals - Treaty proposals
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS peace_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conflict_id INTEGER NOT NULL,
+            proposer_partner_id INTEGER NOT NULL,
+            recipient_partner_id INTEGER NOT NULL,
+            proposal_type TEXT NOT NULL CHECK (proposal_type IN ('initial', 'counter')),
+            counter_number INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'expired', 'superseded')),
+            proposed_at TEXT DEFAULT (datetime('now')),
+            responded_at TEXT,
+            response_by TEXT,
+            message TEXT,
+            FOREIGN KEY (conflict_id) REFERENCES conflicts(id) ON DELETE CASCADE,
+            FOREIGN KEY (proposer_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (recipient_partner_id) REFERENCES partner_accounts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_peace_proposals_conflict ON peace_proposals(conflict_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_peace_proposals_status ON peace_proposals(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_peace_proposals_recipient ON peace_proposals(recipient_partner_id, status)')
+    logger.info("Created peace_proposals table")
+
+    # Table 2: proposal_items - Items in a peace proposal
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS proposal_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposal_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL CHECK (item_type IN ('system', 'region')),
+            direction TEXT NOT NULL CHECK (direction IN ('give', 'receive')),
+            system_id TEXT,
+            system_name TEXT,
+            region_x INTEGER,
+            region_y INTEGER,
+            region_z INTEGER,
+            region_name TEXT,
+            galaxy TEXT DEFAULT 'Euclid',
+            from_partner_id INTEGER NOT NULL,
+            to_partner_id INTEGER NOT NULL,
+            FOREIGN KEY (proposal_id) REFERENCES peace_proposals(id) ON DELETE CASCADE,
+            FOREIGN KEY (from_partner_id) REFERENCES partner_accounts(id),
+            FOREIGN KEY (to_partner_id) REFERENCES partner_accounts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_proposal_items_proposal ON proposal_items(proposal_id)')
+    logger.info("Created proposal_items table")
+
+    # Table 3: auto_news_events - Tracks auto-generated news
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS auto_news_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            reference_id INTEGER,
+            reference_type TEXT,
+            news_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (news_id) REFERENCES war_news(id) ON DELETE SET NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_auto_news_ref ON auto_news_events(reference_type, reference_id)')
+    logger.info("Created auto_news_events table")
+
+    # Add negotiation columns to conflicts table
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN negotiation_status TEXT DEFAULT NULL')
+        logger.info("Added negotiation_status to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN attacker_counter_count INTEGER DEFAULT 0')
+        logger.info("Added attacker_counter_count to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN defender_counter_count INTEGER DEFAULT 0')
+        logger.info("Added defender_counter_count to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN negotiation_started_at TEXT')
+        logger.info("Added negotiation_started_at to conflicts")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add is_hq flag to war_room_enrollment for HQ protection
+    try:
+        cursor.execute('ALTER TABLE war_room_enrollment ADD COLUMN is_hq_protected INTEGER DEFAULT 1')
+        logger.info("Added is_hq_protected to war_room_enrollment")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.28.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.28.0")
+
+
+@register_migration("1.29.0", "System update tracking - last_updated_by, last_updated_at, contributors")
+def migration_1_29_0_system_update_tracking(conn: sqlite3.Connection):
+    """
+    Jan 2026 - System Update Tracking.
+
+    Adds fields to track who has contributed updates to systems:
+    - last_updated_by: Username of the last person to update the system
+    - last_updated_at: Timestamp of the last update
+    - contributors: JSON array of all usernames who have contributed to this system
+
+    This preserves credit for the original discoverer (discovered_by) while
+    tracking subsequent editors for attribution.
+    """
+    cursor = conn.cursor()
+
+    # Add last_updated_by to systems table
+    try:
+        cursor.execute('ALTER TABLE systems ADD COLUMN last_updated_by TEXT')
+        logger.info("Added last_updated_by to systems")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add last_updated_at to systems table
+    try:
+        cursor.execute('ALTER TABLE systems ADD COLUMN last_updated_at TEXT')
+        logger.info("Added last_updated_at to systems")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add contributors JSON array to systems table
+    try:
+        cursor.execute("ALTER TABLE systems ADD COLUMN contributors TEXT DEFAULT '[]'")
+        logger.info("Added contributors to systems")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.29.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.29.0")

@@ -23,10 +23,13 @@ export default defineConfig({
   plugins: [react(), VitePWA({
     registerType: 'autoUpdate',
     includeAssets: ['favicon.svg', 'icon.svg', 'VH-Map.html'],
-      manifest: {
+    workbox: {
+      maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB limit for Three.js bundle
+    },
+    manifest: {
       name: 'Haven Control Room',
       short_name: 'HavenCR',
-        theme_color: '#00C2B3',
+      theme_color: '#00C2B3',
       start_url: process.env.NODE_ENV === 'production' ? '/haven-ui/' : '/',
       display: 'standalone',
       background_color: '#071229',

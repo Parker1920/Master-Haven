@@ -5,10 +5,8 @@ import Systems from './pages/Systems'
 import SystemDetail from './pages/SystemDetail'
 import RegionDetail from './pages/RegionDetail'
 import Wizard from './pages/Wizard'
-import RTAI from './pages/RTAI'
 import Settings from './pages/Settings'
 import Discoveries from './pages/Discoveries'
-import Tests from './pages/Tests'
 import DBStats from './pages/DBStats'
 import PendingApprovals from './pages/PendingApprovals'
 import ApiKeys from './pages/ApiKeys'
@@ -19,6 +17,8 @@ import Analytics from './pages/Analytics'
 import Events from './pages/Events'
 import CsvImport from './pages/CsvImport'
 import DataRestrictions from './pages/DataRestrictions'
+import WarRoom from './pages/WarRoom'
+import WarRoomAdmin from './pages/WarRoomAdmin'
 import Navbar from './components/Navbar'
 import InactivityOverlay from './components/InactivityOverlay'
 import { AuthProvider, AuthContext, FEATURES } from './utils/AuthContext'
@@ -46,6 +46,19 @@ function RequireFeature({ feature, children }) {
   if (!auth.isAdmin) return <Navigate to='/' replace />
   if (!auth.canAccess(feature)) return <Navigate to='/' replace />
   return children
+}
+
+// Special guard for War Room - allows enrolled partners, super admin, and correspondents
+function RequireWarRoomAccess({ children }) {
+  const auth = useContext(AuthContext)
+  if (auth.loading) return <div className="flex items-center justify-center min-h-64"><div className="text-lg text-gray-400">Loading...</div></div>
+  // Allow correspondents without normal admin check
+  if (auth.user?.type === 'correspondent') return children
+  // Allow super admin
+  if (auth.isSuperAdmin) return children
+  // Allow enrolled partners/sub-admins with war_room feature
+  if (auth.isAdmin && auth.canAccess(FEATURES.WAR_ROOM)) return children
+  return <Navigate to='/' replace />
 }
 
 export default function App() {
@@ -82,9 +95,7 @@ export default function App() {
             <Route path="/db_stats" element={<DBStats />} />
 
             {/* Super admin only routes */}
-            <Route path="/rtai" element={<RequireSuperAdmin><RTAI /></RequireSuperAdmin>} />
             <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />
-            <Route path="/tests" element={<RequireSuperAdmin><Tests /></RequireSuperAdmin>} />
             <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
             <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
             <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
@@ -101,6 +112,10 @@ export default function App() {
             <Route path="/pending-approvals" element={<RequireFeature feature={FEATURES.APPROVALS}><PendingApprovals /></RequireFeature>} />
             <Route path="/csv-import" element={<RequireFeature feature={FEATURES.CSV_IMPORT}><CsvImport /></RequireFeature>} />
             <Route path="/data-restrictions" element={<RequireAdmin><DataRestrictions /></RequireAdmin>} />
+
+            {/* War Room */}
+            <Route path="/war-room" element={<RequireWarRoomAccess><WarRoom /></RequireWarRoomAccess>} />
+            <Route path="/war-room/admin" element={<RequireSuperAdmin><WarRoomAdmin /></RequireSuperAdmin>} />
           </Routes>
         </main>
         <InactivityOverlay />

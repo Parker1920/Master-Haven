@@ -2,10 +2,8 @@ import React, { createContext, useState, useEffect } from 'react'
 
 // Feature constants for permission checking
 export const FEATURES = {
-  RTAI: 'rtai',
   API_KEYS: 'api_keys',
   BACKUP_RESTORE: 'backup_restore',
-  TESTS: 'tests',
   PARTNER_MANAGEMENT: 'partner_management',
   SYSTEM_CREATE: 'system_create',
   SYSTEM_EDIT: 'system_edit',
@@ -13,7 +11,8 @@ export const FEATURES = {
   STATS: 'stats',
   SETTINGS: 'settings',
   CSV_IMPORT: 'csv_import',
-  BATCH_APPROVALS: 'batch_approvals'
+  BATCH_APPROVALS: 'batch_approvals',
+  WAR_ROOM: 'war_room'
 }
 
 export const AuthContext = createContext({
@@ -22,6 +21,7 @@ export const AuthContext = createContext({
   isPartner: false,
   isSubAdmin: false,
   isHavenSubAdmin: false,
+  isCorrespondent: false,
   user: null,
   loading: true,
   login: async () => {},
@@ -69,6 +69,7 @@ export function AuthProvider({ children }) {
   const isPartner = user?.type === 'partner'
   const isSubAdmin = user?.type === 'sub_admin'
   const isHavenSubAdmin = user?.isHavenSubAdmin || false
+  const isCorrespondent = user?.type === 'correspondent'
 
   function canAccess(feature) {
     if (!user) return false
@@ -119,6 +120,7 @@ export function AuthProvider({ children }) {
       isPartner,
       isSubAdmin,
       isHavenSubAdmin,
+      isCorrespondent,
       user,
       loading,
       login,

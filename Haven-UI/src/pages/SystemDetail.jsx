@@ -18,6 +18,123 @@ function getPhotoUrl(photo) {
   return `/haven-ui-photos/${encodeURIComponent(filename)}`
 }
 
+// Format date for display
+function formatDate(dateStr) {
+  if (!dateStr) return null
+  try {
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  } catch {
+    return dateStr
+  }
+}
+
+// Contributors Modal Component
+function ContributorsModal({ system, onClose }) {
+  if (!system) return null
+
+  // Parse contributors JSON if it's a string
+  let contributors = []
+  if (system.contributors) {
+    try {
+      contributors = typeof system.contributors === 'string'
+        ? JSON.parse(system.contributors)
+        : system.contributors
+    } catch {
+      contributors = []
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 border border-gray-700"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold text-purple-400">System Contributors</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white text-2xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Original Discoverer */}
+        <div className="mb-4 p-3 bg-gray-900 rounded">
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Original Discoverer</div>
+          <div className="text-lg text-yellow-400 font-medium">
+            {system.discovered_by || 'Unknown'}
+          </div>
+          {system.discovered_at && (
+            <div className="text-sm text-gray-400 mt-1">
+              {formatDate(system.discovered_at)}
+            </div>
+          )}
+        </div>
+
+        {/* Last Updated */}
+        {system.last_updated_by && (
+          <div className="mb-4 p-3 bg-gray-900 rounded">
+            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Last Updated By</div>
+            <div className="text-lg text-blue-400 font-medium">
+              {system.last_updated_by}
+            </div>
+            {system.last_updated_at && (
+              <div className="text-sm text-gray-400 mt-1">
+                {formatDate(system.last_updated_at)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* All Contributors */}
+        {contributors.length > 0 && (
+          <div className="p-3 bg-gray-900 rounded">
+            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">All Contributors</div>
+            <div className="flex flex-wrap gap-2">
+              {contributors.map((name, idx) => (
+                <span
+                  key={idx}
+                  className={`px-3 py-1 rounded-full text-sm ${
+                    idx === 0
+                      ? 'bg-yellow-600/30 text-yellow-400 border border-yellow-600/50'
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  {name}
+                  {idx === 0 && <span className="ml-1 text-xs">(OG)</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* No data message */}
+        {!system.discovered_by && !system.last_updated_by && contributors.length === 0 && (
+          <div className="text-center text-gray-500 py-4">
+            No contributor information available for this system.
+          </div>
+        )}
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SystemDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -26,6 +143,7 @@ export default function SystemDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expandedPlanets, setExpandedPlanets] = useState({})
+  const [showContributors, setShowContributors] = useState(false)
 
   useEffect(() => {
     loadSystem()
@@ -124,11 +242,25 @@ export default function SystemDetail() {
             )}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-shrink-0">
+            <a
+              href={`/map/system/${system.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded text-white text-center font-medium transition-colors w-full sm:w-auto"
+            >
+              3D Map
+            </a>
             <Button
               className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
               onClick={() => navigate(`/create?edit=${encodeURIComponent(system.id || system.name)}`)}
             >
               Edit
+            </Button>
+            <Button
+              className="bg-purple-600 hover:bg-purple-700 w-full sm:w-auto"
+              onClick={() => setShowContributors(true)}
+            >
+              Contributors
             </Button>
             {auth?.isAdmin && (
               <Button
@@ -164,12 +296,30 @@ export default function SystemDetail() {
         </div>
 
         {/* System Properties (from NMS live extraction) */}
-        {(system.star_type || system.economy_type || system.economy_level || system.conflict_level || system.dominant_lifeform) && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-4 p-4 bg-gray-800 rounded">
+        {(system.star_type || system.economy_type || system.economy_level || system.conflict_level || system.dominant_lifeform || system.stellar_classification) && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 mb-4 p-4 bg-gray-800 rounded">
             {system.star_type && (
               <div>
                 <div className="text-xs text-gray-400">Star Type</div>
                 <div className="text-yellow-400">{system.star_type}</div>
+              </div>
+            )}
+            {system.stellar_classification && (
+              <div>
+                <div className="text-xs text-gray-400">Spectral Class</div>
+                <div className={`font-mono ${
+                  (() => {
+                    const firstChar = system.stellar_classification[0]?.toUpperCase();
+                    switch(firstChar) {
+                      case 'O': case 'B': return 'text-blue-300';
+                      case 'F': case 'G': return 'text-yellow-300';
+                      case 'K': case 'M': return 'text-red-400';
+                      case 'E': return 'text-green-400';
+                      case 'X': case 'Y': return 'text-purple-400';
+                      default: return 'text-gray-300';
+                    }
+                  })()
+                }`}>{system.stellar_classification}</div>
               </div>
             )}
             {system.economy_type && (
@@ -612,6 +762,14 @@ export default function SystemDetail() {
           </div>
         )}
       </Card>
+
+      {/* Contributors Modal */}
+      {showContributors && (
+        <ContributorsModal
+          system={system}
+          onClose={() => setShowContributors(false)}
+        />
+      )}
     </div>
   )
 }

@@ -546,173 +546,137 @@ def clean_weather_string(weather_str: str) -> str:
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "10.2.0"
-    __description__ = "Batch mode planet data extraction with contextual adjectives"
+    __version__ = "10.3.0"
+    __description__ = "Batch mode planet data extraction - adjectives match Haven UI adjectives.js"
 
     # ==========================================================================
-    # CONTEXTUAL ADJECTIVE MAPPINGS (v10.2.0)
-    # Uses valid adjectives from Haven UI's adjectives.js for variety
-    # Selection is based on biome type + level for contextual accuracy
+    # VALID ADJECTIVE LISTS FROM adjectives.js (v10.3.0)
+    # ALL values MUST come from Haven UI's adjectives.js - curated from in-game
+    # Uses lists per level for variety, selected by planet_index % len(list)
     # ==========================================================================
 
-    # Flora level adjectives by biome type (from floraAdjectives in adjectives.js)
-    FLORA_BY_BIOME = {
-        # Lush biomes - varied vegetation descriptions
-        "Lush": {0: "Absent", 1: "Occasional", 2: "Frequent", 3: "Lush"},
-        "Swamp": {0: "Devoid", 1: "Sparse", 2: "Ample", 3: "Abundant"},
-        # Harsh biomes - survival-focused descriptions
-        "Toxic": {0: "None", 1: "Deficient", 2: "Limited", 3: "Moderate"},
-        "Scorched": {0: "Nonexistent", 1: "Rare", 2: "Sparse", 3: "Typical"},
-        "Radioactive": {0: "Absent", 1: "Uncommon", 2: "Regular", 3: "Common"},
-        "Frozen": {0: "Empty", 1: "Lacking", 2: "Fair", 3: "Average"},
-        # Barren/Dead - minimal vegetation
-        "Barren": {0: "None", 1: "Sporadic", 2: "Infrequent", 3: "Occasional"},
-        "Dead": {0: "Nonexistent", 1: "Not Present", 2: "Sparse", 3: "Rare"},
-        # Exotic/Weird - unusual descriptions
-        "Weird": {0: "Undetected", 1: "Unusual", 2: "Moderate", 3: "Bountiful"},
-        "Red": {0: "Absent", 1: "Intermittent", 2: "Average", 3: "Rich"},
-        "Green": {0: "Empty", 1: "Sparse", 2: "Regular", 3: "Generous"},
-        "Blue": {0: "Devoid", 1: "Infrequent", 2: "Frequent", 3: "Full"},
-        # Special biomes
-        "Lava": {0: "None", 1: "Rare", 2: "Uncommon", 3: "Occasional"},
-        "Waterworld": {0: "Absent", 1: "Sparse", 2: "Moderate", 3: "Copious"},
-        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    # Flora adjectives by level - ALL values from floraAdjectives in adjectives.js
+    # Level 0 = None/Empty, Level 1 = Low, Level 2 = Medium, Level 3 = High
+    FLORA_BY_LEVEL = {
+        0: ["Absent", "Barren", "Devoid", "Empty", "None", "Nonexistent", "Not Present"],
+        1: ["Deficient", "Few", "Infrequent", "Lacking", "Limited", "Low", "Rare", "Sparse", "Sporadic", "Uncommon"],
+        2: ["Average", "Common", "Fair", "Moderate", "Occasional", "Ordinary", "Regular", "Typical"],
+        3: ["Abundant", "Ample", "Bountiful", "Copious", "Frequent", "Full", "Generous", "High", "Lush", "Numerous", "Rich"],
     }
 
-    # Fauna level adjectives by biome type (from faunaAdjectives in adjectives.js)
-    FAUNA_BY_BIOME = {
-        # Lush biomes - abundant wildlife
-        "Lush": {0: "Absent", 1: "Occasional", 2: "Frequent", 3: "Bountiful"},
-        "Swamp": {0: "Devoid", 1: "Uncommon", 2: "Common", 3: "Copious"},
-        # Harsh biomes - survival adaptations
-        "Toxic": {0: "None", 1: "Rare", 2: "Average", 3: "Ample"},
-        "Scorched": {0: "Empty", 1: "Sparse", 2: "Limited", 3: "Moderate"},
-        "Radioactive": {0: "Nonexistent", 1: "Deficient", 2: "Regular", 3: "Typical"},
-        "Frozen": {0: "Absent", 1: "Infrequent", 2: "Fair", 3: "Generous"},
-        # Barren/Dead - minimal life
-        "Barren": {0: "None", 1: "Rare", 2: "Sporadic", 3: "Occasional"},
-        "Dead": {0: "Not Present", 1: "Lacking", 2: "Sparse", 3: "Few"},
-        # Exotic/Weird - unusual fauna
-        "Weird": {0: "Undetected", 1: "Unusual", 2: "Intermittent", 3: "Rich"},
-        "Red": {0: "Empty", 1: "Uncommon", 2: "Average", 3: "Numerous"},
-        "Green": {0: "Devoid", 1: "Infrequent", 2: "Frequent", 3: "Abundant"},
-        "Blue": {0: "Absent", 1: "Sparse", 2: "Regular", 3: "Full"},
-        # Special biomes
-        "Lava": {0: "None", 1: "Rare", 2: "Sporadic", 3: "Few"},
-        "Waterworld": {0: "Empty", 1: "Occasional", 2: "Common", 3: "Copious"},
-        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    # Fauna adjectives by level - ALL values from faunaAdjectives in adjectives.js
+    FAUNA_BY_LEVEL = {
+        0: ["Absent", "Barren", "Devoid", "Empty", "None", "Nonexistent", "Not Present"],
+        1: ["Deficient", "Few", "Infrequent", "Lacking", "Limited", "Low", "Rare", "Sparse", "Sporadic", "Uncommon"],
+        2: ["Average", "Common", "Fair", "Moderate", "Occasional", "Ordinary", "Regular", "Typical"],
+        3: ["Abundant", "Ample", "Bountiful", "Copious", "Frequent", "Full", "Generous", "High", "Numerous", "Rich"],
     }
 
-    # Sentinel level adjectives by biome type (from sentinelAdjectives in adjectives.js)
-    SENTINEL_BY_BIOME = {
-        # Lush biomes - typically lower security
-        "Lush": {0: "None Present", 1: "Low Security", 2: "Observant", 3: "Aggressive"},
-        "Swamp": {0: "Absent", 1: "Few", 2: "Frequent", 3: "Hateful"},
-        # Harsh biomes - often higher security
-        "Toxic": {0: "Missing", 1: "Infrequent", 2: "Attentive", 3: "Frenzied"},
-        "Scorched": {0: "Not Present", 1: "Sparse", 2: "Regular Patrols", 3: "Threatening"},
-        "Radioactive": {0: "None", 1: "Limited", 2: "Hostile Patrols", 3: "Zealous"},
-        "Frozen": {0: "Absent", 1: "Intermittent", 2: "High Security", 3: "Enforcing"},
-        # Barren/Dead - variable
-        "Barren": {0: "Missing", 1: "Remote", 2: "Spread Thin", 3: "Unwavering"},
-        "Dead": {0: "None Present", 1: "Isolated", 2: "Infrequent", 3: "Hateful"},
-        # Exotic/Weird - unusual behavior
-        "Weird": {0: "Forsaken", 1: "Irregular Patrols", 2: "Normal", 3: "Malicious"},
-        "Red": {0: "Absent", 1: "Low", 2: "Observant", 3: "Aggressive"},
-        "Green": {0: "Not Present", 1: "Few", 2: "Attentive", 3: "Zealous"},
-        "Blue": {0: "None", 1: "Sparse", 2: "Frequent", 3: "Threatening"},
-        # Special biomes
-        "Lava": {0: "Missing", 1: "Few", 2: "Hostile Patrols", 3: "Frenzied"},
-        "Waterworld": {0: "Absent", 1: "Low", 2: "Limited", 3: "Enforcing"},
-        "GasGiant": {0: "None", 1: "None", 2: "None", 3: "None"},
+    # Sentinel adjectives by level - ALL values from sentinelAdjectives in adjectives.js
+    # Level 0 = Minimal, Level 1 = Low, Level 2 = Medium, Level 3 = High/Aggressive
+    SENTINEL_BY_LEVEL = {
+        0: ["Absent", "Forsaken", "Isolated", "Missing", "None", "None Present", "Not Present", "Remote"],
+        1: ["Few", "Infrequent", "Intermittent", "Irregular Patrols", "Limited", "Low", "Low Security", "Minimal", "Sparse", "Spread Thin"],
+        2: ["Attentive", "Frequent", "High Security", "Hostile Patrols", "Normal", "Observant", "Regular Patrols"],
+        3: ["Aggressive", "Enforcing", "Frenzied", "Hateful", "Malicious", "Threatening", "Unwavering", "Zealous"],
     }
 
-    # Weather adjectives by biome + storm frequency (from weatherAdjectives in adjectives.js)
-    # Key: (biome, weather_enum, storm_frequency) -> adjective
-    # Storm frequency: 0=None, 1=Low, 2=High, 3=Always
-    WEATHER_CONTEXTUAL = {
-        # Lush biomes
-        ("Lush", 0, 0): "Peaceful",       # Clear, no storms
-        ("Lush", 0, 1): "Mild",           # Clear, low storms
-        ("Lush", 2, 0): "Humid",          # Humid, no storms
-        ("Lush", 2, 1): "Tropical Storms", # Humid, low storms
-        ("Lush", 2, 2): "Heavy Rain",     # Humid, high storms
-        # Toxic biomes
-        ("Toxic", 4, 0): "Toxic Clouds",  # Toxic, no storms
-        ("Toxic", 4, 1): "Toxic Rain",    # Toxic, low storms
-        ("Toxic", 4, 2): "Toxic Superstorms", # Toxic, high storms
-        ("Toxic", 4, 3): "Extreme Toxicity", # Toxic, constant storms
-        # Scorched biomes
-        ("Scorched", 5, 0): "Hot",        # Scorched, no storms
-        ("Scorched", 5, 1): "Heated Atmosphere", # Scorched, low storms
-        ("Scorched", 5, 2): "Firestorms", # Scorched, high storms
-        ("Scorched", 5, 3): "Inferno",    # Scorched, constant storms
-        ("Scorched", 14, 2): "Walls of Flame", # Fire weather
-        ("Scorched", 14, 3): "Colossal Firestorms",
-        # Radioactive biomes
-        ("Radioactive", 6, 0): "Radioactive",
-        ("Radioactive", 6, 1): "Irradiated",
-        ("Radioactive", 6, 2): "Radioactive Storms",
-        ("Radioactive", 6, 3): "Extreme Radioactivity",
-        # Frozen biomes
-        ("Frozen", 3, 0): "Frozen",       # Snow, no storms
-        ("Frozen", 3, 1): "Freezing",     # Snow, low storms
-        ("Frozen", 3, 2): "Blizzard",     # Snow, high storms
-        ("Frozen", 3, 3): "Extreme Cold", # Snow, constant storms
-        ("Frozen", 15, 0): "Icy",         # ClearCold
-        ("Frozen", 15, 1): "Frozen Clouds",
-        # Barren/Dead
-        ("Barren", 1, 0): "Arid",         # Dust, no storms
-        ("Barren", 1, 1): "Dusty",        # Dust, low storms
-        ("Barren", 1, 2): "Sandstorms",   # Dust, high storms
-        ("Dead", 0, 0): "Airless",
-        ("Dead", 0, 1): "No Atmosphere",
-        # Swamp
-        ("Swamp", 10, 0): "Humid",
-        ("Swamp", 10, 1): "Damp",
-        ("Swamp", 10, 2): "Monsoon",
-        ("Swamp", 10, 3): "Choking Humidity",
-        # Lava
-        ("Lava", 11, 0): "Molten",
-        ("Lava", 11, 1): "Magma Geysers",
-        ("Lava", 11, 2): "Magma Rain",
-        ("Lava", 11, 3): "Inferno",
-        # Exotic/Weird
-        ("Weird", 13, 0): "Anomalous",
-        ("Weird", 13, 1): "Unstable",
-        ("Weird", 13, 2): "Unfathomable Storms",
-        ("Weird", 12, 0): "Anomalous",    # Bubble weather
+    # Weather adjectives by weather_raw enum + storm_raw level
+    # ALL values from weatherAdjectives in adjectives.js
+    # Key: (weather_raw, storm_raw) -> list of valid adjectives
+    WEATHER_BY_TYPE_STORM = {
+        # Clear weather (0) - calm to stormy
+        (0, 0): ["Beautiful", "Blissful", "Clear", "Crisp", "Fair", "Fine", "Mild", "Peaceful", "Peaceful Climate", "Pleasant", "Temperate", "Unclouded Skies"],
+        (0, 1): ["Balmy", "Gentle Mist", "Light Showers", "Mellow", "Moderate", "Mostly Calm", "Refreshing Breeze", "Temperate", "Usually Mild", "Warm"],
+        (0, 2): ["Coastal Storms", "Downpours", "Harsh Winds", "Heavy Rain", "Howling Gales", "Intense Rainfall", "Pouring Rain", "Rainstorms", "Torrential Rain"],
+        (0, 3): ["Cataclysmic Monsoons", "Deluge", "Extreme Winds", "Planetwide Maelstrom", "Tropical Storms"],
+        # Dust weather (1) - arid planets
+        (1, 0): ["Arid", "Ceaseless Drought", "Dehydrated", "Desiccated", "Droughty", "Dry Gusts", "Moistureless", "Parched", "Parched Sands"],
+        (1, 1): ["Billowing Dust Storms", "Caustic Dust", "Combustible Dust", "Dusty", "Infrequent Dust Storms", "Particulate Winds", "Sporadic Grit Storms"],
+        (1, 2): ["Choking Sandstorms", "Dust-Choked Winds", "Intense Dust", "Sand Blizzards", "Sandstorms", "Volatile Dust Storms"],
+        (1, 3): ["Extreme Wind Blasting", "Planetwide Desiccation", "Winds of Glass"],
+        # Humid weather (2) - lush planets
+        (2, 0): ["Balmy", "Damp", "Humid", "Muggy Haze", "Tepid Damp", "Warm", "Warm Dewdrops", "Wet"],
+        (2, 1): ["Drizzle", "Light Showers", "Mild Rain", "Occasional Snowfall", "Rainstorms", "Sweltering Damp"],
+        (2, 2): ["Blistering Damp", "Boiling Monsoons", "Broiling Humidity", "Choking Humidity", "Heavy Rain", "Intense Rainfall", "Monsoon", "Tropical Storms"],
+        (2, 3): ["Boiling Superstorms", "Cataclysmic Monsoons", "Lethal Humidity Outbreaks", "Torrential Rain"],
+        # Snow weather (3) - frozen planets
+        (3, 0): ["Cold", "Freezing", "Frigid", "Frost", "Frozen", "Gelid", "Glacial", "Icy", "Permafrost", "Snowy", "Wintry"],
+        (3, 1): ["Drifting Snowstorms", "Freezing Night Winds", "Freezing Rain", "Frozen Clouds", "Frozen Mists", "Icy Nights", "Infrequent Blizzards", "Occasional Snowfall", "Powder Snow", "Snow", "Snowfall"],
+        (3, 2): ["Blizzard", "Frequent Blizzards", "Harsh, Icy Winds", "Hazardous Whiteouts", "Howling Blizzards", "Ice Storms", "Icy Blasts", "Icy Tempests", "Migratory Blizzards", "Raging Snowstorms", "Roaring Ice Storms", "Snowstorms", "Supercooled Storms", "Whiteout"],
+        (3, 3): ["All-Consuming Cold", "Deep Freeze", "Extreme Cold", "Intense Cold", "Outbreaks of Frozen Rain"],
+        # Toxic weather (4) - toxic planets
+        (4, 0): ["Acidic Dust", "Acidic Dust Pockets", "Caustic Moisture", "Choking Clouds", "Contaminated", "Noxious Gases", "Poisonous Dust", "Poisonous Gas", "Stinging Atmosphere", "Toxic Damp", "Toxic Dust"],
+        (4, 1): ["Acid Rain", "Alkaline Rain", "Contaminated Puddles", "Dangerously Toxic Rain", "Harmful Rain", "Infrequent Toxic Drizzle", "Passing Toxic Fronts", "Poison Rain", "Stinging Puddles", "Toxic Outbreaks", "Toxic Rain"],
+        (4, 2): ["Acidic Deluges", "Alkaline Cloudbursts", "Alkaline Storms", "Bilious Storms", "Bone-Stripping Acid Storms", "Corrosive Cyclones", "Corrosive Rainstorms", "Corrosive Sleet Storms", "Corrosive Storms", "Frequent Toxic Floods", "Heavily Toxic Rain", "Occasional Acid Storms", "Poison Cyclones", "Poison Flurries", "Pouring Toxic Rain", "Toxic Monsoons", "Toxic Superstorms", "Torrential Acid"],
+        (4, 3): ["Echoes of Acid", "Extreme Acidity", "Extreme Contamination", "Extreme Toxicity", "Inescapeable Toxins", "Infinite Toxic Mist", "Toxic Horror"],
+        # Scorched weather (5) - scorched planets
+        (5, 0): ["Baked", "Blazed", "Burning", "Dangerously Hot", "Direct Sunlight", "Heated", "Hot", "Scalding Heat", "Smouldering", "Sticky Heat", "Sunny", "Sweltering", "Unending Sunlight", "Warm"],
+        (5, 1): ["Burning Air", "Dangerously Hot Fog", "Heated Atmosphere", "Heated Gas Pockets", "Infrequent Heat Storms", "Intense Heat", "Occasional Boiling Fog", "Overly Warm", "Superheated Air", "Superheated Gas Pockets", "Wandering Hot Spots"],
+        (5, 2): ["Atmospheric Heat Instabilities", "Boiling Puddles", "Drifting Firestorms", "Extreme Heat", "Firestorms", "Frequent Firestorms", "Hazardous Temperature Extremes", "Highly Variable Temperatures", "Intense Heatbursts", "Occasional Firestorms", "Occasional Scalding Cloudbursts", "Rare Firestorms", "Superheated Drizzle", "Superheated Mists", "Superheated Rain", "Torrential Heat"],
+        (5, 3): ["Boiling Catastrophe", "Colossal Firestorms", "Inferno", "Inferno Winds", "Pillars of Flame", "Plumes of Fire", "Self-Igniting Storm", "Unpredictable Conflagrations", "Walls of Flame"],
+        # Radioactive weather (6) - radioactive planets
+        (6, 0): ["Contaminated", "Elevated Radioactivity", "High Energy", "Nuclidic Atmosphere", "Radioactive", "Radioactive Damp", "Radioactivity", "Reactive"],
+        (6, 1): ["Gamma Dust", "Irradiated", "Irradiated Downpours", "Irradiated Winds", "Nuclear Emission", "Occasional Radiation Outbursts", "Radioactive Decay", "Radioactive Humidity", "Reactive Dust", "Reactive Rain"],
+        (6, 2): ["Enormous Nuclear Storms", "Gamma Cyclones", "Irradiated Storms", "Irradiated Thunderstorms", "Planetwide Radiation Storms", "Radioactive Dust Storms", "Radioactive Storms", "Roaring Nuclear Wind"],
+        (6, 3): ["Extreme Nuclear Decay", "Extreme Radioactivity", "Extreme Thermonuclear Fog"],
+        # Red exotic weather (7)
+        (7, 0): ["Anomalous", "Eerily Calm", "Red Mist", "Silent", "Utterly Still"],
+        (7, 1): ["Carmine Winds", "Crimson Heat", "Unstable"],
+        (7, 2): ["Burning Crimson", "Vermillion Storms"],
+        (7, 3): ["Corrupted Blood", "Scarlet Rain"],
+        # Green exotic weather (8)
+        (8, 0): ["Anomalous", "Eerily Calm", "Silent", "Utterly Still"],
+        (8, 1): ["Clouds of Haunted Green", "Invisible Jade Winds", "Unstable"],
+        (8, 2): ["Azure Storms", "Deathly Green Anomaly"],
+        (8, 3): ["Haunted Frost"],
+        # Blue exotic weather (9)
+        (9, 0): ["Anomalous", "Eerily Calm", "Silent", "Utterly Still"],
+        (9, 1): ["Ultramarine Wind", "Unstable"],
+        (9, 2): ["Azure Storms", "Unimaginable Blue"],
+        (9, 3): ["Harsh Blue Globe"],
+        # Swamp weather (10)
+        (10, 0): ["Damp", "Hazardous Moisture", "Humid", "Muggy Haze", "Wet"],
+        (10, 1): ["Blistering Damp", "Clammy Menace", "Damp Misery", "Soggy Danger", "Sweltering Damp", "Tepid Damp"],
+        (10, 2): ["Blistering Floods", "Broiling Humidity", "Caustic Floods", "Choking Humidity", "Corrosive Damp", "Monsoon"],
+        (10, 3): ["Boiling Superstorms", "Lethal Humidity Outbreaks"],
+        # Lava weather (11)
+        (11, 0): ["Burning", "Hot", "Molten", "Smouldering", "Volcanic"],
+        (11, 1): ["Burning Air", "Incendiary Dust", "Incendiary Winds", "Magma Geysers", "Obsidian Heat"],
+        (11, 2): ["Ash Plumes", "Ashen Destruction", "Choking Ash", "Enveloping Ash", "Lethal Ash Storms", "Magma Rain", "Molten Rain", "Occasional Ash Storms", "Smothering Ash", "Tectonic Storms"],
+        (11, 3): ["Basalt Hail", "Cinderfalls", "Flaming Hail", "Inferno", "Liquid Hell", "Mists of Annihilation", "Obsidian Doom"],
+        # Bubble exotic weather (12)
+        (12, 0): ["Anomalous", "Eerily Calm", "Inert", "Silent", "Sterile", "Utterly Still"],
+        (12, 1): ["Invisible Mist", "Lost Clouds", "Unstable"],
+        (12, 2): ["Inverted Superstorms", "Unfathomable Storms", "Unstable Fog"],
+        (12, 3): ["All-Consuming Fog", "Winds From Beyond"],
+        # Weird exotic weather (13)
+        (13, 0): ["Anomalous", "Eerily Calm", "Inert", "Silent", "Sterile", "Utterly Still"],
+        (13, 1): ["Internal Rain", "Invisible Mist", "Lost Clouds", "Memories of Frost", "Unstable", "Wandering Frosts"],
+        (13, 2): ["Atmospheric Corruption", "Inverted Superstorms", "Rain of Atlas", "Storms of Desolation", "Unfathomable Storms", "Unstable Atmosphere", "Unstable Fog", "Volatile Storms"],
+        (13, 3): ["All-Consuming Fog", "Blasted Atmosphere", "Dead Wastes", "Death Fog", "Extreme Atmospheric Decay", "Lethal Atmosphere", "Winds From Beyond"],
+        # Fire weather (14) - extreme heat
+        (14, 0): ["Burning", "Dangerously Hot", "Hot", "Scalding Heat", "Smouldering"],
+        (14, 1): ["Burning Air", "Clouds of Fire", "Heated Atmosphere", "Incendiary Dust", "Incendiary Winds"],
+        (14, 2): ["Drifting Firestorms", "Firestorms", "Frequent Firestorms", "Occasional Firestorms", "Rare Firestorms", "Walls of Flame"],
+        (14, 3): ["Boiling Catastrophe", "Colossal Firestorms", "Inferno", "Inferno Winds", "Pillars of Flame", "Plumes of Fire"],
+        # ClearCold weather (15) - cold clear
+        (15, 0): ["Cold", "Freezing", "Frigid", "Frost", "Frozen", "Glacial", "Icy", "Wintry"],
+        (15, 1): ["Freezing Night Winds", "Frozen Clouds", "Frozen Mists", "Icy Nights"],
+        (15, 2): ["Harsh, Icy Winds", "Icy Blasts", "Roaring Ice Storms"],
+        (15, 3): ["All-Consuming Cold", "Extreme Cold", "Intense Cold"],
+        # GasGiant weather (16)
+        (16, 0): ["Airless", "Extreme Low Pressure", "Gas Clouds", "Inert", "No Atmosphere", "Sterile"],
+        (16, 1): ["Constant Pressure Storms", "Deadly Pressure Variations", "Gas Storms"],
+        (16, 2): ["Energetic Storms", "Explosive Gas Eruptions", "Frequent Particle Eruptions", "Noxious Gas Storms", "Volatile Windstorms"],
+        (16, 3): ["Extreme Low Pressure", "Lethal Atmosphere"],
     }
 
-    # Fallback mappings (simple level-based, used when biome not found)
+    # Fallback mappings (simple level-based, used when list selection fails)
     FLORA_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Bountiful"}
-    FAUNA_LEVELS = {0: "None", 1: "Scarce", 2: "Regular", 3: "Copious"}
-    # Legacy mapping for compatibility
+    FAUNA_LEVELS = {0: "None", 1: "Sparse", 2: "Regular", 3: "Copious"}
     LIFE_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Abundant"}
-    # Sentinel activity levels
     SENTINEL_LEVELS = {0: "Minimal", 1: "Limited", 2: "High", 3: "Aggressive"}
-
-    # v10.2.0: Convert WEATHER_OPTIONS internal names to user-friendly adjectives
-    # Used when WEATHER_CONTEXTUAL doesn't have a specific entry
-    WEATHER_FALLBACK = {
-        "Clear": "Pleasant",
-        "Dust": "Arid",
-        "Humid": "Humid",
-        "Snow": "Frozen",
-        "Toxic": "Toxic Rain",
-        "Scorched": "Extreme Heat",
-        "Radioactive": "Radioactive",
-        "RedWeather": "Anomalous",
-        "GreenWeather": "Anomalous",
-        "BlueWeather": "Anomalous",
-        "Swamp": "Humid",
-        "Lava": "Inferno",
-        "Bubble": "Anomalous",
-        "Weird": "Anomalous",
-        "Fire": "Inferno",
-        "ClearCold": "Icy",
-        "GasGiant": "No Atmosphere",
-    }
 
     # =========================================================================
     # CONFIG GUI FIELDS - Using pymhf's native DearPyGUI
@@ -1706,14 +1670,71 @@ class HavenExtractorMod(Mod):
             except Exception as e:
                 logger.debug(f"Planet name extraction failed: {e}")
 
+            # =============================================================
+            # v10.3.0: Extract ACTUAL DISPLAY STRINGS from PlanetInfo
+            # These are the EXACT strings the game shows on discovery pages
+            # PlanetInfo.Flora (0x280), Fauna (0x200), SentinelsPerDifficulty[0] (0x0)
+            # =============================================================
+            flora_display = ""
+            fauna_display = ""
+            sentinel_display = ""
+            weather_display = ""
+            try:
+                if hasattr(planet_data, 'PlanetInfo'):
+                    info = planet_data.PlanetInfo
+
+                    # Flora display string - cTkFixedString0x80 at offset 0x280
+                    if hasattr(info, 'Flora'):
+                        val = str(info.Flora) or ""
+                        flora_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if flora_display and flora_display != "None" and len(flora_display) >= 2:
+                            logger.info(f"    [DISPLAY] Flora: '{flora_display}'")
+                        else:
+                            flora_display = ""
+
+                    # Fauna display string - cTkFixedString0x80 at offset 0x200
+                    if hasattr(info, 'Fauna'):
+                        val = str(info.Fauna) or ""
+                        fauna_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if fauna_display and fauna_display != "None" and len(fauna_display) >= 2:
+                            logger.info(f"    [DISPLAY] Fauna: '{fauna_display}'")
+                        else:
+                            fauna_display = ""
+
+                    # Sentinel display string - SentinelsPerDifficulty[0] at offset 0x0
+                    if hasattr(info, 'SentinelsPerDifficulty'):
+                        sent_arr = info.SentinelsPerDifficulty
+                        if hasattr(sent_arr, '__getitem__'):
+                            val = str(sent_arr[0]) or ""
+                            sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
+                                logger.info(f"    [DISPLAY] Sentinel: '{sentinel_display}'")
+                            else:
+                                sentinel_display = ""
+
+                    # Weather display string - cTkFixedString0x80 at offset 0x480
+                    if hasattr(info, 'Weather'):
+                        val = str(info.Weather) or ""
+                        weather_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if weather_display and weather_display != "None" and len(weather_display) >= 2:
+                            logger.info(f"    [DISPLAY] Weather: '{weather_display}'")
+                        else:
+                            weather_display = ""
+            except Exception as e:
+                logger.debug(f"PlanetInfo display string extraction failed: {e}")
+
             # Store captured planet data
             self._captured_planets[planet_index] = {
                 'flora_raw': flora_raw,
                 'flora': flora_name,
+                'flora_display': flora_display,  # v10.3.0: Actual game display string
                 'fauna_raw': fauna_raw,
                 'fauna': fauna_name,
+                'fauna_display': fauna_display,  # v10.3.0: Actual game display string
                 'sentinel_raw': sentinel_raw,
                 'sentinel': sentinel_name,
+                'sentinel_display': sentinel_display,  # v10.3.0: Actual game display string
+                'weather_display': weather_display,  # v10.3.0: Actual game display string
                 'biome_raw': biome_raw,
                 'biome': biome_name,
                 'biome_subtype_raw': biome_subtype_raw,
@@ -2249,6 +2270,125 @@ class HavenExtractorMod(Mod):
     # =========================================================================
     # v10.0.0: STREAMLINED GUI BUTTONS
     # =========================================================================
+
+    @gui_button("Refresh Display Strings (After Freighter Scan)")
+    def refresh_display_strings(self):
+        """
+        v10.3.0: Re-read PlanetInfo display strings after freighter scanner.
+
+        The freighter scanner populates PlanetInfo.Flora, Fauna, SentinelsPerDifficulty,
+        and Weather fields for all planets in the system. Call this AFTER using the
+        freighter scanner to get the EXACT display strings the game shows.
+        """
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(">>> REFRESHING DISPLAY STRINGS (v10.3.0) <<<")
+        logger.info(">>> Use this AFTER freighter scanner! <<<")
+        logger.info("=" * 60)
+
+        if not self._captured_planets:
+            logger.warning("  No captured planets - warp to a system first!")
+            logger.info("=" * 60)
+            return
+
+        # Get solar system data
+        try:
+            solar_system = nmse.GcSolarSystemData.get()
+            if solar_system is None:
+                logger.error("  ERROR: Cannot access solar system data")
+                logger.info("=" * 60)
+                return
+
+            planets = solar_system.mPlanetData
+            if planets is None:
+                logger.error("  ERROR: Cannot access planet data array")
+                logger.info("=" * 60)
+                return
+
+            updated_count = 0
+            for index in range(min(6, len(planets))):
+                if index not in self._captured_planets:
+                    continue
+
+                try:
+                    planet = planets[index]
+                    if planet is None:
+                        continue
+
+                    # Try to read PlanetInfo display strings
+                    if hasattr(planet, 'PlanetInfo'):
+                        info = planet.PlanetInfo
+                        captured = self._captured_planets[index]
+                        fields_updated = []
+
+                        # Flora display string
+                        if hasattr(info, 'Flora'):
+                            val = str(info.Flora) or ""
+                            flora_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if flora_display and flora_display != "None" and len(flora_display) >= 2:
+                                old_val = captured.get('flora_display', '')
+                                if flora_display != old_val:
+                                    captured['flora_display'] = flora_display
+                                    fields_updated.append(f"Flora='{flora_display}'")
+
+                        # Fauna display string
+                        if hasattr(info, 'Fauna'):
+                            val = str(info.Fauna) or ""
+                            fauna_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if fauna_display and fauna_display != "None" and len(fauna_display) >= 2:
+                                old_val = captured.get('fauna_display', '')
+                                if fauna_display != old_val:
+                                    captured['fauna_display'] = fauna_display
+                                    fields_updated.append(f"Fauna='{fauna_display}'")
+
+                        # Sentinel display string
+                        if hasattr(info, 'SentinelsPerDifficulty'):
+                            sent_arr = info.SentinelsPerDifficulty
+                            if hasattr(sent_arr, '__getitem__'):
+                                val = str(sent_arr[0]) or ""
+                                sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                                if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
+                                    old_val = captured.get('sentinel_display', '')
+                                    if sentinel_display != old_val:
+                                        captured['sentinel_display'] = sentinel_display
+                                        fields_updated.append(f"Sentinel='{sentinel_display}'")
+
+                        # Weather display string
+                        if hasattr(info, 'Weather'):
+                            val = str(info.Weather) or ""
+                            weather_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if weather_display and weather_display != "None" and len(weather_display) >= 2:
+                                old_val = captured.get('weather_display', '')
+                                if weather_display != old_val:
+                                    captured['weather_display'] = weather_display
+                                    fields_updated.append(f"Weather='{weather_display}'")
+
+                        if fields_updated:
+                            planet_name = captured.get('planet_name', f'Planet {index}')
+                            logger.info(f"  Planet {index} ({planet_name}):")
+                            for field in fields_updated:
+                                logger.info(f"    + {field}")
+                            updated_count += 1
+                        else:
+                            planet_name = captured.get('planet_name', f'Planet {index}')
+                            logger.info(f"  Planet {index} ({planet_name}): No new display strings found")
+
+                except Exception as e:
+                    logger.debug(f"  Error reading planet {index}: {e}")
+
+            logger.info("")
+            if updated_count > 0:
+                logger.info(f"  SUCCESS: Updated display strings for {updated_count} planet(s)")
+                logger.info("  These EXACT values will be used in the next export!")
+            else:
+                logger.info("  No new display strings found.")
+                logger.info("  Make sure you've used the freighter scanner first!")
+            logger.info("=" * 60)
+            logger.info("")
+
+        except Exception as e:
+            logger.error(f"  ERROR: {e}")
+            logger.info("=" * 60)
 
     @gui_button("Check Batch Data")
     def check_batch_data(self):
@@ -2975,30 +3115,53 @@ class HavenExtractorMod(Mod):
                     result["is_moon"] = captured.get('is_moon', False)
                     logger.info(f"    [CAPTURED] PlanetSize = {result['planet_size']} (raw: {captured.get('planet_size_raw')}, is_moon: {result['is_moon']})")
 
-                # Apply captured flora/fauna/sentinel data with CONTEXTUAL adjectives
-                # v10.2.0: Use biome-specific mappings for variety
-                biome_key = result["biome"]  # Already determined above
+                # =============================================================
+                # v10.3.0: Apply flora/fauna/sentinel - PREFER DISPLAY STRINGS
+                # Display strings from PlanetInfo are the EXACT game text
+                # Fall back to list-based selection only if display strings unavailable
+                # =============================================================
 
-                # Flora - use biome-specific mapping if available
-                flora_raw = captured.get('flora_raw', -1)
-                if flora_raw >= 0 and biome_key in self.FLORA_BY_BIOME:
-                    result["flora_level"] = self.FLORA_BY_BIOME[biome_key].get(flora_raw, captured.get('flora', 'Unknown'))
+                # Flora - prefer display string from PlanetInfo.Flora
+                flora_display = captured.get('flora_display', '')
+                if flora_display:
+                    result["flora_level"] = flora_display
+                    logger.info(f"    [DISPLAY] Using Flora display string: '{flora_display}'")
                 else:
-                    result["flora_level"] = captured.get('flora', 'Unknown')
+                    # Fallback to list-based selection
+                    flora_raw = captured.get('flora_raw', -1)
+                    if flora_raw >= 0 and flora_raw in self.FLORA_BY_LEVEL:
+                        flora_list = self.FLORA_BY_LEVEL[flora_raw]
+                        result["flora_level"] = flora_list[index % len(flora_list)]
+                    else:
+                        result["flora_level"] = self.FLORA_LEVELS.get(flora_raw, captured.get('flora', 'Unknown'))
 
-                # Fauna - use biome-specific mapping if available
-                fauna_raw = captured.get('fauna_raw', -1)
-                if fauna_raw >= 0 and biome_key in self.FAUNA_BY_BIOME:
-                    result["fauna_level"] = self.FAUNA_BY_BIOME[biome_key].get(fauna_raw, captured.get('fauna', 'Unknown'))
+                # Fauna - prefer display string from PlanetInfo.Fauna
+                fauna_display = captured.get('fauna_display', '')
+                if fauna_display:
+                    result["fauna_level"] = fauna_display
+                    logger.info(f"    [DISPLAY] Using Fauna display string: '{fauna_display}'")
                 else:
-                    result["fauna_level"] = captured.get('fauna', 'Unknown')
+                    # Fallback to list-based selection
+                    fauna_raw = captured.get('fauna_raw', -1)
+                    if fauna_raw >= 0 and fauna_raw in self.FAUNA_BY_LEVEL:
+                        fauna_list = self.FAUNA_BY_LEVEL[fauna_raw]
+                        result["fauna_level"] = fauna_list[index % len(fauna_list)]
+                    else:
+                        result["fauna_level"] = self.FAUNA_LEVELS.get(fauna_raw, captured.get('fauna', 'Unknown'))
 
-                # Sentinel - use biome-specific mapping if available
-                sentinel_raw = captured.get('sentinel_raw', -1)
-                if sentinel_raw >= 0 and biome_key in self.SENTINEL_BY_BIOME:
-                    result["sentinel_level"] = self.SENTINEL_BY_BIOME[biome_key].get(sentinel_raw, captured.get('sentinel', 'Unknown'))
+                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[0]
+                sentinel_display = captured.get('sentinel_display', '')
+                if sentinel_display:
+                    result["sentinel_level"] = sentinel_display
+                    logger.info(f"    [DISPLAY] Using Sentinel display string: '{sentinel_display}'")
                 else:
-                    result["sentinel_level"] = captured.get('sentinel', 'Unknown')
+                    # Fallback to list-based selection
+                    sentinel_raw = captured.get('sentinel_raw', -1)
+                    if sentinel_raw >= 0 and sentinel_raw in self.SENTINEL_BY_LEVEL:
+                        sentinel_list = self.SENTINEL_BY_LEVEL[sentinel_raw]
+                        result["sentinel_level"] = sentinel_list[index % len(sentinel_list)]
+                    else:
+                        result["sentinel_level"] = self.SENTINEL_LEVELS.get(sentinel_raw, captured.get('sentinel', 'Unknown'))
 
                 # Apply captured resources if not already set from direct read (translate to readable names)
                 if result["common_resource"] == "Unknown" and captured.get('common_resource'):
@@ -3008,34 +3171,44 @@ class HavenExtractorMod(Mod):
                 if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
                     result["rare_resource"] = translate_resource(captured['rare_resource'])
 
-                # v10.2.0: Apply captured weather with CONTEXTUAL adjectives
-                # Uses biome + weather_raw + storm_raw for variety
-                if captured.get('weather') and captured.get('weather_raw', -1) >= 0:
+                # =============================================================
+                # v10.3.0: Apply weather - PREFER DISPLAY STRING from PlanetInfo.Weather
+                # Display string is the EXACT text the game shows
+                # Fall back to list-based selection only if display string unavailable
+                # =============================================================
+                weather_display = captured.get('weather_display', '')
+                if weather_display:
+                    # Use the actual game display string - clean it if needed
+                    result["weather"] = clean_weather_string(weather_display)
+                    logger.info(f"    [DISPLAY] Using Weather display string: '{result['weather']}' (raw: '{weather_display}')")
+                elif captured.get('weather') and captured.get('weather_raw', -1) >= 0:
+                    # Fallback to list-based selection
                     weather_raw = captured.get('weather_raw', -1)
                     storm_raw = captured.get('storm_raw', 0)
                     storm_info = captured.get('storm_frequency', '')
 
-                    # Try contextual weather lookup: (biome, weather_enum, storm_frequency)
-                    weather_key = (biome_key, weather_raw, storm_raw)
-                    contextual_weather = self.WEATHER_CONTEXTUAL.get(weather_key)
+                    # Try list-based weather lookup: (weather_raw, storm_raw) -> list
+                    weather_key = (weather_raw, storm_raw)
+                    weather_list = self.WEATHER_BY_TYPE_STORM.get(weather_key)
 
-                    if contextual_weather:
-                        result["weather"] = contextual_weather
-                        logger.info(f"    [CAPTURED] Weather = {result['weather']} (contextual: biome={biome_key}, weather={weather_raw}, storm={storm_raw})")
+                    if weather_list:
+                        result["weather"] = weather_list[index % len(weather_list)]
+                        logger.info(f"    [LIST] Weather = {result['weather']} (from list: weather={weather_raw}, storm={storm_raw}, idx={index})")
                     else:
-                        # v10.2.0: Convert internal weather name to user-friendly adjective
-                        raw_weather_name = captured['weather']
-                        result["weather"] = self.WEATHER_FALLBACK.get(raw_weather_name, raw_weather_name)
-                        if storm_info:
-                            logger.info(f"    [CAPTURED] Weather = {result['weather']} (from {raw_weather_name}, storms: {storm_info})")
+                        # Fallback: try storm_raw=0 (calm weather) if specific storm level not found
+                        weather_key_calm = (weather_raw, 0)
+                        weather_list_calm = self.WEATHER_BY_TYPE_STORM.get(weather_key_calm)
+                        if weather_list_calm:
+                            result["weather"] = weather_list_calm[index % len(weather_list_calm)]
+                            logger.info(f"    [LIST] Weather = {result['weather']} (calm fallback: weather={weather_raw})")
                         else:
-                            logger.info(f"    [CAPTURED] Weather = {result['weather']}")
+                            # Last resort: use captured weather name
+                            result["weather"] = captured['weather']
+                            logger.info(f"    [RAW] Weather = {result['weather']} (raw fallback)")
                 elif result["weather"] == "Unknown" and captured.get('weather'):
-                    # Fallback to any weather value if raw not available
-                    # v10.2.0: Still convert to user-friendly adjective
-                    raw_weather_name = captured['weather']
-                    result["weather"] = self.WEATHER_FALLBACK.get(raw_weather_name, raw_weather_name)
-                    logger.info(f"    [CAPTURED] Weather = {result['weather']} (fallback from {raw_weather_name})")
+                    # Fallback when weather_raw not available
+                    result["weather"] = captured['weather']
+                    logger.info(f"    [RAW] Weather = {result['weather']} (no raw value)")
 
                 # v8.1.7: Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires

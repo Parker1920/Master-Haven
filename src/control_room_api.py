@@ -137,6 +137,52 @@ def normalize_discord_username(username: str) -> str:
     return normalized
 
 
+def get_system_glyph(glyph_code: str) -> str:
+    """
+    Extract the system portion of a glyph code (last 11 characters).
+
+    In NMS, the first character is the planet/moon index (which portal you warp to).
+    The remaining 11 characters represent the actual system coordinates.
+    Two glyphs that only differ in the first character are the SAME system.
+
+    Example:
+        '2103CF58AC1D' -> '103CF58AC1D' (system glyph)
+        '0103CF58AC1D' -> '103CF58AC1D' (same system, different portal)
+    """
+    if not glyph_code or len(glyph_code) < 11:
+        return None
+    # Return last 11 characters (the system coordinates)
+    return glyph_code[-11:].upper() if len(glyph_code) >= 11 else glyph_code.upper()
+
+
+def find_matching_system(cursor, glyph_code: str, galaxy: str, reality: str):
+    """
+    Find an existing system that matches by glyph coordinates + galaxy + reality.
+
+    Two systems are considered the same if:
+    1. Last 11 characters of glyph match (same system coordinates)
+    2. Same galaxy (Euclid, Hilbert, etc.)
+    3. Same reality (Normal, Permadeath)
+
+    Returns the matching system row or None if no match found.
+    """
+    system_glyph = get_system_glyph(glyph_code)
+    if not system_glyph:
+        return None
+
+    # Query for systems where last 11 chars of glyph match + same galaxy + reality
+    cursor.execute('''
+        SELECT id, name, glyph_code, glyph_planet, glyph_solar_system,
+               discovered_by, discovered_at, contributors
+        FROM systems
+        WHERE SUBSTR(glyph_code, -11) = ?
+          AND galaxy = ?
+          AND reality = ?
+    ''', (system_glyph, galaxy or 'Euclid', reality or 'Normal'))
+
+    return cursor.fetchone()
+
+
 # Ensure directories exist
 HAVEN_UI_DIR.mkdir(parents=True, exist_ok=True)
 (HAVEN_UI_DIR / 'data').mkdir(parents=True, exist_ok=True)
@@ -1127,6 +1173,26 @@ async def spa_planet_view(planet_id: int):
     """Serve index.html for 3D planet view route"""
     return await _serve_spa_index()
 
+@app.get('/war-room')
+async def spa_war_room():
+    """Serve index.html for War Room route"""
+    return await _serve_spa_index()
+
+@app.get('/war-room/admin')
+async def spa_war_room_admin():
+    """Serve index.html for War Room admin route"""
+    return await _serve_spa_index()
+
+@app.get('/haven-ui/war-room')
+async def spa_haven_war_room():
+    """Serve index.html for War Room route (haven-ui prefix)"""
+    return await _serve_spa_index()
+
+@app.get('/haven-ui/war-room/admin')
+async def spa_haven_war_room_admin():
+    """Serve index.html for War Room admin route (haven-ui prefix)"""
+    return await _serve_spa_index()
+
 
 @app.get('/api/status')
 async def api_status():
@@ -1283,7 +1349,7 @@ async def api_map_regions_aggregated(
 @app.get('/api/galaxies')
 async def api_galaxies():
     """Return list of all 256 NMS galaxies with indices.
-    
+
     Returns:
         Dictionary with galaxies list, each containing index and name
     """
@@ -1293,6 +1359,104 @@ async def api_galaxies():
             for idx, name in sorted(GALAXY_BY_INDEX.items())
         ]
     }
+
+
+@app.get('/api/realities/summary')
+async def api_realities_summary():
+    """Level 1 Hierarchy: Returns reality-level aggregation.
+
+    Used by the containerized Systems page to show Normal vs Permadeath
+    with counts before drilling down into galaxies.
+
+    Returns:
+        Dictionary with realities list, each containing:
+        - reality: 'Normal' or 'Permadeath'
+        - galaxy_count: Number of distinct galaxies with data
+        - system_count: Total systems in this reality
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'realities': []}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT
+                COALESCE(reality, 'Normal') as reality,
+                COUNT(DISTINCT galaxy) as galaxy_count,
+                COUNT(*) as system_count
+            FROM systems
+            GROUP BY COALESCE(reality, 'Normal')
+            ORDER BY system_count DESC
+        ''')
+        results = [dict(row) for row in cursor.fetchall()]
+        return {'realities': results}
+    except Exception as e:
+        logger.error(f"Realities summary error: {e}")
+        return {'realities': []}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/galaxies/summary')
+async def api_galaxies_summary(reality: str = None):
+    """Level 2 Hierarchy: Returns galaxy-level aggregation within a reality.
+
+    Used by the containerized Systems page to show galaxies with counts
+    after selecting a reality.
+
+    Args:
+        reality: Optional filter for 'Normal' or 'Permadeath'. If not provided,
+                 returns aggregation across all realities.
+
+    Returns:
+        Dictionary with galaxies list, each containing:
+        - galaxy: Galaxy name (e.g., 'Euclid', 'Eissentam')
+        - region_count: Number of distinct regions with data
+        - system_count: Total systems in this galaxy
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'galaxies': []}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if reality:
+            cursor.execute('''
+                SELECT
+                    COALESCE(galaxy, 'Euclid') as galaxy,
+                    COUNT(DISTINCT region_x || '-' || region_y || '-' || region_z) as region_count,
+                    COUNT(*) as system_count
+                FROM systems
+                WHERE COALESCE(reality, 'Normal') = ?
+                GROUP BY COALESCE(galaxy, 'Euclid')
+                ORDER BY system_count DESC
+            ''', (reality,))
+        else:
+            cursor.execute('''
+                SELECT
+                    COALESCE(galaxy, 'Euclid') as galaxy,
+                    COUNT(DISTINCT region_x || '-' || region_y || '-' || region_z) as region_count,
+                    COUNT(*) as system_count
+                FROM systems
+                GROUP BY COALESCE(galaxy, 'Euclid')
+                ORDER BY system_count DESC
+            ''')
+
+        results = [dict(row) for row in cursor.fetchall()]
+        return {'galaxies': results, 'reality': reality}
+    except Exception as e:
+        logger.error(f"Galaxies summary error: {e}")
+        return {'galaxies': [], 'reality': reality}
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get('/api/activity_logs')
@@ -5078,18 +5242,191 @@ async def check_duplicate(
 
 
 @app.get('/api/systems')
-async def api_systems():
-    # If DB is available, return current systems by querying DB; otherwise return JSON cache
+async def api_systems(
+    reality: str = None,
+    galaxy: str = None,
+    region_x: int = None,
+    region_y: int = None,
+    region_z: int = None,
+    page: int = 1,
+    limit: int = 50,
+    include_planets: bool = False,
+    discord_tag: str = None,
+    session: Optional[str] = Cookie(None)
+):
+    """Return paginated systems with optional hierarchy filtering.
+
+    This endpoint supports the containerized Systems page by allowing
+    filtering at each level of the hierarchy:
+    - reality: 'Normal' or 'Permadeath'
+    - galaxy: Galaxy name (e.g., 'Euclid')
+    - region_x, region_y, region_z: Specific region coordinates
+
+    Args:
+        reality: Filter by game mode (Normal/Permadeath)
+        galaxy: Filter by galaxy name
+        region_x, region_y, region_z: Filter by region coordinates (all three required together)
+        page: Page number (1-indexed, default 1)
+        limit: Results per page (default 50, max 100)
+        include_planets: Whether to include planet data (default false for list view)
+        discord_tag: Filter by discord tag ('all', 'untagged', 'personal', or specific tag)
+        session: Session cookie for permission checking
+
+    Returns:
+        {
+            "systems": [...],
+            "pagination": {"page": 1, "limit": 50, "total": 100, "pages": 2},
+            "filters": {"reality": "Normal", "galaxy": "Euclid", ...}
+        }
+    """
+    session_data = get_session(session)
+    limit = min(limit, 100)  # Cap at 100
+
+    conn = None
     try:
         db_path = get_db_path()
-        if db_path.exists():
-            systems = load_systems_from_db()
-            return {'systems': systems}
-    except Exception:
-        pass
-    async with _systems_lock:
-        systems = list(_systems_cache.values())
-    return {'systems': systems}
+        if not db_path.exists():
+            return {'systems': [], 'pagination': {'page': 1, 'limit': limit, 'total': 0, 'pages': 0}}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build filter clauses
+        where_clauses = []
+        params = []
+
+        if reality:
+            where_clauses.append("COALESCE(s.reality, 'Normal') = ?")
+            params.append(reality)
+
+        if galaxy:
+            where_clauses.append("COALESCE(s.galaxy, 'Euclid') = ?")
+            params.append(galaxy)
+
+        # Region filter - all three must be provided together
+        if region_x is not None and region_y is not None and region_z is not None:
+            where_clauses.append("s.region_x = ? AND s.region_y = ? AND s.region_z = ?")
+            params.extend([region_x, region_y, region_z])
+
+        # Discord tag filter
+        if discord_tag and discord_tag != 'all':
+            if discord_tag == 'untagged':
+                where_clauses.append("(s.discord_tag IS NULL OR s.discord_tag = '')")
+            elif discord_tag == 'personal':
+                where_clauses.append("s.discord_tag = 'personal'")
+            else:
+                where_clauses.append("s.discord_tag = ?")
+                params.append(discord_tag)
+
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        # Get total count first
+        cursor.execute(f'''
+            SELECT COUNT(*) FROM systems s {where_sql}
+        ''', params)
+        total = cursor.fetchone()[0]
+
+        # Calculate pagination
+        total_pages = (total + limit - 1) // limit if total > 0 else 0
+        offset = (page - 1) * limit
+
+        # Fetch systems with pagination
+        cursor.execute(f'''
+            SELECT s.*, r.custom_name as region_name
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+            {where_sql}
+            ORDER BY s.created_at DESC NULLS LAST, s.id DESC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+
+        systems = [dict(row) for row in cursor.fetchall()]
+
+        # Apply data restrictions
+        systems = apply_data_restrictions(systems, session_data)
+
+        # Optionally load planets for each system
+        if include_planets and systems:
+            system_ids = [s['id'] for s in systems]
+            placeholders = ','.join(['?'] * len(system_ids))
+
+            # Load planets
+            cursor.execute(f'''
+                SELECT * FROM planets WHERE system_id IN ({placeholders}) ORDER BY system_id, name
+            ''', system_ids)
+            all_planets = [dict(row) for row in cursor.fetchall()]
+
+            # Index planets by system_id
+            planets_by_system = {}
+            for planet in all_planets:
+                sys_id = planet['system_id']
+                if sys_id not in planets_by_system:
+                    planets_by_system[sys_id] = []
+                planets_by_system[sys_id].append(planet)
+
+            # Load moons for all planets
+            planet_ids = [p['id'] for p in all_planets]
+            if planet_ids:
+                placeholders = ','.join(['?'] * len(planet_ids))
+                cursor.execute(f'''
+                    SELECT * FROM moons WHERE planet_id IN ({placeholders}) ORDER BY planet_id, name
+                ''', planet_ids)
+                all_moons = [dict(row) for row in cursor.fetchall()]
+
+                # Index moons by planet_id
+                moons_by_planet = {}
+                for moon in all_moons:
+                    planet_id = moon['planet_id']
+                    if planet_id not in moons_by_planet:
+                        moons_by_planet[planet_id] = []
+                    moons_by_planet[planet_id].append(moon)
+
+                # Attach moons to planets
+                for planet in all_planets:
+                    planet['moons'] = moons_by_planet.get(planet['id'], [])
+            else:
+                for planet in all_planets:
+                    planet['moons'] = []
+
+            # Attach planets to systems
+            for system in systems:
+                system['planets'] = planets_by_system.get(system['id'], [])
+        else:
+            # No planets in list view
+            for system in systems:
+                system['planets'] = []
+
+        return {
+            'systems': systems,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'pages': total_pages
+            },
+            'filters': {
+                'reality': reality,
+                'galaxy': galaxy,
+                'region_x': region_x,
+                'region_y': region_y,
+                'region_z': region_z,
+                'discord_tag': discord_tag
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching systems: {e}")
+        return {
+            'systems': [],
+            'pagination': {'page': 1, 'limit': limit, 'total': 0, 'pages': 0},
+            'filters': {}
+        }
+    finally:
+        if conn:
+            conn.close()
 
 
 # NOTE: This route MUST be defined BEFORE /api/systems/{system_id} to avoid route shadowing
@@ -5296,6 +5633,8 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0,
 @app.get('/api/regions/grouped')
 async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0,
                                discord_tag: str = None,
+                               reality: str = None,
+                               galaxy: str = None,
                                session: Optional[str] = Cookie(None)):
     """Return all regions with their systems grouped together.
 
@@ -5306,6 +5645,8 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
     - Applies data restrictions based on viewer permissions
     - discord_tag filter: 'all' or None for all, 'untagged' for NULL tags,
       'personal' for personal tag, or specific tag name
+    - reality filter: 'Normal' or 'Permadeath' to filter by game mode
+    - galaxy filter: Galaxy name (e.g., 'Euclid') to filter by galaxy
 
     Returns regions ordered by:
     1. "Sea of Gidzenuf" (home system) always first
@@ -5323,17 +5664,34 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Build discord_tag filter clause
-        tag_filter = ""
-        tag_params = []
+        # Build filter clauses
+        filter_clauses = []
+        filter_params = []
+
+        # Discord tag filter
         if discord_tag and discord_tag != 'all':
             if discord_tag == 'untagged':
-                tag_filter = " AND (s.discord_tag IS NULL OR s.discord_tag = '')"
+                filter_clauses.append("(s.discord_tag IS NULL OR s.discord_tag = '')")
             elif discord_tag == 'personal':
-                tag_filter = " AND s.discord_tag = 'personal'"
+                filter_clauses.append("s.discord_tag = 'personal'")
             else:
-                tag_filter = " AND s.discord_tag = ?"
-                tag_params = [discord_tag]
+                filter_clauses.append("s.discord_tag = ?")
+                filter_params.append(discord_tag)
+
+        # Reality filter (Level 1 hierarchy)
+        if reality:
+            filter_clauses.append("COALESCE(s.reality, 'Normal') = ?")
+            filter_params.append(reality)
+
+        # Galaxy filter (Level 2 hierarchy)
+        if galaxy:
+            filter_clauses.append("COALESCE(s.galaxy, 'Euclid') = ?")
+            filter_params.append(galaxy)
+
+        # Combine filters
+        combined_filter = ""
+        if filter_clauses:
+            combined_filter = " AND " + " AND ".join(filter_clauses)
 
         # STEP 1: Get all regions with aggregated counts in a SINGLE query
         # This replaces the N+1 pattern with one efficient GROUP BY query
@@ -5349,7 +5707,7 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
             WHERE s.region_x IS NOT NULL AND s.region_y IS NOT NULL AND s.region_z IS NOT NULL
-                {tag_filter}
+                {combined_filter}
             GROUP BY s.region_x, s.region_y, s.region_z
             ORDER BY
                 CASE
@@ -5360,34 +5718,30 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 COUNT(DISTINCT s.id) DESC,
                 first_system_date ASC NULLS FIRST,
                 first_system_id ASC
-        ''', tag_params)
+        ''', filter_params)
 
         region_rows = cursor.fetchall()
-        total_regions = len(region_rows)
-
-        # Apply pagination if requested
-        if limit > 0:
-            offset = page * limit
-            region_rows = region_rows[offset:offset + limit]
+        all_region_rows = list(region_rows)  # Keep full list before any pagination
 
         regions = []
 
         if not include_systems:
             # Fast path: return just region summaries without nested data
             # BUT we need accurate counts, so fetch minimal system data for restriction checks
-            region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
+            # Use ALL region_rows (before pagination) to get accurate visible counts
+            all_region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in all_region_rows]
             visible_counts = {}  # Initialize before conditional to avoid NameError
 
-            if region_coords:
-                # Build WHERE clause for all regions
-                placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
-                params = [coord for region in region_coords for coord in region]
-                # Add tag filter params if present
-                params.extend(tag_params)
+            if all_region_coords:
+                # Build WHERE clause for all regions (not just paginated ones)
+                placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(all_region_coords))
+                params = [coord for region in all_region_coords for coord in region]
+                # Add hierarchy filter params if present
+                params.extend(filter_params)
 
                 cursor.execute(f'''
                     SELECT id, discord_tag, region_x, region_y, region_z FROM systems s
-                    WHERE ({placeholders}) {tag_filter}
+                    WHERE ({placeholders}) {combined_filter}
                 ''', params)
 
                 all_systems = [dict(row) for row in cursor.fetchall()]
@@ -5405,7 +5759,19 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                         key = (rx, ry, rz)
                         visible_counts[key] = visible_counts.get(key, 0) + 1
 
-            for region_row in region_rows:
+            # Calculate the TRUE total of regions with visible systems BEFORE pagination
+            true_total_regions = sum(1 for r in all_region_rows if visible_counts.get((r['region_x'], r['region_y'], r['region_z']), 0) > 0)
+
+            # Now apply pagination to all_region_rows
+            if limit > 0:
+                offset = page * limit
+                # Filter all_region_rows to only include those with visible systems, THEN paginate
+                visible_region_rows = [r for r in all_region_rows if visible_counts.get((r['region_x'], r['region_y'], r['region_z']), 0) > 0]
+                region_rows_paginated = visible_region_rows[offset:offset + limit]
+            else:
+                region_rows_paginated = [r for r in all_region_rows if visible_counts.get((r['region_x'], r['region_y'], r['region_z']), 0) > 0]
+
+            for region_row in region_rows_paginated:
                 region = dict(region_row)
                 rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
 
@@ -5419,29 +5785,36 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 region['systems'] = []  # Empty for now, lazy-load via separate endpoint
                 regions.append(region)
 
-            # Filter out regions with no visible systems
-            regions = [r for r in regions if r['system_count'] > 0]
-
             return {
                 'regions': regions,
-                'total_regions': len(regions),
-                'applied_filter': discord_tag or 'all'
+                'total_regions': true_total_regions,
+                'applied_filter': discord_tag or 'all',
+                'reality': reality,
+                'galaxy': galaxy
             }
 
-        # STEP 2: Load all systems for all regions in ONE query
-        region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in region_rows]
+        # STEP 2: Load all systems for all regions in ONE query (include_systems=True path)
+        # Apply pagination for include_systems=True case
+        total_regions = len(all_region_rows)
+        if limit > 0:
+            offset = page * limit
+            paginated_region_rows = all_region_rows[offset:offset + limit]
+        else:
+            paginated_region_rows = all_region_rows
+
+        region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in paginated_region_rows]
         if not region_coords:
             return {'regions': [], 'total_regions': 0}
 
         # Build WHERE clause for all regions
         placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
         params = [coord for region in region_coords for coord in region]
-        # Add tag filter params if present
-        params.extend(tag_params)
+        # Add hierarchy filter params if present
+        params.extend(filter_params)
 
         cursor.execute(f'''
             SELECT * FROM systems s
-            WHERE ({placeholders}) {tag_filter}
+            WHERE ({placeholders}) {combined_filter}
             ORDER BY s.region_x, s.region_y, s.region_z, s.created_at ASC NULLS FIRST, s.id ASC
         ''', params)
 
@@ -5526,7 +5899,7 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 system['discoveries'] = []
 
         # STEP 6: Build final region objects with data restrictions applied
-        for region_row in region_rows:
+        for region_row in paginated_region_rows:
             region = dict(region_row)
             rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
 
@@ -5544,7 +5917,13 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
 
             regions.append(region)
 
-        return {'regions': regions, 'total_regions': total_regions}
+        return {
+            'regions': regions,
+            'total_regions': total_regions,
+            'applied_filter': discord_tag or 'all',
+            'reality': reality,
+            'galaxy': galaxy
+        }
 
     except Exception as e:
         import traceback
@@ -6924,9 +7303,28 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             cursor.execute('SELECT id FROM systems WHERE name = ?', (name,))
             existing = cursor.fetchone()
 
+        # Get the editor's username for contributor tracking
+        editor_username = session_data.get('username') or payload.get('personal_discord_username') or 'Unknown'
+
         if existing:
             sys_id = existing['id']
-            # Update existing system (including name for renames and new NMS fields)
+
+            # Get current contributor data to preserve/update
+            cursor.execute('SELECT discovered_by, contributors FROM systems WHERE id = ?', (sys_id,))
+            current_row = cursor.fetchone()
+            current_discovered_by = current_row['discovered_by'] if current_row else None
+            current_contributors = current_row['contributors'] if current_row else None
+
+            # Parse and update contributors list
+            try:
+                contributors_list = json.loads(current_contributors) if current_contributors else []
+            except (json.JSONDecodeError, TypeError):
+                contributors_list = []
+
+            if editor_username and editor_username not in contributors_list:
+                contributors_list.append(editor_username)
+
+            # Update existing system (including contributor tracking)
             cursor.execute('''
                 UPDATE systems SET
                     name = ?, galaxy = ?, reality = ?, x = ?, y = ?, z = ?,
@@ -6935,7 +7333,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     glyph_code = ?, glyph_planet = ?, glyph_solar_system = ?,
                     region_x = ?, region_y = ?, region_z = ?,
                     star_type = ?, economy_type = ?, economy_level = ?,
-                    conflict_level = ?, dominant_lifeform = ?, discord_tag = ?
+                    conflict_level = ?, dominant_lifeform = ?, discord_tag = ?,
+                    stellar_classification = ?,
+                    last_updated_by = ?, last_updated_at = ?, contributors = ?
                 WHERE id = ?
             ''', (
                 name,
@@ -6960,8 +7360,14 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 payload.get('conflict_level'),
                 payload.get('dominant_lifeform'),
                 payload.get('discord_tag'),
+                payload.get('stellar_classification'),
+                editor_username,
+                datetime.now(timezone.utc).isoformat(),
+                json.dumps(contributors_list),
                 sys_id
             ))
+            logger.info(f"Updated system {sys_id}, last_updated_by: {editor_username}")
+
             # Delete existing planets (will cascade to moons)
             cursor.execute('DELETE FROM planets WHERE system_id = ?', (sys_id,))
             # Delete existing space station
@@ -6970,12 +7376,13 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # Generate new ID
             import uuid
             sys_id = str(uuid.uuid4())
-            # Insert new system (including new NMS fields and discord_tag)
+            # Insert new system (including contributor tracking)
             cursor.execute('''
                 INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
-                    star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag,
+                    stellar_classification, discovered_by, contributors)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
@@ -6999,8 +7406,12 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 payload.get('economy_level'),
                 payload.get('conflict_level'),
                 payload.get('dominant_lifeform'),
-                payload.get('discord_tag')
+                payload.get('discord_tag'),
+                payload.get('stellar_classification'),
+                editor_username,
+                json.dumps([editor_username])
             ))
+            logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 
         # Insert planets with ALL fields (including weather, resources, hazards from Haven Extractor)
         for planet in payload.get('planets', []):
@@ -8595,19 +9006,30 @@ async def submit_system(
                 detail=f"A pending submission for system '{system_name}' already exists"
             )
 
-        # Check if a system with this glyph_code already exists (will be treated as edit on approval)
+        # Check if a system with matching glyph coordinates already exists
+        # Match on last 11 characters of glyph (ignoring planet index) + galaxy + reality
+        # This ensures we detect the same system even if the portal destination differs
         glyph_code = payload.get('glyph_code')
+        system_reality = payload.get('reality', 'Normal')
         existing_glyph_system = None
         if glyph_code:
-            cursor.execute('SELECT id, name FROM systems WHERE glyph_code = ?', (glyph_code,))
-            existing_glyph_row = cursor.fetchone()
+            existing_glyph_row = find_matching_system(cursor, glyph_code, system_galaxy, system_reality)
             if existing_glyph_row:
                 existing_glyph_system = {'id': existing_glyph_row[0], 'name': existing_glyph_row[1]}
-                warnings.append(
-                    f"EXISTING SYSTEM: A system with this glyph code already exists: '{existing_glyph_row[1]}'. "
-                    f"Approving this submission will UPDATE the existing system."
-                )
-                logger.info(f"Submission for '{system_name}' has glyph_code matching existing system '{existing_glyph_row[1]}' (ID: {existing_glyph_row[0]})")
+                # Check if names match - warn appropriately
+                if existing_glyph_row[1] and existing_glyph_row[1].strip() != system_name.strip():
+                    warnings.append(
+                        f"EXISTING SYSTEM: This appears to update existing system '{existing_glyph_row[1]}' "
+                        f"(same glyph coordinates in {system_galaxy}/{system_reality}). "
+                        f"However, the submitted name '{system_name}' differs. Please verify before approving."
+                    )
+                else:
+                    warnings.append(
+                        f"EXISTING SYSTEM: This appears to update existing system '{existing_glyph_row[1]}' "
+                        f"(same glyph coordinates in {system_galaxy}/{system_reality}). "
+                        f"Approving this submission will UPDATE the existing system."
+                    )
+                logger.info(f"Submission for '{system_name}' has glyph matching existing system '{existing_glyph_row[1]}' (ID: {existing_glyph_row[0]}) via last-11 + galaxy + reality")
 
         # Extract discord_tag for filtering (partners only see their tagged submissions)
         # Priority: 1) Payload, 2) API key, 3) Logged-in user's session
@@ -9180,12 +9602,19 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         existing_system_id = system_data.get('id')
         is_edit = False
         original_glyph_data = None  # Store original glyph info for edits
+        original_discovered_by = None
+        original_discovered_at = None
+        original_contributors = None
 
         logger.info(f"Approving submission {submission_id}: system_data.id = {existing_system_id}")
 
         if existing_system_id:
             # Check if the system actually exists in the database
-            cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
+            cursor.execute('''
+                SELECT id, glyph_code, glyph_planet, glyph_solar_system,
+                       discovered_by, discovered_at, contributors
+                FROM systems WHERE id = ?
+            ''', (existing_system_id,))
             existing_row = cursor.fetchone()
             if existing_row:
                 is_edit = True
@@ -9196,25 +9625,73 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     'glyph_planet': existing_row[2],
                     'glyph_solar_system': existing_row[3]
                 }
+                original_discovered_by = existing_row[4]
+                original_discovered_at = existing_row[5]
+                original_contributors = existing_row[6]
                 logger.info(f"Submission {submission_id} is an EDIT - found existing system with ID: {system_id}, original glyph: {original_glyph_data['glyph_code']}")
             else:
                 logger.info(f"Submission {submission_id} has ID {existing_system_id} but system not found in DB - treating as NEW")
 
-        # If not already an edit, check if a system with this glyph_code already exists
-        # This handles the case where someone submits via text input a glyph that's already in the DB
+        # If not already an edit, check if a system with matching glyph coordinates exists
+        # Match on last 11 characters (ignoring planet index) + galaxy + reality
+        # This handles the case where someone submits a system that's already in the DB
+        submission_galaxy = system_data.get('galaxy', 'Euclid')
+        submission_reality = system_data.get('reality', 'Normal')
+        existing_system_row = None
+
         if not is_edit and system_data.get('glyph_code'):
-            cursor.execute('SELECT id, name, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
-            existing_glyph_row = cursor.fetchone()
-            if existing_glyph_row:
+            existing_system_row = find_matching_system(
+                cursor,
+                system_data['glyph_code'],
+                submission_galaxy,
+                submission_reality
+            )
+            if existing_system_row:
+                existing_name = existing_system_row[1]
+                submitted_name = system_data.get('name', '').strip()
+
+                # Check if names differ - require manual review
+                if existing_name and submitted_name and existing_name.strip() != submitted_name:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"System glyph coordinates match existing system '{existing_name}' "
+                               f"but submitted name is '{submitted_name}'. "
+                               f"Please verify the names match or edit one before approving."
+                    )
+
                 is_edit = True
-                system_id = existing_glyph_row[0]
-                existing_name = existing_glyph_row[1]
+                system_id = existing_system_row[0]
                 original_glyph_data = {
-                    'glyph_code': existing_glyph_row[2],
-                    'glyph_planet': existing_glyph_row[3],
-                    'glyph_solar_system': existing_glyph_row[4]
+                    'glyph_code': existing_system_row[2],
+                    'glyph_planet': existing_system_row[3],
+                    'glyph_solar_system': existing_system_row[4]
                 }
-                logger.info(f"Submission {submission_id} has glyph_code that matches existing system '{existing_name}' (ID: {system_id}) - treating as EDIT")
+                # Store original discovered_by and contributors for preservation
+                original_discovered_by = existing_system_row[5]
+                original_discovered_at = existing_system_row[6]
+                original_contributors = existing_system_row[7]
+                logger.info(f"Submission {submission_id} has glyph matching existing system '{existing_name}' (ID: {system_id}) via last-11 + galaxy + reality - treating as EDIT")
+
+        # If still not an edit, check if a system with this exact name exists (fallback)
+        if not is_edit and system_data.get('name'):
+            cursor.execute('''
+                SELECT id, name, glyph_code, glyph_planet, glyph_solar_system,
+                       discovered_by, discovered_at, contributors
+                FROM systems WHERE name = ? AND galaxy = ? AND reality = ?
+            ''', (system_data['name'], submission_galaxy, submission_reality))
+            existing_name_row = cursor.fetchone()
+            if existing_name_row:
+                is_edit = True
+                system_id = existing_name_row[0]
+                original_glyph_data = {
+                    'glyph_code': existing_name_row[2],
+                    'glyph_planet': existing_name_row[3],
+                    'glyph_solar_system': existing_name_row[4]
+                }
+                original_discovered_by = existing_name_row[5]
+                original_discovered_at = existing_name_row[6]
+                original_contributors = existing_name_row[7]
+                logger.info(f"Submission {submission_id} has name matching existing system (ID: {system_id}) - treating as EDIT")
 
         # For EDITS: If submission doesn't have glyph data, preserve the original
         if is_edit and original_glyph_data:
@@ -9225,7 +9702,20 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 logger.info(f"Preserved original glyph for edit: {system_data['glyph_code']}")
 
         if is_edit:
-            # UPDATE existing system (including new companion app fields)
+            # Determine the updater's username for tracking
+            updater_username = submission.get('personal_discord_username') or submission.get('submitted_by') or current_username or 'Unknown'
+
+            # Build updated contributors list (preserve original, add new contributor if not already present)
+            try:
+                contributors_list = json.loads(original_contributors) if original_contributors else []
+            except (json.JSONDecodeError, TypeError):
+                contributors_list = []
+
+            # Add updater to contributors if not already present
+            if updater_username and updater_username not in contributors_list:
+                contributors_list.append(updater_username)
+
+            # UPDATE existing system - PRESERVE discovered_by/discovered_at, UPDATE last_updated_by/last_updated_at
             cursor.execute('''
                 UPDATE systems
                 SET name = ?, galaxy = ?, x = ?, y = ?, z = ?,
@@ -9235,8 +9725,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     region_x = ?, region_y = ?, region_z = ?,
                     star_type = ?, economy_type = ?, economy_level = ?,
                     conflict_level = ?, dominant_lifeform = ?,
-                    discovered_by = ?, discovered_at = ?,
-                    discord_tag = ?, personal_discord_username = ?
+                    discord_tag = ?, personal_discord_username = ?,
+                    stellar_classification = ?,
+                    last_updated_by = ?, last_updated_at = ?, contributors = ?
                 WHERE id = ?
             ''', (
                 system_data.get('name'),
@@ -9259,32 +9750,40 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 system_data.get('economy_level'),
                 system_data.get('conflict_level'),
                 system_data.get('dominant_lifeform'),
-                system_data.get('discovered_by'),
-                system_data.get('discovered_at'),
                 submission.get('discord_tag'),
                 submission.get('personal_discord_username'),
+                system_data.get('stellar_classification'),
+                updater_username,
+                datetime.now(timezone.utc).isoformat(),
+                json.dumps(contributors_list),
                 system_id
             ))
 
-            # Delete existing planets, moons, and space station for this system (will re-insert)
-            cursor.execute('SELECT id FROM planets WHERE system_id = ?', (system_id,))
-            planet_ids = [row[0] for row in cursor.fetchall()]
-            for pid in planet_ids:
-                cursor.execute('DELETE FROM moons WHERE planet_id = ?', (pid,))
-            cursor.execute('DELETE FROM planets WHERE system_id = ?', (system_id,))
-            cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (system_id,))
+            logger.info(f"Updated system {system_id}, preserving discovered_by='{original_discovered_by}', added contributor '{updater_username}'")
+
+            # MERGE planets: Update existing by name, add new ones, keep others
+            # First, get existing planets for this system
+            cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+            existing_planets = {row[1]: row[0] for row in cursor.fetchall()}  # name -> id mapping
+
+            # Track which planets we've processed (to keep unmentioned ones)
+            processed_planet_names = set()
         else:
             # Generate UUID for new system
             import uuid
             system_id = str(uuid.uuid4())
 
-            # INSERT new system (including new companion app fields and discord_tag)
+            # Determine the discoverer's username for new system
+            discoverer_username = system_data.get('discovered_by') or submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+
+            # INSERT new system (including new tracking fields)
             cursor.execute('''
                 INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
-                    discovered_by, discovered_at, discord_tag, personal_discord_username)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
+                    contributors)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -9308,13 +9807,20 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 system_data.get('economy_level'),
                 system_data.get('conflict_level'),
                 system_data.get('dominant_lifeform'),
-                system_data.get('discovered_by'),
+                discoverer_username,
                 system_data.get('discovered_at'),
                 submission.get('discord_tag'),
-                submission.get('personal_discord_username')
+                submission.get('personal_discord_username'),
+                system_data.get('stellar_classification'),
+                json.dumps([discoverer_username])  # Initialize contributors with discoverer
             ))
 
-        # Insert planets (including all Haven Extractor v7.9.6+ fields)
+        # Handle planets - for edits, merge by name; for new systems, insert all
+        # Initialize existing_planets if not already set (for new systems)
+        if not is_edit:
+            existing_planets = {}
+            processed_planet_names = set()
+
         for planet in system_data.get('planets', []):
             # Handle sentinel_level -> sentinel field mapping (companion app sends sentinel_level)
             sentinel_val = planet.get('sentinel') or planet.get('sentinel_level', 'None')
@@ -9322,57 +9828,117 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             fauna_val = planet.get('fauna') or planet.get('fauna_level', 'N/A')
             flora_val = planet.get('flora') or planet.get('flora_level', 'N/A')
 
-            cursor.execute('''
-                INSERT INTO planets (
-                    system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
-                    fauna_count, flora_count, has_water, materials, base_location, photo, notes, description,
-                    biome, biome_subtype, planet_size, planet_index, is_moon,
-                    storm_frequency, weather_intensity, building_density,
-                    hazard_temperature, hazard_radiation, hazard_toxicity,
-                    common_resource, uncommon_resource, rare_resource,
-                    weather_text, sentinels_text, flora_text, fauna_text
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                system_id,
-                planet.get('name'),
-                planet.get('x', 0),
-                planet.get('y', 0),
-                planet.get('z', 0),
-                planet.get('climate'),
-                planet.get('weather'),
-                sentinel_val,
-                fauna_val,
-                flora_val,
-                planet.get('fauna_count', 0),
-                planet.get('flora_count', 0),
-                planet.get('has_water', 0),
-                planet.get('materials'),
-                planet.get('base_location'),
-                planet.get('photo'),
-                planet.get('notes'),
-                planet.get('description', ''),
-                # New Haven Extractor fields
-                planet.get('biome'),
-                planet.get('biome_subtype'),
-                planet.get('planet_size'),
-                planet.get('planet_index'),
-                1 if planet.get('is_moon') else 0,
-                planet.get('storm_frequency'),
-                planet.get('weather_intensity'),
-                planet.get('building_density'),
-                planet.get('hazard_temperature', 0),
-                planet.get('hazard_radiation', 0),
-                planet.get('hazard_toxicity', 0),
-                planet.get('common_resource'),
-                planet.get('uncommon_resource'),
-                planet.get('rare_resource'),
-                planet.get('weather_text'),
-                planet.get('sentinels_text'),
-                planet.get('flora_text'),
-                planet.get('fauna_text')
-            ))
-            planet_id = cursor.lastrowid
+            planet_name = planet.get('name')
+            processed_planet_names.add(planet_name)
+
+            # Check if this planet already exists (for edits)
+            if is_edit and planet_name in existing_planets:
+                # UPDATE existing planet
+                existing_planet_id = existing_planets[planet_name]
+                cursor.execute('''
+                    UPDATE planets SET
+                        x = ?, y = ?, z = ?, climate = ?, weather = ?, sentinel = ?, fauna = ?, flora = ?,
+                        fauna_count = ?, flora_count = ?, has_water = ?, materials = ?, base_location = ?,
+                        photo = ?, notes = ?, description = ?,
+                        biome = ?, biome_subtype = ?, planet_size = ?, planet_index = ?, is_moon = ?,
+                        storm_frequency = ?, weather_intensity = ?, building_density = ?,
+                        hazard_temperature = ?, hazard_radiation = ?, hazard_toxicity = ?,
+                        common_resource = ?, uncommon_resource = ?, rare_resource = ?,
+                        weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?
+                    WHERE id = ?
+                ''', (
+                    planet.get('x', 0),
+                    planet.get('y', 0),
+                    planet.get('z', 0),
+                    planet.get('climate'),
+                    planet.get('weather'),
+                    sentinel_val,
+                    fauna_val,
+                    flora_val,
+                    planet.get('fauna_count', 0),
+                    planet.get('flora_count', 0),
+                    planet.get('has_water', 0),
+                    planet.get('materials'),
+                    planet.get('base_location'),
+                    planet.get('photo'),
+                    planet.get('notes'),
+                    planet.get('description', ''),
+                    planet.get('biome'),
+                    planet.get('biome_subtype'),
+                    planet.get('planet_size'),
+                    planet.get('planet_index'),
+                    1 if planet.get('is_moon') else 0,
+                    planet.get('storm_frequency'),
+                    planet.get('weather_intensity'),
+                    planet.get('building_density'),
+                    planet.get('hazard_temperature', 0),
+                    planet.get('hazard_radiation', 0),
+                    planet.get('hazard_toxicity', 0),
+                    planet.get('common_resource'),
+                    planet.get('uncommon_resource'),
+                    planet.get('rare_resource'),
+                    planet.get('weather_text'),
+                    planet.get('sentinels_text'),
+                    planet.get('flora_text'),
+                    planet.get('fauna_text'),
+                    existing_planet_id
+                ))
+                planet_id = existing_planet_id
+                logger.info(f"Updated existing planet '{planet_name}' (ID: {planet_id})")
+            else:
+                # INSERT new planet
+                cursor.execute('''
+                    INSERT INTO planets (
+                        system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
+                        fauna_count, flora_count, has_water, materials, base_location, photo, notes, description,
+                        biome, biome_subtype, planet_size, planet_index, is_moon,
+                        storm_frequency, weather_intensity, building_density,
+                        hazard_temperature, hazard_radiation, hazard_toxicity,
+                        common_resource, uncommon_resource, rare_resource,
+                        weather_text, sentinels_text, flora_text, fauna_text
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    system_id,
+                    planet_name,
+                    planet.get('x', 0),
+                    planet.get('y', 0),
+                    planet.get('z', 0),
+                    planet.get('climate'),
+                    planet.get('weather'),
+                    sentinel_val,
+                    fauna_val,
+                    flora_val,
+                    planet.get('fauna_count', 0),
+                    planet.get('flora_count', 0),
+                    planet.get('has_water', 0),
+                    planet.get('materials'),
+                    planet.get('base_location'),
+                    planet.get('photo'),
+                    planet.get('notes'),
+                    planet.get('description', ''),
+                    planet.get('biome'),
+                    planet.get('biome_subtype'),
+                    planet.get('planet_size'),
+                    planet.get('planet_index'),
+                    1 if planet.get('is_moon') else 0,
+                    planet.get('storm_frequency'),
+                    planet.get('weather_intensity'),
+                    planet.get('building_density'),
+                    planet.get('hazard_temperature', 0),
+                    planet.get('hazard_radiation', 0),
+                    planet.get('hazard_toxicity', 0),
+                    planet.get('common_resource'),
+                    planet.get('uncommon_resource'),
+                    planet.get('rare_resource'),
+                    planet.get('weather_text'),
+                    planet.get('sentinels_text'),
+                    planet.get('flora_text'),
+                    planet.get('fauna_text')
+                ))
+                planet_id = cursor.lastrowid
+                if is_edit:
+                    logger.info(f"Added new planet '{planet_name}' (ID: {planet_id}) to existing system")
 
             # Insert moons (nested under planet)
             for moon in planet.get('moons', []):
@@ -9859,7 +10425,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             star_type = ?, economy_type = ?, economy_level = ?,
                             conflict_level = ?, dominant_lifeform = ?,
                             discovered_by = ?, discovered_at = ?,
-                            discord_tag = ?, personal_discord_username = ?
+                            discord_tag = ?, personal_discord_username = ?,
+                            stellar_classification = ?
                         WHERE id = ?
                     ''', (
                         system_data.get('name'),
@@ -9884,6 +10451,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('discovered_at'),
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
+                        system_data.get('stellar_classification'),
                         system_id
                     ))
 
@@ -9902,8 +10470,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
-                            discovered_by, discovered_at, discord_tag, personal_discord_username)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -9928,7 +10496,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('discovered_by'),
                         system_data.get('discovered_at'),
                         submission.get('discord_tag'),
-                        submission.get('personal_discord_username')
+                        submission.get('personal_discord_username'),
+                        system_data.get('stellar_classification')
                     ))
 
                 # Insert planets
@@ -10701,6 +11270,3874 @@ async def receive_extraction(
     finally:
         if conn:
             conn.close()
+
+
+# =============================================================================
+# WAR ROOM API ENDPOINTS
+# =============================================================================
+# Territorial conflict tracking system for enrolled civilizations
+# =============================================================================
+
+
+def get_war_room_partner_info(session: dict) -> dict:
+    """Get partner info for War Room operations. Returns None if not enrolled."""
+    if not session:
+        return None
+
+    user_type = session.get('user_type')
+    partner_id = None
+
+    if user_type == 'super_admin':
+        return {'is_super_admin': True, 'partner_id': None}
+
+    if user_type == 'partner':
+        partner_id = session.get('partner_id')
+    elif user_type == 'sub_admin':
+        # Sub-admin's parent partner is stored as 'partner_id' in session
+        partner_id = session.get('partner_id')
+
+    if not partner_id:
+        return None
+
+    # Check if enrolled in War Room
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT wre.id, pa.display_name, pa.discord_tag, pa.region_color
+            FROM war_room_enrollment wre
+            JOIN partner_accounts pa ON wre.partner_id = pa.id
+            WHERE wre.partner_id = ? AND wre.is_active = 1
+        ''', (partner_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            'is_super_admin': False,
+            'partner_id': partner_id,
+            'enrollment_id': row[0],
+            'display_name': row[1],
+            'discord_tag': row[2],
+            'region_color': row[3]
+        }
+    finally:
+        conn.close()
+
+
+async def send_war_notification(
+    partner_id: int,
+    notification_type: str,
+    title: str,
+    message: str,
+    conflict_id: int = None
+):
+    """Create in-app notification and optionally send Discord webhook."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Create in-app notification
+        cursor.execute('''
+            INSERT INTO war_notifications (recipient_partner_id, notification_type, title, message, related_conflict_id)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (partner_id, notification_type, title, message, conflict_id))
+        conn.commit()
+
+        # Check for Discord webhook
+        cursor.execute('''
+            SELECT webhook_url FROM discord_webhooks
+            WHERE partner_id = ? AND is_active = 1
+        ''', (partner_id,))
+        webhook_row = cursor.fetchone()
+
+        if webhook_row and webhook_row[0]:
+            webhook_url = webhook_row[0]
+            # Send webhook using requests (fire and forget)
+            import requests as req_lib
+            embed = {
+                "title": f"WAR ROOM: {title}",
+                "description": message,
+                "color": 15158332,  # Red
+                "footer": {"text": "Haven War Room"},
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            try:
+                req_lib.post(webhook_url, json={"embeds": [embed]}, timeout=5)
+                cursor.execute('''
+                    UPDATE discord_webhooks SET last_triggered_at = ? WHERE partner_id = ?
+                ''', (datetime.now(timezone.utc).isoformat(), partner_id))
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Failed to send War Room webhook to partner {partner_id}: {e}")
+    finally:
+        conn.close()
+
+
+# --- Enrollment Endpoints ---
+
+@app.get('/api/warroom/enrollment')
+async def get_war_room_enrollment(session: Optional[str] = Cookie(None)):
+    """List all enrolled civs in War Room."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT wre.id, wre.partner_id, pa.display_name, pa.discord_tag, pa.region_color,
+                   wre.enrolled_at, wre.enrolled_by, wre.is_active,
+                   wre.home_region_x, wre.home_region_y, wre.home_region_z,
+                   wre.home_region_name, wre.home_galaxy
+            FROM war_room_enrollment wre
+            JOIN partner_accounts pa ON wre.partner_id = pa.id
+            WHERE wre.is_active = 1
+            ORDER BY wre.enrolled_at DESC
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'partner_id': r[1],
+            'display_name': r[2],
+            'discord_tag': r[3],
+            'region_color': r[4],
+            'enrolled_at': r[5],
+            'enrolled_by': r[6],
+            'is_active': r[7],
+            'home_region_x': r[8],
+            'home_region_y': r[9],
+            'home_region_z': r[10],
+            'home_region_name': r[11],
+            'home_galaxy': r[12]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/enrollment')
+async def enroll_in_war_room(request: Request, session: Optional[str] = Cookie(None)):
+    """Enroll a partner in War Room (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    partner_id = data.get('partner_id')
+    if not partner_id:
+        raise HTTPException(status_code=400, detail="partner_id required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Check partner exists and get current enabled_features
+        cursor.execute('SELECT id, display_name, enabled_features FROM partner_accounts WHERE id = ?', (partner_id,))
+        partner = cursor.fetchone()
+        if not partner:
+            raise HTTPException(status_code=404, detail="Partner not found")
+
+        # Check if already enrolled (only check active enrollments)
+        cursor.execute('SELECT id, is_active FROM war_room_enrollment WHERE partner_id = ?', (partner_id,))
+        existing = cursor.fetchone()
+        if existing:
+            if existing[1] == 1:  # is_active = 1
+                raise HTTPException(status_code=409, detail="Partner already enrolled")
+            else:
+                # Re-activate existing enrollment
+                cursor.execute('''
+                    UPDATE war_room_enrollment SET is_active = 1, enrolled_by = ?, enrolled_at = datetime('now')
+                    WHERE partner_id = ?
+                ''', (session_data.get('username'), partner_id))
+        else:
+            # Add new enrollment
+            cursor.execute('''
+                INSERT INTO war_room_enrollment (partner_id, enrolled_by)
+                VALUES (?, ?)
+            ''', (partner_id, session_data.get('username')))
+
+        # Also add 'war_room' to partner's enabled_features so navbar shows the tab
+        current_features = json.loads(partner[2] or '[]')
+        if 'war_room' not in current_features:
+            current_features.append('war_room')
+            cursor.execute('''
+                UPDATE partner_accounts SET enabled_features = ? WHERE id = ?
+            ''', (json.dumps(current_features), partner_id))
+
+        conn.commit()
+
+        logger.info(f"War Room: Enrolled {partner[1]} (ID: {partner_id})")
+        return {'status': 'enrolled', 'partner_id': partner_id, 'display_name': partner[1]}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/enrollment/{partner_id}')
+async def unenroll_from_war_room(partner_id: int, session: Optional[str] = Cookie(None)):
+    """Unenroll a partner from War Room (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE war_room_enrollment SET is_active = 0 WHERE partner_id = ?
+        ''', (partner_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Enrollment not found")
+
+        # Also remove 'war_room' from partner's enabled_features
+        cursor.execute('SELECT enabled_features FROM partner_accounts WHERE id = ?', (partner_id,))
+        row = cursor.fetchone()
+        if row:
+            current_features = json.loads(row[0] or '[]')
+            if 'war_room' in current_features:
+                current_features.remove('war_room')
+                cursor.execute('''
+                    UPDATE partner_accounts SET enabled_features = ? WHERE id = ?
+                ''', (json.dumps(current_features), partner_id))
+
+        conn.commit()
+
+        logger.info(f"War Room: Unenrolled partner ID {partner_id}")
+        return {'status': 'unenrolled', 'partner_id': partner_id}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/enrollment/status')
+async def get_enrollment_status(session: Optional[str] = Cookie(None)):
+    """Check if current user's civ is enrolled in War Room."""
+    try:
+        session_data = get_session(session)
+
+        # Check if correspondent
+        if session_data and session_data.get('user_type') == 'correspondent':
+            return {
+                'enrolled': False,
+                'is_correspondent': True,
+                'display_name': session_data.get('display_name', session_data.get('username'))
+            }
+
+        partner_info = get_war_room_partner_info(session_data)
+
+        if partner_info and partner_info.get('is_super_admin'):
+            return {'enrolled': True, 'is_super_admin': True}
+
+        if not partner_info:
+            return {'enrolled': False}
+
+        return {
+            'enrolled': True,
+            'partner_id': partner_info['partner_id'],
+            'display_name': partner_info['display_name'],
+            'discord_tag': partner_info['discord_tag'],
+            'region_color': partner_info['region_color']
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_enrollment_status: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
+
+
+@app.put('/api/warroom/enrollment/{partner_id}/home-region')
+async def set_home_region(partner_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Set home region for an enrolled civilization (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    region_x = data.get('region_x')
+    region_y = data.get('region_y')
+    region_z = data.get('region_z')
+    region_name = data.get('region_name')
+    galaxy = data.get('galaxy', 'Euclid')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Check enrollment exists
+        cursor.execute('SELECT id FROM war_room_enrollment WHERE partner_id = ? AND is_active = 1', (partner_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Enrollment not found")
+
+        cursor.execute('''
+            UPDATE war_room_enrollment
+            SET home_region_x = ?, home_region_y = ?, home_region_z = ?,
+                home_region_name = ?, home_galaxy = ?
+            WHERE partner_id = ?
+        ''', (region_x, region_y, region_z, region_name, galaxy, partner_id))
+        conn.commit()
+
+        logger.info(f"War Room: Set home region for partner {partner_id}: ({region_x}, {region_y}, {region_z})")
+        return {'status': 'updated', 'partner_id': partner_id}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/home-regions')
+async def get_home_regions(session: Optional[str] = Cookie(None)):
+    """Get home regions for all enrolled civilizations."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT wre.partner_id, pa.display_name, pa.region_color,
+                   wre.home_region_x, wre.home_region_y, wre.home_region_z,
+                   wre.home_region_name, wre.home_galaxy
+            FROM war_room_enrollment wre
+            JOIN partner_accounts pa ON wre.partner_id = pa.id
+            WHERE wre.is_active = 1 AND wre.home_region_x IS NOT NULL
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'partner_id': r[0],
+            'display_name': r[1],
+            'region_color': r[2],
+            'region_x': r[3],
+            'region_y': r[4],
+            'region_z': r[5],
+            'region_name': r[6],
+            'galaxy': r[7]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+# --- Territorial Claims Endpoints ---
+
+@app.get('/api/warroom/claims')
+async def get_territorial_claims(partner_id: int = None, session: Optional[str] = Cookie(None)):
+    """List all territorial claims, optionally filtered by partner."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = '''
+            SELECT tc.id, tc.system_id, tc.claimant_partner_id, pa.display_name, pa.discord_tag,
+                   pa.region_color, tc.claimed_at, tc.claim_type, tc.region_x, tc.region_y, tc.region_z,
+                   tc.galaxy, tc.reality, tc.notes, s.name as system_name
+            FROM territorial_claims tc
+            JOIN partner_accounts pa ON tc.claimant_partner_id = pa.id
+            LEFT JOIN systems s ON tc.system_id = s.id
+        '''
+        params = []
+        if partner_id:
+            query += ' WHERE tc.claimant_partner_id = ?'
+            params.append(partner_id)
+        query += ' ORDER BY tc.claimed_at DESC'
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'system_id': r[1],
+            'claimant_partner_id': r[2],
+            'claimant_display_name': r[3],
+            'claimant_discord_tag': r[4],
+            'claimant_color': r[5],
+            'claimed_at': r[6],
+            'claim_type': r[7],
+            'region_x': r[8],
+            'region_y': r[9],
+            'region_z': r[10],
+            'galaxy': r[11],
+            'reality': r[12],
+            'notes': r[13],
+            'system_name': r[14]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/claims')
+async def create_territorial_claim(request: Request, session: Optional[str] = Cookie(None)):
+    """Claim a system for your civilization."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    system_id = data.get('system_id')
+    if not system_id:
+        raise HTTPException(status_code=400, detail="system_id required")
+
+    # Super admin can claim for any partner
+    partner_id = data.get('partner_id') if partner_info.get('is_super_admin') else partner_info['partner_id']
+    if not partner_id:
+        raise HTTPException(status_code=400, detail="partner_id required for super admin")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get system info
+        cursor.execute('''
+            SELECT id, name, region_x, region_y, region_z, galaxy, reality
+            FROM systems WHERE id = ?
+        ''', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            raise HTTPException(status_code=404, detail="System not found")
+
+        # Check if already claimed
+        cursor.execute('SELECT id, claimant_partner_id FROM territorial_claims WHERE system_id = ?', (system_id,))
+        existing = cursor.fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="System already claimed by another civilization")
+
+        cursor.execute('''
+            INSERT INTO territorial_claims (system_id, claimant_partner_id, region_x, region_y, region_z, galaxy, reality, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (system_id, partner_id, system[2], system[3], system[4], system[5], system[6], data.get('notes')))
+        conn.commit()
+
+        logger.info(f"War Room: Partner {partner_id} claimed system {system[1]} ({system_id})")
+        return {'status': 'claimed', 'claim_id': cursor.lastrowid, 'system_name': system[1]}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/claims/{claim_id}')
+async def release_territorial_claim(claim_id: int, session: Optional[str] = Cookie(None)):
+    """Release a territorial claim."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Check ownership
+        cursor.execute('SELECT claimant_partner_id FROM territorial_claims WHERE id = ?', (claim_id,))
+        claim = cursor.fetchone()
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+        if not partner_info.get('is_super_admin') and claim[0] != partner_info['partner_id']:
+            raise HTTPException(status_code=403, detail="Can only release your own claims")
+
+        cursor.execute('DELETE FROM territorial_claims WHERE id = ?', (claim_id,))
+        conn.commit()
+
+        return {'status': 'released', 'claim_id': claim_id}
+    finally:
+        conn.close()
+
+
+# --- Conflict Management Endpoints ---
+
+@app.get('/api/warroom/conflicts')
+async def get_conflicts(status: str = None, partner_id: int = None, session: Optional[str] = Cookie(None)):
+    """List conflicts with optional filters."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = '''
+            SELECT c.id, c.target_system_id, c.target_system_name,
+                   c.attacker_partner_id, att.display_name, att.region_color,
+                   c.defender_partner_id, def.display_name, def.region_color,
+                   c.declared_at, c.declared_by, c.acknowledged_at, c.resolved_at,
+                   c.status, c.resolution, c.victor_partner_id, c.notes
+            FROM conflicts c
+            JOIN partner_accounts att ON c.attacker_partner_id = att.id
+            JOIN partner_accounts def ON c.defender_partner_id = def.id
+            WHERE 1=1
+        '''
+        params = []
+        if status:
+            query += ' AND c.status = ?'
+            params.append(status)
+        if partner_id:
+            query += ' AND (c.attacker_partner_id = ? OR c.defender_partner_id = ?)'
+            params.extend([partner_id, partner_id])
+        query += ' ORDER BY c.declared_at DESC'
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'target_system_id': r[1],
+            'target_system_name': r[2],
+            'attacker': {'partner_id': r[3], 'display_name': r[4], 'color': r[5]},
+            'defender': {'partner_id': r[6], 'display_name': r[7], 'color': r[8]},
+            'declared_at': r[9],
+            'declared_by': r[10],
+            'acknowledged_at': r[11],
+            'resolved_at': r[12],
+            'status': r[13],
+            'resolution': r[14],
+            'victor_partner_id': r[15],
+            'notes': r[16]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/active')
+async def get_active_conflicts(session: Optional[str] = Cookie(None)):
+    """Get currently active conflicts for the live feed."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT c.id, c.target_system_id, c.target_system_name,
+                   att.display_name as attacker_name, att.region_color as attacker_color,
+                   def.display_name as defender_name, def.region_color as defender_color,
+                   c.declared_at, c.status
+            FROM conflicts c
+            JOIN partner_accounts att ON c.attacker_partner_id = att.id
+            JOIN partner_accounts def ON c.defender_partner_id = def.id
+            WHERE c.status IN ('pending', 'acknowledged', 'active')
+            ORDER BY c.declared_at DESC
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'target_system_id': r[1],
+            'target_system_name': r[2],
+            'attacker_name': r[3],
+            'attacker_color': r[4],
+            'defender_name': r[5],
+            'defender_color': r[6],
+            'declared_at': r[7],
+            'status': r[8]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/{conflict_id}')
+async def get_conflict_detail(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Get conflict details including timeline."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict
+        cursor.execute('''
+            SELECT c.id, c.target_system_id, c.target_system_name,
+                   c.attacker_partner_id, att.display_name, att.region_color,
+                   c.defender_partner_id, def.display_name, def.region_color,
+                   c.declared_at, c.declared_by, c.acknowledged_at, c.acknowledged_by,
+                   c.resolved_at, c.resolved_by, c.status, c.resolution, c.victor_partner_id, c.notes
+            FROM conflicts c
+            JOIN partner_accounts att ON c.attacker_partner_id = att.id
+            JOIN partner_accounts def ON c.defender_partner_id = def.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        r = cursor.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        # Get timeline events
+        cursor.execute('''
+            SELECT id, event_type, event_at, actor_username, details
+            FROM conflict_events
+            WHERE conflict_id = ?
+            ORDER BY event_at ASC
+        ''', (conflict_id,))
+        events = cursor.fetchall()
+
+        return {
+            'id': r[0],
+            'target_system_id': r[1],
+            'target_system_name': r[2],
+            'attacker': {'partner_id': r[3], 'display_name': r[4], 'color': r[5]},
+            'defender': {'partner_id': r[6], 'display_name': r[7], 'color': r[8]},
+            'declared_at': r[9],
+            'declared_by': r[10],
+            'acknowledged_at': r[11],
+            'acknowledged_by': r[12],
+            'resolved_at': r[13],
+            'resolved_by': r[14],
+            'status': r[15],
+            'resolution': r[16],
+            'victor_partner_id': r[17],
+            'notes': r[18],
+            'timeline': [{
+                'id': e[0],
+                'event_type': e[1],
+                'event_at': e[2],
+                'actor': e[3],
+                'details': e[4]
+            } for e in events]
+        }
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/conflicts')
+async def declare_conflict(request: Request, session: Optional[str] = Cookie(None)):
+    """Declare an attack on another civ's territory."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    target_system_id = data.get('target_system_id')
+    if not target_system_id:
+        raise HTTPException(status_code=400, detail="target_system_id required")
+
+    attacker_id = data.get('attacker_partner_id') if partner_info.get('is_super_admin') else partner_info['partner_id']
+    if not attacker_id:
+        raise HTTPException(status_code=400, detail="attacker_partner_id required for super admin")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Find the claim on this system
+        cursor.execute('''
+            SELECT tc.claimant_partner_id, pa.display_name, s.name
+            FROM territorial_claims tc
+            JOIN partner_accounts pa ON tc.claimant_partner_id = pa.id
+            LEFT JOIN systems s ON tc.system_id = s.id
+            WHERE tc.system_id = ?
+        ''', (target_system_id,))
+        claim = cursor.fetchone()
+        if not claim:
+            raise HTTPException(status_code=404, detail="System not claimed by any civilization")
+
+        defender_id = claim[0]
+        defender_name = claim[1]
+        system_name = claim[2] or target_system_id
+
+        if defender_id == attacker_id:
+            raise HTTPException(status_code=400, detail="Cannot attack your own territory")
+
+        # Check for existing active conflict on this system
+        cursor.execute('''
+            SELECT id FROM conflicts
+            WHERE target_system_id = ? AND status IN ('pending', 'acknowledged', 'active')
+        ''', (target_system_id,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail="Active conflict already exists for this system")
+
+        # Create conflict
+        username = session_data.get('username')
+        cursor.execute('''
+            INSERT INTO conflicts (target_system_id, target_system_name, attacker_partner_id, defender_partner_id, declared_by)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (target_system_id, system_name, attacker_id, defender_id, username))
+        conflict_id = cursor.lastrowid
+
+        # Add declaration event
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, 'declared', ?, ?, ?)
+        ''', (conflict_id, attacker_id, username, f"Attack declared on {system_name}"))
+        conn.commit()
+
+        # Send notification to defender
+        attacker_name = partner_info.get('display_name', 'Unknown')
+        await send_war_notification(
+            defender_id,
+            'attack_declared',
+            f"Attack Declaration: {system_name}",
+            f"{attacker_name} has declared an attack on {system_name}! Respond to acknowledge the conflict.",
+            conflict_id
+        )
+
+        # Add to public activity feed
+        await add_activity_feed_entry(
+            event_type='war_declared',
+            headline=f"{attacker_name} declares war on {defender_name}",
+            actor_partner_id=attacker_id,
+            actor_name=attacker_name,
+            target_partner_id=defender_id,
+            target_name=defender_name,
+            conflict_id=conflict_id,
+            system_id=str(target_system_id),
+            system_name=system_name,
+            details=f"Attack declared on system {system_name}. Awaiting defender acknowledgement.",
+            is_public=True
+        )
+
+        logger.info(f"War Room: Conflict declared - {attacker_name} attacking {defender_name} at {system_name}")
+        return {'status': 'declared', 'conflict_id': conflict_id, 'target_system': system_name}
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/conflicts/{conflict_id}/acknowledge')
+async def acknowledge_conflict(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Defender acknowledges the conflict."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict
+        cursor.execute('''
+            SELECT defender_partner_id, attacker_partner_id, status, target_system_name
+            FROM conflicts WHERE id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        defender_id, attacker_id, status, system_name = conflict
+
+        # Check authorization
+        if not partner_info.get('is_super_admin') and partner_info['partner_id'] != defender_id:
+            raise HTTPException(status_code=403, detail="Only the defender can acknowledge")
+
+        if status != 'pending':
+            raise HTTPException(status_code=400, detail="Conflict already acknowledged or resolved")
+
+        username = session_data.get('username')
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute('''
+            UPDATE conflicts SET status = 'active', acknowledged_at = ?, acknowledged_by = ?
+            WHERE id = ?
+        ''', (now, username, conflict_id))
+
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, 'acknowledged', ?, ?, ?)
+        ''', (conflict_id, defender_id, username, "Defender acknowledged the conflict - battle is now active"))
+        conn.commit()
+
+        # Notify attacker
+        await send_war_notification(
+            attacker_id,
+            'conflict_update',
+            f"Conflict Acknowledged: {system_name}",
+            f"The defender has acknowledged your attack on {system_name}. The battle is now active!",
+            conflict_id
+        )
+
+        # Get defender and attacker names for activity feed
+        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (defender_id,))
+        defender_row = cursor.fetchone()
+        defender_name = defender_row[0] if defender_row else 'Unknown'
+
+        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (attacker_id,))
+        attacker_row = cursor.fetchone()
+        attacker_name = attacker_row[0] if attacker_row else 'Unknown'
+
+        # Add to public activity feed
+        await add_activity_feed_entry(
+            event_type='conflict_acknowledged',
+            headline=f"{defender_name} accepts {attacker_name}'s challenge",
+            actor_partner_id=defender_id,
+            actor_name=defender_name,
+            target_partner_id=attacker_id,
+            target_name=attacker_name,
+            conflict_id=conflict_id,
+            system_name=system_name,
+            details=f"Battle for {system_name} is now active!",
+            is_public=True
+        )
+
+        logger.info(f"War Room: Conflict {conflict_id} acknowledged")
+        return {'status': 'acknowledged', 'conflict_id': conflict_id}
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/conflicts/{conflict_id}/resolve')
+async def resolve_conflict(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Resolve a conflict with a victor."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    resolution = data.get('resolution')  # attacker_victory, defender_victory, stalemate
+    if resolution not in ['attacker_victory', 'defender_victory', 'stalemate', 'cancelled']:
+        raise HTTPException(status_code=400, detail="Invalid resolution")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT attacker_partner_id, defender_partner_id, status, target_system_id, target_system_name
+            FROM conflicts WHERE id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        attacker_id, defender_id, status, system_id, system_name = conflict
+
+        # Check authorization - only super admin or involved parties
+        if not partner_info.get('is_super_admin'):
+            if partner_info['partner_id'] not in [attacker_id, defender_id]:
+                raise HTTPException(status_code=403, detail="Only involved parties can resolve")
+
+        if status == 'resolved':
+            raise HTTPException(status_code=400, detail="Conflict already resolved")
+
+        victor_id = None
+        if resolution == 'attacker_victory':
+            victor_id = attacker_id
+        elif resolution == 'defender_victory':
+            victor_id = defender_id
+
+        username = session_data.get('username')
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute('''
+            UPDATE conflicts SET status = 'resolved', resolution = ?, victor_partner_id = ?,
+                   resolved_at = ?, resolved_by = ?
+            WHERE id = ?
+        ''', (resolution, victor_id, now, username, conflict_id))
+
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_username, details)
+            VALUES (?, 'resolved', ?, ?)
+        ''', (conflict_id, username, f"Conflict resolved: {resolution}"))
+
+        # Transfer territory if attacker won
+        if resolution == 'attacker_victory':
+            cursor.execute('''
+                UPDATE territorial_claims SET claimant_partner_id = ?, claimed_at = ?
+                WHERE system_id = ?
+            ''', (attacker_id, now, system_id))
+            logger.info(f"War Room: Territory {system_name} transferred to attacker (partner {attacker_id})")
+
+        conn.commit()
+
+        # Recalculate statistics
+        await recalculate_war_statistics_internal(conn)
+
+        # Notify both parties
+        for pid in [attacker_id, defender_id]:
+            await send_war_notification(
+                pid,
+                'conflict_resolved',
+                f"Conflict Resolved: {system_name}",
+                f"The battle for {system_name} has ended. Resolution: {resolution.replace('_', ' ').title()}",
+                conflict_id
+            )
+
+        # Get names for activity feed
+        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (attacker_id,))
+        attacker_row = cursor.fetchone()
+        attacker_name = attacker_row[0] if attacker_row else 'Unknown'
+
+        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (defender_id,))
+        defender_row = cursor.fetchone()
+        defender_name = defender_row[0] if defender_row else 'Unknown'
+
+        victor_name = None
+        if victor_id == attacker_id:
+            victor_name = attacker_name
+        elif victor_id == defender_id:
+            victor_name = defender_name
+
+        # Add to public activity feed
+        if resolution == 'attacker_victory':
+            headline = f"{attacker_name} conquers {system_name} from {defender_name}"
+            details = f"{attacker_name} has seized control of {system_name}. Territory transferred to the victor."
+        elif resolution == 'defender_victory':
+            headline = f"{defender_name} repels {attacker_name}'s invasion of {system_name}"
+            details = f"{defender_name} has successfully defended {system_name} against {attacker_name}."
+        elif resolution == 'stalemate':
+            headline = f"Battle for {system_name} ends in stalemate"
+            details = f"The conflict between {attacker_name} and {defender_name} over {system_name} has ended without a clear victor."
+        else:
+            headline = f"Conflict over {system_name} cancelled"
+            details = f"The conflict between {attacker_name} and {defender_name} has been cancelled."
+
+        await add_activity_feed_entry(
+            event_type='conflict_resolved',
+            headline=headline,
+            actor_partner_id=victor_id,
+            actor_name=victor_name,
+            target_partner_id=defender_id if victor_id == attacker_id else attacker_id,
+            target_name=defender_name if victor_id == attacker_id else attacker_name,
+            conflict_id=conflict_id,
+            system_id=str(system_id) if system_id else None,
+            system_name=system_name,
+            details=details,
+            is_public=True
+        )
+
+        logger.info(f"War Room: Conflict {conflict_id} resolved as {resolution}")
+        return {'status': 'resolved', 'resolution': resolution, 'victor_partner_id': victor_id}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/conflicts/{conflict_id}')
+async def cancel_conflict(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Cancel a pending conflict (attacker only)."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT c.attacker_partner_id, c.defender_partner_id, c.status, c.target_system_name,
+                   pa1.display_name as attacker_name, pa2.display_name as defender_name
+            FROM conflicts c
+            LEFT JOIN partner_accounts pa1 ON c.attacker_partner_id = pa1.id
+            LEFT JOIN partner_accounts pa2 ON c.defender_partner_id = pa2.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        attacker_id, defender_id, status, system_name, attacker_name, defender_name = conflict
+
+        if not partner_info.get('is_super_admin') and partner_info['partner_id'] != attacker_id:
+            raise HTTPException(status_code=403, detail="Only the attacker can cancel")
+
+        if status != 'pending':
+            raise HTTPException(status_code=400, detail="Can only cancel pending conflicts")
+
+        cursor.execute('''
+            UPDATE conflicts SET status = 'resolved', resolution = 'cancelled',
+                   resolved_at = ?, resolved_by = ?
+            WHERE id = ?
+        ''', (datetime.now(timezone.utc).isoformat(), session_data.get('username'), conflict_id))
+        conn.commit()
+
+        # Add to public activity feed
+        await add_activity_feed_entry(
+            event_type='conflict_cancelled',
+            headline=f"{attacker_name} withdraws attack on {system_name}",
+            actor_partner_id=attacker_id,
+            actor_name=attacker_name,
+            target_partner_id=defender_id,
+            target_name=defender_name,
+            conflict_id=conflict_id,
+            system_name=system_name,
+            details=f"{attacker_name} has withdrawn their declaration of war against {defender_name} for {system_name}.",
+            is_public=True
+        )
+
+        return {'status': 'cancelled', 'conflict_id': conflict_id}
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/conflicts/{conflict_id}/events')
+async def add_conflict_event(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Add a timeline event to a conflict."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    event_type = data.get('event_type')
+    details = data.get('details')
+
+    if event_type not in ['skirmish', 'capture', 'defense', 'retreat', 'reinforcement', 'note']:
+        raise HTTPException(status_code=400, detail="Invalid event_type")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict details for activity feed
+        cursor.execute('''
+            SELECT c.status, c.target_system_name, pa.display_name
+            FROM conflicts c
+            LEFT JOIN partner_accounts pa ON c.attacker_partner_id = pa.id OR c.defender_partner_id = pa.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+        if conflict[0] == 'resolved':
+            raise HTTPException(status_code=400, detail="Cannot add events to resolved conflict")
+
+        system_name = conflict[1] or 'Unknown System'
+
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (conflict_id, event_type, partner_info.get('partner_id'), session_data.get('username'), details))
+        event_id = cursor.lastrowid
+        conn.commit()
+
+        # Add to activity feed for significant battle events (not notes)
+        if event_type != 'note':
+            actor_name = partner_info.get('display_name', session_data.get('username', 'Unknown'))
+
+            # Create appropriate headline based on event type
+            event_headlines = {
+                'skirmish': f"Skirmish reported at {system_name}",
+                'capture': f"{actor_name} captures position at {system_name}",
+                'defense': f"{actor_name} defends position at {system_name}",
+                'retreat': f"Forces retreat at {system_name}",
+                'reinforcement': f"{actor_name} sends reinforcements to {system_name}"
+            }
+            headline = event_headlines.get(event_type, f"Battle update at {system_name}")
+
+            await add_activity_feed_entry(
+                event_type=f'battle_{event_type}',
+                headline=headline,
+                actor_partner_id=partner_info.get('partner_id'),
+                actor_name=actor_name,
+                conflict_id=conflict_id,
+                system_name=system_name,
+                details=details,
+                is_public=True
+            )
+
+        return {'status': 'added', 'event_id': event_id}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/{conflict_id}/events')
+async def get_conflict_events(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Get timeline events for a conflict."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Verify conflict exists
+        cursor.execute('SELECT id FROM conflicts WHERE id = ?', (conflict_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        cursor.execute('''
+            SELECT id, event_type, actor_partner_id, actor_username, details, event_at
+            FROM conflict_events
+            WHERE conflict_id = ?
+            ORDER BY event_at ASC
+        ''', (conflict_id,))
+        events = []
+        for row in cursor.fetchall():
+            events.append({
+                'id': row[0],
+                'event_type': row[1],
+                'actor_partner_id': row[2],
+                'actor_username': row[3],
+                'details': row[4],
+                'created_at': row[5]  # Frontend expects created_at
+            })
+        return events
+    finally:
+        conn.close()
+
+
+# --- Debrief Endpoints ---
+
+@app.get('/api/warroom/debrief')
+async def get_debrief(session: Optional[str] = Cookie(None)):
+    """Get current mission objectives."""
+    try:
+        session_data = get_session(session)
+        if not session_data:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT objectives, updated_at, updated_by FROM current_debrief WHERE id = 1')
+            row = cursor.fetchone()
+            if not row:
+                return {'objectives': [], 'updated_at': None, 'updated_by': None}
+
+            objectives = json.loads(row[0]) if row[0] else []
+            return {'objectives': objectives, 'updated_at': row[1], 'updated_by': row[2]}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_debrief: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
+
+
+@app.put('/api/warroom/debrief')
+async def update_debrief(request: Request, session: Optional[str] = Cookie(None)):
+    """Update mission objectives (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    objectives = data.get('objectives', [])
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE current_debrief SET objectives = ?, updated_at = ?, updated_by = ?
+            WHERE id = 1
+        ''', (json.dumps(objectives), datetime.now(timezone.utc).isoformat(), session_data.get('username')))
+        conn.commit()
+
+        return {'status': 'updated', 'objectives': objectives}
+    finally:
+        conn.close()
+
+
+# --- War News Endpoints ---
+
+@app.get('/api/warroom/news')
+async def get_war_news(limit: int = 20, offset: int = 0, session: Optional[str] = Cookie(None)):
+    """Get war news articles."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT wn.id, wn.headline, wn.body, wn.author_username, wn.author_type,
+                   wn.related_conflict_id, wn.published_at, wn.is_pinned,
+                   wn.article_type, wn.view_count, wn.reporting_org_id,
+                   ro.name as reporting_org_name, wc.display_name as author_name
+            FROM war_news wn
+            LEFT JOIN reporting_organizations ro ON wn.reporting_org_id = ro.id
+            LEFT JOIN war_correspondents wc ON wn.author_username = wc.username
+            WHERE wn.is_active = 1
+            ORDER BY wn.is_pinned DESC, wn.published_at DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'headline': r[1],
+            'body': r[2],
+            'author': r[3],
+            'author_type': r[4],
+            'conflict_id': r[5],
+            'created_at': r[6],
+            'is_pinned': r[7],
+            'article_type': r[8] or 'breaking',
+            'view_count': r[9] or 0,
+            'reporting_org_id': r[10],
+            'reporting_org_name': r[11],
+            'author_name': r[12] or r[3]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/news/ticker')
+async def get_news_ticker(session: Optional[str] = Cookie(None)):
+    """Get latest 10 news items for the ticker."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, headline, published_at FROM war_news
+            WHERE is_active = 1
+            ORDER BY published_at DESC
+            LIMIT 10
+        ''')
+        rows = cursor.fetchall()
+
+        return [{'id': r[0], 'headline': r[1], 'published_at': r[2]} for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/news')
+async def create_war_news(request: Request, session: Optional[str] = Cookie(None)):
+    """Create a news article (super admin or correspondent)."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Check if super admin or correspondent
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    username = session_data.get('username')
+    author_type = 'super_admin' if is_super_admin else 'correspondent'
+
+    if not is_super_admin:
+        # Check if they're a correspondent
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM war_correspondents WHERE username = ? AND is_active = 1', (username,))
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=403, detail="Must be super admin or war correspondent")
+        conn.close()
+
+    data = await request.json()
+    headline = data.get('headline')
+    body = data.get('body')
+    article_type = data.get('article_type', 'breaking')
+    if not headline or not body:
+        raise HTTPException(status_code=400, detail="headline and body required")
+
+    # Validate article_type
+    valid_types = ['breaking', 'report', 'analysis', 'editorial', 'announcement']
+    if article_type not in valid_types:
+        article_type = 'breaking'
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO war_news (headline, body, author_username, author_type, related_conflict_id, is_pinned, article_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (headline, body, username, author_type, data.get('conflict_id'), data.get('is_pinned', False), article_type))
+        news_id = cursor.lastrowid
+        conn.commit()
+
+        # Add to activity feed
+        await add_activity_feed_entry(
+            event_type='news_published',
+            headline=f"News: {headline}",
+            actor_name=username,
+            details=f"New {article_type} article published",
+            is_public=True
+        )
+
+        logger.info(f"War Room: News created by {username}: {headline}")
+        return {'status': 'created', 'news_id': news_id}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/news/{news_id}')
+async def delete_war_news(news_id: int, session: Optional[str] = Cookie(None)):
+    """Delete a news article (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('UPDATE war_news SET is_active = 0 WHERE id = ?', (news_id,))
+        conn.commit()
+        return {'status': 'deleted', 'news_id': news_id}
+    finally:
+        conn.close()
+
+
+# --- War Correspondents Endpoints ---
+
+@app.get('/api/warroom/correspondents')
+async def get_correspondents(session: Optional[str] = Cookie(None)):
+    """List war correspondents (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, username, display_name, is_active, created_at, created_by
+            FROM war_correspondents
+            ORDER BY created_at DESC
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'username': r[1],
+            'display_name': r[2],
+            'is_active': bool(r[3]),
+            'created_at': r[4],
+            'created_by': r[5]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/correspondents')
+async def create_correspondent(request: Request, session: Optional[str] = Cookie(None)):
+    """Create a war correspondent (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    username = data.get('username')
+    password = data.get('password')
+    display_name = data.get('display_name')
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO war_correspondents (username, password_hash, display_name, created_by)
+            VALUES (?, ?, ?, ?)
+        ''', (username, password_hash, display_name, session_data.get('username')))
+        conn.commit()
+
+        logger.info(f"War Room: Correspondent created: {username}")
+        return {'status': 'created', 'correspondent_id': cursor.lastrowid}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/correspondents/login')
+async def correspondent_login(request: Request, response: Response):
+    """Login as a war correspondent."""
+    data = await request.json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, username, display_name, is_active
+            FROM war_correspondents
+            WHERE username = ? AND password_hash = ?
+        ''', (username, password_hash))
+        correspondent = cursor.fetchone()
+
+        if not correspondent:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        if not correspondent[3]:
+            raise HTTPException(status_code=403, detail="Account is inactive")
+
+        # Create session for correspondent
+        session_id = secrets.token_hex(32)
+        session_data = {
+            'user_type': 'correspondent',
+            'username': correspondent[1],
+            'display_name': correspondent[2] or correspondent[1],
+            'correspondent_id': correspondent[0]
+        }
+        sessions[session_id] = session_data
+
+        response.set_cookie(
+            key='session',
+            value=session_id,
+            httponly=True,
+            secure=False,
+            samesite='lax',
+            max_age=86400 * 7
+        )
+
+        logger.info(f"War Room: Correspondent logged in: {username}")
+        return {
+            'status': 'success',
+            'username': correspondent[1],
+            'display_name': correspondent[2] or correspondent[1],
+            'user_type': 'correspondent'
+        }
+    finally:
+        conn.close()
+
+
+# --- Statistics Endpoints ---
+
+async def recalculate_war_statistics_internal(conn=None):
+    """Internal function to recalculate war statistics."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    try:
+        # Clear existing stats
+        cursor.execute('DELETE FROM war_statistics')
+
+        # Longest Defense: defender_victory with max duration
+        cursor.execute('''
+            SELECT defender_partner_id, pa.display_name,
+                   CAST((julianday(resolved_at) - julianday(declared_at)) * 24 AS INTEGER) as hours,
+                   target_system_name, id
+            FROM conflicts c
+            JOIN partner_accounts pa ON c.defender_partner_id = pa.id
+            WHERE resolution = 'defender_victory' AND resolved_at IS NOT NULL
+            ORDER BY hours DESC LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row:
+            cursor.execute('''
+                INSERT INTO war_statistics (stat_type, partner_id, partner_display_name, value, value_unit, details)
+                VALUES ('longest_defense', ?, ?, ?, 'hours', ?)
+            ''', (row[0], row[1], row[2], json.dumps({'system': row[3], 'conflict_id': row[4]})))
+
+        # Fastest Invasion: attacker_victory with min duration
+        cursor.execute('''
+            SELECT attacker_partner_id, pa.display_name,
+                   CAST((julianday(resolved_at) - julianday(declared_at)) * 24 AS INTEGER) as hours,
+                   target_system_name, id
+            FROM conflicts c
+            JOIN partner_accounts pa ON c.attacker_partner_id = pa.id
+            WHERE resolution = 'attacker_victory' AND resolved_at IS NOT NULL
+            ORDER BY hours ASC LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row:
+            cursor.execute('''
+                INSERT INTO war_statistics (stat_type, partner_id, partner_display_name, value, value_unit, details)
+                VALUES ('fastest_invasion', ?, ?, ?, 'hours', ?)
+            ''', (row[0], row[1], row[2], json.dumps({'system': row[3], 'conflict_id': row[4]})))
+
+        # Largest Battle: conflict with most events
+        cursor.execute('''
+            SELECT c.id, c.target_system_name, c.attacker_partner_id, att.display_name,
+                   c.defender_partner_id, def.display_name, COUNT(ce.id) as event_count
+            FROM conflicts c
+            JOIN partner_accounts att ON c.attacker_partner_id = att.id
+            JOIN partner_accounts def ON c.defender_partner_id = def.id
+            LEFT JOIN conflict_events ce ON c.id = ce.conflict_id
+            GROUP BY c.id
+            ORDER BY event_count DESC LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row and row[6] > 0:
+            cursor.execute('''
+                INSERT INTO war_statistics (stat_type, partner_id, partner_display_name, value, value_unit, details)
+                VALUES ('largest_battle', NULL, NULL, ?, 'events', ?)
+            ''', (row[6], json.dumps({
+                'conflict_id': row[0], 'system': row[1],
+                'attacker': row[3], 'defender': row[5]
+            })))
+
+        # Most Conquered: attacker with most victories
+        cursor.execute('''
+            SELECT attacker_partner_id, pa.display_name, COUNT(*) as wins
+            FROM conflicts c
+            JOIN partner_accounts pa ON c.attacker_partner_id = pa.id
+            WHERE resolution = 'attacker_victory'
+            GROUP BY attacker_partner_id
+            ORDER BY wins DESC LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row:
+            cursor.execute('''
+                INSERT INTO war_statistics (stat_type, partner_id, partner_display_name, value, value_unit, details)
+                VALUES ('most_conquered', ?, ?, ?, 'systems', NULL)
+            ''', (row[0], row[1], row[2]))
+
+        conn.commit()
+        logger.info("War Room: Statistics recalculated")
+    finally:
+        if close_conn:
+            conn.close()
+
+
+@app.get('/api/warroom/statistics')
+async def get_war_statistics(session: Optional[str] = Cookie(None)):
+    """Get war statistics."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT stat_type, partner_id, partner_display_name, value, value_unit, details, calculated_at
+            FROM war_statistics
+        ''')
+        rows = cursor.fetchall()
+
+        stats = {}
+        for r in rows:
+            stats[r[0]] = {
+                'partner_id': r[1],
+                'holder': r[2],
+                'value': r[3],
+                'unit': r[4],
+                'details': json.loads(r[5]) if r[5] else None,
+                'calculated_at': r[6]
+            }
+
+        return stats
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/statistics/leaderboard')
+async def get_war_leaderboard(session: Optional[str] = Cookie(None)):
+    """Get per-civ rankings."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get all enrolled civs with their stats
+        cursor.execute('''
+            SELECT pa.id, pa.display_name, pa.region_color,
+                   (SELECT COUNT(*) FROM territorial_claims WHERE claimant_partner_id = pa.id) as systems_controlled,
+                   (SELECT COUNT(*) FROM conflicts WHERE attacker_partner_id = pa.id AND resolution = 'attacker_victory') as systems_conquered,
+                   (SELECT COUNT(*) FROM conflicts WHERE defender_partner_id = pa.id AND resolution = 'attacker_victory') as systems_lost,
+                   (SELECT COUNT(*) FROM conflicts WHERE (attacker_partner_id = pa.id OR defender_partner_id = pa.id) AND status IN ('pending', 'acknowledged', 'active')) as active_conflicts
+            FROM partner_accounts pa
+            JOIN war_room_enrollment wre ON pa.id = wre.partner_id
+            WHERE wre.is_active = 1
+            ORDER BY systems_controlled DESC
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'partner_id': r[0],
+            'display_name': r[1],
+            'color': r[2],
+            'systems_controlled': r[3],
+            'systems_conquered': r[4],
+            'systems_lost': r[5],
+            'active_conflicts': r[6],
+            'win_rate': round(r[4] / (r[4] + r[5]) * 100, 1) if (r[4] + r[5]) > 0 else 0
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/statistics/recalculate')
+async def recalculate_statistics(session: Optional[str] = Cookie(None)):
+    """Force recalculation of statistics (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    await recalculate_war_statistics_internal()
+    return {'status': 'recalculated'}
+
+
+# --- Notifications Endpoints ---
+
+@app.get('/api/warroom/notifications')
+async def get_notifications(session: Optional[str] = Cookie(None)):
+    """Get user's War Room notifications."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        return []  # Super admins don't get individual notifications
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, notification_type, title, message, related_conflict_id, created_at, read_at
+            FROM war_notifications
+            WHERE recipient_partner_id = ? AND dismissed_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (partner_info['partner_id'],))
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'type': r[1],
+            'title': r[2],
+            'message': r[3],
+            'conflict_id': r[4],
+            'created_at': r[5],
+            'read': r[6] is not None
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/notifications/count')
+async def get_notification_count(session: Optional[str] = Cookie(None)):
+    """Get unread notification count."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        return {'count': 0}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT COUNT(*) FROM war_notifications
+            WHERE recipient_partner_id = ? AND read_at IS NULL AND dismissed_at IS NULL
+        ''', (partner_info['partner_id'],))
+        count = cursor.fetchone()[0]
+        return {'count': count}
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/notifications/read-all')
+async def mark_all_notifications_read(session: Optional[str] = Cookie(None)):
+    """Mark all notifications as read."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        return {'status': 'ok'}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE war_notifications SET read_at = ?
+            WHERE recipient_partner_id = ? AND read_at IS NULL
+        ''', (datetime.now(timezone.utc).isoformat(), partner_info['partner_id']))
+        conn.commit()
+        return {'status': 'ok', 'marked': cursor.rowcount}
+    finally:
+        conn.close()
+
+
+# --- Discord Webhooks Endpoints ---
+
+@app.get('/api/warroom/webhooks')
+async def get_webhook(session: Optional[str] = Cookie(None)):
+    """Get webhook for current partner."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        raise HTTPException(status_code=403, detail="Partner access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT webhook_url, is_active, last_triggered_at
+            FROM discord_webhooks WHERE partner_id = ?
+        ''', (partner_info['partner_id'],))
+        row = cursor.fetchone()
+
+        if not row:
+            return {'configured': False}
+
+        return {
+            'configured': True,
+            'webhook_url': row[0][:50] + '...' if row[0] else None,  # Partial for security
+            'is_active': bool(row[1]),
+            'last_triggered_at': row[2]
+        }
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/webhooks')
+async def set_webhook(request: Request, session: Optional[str] = Cookie(None)):
+    """Set or update webhook URL."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        raise HTTPException(status_code=403, detail="Partner access required")
+
+    data = await request.json()
+    webhook_url = data.get('webhook_url')
+    is_active = data.get('is_active', True)
+
+    if webhook_url and not webhook_url.startswith('https://discord.com/api/webhooks/'):
+        raise HTTPException(status_code=400, detail="Invalid Discord webhook URL")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO discord_webhooks (partner_id, webhook_url, is_active)
+            VALUES (?, ?, ?)
+            ON CONFLICT(partner_id) DO UPDATE SET webhook_url = ?, is_active = ?
+        ''', (partner_info['partner_id'], webhook_url, is_active, webhook_url, is_active))
+        conn.commit()
+        return {'status': 'updated'}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/webhooks')
+async def delete_webhook(session: Optional[str] = Cookie(None)):
+    """Remove webhook configuration."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info or partner_info.get('is_super_admin'):
+        raise HTTPException(status_code=403, detail="Partner access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('DELETE FROM discord_webhooks WHERE partner_id = ?', (partner_info['partner_id'],))
+        conn.commit()
+        return {'status': 'deleted'}
+    finally:
+        conn.close()
+
+
+# --- Map Data Endpoint ---
+
+@app.get('/api/warroom/map-data')
+async def get_war_map_data(session: Optional[str] = Cookie(None)):
+    """Get aggregated data for the war map visualization."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get enrolled civs with home region data
+        cursor.execute('''
+            SELECT pa.id, pa.display_name, pa.discord_tag, pa.region_color,
+                   wre.home_region_x, wre.home_region_y, wre.home_region_z,
+                   wre.home_region_name, wre.home_galaxy
+            FROM partner_accounts pa
+            JOIN war_room_enrollment wre ON pa.id = wre.partner_id
+            WHERE wre.is_active = 1
+        ''')
+        enrolled_civs = [{
+            'partner_id': r[0],
+            'display_name': r[1],
+            'discord_tag': r[2],
+            'color': r[3],
+            'home_region': {
+                'x': r[4],
+                'y': r[5],
+                'z': r[6],
+                'name': r[7],
+                'galaxy': r[8]
+            } if r[4] is not None else None
+        } for r in cursor.fetchall()]
+
+        enrolled_ids = [c['partner_id'] for c in enrolled_civs]
+        if not enrolled_ids:
+            return {'regions': [], 'enrolled_civs': [], 'active_conflict_count': 0}
+
+        # Get territorial claims grouped by region
+        placeholders = ','.join('?' * len(enrolled_ids))
+        cursor.execute(f'''
+            SELECT tc.region_x, tc.region_y, tc.region_z, tc.galaxy, tc.reality,
+                   tc.claimant_partner_id, pa.display_name, pa.region_color,
+                   COUNT(*) as system_count
+            FROM territorial_claims tc
+            JOIN partner_accounts pa ON tc.claimant_partner_id = pa.id
+            WHERE tc.claimant_partner_id IN ({placeholders})
+            GROUP BY tc.region_x, tc.region_y, tc.region_z, tc.claimant_partner_id
+            ORDER BY system_count DESC
+        ''', enrolled_ids)
+
+        regions = []
+        for r in cursor.fetchall():
+            region_key = f"{r[0]}:{r[1]}:{r[2]}"
+
+            # Check for active conflicts in this region
+            cursor.execute('''
+                SELECT c.id, att.display_name, c.target_system_name
+                FROM conflicts c
+                JOIN territorial_claims tc ON c.target_system_id = tc.system_id
+                JOIN partner_accounts att ON c.attacker_partner_id = att.id
+                WHERE tc.region_x = ? AND tc.region_y = ? AND tc.region_z = ?
+                  AND c.status IN ('pending', 'acknowledged', 'active')
+            ''', (r[0], r[1], r[2]))
+            active_conflicts = [{
+                'conflict_id': ac[0],
+                'attacker': ac[1],
+                'target_system': ac[2]
+            } for ac in cursor.fetchall()]
+
+            regions.append({
+                'region_x': r[0],
+                'region_y': r[1],
+                'region_z': r[2],
+                'galaxy': r[3],
+                'reality': r[4],
+                'controlling_civ': {
+                    'partner_id': r[5],
+                    'display_name': r[6],
+                    'color': r[7]
+                },
+                'system_count': r[8],
+                'contested': len(active_conflicts) > 0,
+                'active_conflicts': active_conflicts
+            })
+
+        # Get total active conflict count
+        cursor.execute('''
+            SELECT COUNT(*) FROM conflicts
+            WHERE status IN ('pending', 'acknowledged', 'active')
+        ''')
+        active_conflict_count = cursor.fetchone()[0]
+
+        # Build home_regions array for map visualization
+        home_regions = []
+        for civ in enrolled_civs:
+            if civ['home_region'] and civ['home_region']['x'] is not None:
+                hr = civ['home_region']
+                home_regions.append({
+                    'region_x': hr['x'],
+                    'region_y': hr['y'],
+                    'region_z': hr['z'],
+                    'region_name': hr['name'],
+                    'galaxy': hr['galaxy'],
+                    'civ': {
+                        'partner_id': civ['partner_id'],
+                        'display_name': civ['display_name'],
+                        'color': civ['color']
+                    }
+                })
+
+        # Also mark regions that are home regions
+        for region in regions:
+            region['is_home_region'] = any(
+                hr['region_x'] == region['region_x'] and
+                hr['region_y'] == region['region_y'] and
+                hr['region_z'] == region['region_z']
+                for hr in home_regions
+            )
+
+        # Calculate region ownership based on systems.discord_tag (>50% rule)
+        # Get all enrolled discord_tags
+        enrolled_tags = {c['discord_tag']: c for c in enrolled_civs if c.get('discord_tag')}
+
+        if enrolled_tags:
+            # Query systems grouped by region and discord_tag
+            tag_placeholders = ','.join('?' * len(enrolled_tags))
+            cursor.execute(f'''
+                SELECT region_x, region_y, region_z, galaxy, discord_tag, COUNT(*) as system_count
+                FROM systems
+                WHERE discord_tag IN ({tag_placeholders})
+                  AND region_x IS NOT NULL
+                GROUP BY region_x, region_y, region_z, discord_tag
+            ''', list(enrolled_tags.keys()))
+
+            # Build region ownership map: {region_key: {discord_tag: count, ...}}
+            region_tag_counts = {}
+            for row in cursor.fetchall():
+                key = f"{row[0]}:{row[1]}:{row[2]}"
+                if key not in region_tag_counts:
+                    region_tag_counts[key] = {'galaxy': row[3], 'coords': (row[0], row[1], row[2]), 'tags': {}}
+                region_tag_counts[key]['tags'][row[4]] = row[5]
+
+            # Calculate ownership for each region (>50% = ownership)
+            region_ownership = []
+            for key, data in region_tag_counts.items():
+                total_systems = sum(data['tags'].values())
+                for tag, count in data['tags'].items():
+                    percentage = (count / total_systems * 100) if total_systems > 0 else 0
+                    if percentage > 50:
+                        civ = enrolled_tags.get(tag)
+                        if civ:
+                            region_ownership.append({
+                                'region_x': data['coords'][0],
+                                'region_y': data['coords'][1],
+                                'region_z': data['coords'][2],
+                                'galaxy': data['galaxy'],
+                                'owner': {
+                                    'partner_id': civ['partner_id'],
+                                    'display_name': civ['display_name'],
+                                    'discord_tag': tag,
+                                    'color': civ['color']
+                                },
+                                'system_count': count,
+                                'total_in_region': total_systems,
+                                'ownership_percentage': round(percentage, 1)
+                            })
+                        break  # Only one owner per region
+
+            # Merge ownership data into existing regions and add new owned regions
+            owned_region_keys = {f"{o['region_x']}:{o['region_y']}:{o['region_z']}": o for o in region_ownership}
+            for region in regions:
+                key = f"{region['region_x']}:{region['region_y']}:{region['region_z']}"
+                if key in owned_region_keys:
+                    ownership = owned_region_keys[key]
+                    region['ownership'] = {
+                        'owner': ownership['owner'],
+                        'percentage': ownership['ownership_percentage'],
+                        'system_count': ownership['system_count']
+                    }
+                else:
+                    region['ownership'] = None
+
+            # Add owned regions that don't have war claims
+            existing_keys = {f"{r['region_x']}:{r['region_y']}:{r['region_z']}" for r in regions}
+            for key, ownership in owned_region_keys.items():
+                if key not in existing_keys:
+                    regions.append({
+                        'region_x': ownership['region_x'],
+                        'region_y': ownership['region_y'],
+                        'region_z': ownership['region_z'],
+                        'galaxy': ownership['galaxy'],
+                        'reality': 'Normal',
+                        'controlling_civ': ownership['owner'],
+                        'system_count': ownership['system_count'],
+                        'contested': False,
+                        'active_conflicts': [],
+                        'is_home_region': any(
+                            hr['region_x'] == ownership['region_x'] and
+                            hr['region_y'] == ownership['region_y'] and
+                            hr['region_z'] == ownership['region_z']
+                            for hr in home_regions
+                        ),
+                        'ownership': {
+                            'owner': ownership['owner'],
+                            'percentage': ownership['ownership_percentage'],
+                            'system_count': ownership['system_count']
+                        }
+                    })
+        else:
+            # No enrolled tags, no ownership data
+            for region in regions:
+                region['ownership'] = None
+
+        return {
+            'regions': regions,
+            'enrolled_civs': enrolled_civs,
+            'home_regions': home_regions,
+            'active_conflict_count': active_conflict_count
+        }
+    finally:
+        conn.close()
+
+
+# --- Activity Feed Endpoints ---
+
+async def add_activity_feed_entry(
+    event_type: str,
+    headline: str,
+    actor_partner_id: int = None,
+    actor_name: str = None,
+    target_partner_id: int = None,
+    target_name: str = None,
+    conflict_id: int = None,
+    system_id: str = None,
+    system_name: str = None,
+    region_name: str = None,
+    details: str = None,
+    is_public: bool = True
+):
+    """Helper function to add an entry to the activity feed."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO war_activity_feed
+            (event_type, headline, actor_partner_id, actor_name, target_partner_id, target_name,
+             conflict_id, system_id, system_name, region_name, details, is_public)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (event_type, headline, actor_partner_id, actor_name, target_partner_id, target_name,
+              conflict_id, system_id, system_name, region_name, details, 1 if is_public else 0))
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/activity-feed')
+async def get_activity_feed(limit: int = 50, offset: int = 0, session: Optional[str] = Cookie(None)):
+    """Get the public activity feed."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, event_type, event_at, actor_partner_id, actor_name,
+                   target_partner_id, target_name, conflict_id, system_id, system_name,
+                   region_name, headline, details
+            FROM war_activity_feed
+            WHERE is_public = 1
+            ORDER BY event_at DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        rows = cursor.fetchall()
+
+        # Get total count
+        cursor.execute('SELECT COUNT(*) FROM war_activity_feed WHERE is_public = 1')
+        total = cursor.fetchone()[0]
+
+        # Return array directly for simpler frontend consumption
+        return [{
+            'id': r[0],
+            'event_type': r[1],
+            'created_at': r[2],  # Frontend expects created_at
+            'actor_partner_id': r[3],
+            'actor_name': r[4],
+            'target_partner_id': r[5],
+            'target_name': r[6],
+            'conflict_id': r[7],
+            'system_id': r[8],
+            'system_name': r[9],
+            'region_name': r[10],
+            'headline': r[11],
+            'details': r[12]
+        } for r in rows]
+        # Note: pagination info available if needed via separate endpoint
+    finally:
+        conn.close()
+
+
+# --- Multi-party Conflict Endpoints ---
+
+@app.post('/api/warroom/conflicts/{conflict_id}/join')
+async def join_conflict(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Join an existing conflict as an ally."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    side = data.get('side')  # 'attacker' or 'defender'
+    if side not in ['attacker', 'defender']:
+        raise HTTPException(status_code=400, detail="side must be 'attacker' or 'defender'")
+
+    joining_partner_id = data.get('partner_id') if partner_info.get('is_super_admin') else partner_info['partner_id']
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict info
+        cursor.execute('''
+            SELECT c.status, c.target_system_name, c.attacker_partner_id, c.defender_partner_id,
+                   att.display_name, def.display_name
+            FROM conflicts c
+            JOIN partner_accounts att ON c.attacker_partner_id = att.id
+            JOIN partner_accounts def ON c.defender_partner_id = def.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        status, system_name, attacker_id, defender_id, attacker_name, defender_name = conflict
+
+        if status == 'resolved':
+            raise HTTPException(status_code=400, detail="Cannot join resolved conflict")
+
+        # Check not already in conflict
+        cursor.execute('SELECT id FROM conflict_parties WHERE conflict_id = ? AND partner_id = ?',
+                       (conflict_id, joining_partner_id))
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail="Already participating in this conflict")
+
+        # Get joining partner name
+        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (joining_partner_id,))
+        joining_name = cursor.fetchone()[0]
+
+        # Add to conflict_parties (ensure primary parties are added if not exists)
+        cursor.execute('''
+            INSERT OR IGNORE INTO conflict_parties (conflict_id, partner_id, side, is_primary)
+            VALUES (?, ?, 'attacker', 1)
+        ''', (conflict_id, attacker_id))
+        cursor.execute('''
+            INSERT OR IGNORE INTO conflict_parties (conflict_id, partner_id, side, is_primary)
+            VALUES (?, ?, 'defender', 1)
+        ''', (conflict_id, defender_id))
+
+        # Add joining party
+        cursor.execute('''
+            INSERT INTO conflict_parties (conflict_id, partner_id, side, joined_by, is_primary)
+            VALUES (?, ?, ?, ?, 0)
+        ''', (conflict_id, joining_partner_id, side, session_data.get('username')))
+
+        # Add timeline event
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, 'ally_joined', ?, ?, ?)
+        ''', (conflict_id, joining_partner_id, session_data.get('username'),
+              f"{joining_name} joined as {side} ally"))
+
+        conn.commit()
+
+        # Add to activity feed
+        await add_activity_feed_entry(
+            'ally_joined',
+            f"{joining_name} joins the battle for {system_name} as {side}",
+            actor_partner_id=joining_partner_id,
+            actor_name=joining_name,
+            conflict_id=conflict_id,
+            system_name=system_name,
+            details=f"Joined on the {'attacking' if side == 'attacker' else 'defending'} side"
+        )
+
+        logger.info(f"War Room: {joining_name} joined conflict {conflict_id} as {side}")
+        return {'status': 'joined', 'conflict_id': conflict_id, 'side': side}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/{conflict_id}/parties')
+async def get_conflict_parties(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Get all parties involved in a conflict."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT cp.partner_id, pa.display_name, pa.region_color, cp.side, cp.is_primary,
+                   cp.joined_at, cp.resolution_agreed
+            FROM conflict_parties cp
+            JOIN partner_accounts pa ON cp.partner_id = pa.id
+            WHERE cp.conflict_id = ?
+            ORDER BY cp.is_primary DESC, cp.joined_at ASC
+        ''', (conflict_id,))
+        rows = cursor.fetchall()
+
+        attackers = []
+        defenders = []
+        for r in rows:
+            party = {
+                'partner_id': r[0],
+                'display_name': r[1],
+                'color': r[2],
+                'is_primary': bool(r[4]),
+                'joined_at': r[5],
+                'resolution_agreed': bool(r[6])
+            }
+            if r[3] == 'attacker':
+                attackers.append(party)
+            else:
+                defenders.append(party)
+
+        return {'attackers': attackers, 'defenders': defenders}
+    finally:
+        conn.close()
+
+
+# --- Mutual Agreement Resolution Endpoints ---
+
+@app.put('/api/warroom/conflicts/{conflict_id}/propose-resolution')
+async def propose_resolution(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Propose a resolution for the conflict. All parties must agree."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    data = await request.json()
+    resolution = data.get('resolution')  # attacker_victory, defender_victory, stalemate
+    summary = data.get('summary', '')
+
+    if resolution not in ['attacker_victory', 'defender_victory', 'stalemate']:
+        raise HTTPException(status_code=400, detail="Invalid resolution")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict
+        cursor.execute('''
+            SELECT status, attacker_partner_id, defender_partner_id, target_system_name
+            FROM conflicts WHERE id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        status, attacker_id, defender_id, system_name = conflict
+
+        if status == 'resolved':
+            raise HTTPException(status_code=400, detail="Conflict already resolved")
+
+        # Check authorization - must be involved in conflict
+        partner_id = partner_info.get('partner_id')
+        is_involved = partner_id in [attacker_id, defender_id]
+        if not is_involved:
+            # Check if in conflict_parties
+            cursor.execute('SELECT id FROM conflict_parties WHERE conflict_id = ? AND partner_id = ?',
+                           (conflict_id, partner_id))
+            is_involved = cursor.fetchone() is not None
+
+        if not partner_info.get('is_super_admin') and not is_involved:
+            raise HTTPException(status_code=403, detail="Must be involved in conflict")
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Update conflict with proposed resolution
+        cursor.execute('''
+            UPDATE conflicts SET resolution = ?, resolution_summary = ?,
+                   resolution_proposed_by = ?, resolution_proposed_at = ?
+            WHERE id = ?
+        ''', (resolution, summary, partner_id, now, conflict_id))
+
+        # Ensure all parties exist in conflict_parties
+        cursor.execute('''
+            INSERT OR IGNORE INTO conflict_parties (conflict_id, partner_id, side, is_primary)
+            VALUES (?, ?, 'attacker', 1)
+        ''', (conflict_id, attacker_id))
+        cursor.execute('''
+            INSERT OR IGNORE INTO conflict_parties (conflict_id, partner_id, side, is_primary)
+            VALUES (?, ?, 'defender', 1)
+        ''', (conflict_id, defender_id))
+
+        # Reset all agreements
+        cursor.execute('UPDATE conflict_parties SET resolution_agreed = 0 WHERE conflict_id = ?', (conflict_id,))
+
+        # Mark proposer as agreed
+        cursor.execute('''
+            UPDATE conflict_parties SET resolution_agreed = 1, resolution_agreed_at = ?
+            WHERE conflict_id = ? AND partner_id = ?
+        ''', (now, conflict_id, partner_id))
+
+        # Add timeline event
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, 'resolution_proposed', ?, ?, ?)
+        ''', (conflict_id, partner_id, session_data.get('username'),
+              f"Proposed resolution: {resolution.replace('_', ' ').title()}. {summary}"))
+
+        conn.commit()
+
+        # Notify all other parties
+        cursor.execute('SELECT partner_id FROM conflict_parties WHERE conflict_id = ? AND partner_id != ?',
+                       (conflict_id, partner_id))
+        for (pid,) in cursor.fetchall():
+            await send_war_notification(
+                pid,
+                'resolution_proposed',
+                f"Resolution Proposed: {system_name}",
+                f"A resolution has been proposed for the battle of {system_name}: {resolution.replace('_', ' ').title()}. Your agreement is needed.",
+                conflict_id
+            )
+
+        logger.info(f"War Room: Resolution proposed for conflict {conflict_id}: {resolution}")
+        return {'status': 'proposed', 'resolution': resolution, 'awaiting_agreement': True}
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/conflicts/{conflict_id}/agree-resolution')
+async def agree_resolution(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Agree to the proposed resolution."""
+    session_data = get_session(session)
+    partner_info = get_war_room_partner_info(session_data)
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    partner_id = partner_info.get('partner_id')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict and proposed resolution
+        cursor.execute('''
+            SELECT c.status, c.resolution, c.resolution_summary, c.target_system_id, c.target_system_name,
+                   c.attacker_partner_id, c.defender_partner_id
+            FROM conflicts c
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        status, resolution, summary, system_id, system_name, attacker_id, defender_id = conflict
+
+        if status == 'resolved':
+            raise HTTPException(status_code=400, detail="Conflict already resolved")
+
+        if not resolution:
+            raise HTTPException(status_code=400, detail="No resolution has been proposed yet")
+
+        # Check if party is involved
+        cursor.execute('SELECT id FROM conflict_parties WHERE conflict_id = ? AND partner_id = ?',
+                       (conflict_id, partner_id))
+        if not cursor.fetchone() and not partner_info.get('is_super_admin'):
+            raise HTTPException(status_code=403, detail="Must be involved in conflict")
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Mark as agreed
+        cursor.execute('''
+            UPDATE conflict_parties SET resolution_agreed = 1, resolution_agreed_at = ?
+            WHERE conflict_id = ? AND partner_id = ?
+        ''', (now, conflict_id, partner_id))
+
+        # Check if all primary parties have agreed
+        cursor.execute('''
+            SELECT COUNT(*) FROM conflict_parties
+            WHERE conflict_id = ? AND is_primary = 1 AND resolution_agreed = 0
+        ''', (conflict_id,))
+        remaining = cursor.fetchone()[0]
+
+        if remaining == 0:
+            # All primary parties agreed - resolve the conflict!
+            victor_id = None
+            if resolution == 'attacker_victory':
+                victor_id = attacker_id
+            elif resolution == 'defender_victory':
+                victor_id = defender_id
+
+            cursor.execute('''
+                UPDATE conflicts SET status = 'resolved', victor_partner_id = ?,
+                       resolved_at = ?, resolved_by = 'mutual_agreement'
+                WHERE id = ?
+            ''', (victor_id, now, conflict_id))
+
+            # Add timeline event
+            cursor.execute('''
+                INSERT INTO conflict_events (conflict_id, event_type, actor_username, details)
+                VALUES (?, 'resolved', 'System', ?)
+            ''', (conflict_id, f"Conflict resolved by mutual agreement: {resolution.replace('_', ' ').title()}"))
+
+            # Transfer territory if attacker won
+            if resolution == 'attacker_victory':
+                cursor.execute('''
+                    UPDATE territorial_claims SET claimant_partner_id = ?, claimed_at = ?
+                    WHERE system_id = ?
+                ''', (attacker_id, now, system_id))
+
+            conn.commit()
+
+            # Recalculate statistics
+            await recalculate_war_statistics_internal(conn)
+
+            # Add to activity feed
+            await add_activity_feed_entry(
+                'conflict_resolved',
+                f"The Battle of {system_name} has ended: {resolution.replace('_', ' ').title()}!",
+                conflict_id=conflict_id,
+                system_name=system_name,
+                details=summary
+            )
+
+            # Notify all parties
+            cursor.execute('SELECT partner_id FROM conflict_parties WHERE conflict_id = ?', (conflict_id,))
+            for (pid,) in cursor.fetchall():
+                await send_war_notification(
+                    pid,
+                    'conflict_resolved',
+                    f"Conflict Resolved: {system_name}",
+                    f"The battle has ended by mutual agreement. Resolution: {resolution.replace('_', ' ').title()}",
+                    conflict_id
+                )
+
+            logger.info(f"War Room: Conflict {conflict_id} resolved by mutual agreement: {resolution}")
+            return {'status': 'resolved', 'resolution': resolution, 'victor_partner_id': victor_id}
+        else:
+            conn.commit()
+            logger.info(f"War Room: Partner {partner_id} agreed to resolution for conflict {conflict_id}")
+            return {'status': 'agreed', 'remaining_agreements_needed': remaining}
+    finally:
+        conn.close()
+
+
+# --- Media Upload Endpoints ---
+
+MEDIA_UPLOAD_DIR = Path(__file__).parent.parent / 'Haven-UI' / 'public' / 'war-media'
+ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+@app.post('/api/warroom/media/upload')
+async def upload_war_media(
+    file: UploadFile,
+    caption: str = None,
+    conflict_id: int = None,
+    session: Optional[str] = Cookie(None)
+):
+    """Upload a war image/screenshot."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Check user type - must be super admin, correspondent, or enrolled partner
+    user_type = session_data.get('user_type')
+    username = session_data.get('username')
+    uploader_id = None
+
+    if user_type == 'super_admin':
+        pass
+    elif user_type == 'correspondent':
+        pass
+    elif user_type in ['partner', 'sub_admin']:
+        partner_info = get_war_room_partner_info(session_data)
+        if not partner_info:
+            raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+        uploader_id = partner_info.get('partner_id')
+    else:
+        raise HTTPException(status_code=403, detail="Not authorized to upload media")
+
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
+
+    # Read file content
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_FILE_SIZE // 1024 // 1024}MB")
+
+    # Create upload directory if needed
+    MEDIA_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique filename
+    unique_id = secrets.token_hex(8)
+    new_filename = f"{unique_id}{ext}"
+    file_path = MEDIA_UPLOAD_DIR / new_filename
+
+    # Save file
+    with open(file_path, 'wb') as f:
+        f.write(content)
+
+    # Get mime type
+    mime_types = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp'
+    }
+    mime_type = mime_types.get(ext, 'application/octet-stream')
+
+    # Save to database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO war_media
+            (filename, original_filename, file_path, file_size, mime_type,
+             uploaded_by_id, uploaded_by_username, uploaded_by_type, caption, related_conflict_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (new_filename, file.filename, f'/war-media/{new_filename}', len(content),
+              mime_type, uploader_id, username, user_type, caption, conflict_id))
+        conn.commit()
+        media_id = cursor.lastrowid
+
+        return {
+            'status': 'uploaded',
+            'media_id': media_id,
+            'filename': new_filename,
+            'url': f'/war-media/{new_filename}'
+        }
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/media')
+async def list_war_media(
+    limit: int = 50,
+    offset: int = 0,
+    conflict_id: int = None,
+    session: Optional[str] = Cookie(None)
+):
+    """List uploaded war media."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = '''
+            SELECT id, filename, original_filename, file_path, file_size, mime_type,
+                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id
+            FROM war_media
+            WHERE is_active = 1
+        '''
+        params = []
+        if conflict_id:
+            query += ' AND related_conflict_id = ?'
+            params.append(conflict_id)
+        query += ' ORDER BY uploaded_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'filename': r[1],
+            'original_filename': r[2],
+            'url': r[3],
+            'file_size': r[4],
+            'mime_type': r[5],
+            'uploaded_by': r[6],
+            'uploaded_by_type': r[7],
+            'uploaded_at': r[8],
+            'caption': r[9],
+            'conflict_id': r[10]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/media/{media_id}')
+async def get_war_media(media_id: int, session: Optional[str] = Cookie(None)):
+    """Get single media item details."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, filename, original_filename, file_path, file_size, mime_type,
+                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id
+            FROM war_media WHERE id = ? AND is_active = 1
+        ''', (media_id,))
+        r = cursor.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        return {
+            'id': r[0],
+            'filename': r[1],
+            'original_filename': r[2],
+            'url': r[3],
+            'file_size': r[4],
+            'mime_type': r[5],
+            'uploaded_by': r[6],
+            'uploaded_by_type': r[7],
+            'uploaded_at': r[8],
+            'caption': r[9],
+            'conflict_id': r[10]
+        }
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/media/{media_id}')
+async def delete_war_media(media_id: int, session: Optional[str] = Cookie(None)):
+    """Delete a media item (soft delete)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('UPDATE war_media SET is_active = 0 WHERE id = ?', (media_id,))
+        conn.commit()
+        return {'status': 'deleted', 'media_id': media_id}
+    finally:
+        conn.close()
+
+
+# --- Reporting Organizations Endpoints ---
+
+@app.get('/api/warroom/reporting-orgs')
+async def list_reporting_orgs(session: Optional[str] = Cookie(None)):
+    """List reporting organizations."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT ro.id, ro.name, ro.description, ro.discord_server_id, ro.discord_server_name,
+                   ro.logo_url, ro.is_active, ro.created_at,
+                   (SELECT COUNT(*) FROM reporting_org_members WHERE org_id = ro.id AND is_active = 1) as member_count
+            FROM reporting_organizations ro
+            ORDER BY ro.name
+        ''')
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'name': r[1],
+            'description': r[2],
+            'discord_server_id': r[3],
+            'discord_server_name': r[4],
+            'logo_url': r[5],
+            'is_active': bool(r[6]),
+            'created_at': r[7],
+            'member_count': r[8]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/reporting-orgs')
+async def create_reporting_org(request: Request, session: Optional[str] = Cookie(None)):
+    """Create a reporting organization (super admin only)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    name = data.get('name')
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO reporting_organizations (name, description, discord_server_id, discord_server_name, logo_url, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, data.get('description'), data.get('discord_server_id'),
+              data.get('discord_server_name'), data.get('logo_url'), session_data.get('username')))
+        conn.commit()
+
+        logger.info(f"War Room: Reporting org created: {name}")
+        return {'status': 'created', 'org_id': cursor.lastrowid}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Organization name already exists")
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/reporting-orgs/{org_id}')
+async def update_reporting_org(org_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Update a reporting organization."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        updates = []
+        params = []
+        for field in ['name', 'description', 'discord_server_id', 'discord_server_name', 'logo_url', 'is_active']:
+            if field in data:
+                updates.append(f'{field} = ?')
+                params.append(data[field])
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        params.append(org_id)
+        cursor.execute(f'UPDATE reporting_organizations SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+
+        return {'status': 'updated', 'org_id': org_id}
+    finally:
+        conn.close()
+
+
+@app.delete('/api/warroom/reporting-orgs/{org_id}')
+async def delete_reporting_org(org_id: int, session: Optional[str] = Cookie(None)):
+    """Delete a reporting organization (soft delete)."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('UPDATE reporting_organizations SET is_active = 0 WHERE id = ?', (org_id,))
+        conn.commit()
+        return {'status': 'deleted', 'org_id': org_id}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/reporting-orgs/{org_id}/members')
+async def list_org_members(org_id: int, session: Optional[str] = Cookie(None)):
+    """List members of a reporting organization."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT id, username, display_name, role, is_active, created_at, last_login_at
+            FROM reporting_org_members
+            WHERE org_id = ?
+            ORDER BY created_at DESC
+        ''', (org_id,))
+        rows = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'username': r[1],
+            'display_name': r[2],
+            'role': r[3],
+            'is_active': bool(r[4]),
+            'created_at': r[5],
+            'last_login_at': r[6]
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/reporting-orgs/{org_id}/members')
+async def add_org_member(org_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Add a member to a reporting organization."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    data = await request.json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Verify org exists
+        cursor.execute('SELECT id FROM reporting_organizations WHERE id = ? AND is_active = 1', (org_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        cursor.execute('''
+            INSERT INTO reporting_org_members (org_id, username, password_hash, display_name, role, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (org_id, username, password_hash, data.get('display_name'), data.get('role', 'reporter'),
+              session_data.get('username')))
+        conn.commit()
+
+        logger.info(f"War Room: Member {username} added to org {org_id}")
+        return {'status': 'created', 'member_id': cursor.lastrowid}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Username already exists in this organization")
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/reporting-orgs/login')
+async def reporting_org_login(request: Request, response: Response):
+    """Login as a reporting organization member."""
+    data = await request.json()
+    username = data.get('username')
+    password = data.get('password')
+    org_id = data.get('org_id')
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = '''
+            SELECT rom.id, rom.org_id, rom.username, rom.display_name, rom.role, rom.is_active,
+                   ro.name as org_name, ro.is_active as org_active
+            FROM reporting_org_members rom
+            JOIN reporting_organizations ro ON rom.org_id = ro.id
+            WHERE rom.username = ? AND rom.password_hash = ?
+        '''
+        params = [username, password_hash]
+        if org_id:
+            query += ' AND rom.org_id = ?'
+            params.append(org_id)
+
+        cursor.execute(query, params)
+        member = cursor.fetchone()
+
+        if not member:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        if not member[5]:
+            raise HTTPException(status_code=403, detail="Account is inactive")
+        if not member[7]:
+            raise HTTPException(status_code=403, detail="Organization is inactive")
+
+        # Update last login
+        cursor.execute('UPDATE reporting_org_members SET last_login_at = ? WHERE id = ?',
+                       (datetime.now(timezone.utc).isoformat(), member[0]))
+        conn.commit()
+
+        # Create session
+        session_id = secrets.token_hex(32)
+        session_data = {
+            'user_type': 'reporter',
+            'username': member[2],
+            'display_name': member[3] or member[2],
+            'member_id': member[0],
+            'org_id': member[1],
+            'org_name': member[6],
+            'role': member[4]
+        }
+        sessions[session_id] = session_data
+
+        response.set_cookie(
+            key='session',
+            value=session_id,
+            httponly=True,
+            secure=False,
+            samesite='lax',
+            max_age=86400 * 7
+        )
+
+        logger.info(f"War Room: Reporter {username} logged in (org: {member[6]})")
+        return {
+            'status': 'success',
+            'username': member[2],
+            'display_name': member[3] or member[2],
+            'org_name': member[6],
+            'role': member[4],
+            'user_type': 'reporter'
+        }
+    finally:
+        conn.close()
+
+
+# --- Enhanced News Endpoints ---
+
+@app.get('/api/warroom/news/{news_id}')
+async def get_news_article(news_id: int, session: Optional[str] = Cookie(None)):
+    """Get a single news article with full details."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT wn.id, wn.headline, wn.body, wn.author_username, wn.author_type,
+                   wn.related_conflict_id, wn.published_at, wn.is_pinned, wn.article_type,
+                   wn.featured_image_id, wn.reporting_org_id, wn.view_count,
+                   ro.name as org_name,
+                   wm.file_path as featured_image_url
+            FROM war_news wn
+            LEFT JOIN reporting_organizations ro ON wn.reporting_org_id = ro.id
+            LEFT JOIN war_media wm ON wn.featured_image_id = wm.id
+            WHERE wn.id = ? AND wn.is_active = 1
+        ''', (news_id,))
+        r = cursor.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        # Increment view count
+        cursor.execute('UPDATE war_news SET view_count = view_count + 1 WHERE id = ?', (news_id,))
+        conn.commit()
+
+        # Get attached media
+        cursor.execute('''
+            SELECT id, filename, file_path, caption FROM war_media
+            WHERE related_news_id = ? AND is_active = 1
+        ''', (news_id,))
+        media = cursor.fetchall()
+
+        return {
+            'id': r[0],
+            'headline': r[1],
+            'body': r[2],
+            'author': r[3],
+            'author_type': r[4],
+            'conflict_id': r[5],
+            'published_at': r[6],
+            'is_pinned': bool(r[7]),
+            'article_type': r[8],
+            'featured_image_id': r[9],
+            'reporting_org_id': r[10],
+            'view_count': r[11] + 1,
+            'org_name': r[12],
+            'featured_image_url': r[13],
+            'media': [{
+                'id': m[0],
+                'filename': m[1],
+                'url': m[2],
+                'caption': m[3]
+            } for m in media]
+        }
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/news/{news_id}')
+async def update_news_article(news_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Update a news article."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Check if super admin, correspondent, or reporter who owns the article
+    user_type = session_data.get('user_type')
+    username = session_data.get('username')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get article
+        cursor.execute('SELECT author_username, author_type FROM war_news WHERE id = ? AND is_active = 1', (news_id,))
+        article = cursor.fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        # Authorization
+        if user_type != 'super_admin':
+            if article[0] != username:
+                raise HTTPException(status_code=403, detail="Can only edit your own articles")
+
+        data = await request.json()
+        updates = []
+        params = []
+
+        for field in ['headline', 'body', 'article_type', 'is_pinned', 'featured_image_id', 'related_conflict_id']:
+            if field in data:
+                updates.append(f'{field} = ?')
+                params.append(data[field])
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        params.append(news_id)
+        cursor.execute(f'UPDATE war_news SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+
+        return {'status': 'updated', 'news_id': news_id}
+    finally:
+        conn.close()
+
+
+# =============================================================================
+# WAR ROOM V3 - TERRITORY INTEGRATION & PEACE TREATY SYSTEM
+# =============================================================================
+
+def create_auto_news(conn, event_type: str, headline: str, body: str, reference_id: int = None, reference_type: str = None, conflict_id: int = None):
+    """Helper to create auto-generated news articles for war events."""
+    cursor = conn.cursor()
+
+    # Check if we already created news for this event
+    if reference_id and reference_type:
+        cursor.execute('''
+            SELECT id FROM auto_news_events
+            WHERE event_type = ? AND reference_id = ? AND reference_type = ?
+        ''', (event_type, reference_id, reference_type))
+        if cursor.fetchone():
+            return None  # Already generated
+
+    # Create the news article
+    cursor.execute('''
+        INSERT INTO war_news (headline, body, author_username, author_type, related_conflict_id, article_type)
+        VALUES (?, ?, 'SYSTEM', 'auto', ?, 'breaking')
+    ''', (headline, body, conflict_id))
+    news_id = cursor.lastrowid
+
+    # Record that we generated this
+    cursor.execute('''
+        INSERT INTO auto_news_events (event_type, reference_id, reference_type, news_id)
+        VALUES (?, ?, ?, ?)
+    ''', (event_type, reference_id, reference_type, news_id))
+
+    # Also add to activity feed
+    cursor.execute('''
+        INSERT INTO war_activity_feed (event_type, headline, details, conflict_id, is_public)
+        VALUES (?, ?, ?, ?, 1)
+    ''', (event_type, headline, body, conflict_id))
+
+    return news_id
+
+
+@app.get('/api/warroom/territory/by-tag')
+async def get_territory_by_discord_tag(discord_tag: str = None, session: Optional[str] = Cookie(None)):
+    """Get all systems owned by a discord_tag (partner territory)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get partner info for this discord_tag
+        cursor.execute('''
+            SELECT p.id, p.display_name, p.region_color, p.discord_tag
+            FROM partner_accounts p
+            WHERE p.discord_tag = ? AND p.is_active = 1
+        ''', (discord_tag,))
+        partner = cursor.fetchone()
+
+        if not partner:
+            return {'partner': None, 'systems': [], 'regions': {}}
+
+        partner_id, display_name, color, tag = partner
+
+        # Get all systems with this discord_tag
+        cursor.execute('''
+            SELECT id, name, galaxy, region_name, glyphs, region_x, region_y, region_z, reality
+            FROM systems
+            WHERE discord_tag = ?
+            ORDER BY name
+        ''', (discord_tag,))
+        systems = cursor.fetchall()
+
+        # Group by region and calculate ownership
+        regions = {}
+        for s in systems:
+            region_key = f"{s[5]}_{s[6]}_{s[7]}_{s[2]}"  # x_y_z_galaxy
+            if region_key not in regions:
+                regions[region_key] = {
+                    'region_x': s[5],
+                    'region_y': s[6],
+                    'region_z': s[7],
+                    'galaxy': s[2],
+                    'region_name': s[3],
+                    'system_count': 0,
+                    'systems': []
+                }
+            regions[region_key]['system_count'] += 1
+            regions[region_key]['systems'].append({
+                'id': s[0],
+                'name': s[1],
+                'glyphs': s[4],
+                'reality': s[8]
+            })
+
+        return {
+            'partner': {
+                'id': partner_id,
+                'display_name': display_name,
+                'color': color,
+                'discord_tag': tag
+            },
+            'systems': [{
+                'id': s[0],
+                'name': s[1],
+                'galaxy': s[2],
+                'region_name': s[3],
+                'glyphs': s[4],
+                'region_x': s[5],
+                'region_y': s[6],
+                'region_z': s[7],
+                'reality': s[8]
+            } for s in systems],
+            'regions': regions,
+            'total_systems': len(systems),
+            'total_regions': len(regions)
+        }
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/territory/search')
+async def search_territory_systems(
+    q: str = '',
+    discord_tag: str = None,
+    galaxy: str = None,
+    limit: int = 50,
+    session: Optional[str] = Cookie(None)
+):
+    """Search systems by name, filtering by discord_tag (for territory selection)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = '''
+            SELECT s.id, s.name, s.galaxy, r.custom_name as region_name, s.glyph_code,
+                   s.region_x, s.region_y, s.region_z, s.discord_tag, s.reality,
+                   p.display_name as owner_name, p.region_color as owner_color
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
+                AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
+            WHERE 1=1
+        '''
+        params = []
+
+        if q:
+            query += ' AND (s.name LIKE ? OR r.custom_name LIKE ?)'
+            params.extend([f'%{q}%', f'%{q}%'])
+
+        if discord_tag:
+            query += ' AND s.discord_tag = ?'
+            params.append(discord_tag)
+
+        if galaxy:
+            query += ' AND s.galaxy = ?'
+            params.append(galaxy)
+
+        query += ' ORDER BY s.name LIMIT ?'
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+
+        return [{
+            'id': r[0],
+            'name': r[1],
+            'galaxy': r[2],
+            'region_name': r[3],
+            'glyphs': r[4],
+            'region_x': r[5],
+            'region_y': r[6],
+            'region_z': r[7],
+            'discord_tag': r[8],
+            'reality': r[9],
+            'owner_name': r[10],
+            'owner_color': r[11],
+            'is_partner_owned': r[10] is not None
+        } for r in results]
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/territory/regions')
+async def get_territory_regions(
+    discord_tag: str = None,
+    galaxy: str = 'Euclid',
+    session: Optional[str] = Cookie(None)
+):
+    """Get regions with system counts, optionally filtered by discord_tag."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get regions from systems table, grouped by coordinates
+        query = '''
+            SELECT
+                s.region_x, s.region_y, s.region_z, s.galaxy,
+                r.custom_name as region_name,
+                s.discord_tag,
+                COUNT(*) as system_count,
+                p.display_name as owner_name,
+                p.region_color as owner_color,
+                p.id as partner_id
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
+                AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
+            WHERE s.galaxy = ?
+        '''
+        params = [galaxy]
+
+        if discord_tag:
+            query += ' AND s.discord_tag = ?'
+            params.append(discord_tag)
+
+        query += '''
+            GROUP BY s.region_x, s.region_y, s.region_z, s.galaxy, s.discord_tag
+            ORDER BY system_count DESC
+        '''
+
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+
+        # Calculate region ownership (>50% = controls region)
+        region_data = {}
+        for r in results:
+            key = f"{r[0]}_{r[1]}_{r[2]}_{r[3]}"
+            if key not in region_data:
+                region_data[key] = {
+                    'region_x': r[0],
+                    'region_y': r[1],
+                    'region_z': r[2],
+                    'galaxy': r[3],
+                    'region_name': r[4],
+                    'total_systems': 0,
+                    'owners': {}
+                }
+
+            region_data[key]['total_systems'] += r[6]
+            tag = r[5] or 'unclaimed'
+            if tag not in region_data[key]['owners']:
+                region_data[key]['owners'][tag] = {
+                    'count': 0,
+                    'name': r[7],
+                    'color': r[8],
+                    'partner_id': r[9]
+                }
+            region_data[key]['owners'][tag]['count'] += r[6]
+
+        # Determine controlling faction for each region
+        regions = []
+        for key, data in region_data.items():
+            controlling = None
+            for tag, owner_info in data['owners'].items():
+                if owner_info['count'] > data['total_systems'] / 2:
+                    controlling = {
+                        'discord_tag': tag,
+                        'name': owner_info['name'],
+                        'color': owner_info['color'],
+                        'partner_id': owner_info['partner_id'],
+                        'system_count': owner_info['count'],
+                        'percentage': round(owner_info['count'] / data['total_systems'] * 100, 1)
+                    }
+                    break
+
+            regions.append({
+                'region_x': data['region_x'],
+                'region_y': data['region_y'],
+                'region_z': data['region_z'],
+                'galaxy': data['galaxy'],
+                'region_name': data['region_name'],
+                'total_systems': data['total_systems'],
+                'controlling_faction': controlling,
+                'owners': data['owners']
+            })
+
+        return regions
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/territory/region-ownership')
+async def get_region_ownership_summary(galaxy: str = 'Euclid', session: Optional[str] = Cookie(None)):
+    """Get summary of which factions control which regions (>50% ownership)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get all systems grouped by region and discord_tag
+        cursor.execute('''
+            SELECT
+                s.region_x, s.region_y, s.region_z, s.galaxy,
+                MAX(r.custom_name) as region_name,
+                s.discord_tag,
+                COUNT(*) as system_count,
+                p.display_name,
+                p.region_color,
+                p.id as partner_id
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
+                AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
+            WHERE s.galaxy = ?
+            GROUP BY s.region_x, s.region_y, s.region_z, s.galaxy, s.discord_tag
+        ''', (galaxy,))
+
+        results = cursor.fetchall()
+
+        # Process into regions
+        regions = {}
+        for r in results:
+            key = f"{r[0]}_{r[1]}_{r[2]}"
+            if key not in regions:
+                regions[key] = {
+                    'region_x': r[0],
+                    'region_y': r[1],
+                    'region_z': r[2],
+                    'galaxy': r[3],
+                    'region_name': r[4],
+                    'total': 0,
+                    'by_owner': {}
+                }
+            regions[key]['total'] += r[6]
+            tag = r[5] or 'unclaimed'
+            regions[key]['by_owner'][tag] = {
+                'count': r[6],
+                'name': r[7],
+                'color': r[8],
+                'partner_id': r[9]
+            }
+
+        # Determine controllers
+        controlled_regions = []
+        for key, data in regions.items():
+            for tag, info in data['by_owner'].items():
+                if info['count'] > data['total'] / 2 and tag != 'unclaimed':
+                    controlled_regions.append({
+                        **{k: data[k] for k in ['region_x', 'region_y', 'region_z', 'galaxy', 'region_name', 'total']},
+                        'controller': {
+                            'discord_tag': tag,
+                            'name': info['name'],
+                            'color': info['color'],
+                            'partner_id': info['partner_id'],
+                            'systems': info['count'],
+                            'percentage': round(info['count'] / data['total'] * 100, 1)
+                        }
+                    })
+                    break
+
+        return {
+            'galaxy': galaxy,
+            'controlled_regions': controlled_regions,
+            'total_regions_with_control': len(controlled_regions)
+        }
+    finally:
+        conn.close()
+
+
+# Peace Treaty Endpoints
+
+@app.post('/api/warroom/conflicts/{conflict_id}/propose-peace')
+async def propose_peace_treaty(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Propose a peace treaty with demands/offers."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    partner_id = session_data.get('partner_id')
+    username = session_data.get('username')
+    user_type = session_data.get('user_type')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get conflict details
+        cursor.execute('''
+            SELECT c.attacker_partner_id, c.defender_partner_id, c.status,
+                   c.attacker_counter_count, c.defender_counter_count,
+                   c.negotiation_status,
+                   a.display_name as attacker_name,
+                   d.display_name as defender_name
+            FROM conflicts c
+            JOIN partner_accounts a ON c.attacker_partner_id = a.id
+            JOIN partner_accounts d ON c.defender_partner_id = d.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        attacker_id, defender_id, status, att_counters, def_counters, neg_status, attacker_name, defender_name = conflict
+
+        if status == 'resolved':
+            raise HTTPException(status_code=400, detail="Conflict already resolved")
+
+        # Check if user is party to the conflict
+        is_attacker = partner_id == attacker_id
+        is_defender = partner_id == defender_id
+        is_super = user_type == 'super_admin'
+
+        if not (is_attacker or is_defender or is_super):
+            raise HTTPException(status_code=403, detail="Not a party to this conflict")
+
+        data = await request.json()
+        items = data.get('items', [])  # List of {type: system/region, direction: give/receive, system_id/region coords, to/from partner}
+        message = data.get('message', '')
+        is_counter = data.get('is_counter', False)
+
+        # Check counter limits (2 per side)
+        if is_counter:
+            if is_attacker and att_counters >= 2:
+                raise HTTPException(status_code=400, detail="Maximum counter-offers reached (2). You must accept, reject, or continue fighting.")
+            if is_defender and def_counters >= 2:
+                raise HTTPException(status_code=400, detail="Maximum counter-offers reached (2). You must accept, reject, or continue fighting.")
+
+        # Validate items - ensure HQ systems are not included
+        for item in items:
+            if item.get('type') == 'system' and item.get('system_id'):
+                # Check if this is an HQ system
+                cursor.execute('''
+                    SELECT e.partner_id, e.home_region_x, e.home_region_y, e.home_region_z,
+                           e.is_hq_protected, s.region_x, s.region_y, s.region_z
+                    FROM war_room_enrollment e
+                    JOIN systems s ON s.id = ?
+                    WHERE e.is_hq_protected = 1
+                      AND e.home_region_x = s.region_x
+                      AND e.home_region_y = s.region_y
+                      AND e.home_region_z = s.region_z
+                ''', (item['system_id'],))
+                hq_check = cursor.fetchone()
+                if hq_check:
+                    raise HTTPException(status_code=400, detail="Cannot include HQ/Home region systems in peace demands")
+
+        # Determine recipient
+        recipient_id = defender_id if is_attacker else attacker_id
+
+        # Mark any pending proposals as superseded
+        cursor.execute('''
+            UPDATE peace_proposals SET status = 'superseded', responded_at = datetime('now')
+            WHERE conflict_id = ? AND status = 'pending'
+        ''', (conflict_id,))
+
+        # Create the proposal
+        cursor.execute('''
+            INSERT INTO peace_proposals (conflict_id, proposer_partner_id, recipient_partner_id,
+                                        proposal_type, counter_number, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (conflict_id, partner_id, recipient_id,
+              'counter' if is_counter else 'initial',
+              (att_counters if is_attacker else def_counters) + (1 if is_counter else 0),
+              message))
+        proposal_id = cursor.lastrowid
+
+        # Add proposal items
+        for item in items:
+            cursor.execute('''
+                INSERT INTO proposal_items (proposal_id, item_type, direction, system_id, system_name,
+                                           region_x, region_y, region_z, region_name, galaxy,
+                                           from_partner_id, to_partner_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                proposal_id,
+                item.get('type', 'system'),
+                item.get('direction', 'give'),
+                item.get('system_id'),
+                item.get('system_name'),
+                item.get('region_x'),
+                item.get('region_y'),
+                item.get('region_z'),
+                item.get('region_name'),
+                item.get('galaxy', 'Euclid'),
+                item.get('from_partner_id', partner_id),
+                item.get('to_partner_id', recipient_id)
+            ))
+
+        # Update conflict negotiation status
+        cursor.execute('''
+            UPDATE conflicts SET
+                negotiation_status = 'pending',
+                negotiation_started_at = COALESCE(negotiation_started_at, datetime('now'))
+        ''', ())
+        cursor.execute('UPDATE conflicts SET negotiation_status = ? WHERE id = ?', ('pending', conflict_id))
+
+        # Increment counter count if this is a counter-offer
+        if is_counter:
+            if is_attacker:
+                cursor.execute('UPDATE conflicts SET attacker_counter_count = attacker_counter_count + 1 WHERE id = ?', (conflict_id,))
+            else:
+                cursor.execute('UPDATE conflicts SET defender_counter_count = defender_counter_count + 1 WHERE id = ?', (conflict_id,))
+
+        # Create notification for recipient
+        cursor.execute('''
+            INSERT INTO war_notifications (recipient_partner_id, notification_type, title, message, related_conflict_id)
+            VALUES (?, 'peace_proposal', ?, ?, ?)
+        ''', (recipient_id, 'Peace Treaty Proposed', f'A peace proposal has been sent for the conflict. Review the terms.', conflict_id))
+
+        # Auto-news: Negotiations started
+        proposer_name = attacker_name if is_attacker else defender_name
+        create_auto_news(
+            conn,
+            'negotiations_started' if not is_counter else 'counter_offer',
+            f"Peace Negotiations {'Continue' if is_counter else 'Begin'}: {attacker_name} vs {defender_name}",
+            f"{proposer_name} has {'sent a counter-offer' if is_counter else 'proposed peace terms'} in the ongoing conflict.",
+            reference_id=proposal_id,
+            reference_type='peace_proposal',
+            conflict_id=conflict_id
+        )
+
+        # Add conflict event
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (conflict_id, 'peace_proposed', partner_id, username,
+              f"{'Counter-offer' if is_counter else 'Peace proposal'} submitted with {len(items)} items"))
+
+        conn.commit()
+        return {'status': 'proposed', 'proposal_id': proposal_id}
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/{conflict_id}/peace-proposals')
+async def get_peace_proposals(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Get all peace proposals for a conflict."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get proposals
+        cursor.execute('''
+            SELECT pp.id, pp.proposer_partner_id, pp.recipient_partner_id, pp.proposal_type,
+                   pp.counter_number, pp.status, pp.proposed_at, pp.responded_at, pp.message,
+                   prop.display_name as proposer_name, prop.region_color as proposer_color,
+                   rec.display_name as recipient_name, rec.region_color as recipient_color
+            FROM peace_proposals pp
+            JOIN partner_accounts prop ON pp.proposer_partner_id = prop.id
+            JOIN partner_accounts rec ON pp.recipient_partner_id = rec.id
+            WHERE pp.conflict_id = ?
+            ORDER BY pp.proposed_at DESC
+        ''', (conflict_id,))
+        proposals = cursor.fetchall()
+
+        result = []
+        for p in proposals:
+            # Get items for this proposal
+            cursor.execute('''
+                SELECT id, item_type, direction, system_id, system_name,
+                       region_x, region_y, region_z, region_name, galaxy,
+                       from_partner_id, to_partner_id
+                FROM proposal_items WHERE proposal_id = ?
+            ''', (p[0],))
+            items = cursor.fetchall()
+
+            result.append({
+                'id': p[0],
+                'proposer_partner_id': p[1],
+                'recipient_partner_id': p[2],
+                'proposal_type': p[3],
+                'counter_number': p[4],
+                'status': p[5],
+                'proposed_at': p[6],
+                'responded_at': p[7],
+                'message': p[8],
+                'proposer_name': p[9],
+                'proposer_color': p[10],
+                'recipient_name': p[11],
+                'recipient_color': p[12],
+                'items': [{
+                    'id': i[0],
+                    'item_type': i[1],
+                    'direction': i[2],
+                    'system_id': i[3],
+                    'system_name': i[4],
+                    'region_x': i[5],
+                    'region_y': i[6],
+                    'region_z': i[7],
+                    'region_name': i[8],
+                    'galaxy': i[9],
+                    'from_partner_id': i[10],
+                    'to_partner_id': i[11]
+                } for i in items]
+            })
+
+        return result
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/peace-proposals/{proposal_id}/accept')
+async def accept_peace_proposal(proposal_id: int, session: Optional[str] = Cookie(None)):
+    """Accept a peace proposal, ending the conflict and transferring territory."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    partner_id = session_data.get('partner_id')
+    username = session_data.get('username')
+    user_type = session_data.get('user_type')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get proposal details
+        cursor.execute('''
+            SELECT pp.id, pp.conflict_id, pp.proposer_partner_id, pp.recipient_partner_id, pp.status,
+                   c.attacker_partner_id, c.defender_partner_id, c.declared_at,
+                   a.display_name as attacker_name, a.discord_tag as attacker_tag,
+                   d.display_name as defender_name, d.discord_tag as defender_tag
+            FROM peace_proposals pp
+            JOIN conflicts c ON pp.conflict_id = c.id
+            JOIN partner_accounts a ON c.attacker_partner_id = a.id
+            JOIN partner_accounts d ON c.defender_partner_id = d.id
+            WHERE pp.id = ?
+        ''', (proposal_id,))
+        proposal = cursor.fetchone()
+
+        if not proposal:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+
+        if proposal[4] != 'pending':
+            raise HTTPException(status_code=400, detail="Proposal is not pending")
+
+        # Check authorization - only recipient can accept
+        if partner_id != proposal[3] and user_type != 'super_admin':
+            raise HTTPException(status_code=403, detail="Only the recipient can accept this proposal")
+
+        conflict_id = proposal[1]
+        attacker_id = proposal[5]
+        defender_id = proposal[6]
+        declared_at = proposal[7]
+        attacker_name = proposal[8]
+        attacker_tag = proposal[9]
+        defender_name = proposal[10]
+        defender_tag = proposal[11]
+
+        # Get items to transfer
+        cursor.execute('SELECT * FROM proposal_items WHERE proposal_id = ?', (proposal_id,))
+        items = cursor.fetchall()
+
+        # Execute territory transfers
+        systems_transferred = 0
+        for item in items:
+            item_type = item[2]
+            direction = item[3]
+            system_id = item[4]
+            from_partner = item[11]
+            to_partner = item[12]
+
+            if item_type == 'system' and system_id:
+                # Get the receiving partner's discord_tag
+                cursor.execute('SELECT discord_tag FROM partner_accounts WHERE id = ?', (to_partner,))
+                to_tag_row = cursor.fetchone()
+                if to_tag_row:
+                    new_tag = to_tag_row[0]
+
+                    # Update systems.discord_tag
+                    cursor.execute('UPDATE systems SET discord_tag = ? WHERE id = ?', (new_tag, system_id))
+
+                    # Update or create territorial_claims
+                    cursor.execute('DELETE FROM territorial_claims WHERE system_id = ?', (system_id,))
+                    cursor.execute('''
+                        INSERT INTO territorial_claims (system_id, claimant_partner_id, claim_type, notes)
+                        VALUES (?, ?, 'conquered', 'Transferred via peace treaty')
+                    ''', (system_id, to_partner))
+
+                    systems_transferred += 1
+
+            elif item_type == 'region':
+                # Transfer all systems in the region
+                region_x = item[5]
+                region_y = item[6]
+                region_z = item[7]
+                galaxy = item[10]
+
+                cursor.execute('SELECT discord_tag FROM partner_accounts WHERE id = ?', (to_partner,))
+                to_tag_row = cursor.fetchone()
+                if to_tag_row:
+                    new_tag = to_tag_row[0]
+
+                    # Get from_partner's discord_tag to only transfer their systems
+                    cursor.execute('SELECT discord_tag FROM partner_accounts WHERE id = ?', (from_partner,))
+                    from_tag_row = cursor.fetchone()
+                    if from_tag_row:
+                        from_tag = from_tag_row[0]
+
+                        # Update all systems in region from the giving partner
+                        cursor.execute('''
+                            UPDATE systems SET discord_tag = ?
+                            WHERE region_x = ? AND region_y = ? AND region_z = ?
+                              AND galaxy = ? AND discord_tag = ?
+                        ''', (new_tag, region_x, region_y, region_z, galaxy, from_tag))
+                        systems_transferred += cursor.rowcount
+
+        # Mark proposal as accepted
+        cursor.execute('''
+            UPDATE peace_proposals SET status = 'accepted', responded_at = datetime('now'), response_by = ?
+            WHERE id = ?
+        ''', (username, proposal_id))
+
+        # Resolve the conflict
+        cursor.execute('''
+            UPDATE conflicts SET
+                status = 'resolved',
+                resolution = 'peace_treaty',
+                resolved_at = datetime('now'),
+                resolved_by = ?,
+                negotiation_status = 'accepted',
+                resolution_summary = ?
+            WHERE id = ?
+        ''', (username, f"Peace treaty accepted. {systems_transferred} systems transferred.", conflict_id))
+
+        # Add conflict event
+        cursor.execute('''
+            INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+            VALUES (?, 'peace_accepted', ?, ?, ?)
+        ''', (conflict_id, partner_id, username, f"Peace treaty accepted. {systems_transferred} systems transferred."))
+
+        # Calculate war duration
+        from datetime import datetime as dt
+        try:
+            start = dt.fromisoformat(declared_at.replace('Z', '+00:00'))
+            end = dt.now()
+            duration = end - start
+            duration_str = f"{duration.days} days" if duration.days > 0 else f"{duration.seconds // 3600} hours"
+        except:
+            duration_str = "unknown duration"
+
+        # Auto-news: Peace concluded
+        create_auto_news(
+            conn,
+            'peace_concluded',
+            f"WAR ENDS: {attacker_name} and {defender_name} Sign Peace Treaty",
+            f"After {duration_str} of conflict, peace has been achieved. {systems_transferred} systems changed hands as part of the agreement.",
+            reference_id=conflict_id,
+            reference_type='conflict',
+            conflict_id=conflict_id
+        )
+
+        # Notify both parties
+        cursor.execute('''
+            INSERT INTO war_notifications (recipient_partner_id, notification_type, title, message, related_conflict_id)
+            VALUES (?, 'peace_accepted', 'Peace Treaty Accepted', 'The peace treaty has been accepted. The war has ended.', ?)
+        ''', (proposal[2], conflict_id))  # Notify proposer
+
+        conn.commit()
+
+        return {
+            'status': 'accepted',
+            'conflict_resolved': True,
+            'systems_transferred': systems_transferred,
+            'duration': duration_str
+        }
+    finally:
+        conn.close()
+
+
+@app.put('/api/warroom/peace-proposals/{proposal_id}/reject')
+async def reject_peace_proposal(proposal_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Reject a peace proposal. Can optionally walk away (continue fighting) or send counter-offer."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    partner_id = session_data.get('partner_id')
+    username = session_data.get('username')
+    user_type = session_data.get('user_type')
+
+    data = await request.json()
+    walk_away = data.get('walk_away', False)  # If true, negotiations fail and war continues
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get proposal
+        cursor.execute('''
+            SELECT pp.id, pp.conflict_id, pp.proposer_partner_id, pp.recipient_partner_id, pp.status,
+                   c.attacker_partner_id, c.defender_partner_id,
+                   a.display_name as attacker_name,
+                   d.display_name as defender_name
+            FROM peace_proposals pp
+            JOIN conflicts c ON pp.conflict_id = c.id
+            JOIN partner_accounts a ON c.attacker_partner_id = a.id
+            JOIN partner_accounts d ON c.defender_partner_id = d.id
+            WHERE pp.id = ?
+        ''', (proposal_id,))
+        proposal = cursor.fetchone()
+
+        if not proposal:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+
+        if proposal[4] != 'pending':
+            raise HTTPException(status_code=400, detail="Proposal is not pending")
+
+        if partner_id != proposal[3] and user_type != 'super_admin':
+            raise HTTPException(status_code=403, detail="Only the recipient can reject this proposal")
+
+        conflict_id = proposal[1]
+        attacker_name = proposal[7]
+        defender_name = proposal[8]
+
+        # Mark proposal as rejected
+        cursor.execute('''
+            UPDATE peace_proposals SET status = 'rejected', responded_at = datetime('now'), response_by = ?
+            WHERE id = ?
+        ''', (username, proposal_id))
+
+        if walk_away:
+            # Negotiations failed - war continues
+            cursor.execute('''
+                UPDATE conflicts SET negotiation_status = 'failed'
+                WHERE id = ?
+            ''', (conflict_id,))
+
+            # Add conflict event
+            cursor.execute('''
+                INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+                VALUES (?, 'negotiations_failed', ?, ?, 'Peace talks have collapsed. The war continues.')
+            ''', (conflict_id, partner_id, username))
+
+            # Auto-news: Negotiations failed
+            create_auto_news(
+                conn,
+                'negotiations_failed',
+                f"PEACE TALKS COLLAPSE: {attacker_name} vs {defender_name} War Continues",
+                f"Negotiations have broken down between the warring factions. Hostilities will continue.",
+                reference_id=conflict_id,
+                reference_type='conflict_negotiations',
+                conflict_id=conflict_id
+            )
+
+            # Notify proposer
+            cursor.execute('''
+                INSERT INTO war_notifications (recipient_partner_id, notification_type, title, message, related_conflict_id)
+                VALUES (?, 'negotiations_failed', 'Peace Talks Failed', 'Your peace proposal was rejected. The war continues.', ?)
+            ''', (proposal[2], conflict_id))
+        else:
+            # Just rejected - waiting for counter-offer
+            cursor.execute('''
+                UPDATE conflicts SET negotiation_status = 'counter_expected'
+                WHERE id = ?
+            ''', (conflict_id,))
+
+            # Add conflict event
+            cursor.execute('''
+                INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
+                VALUES (?, 'proposal_rejected', ?, ?, 'Peace proposal rejected. Counter-offer may follow.')
+            ''', (conflict_id, partner_id, username))
+
+        conn.commit()
+
+        return {
+            'status': 'rejected',
+            'walk_away': walk_away,
+            'war_continues': walk_away
+        }
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/conflicts/{conflict_id}/negotiation-status')
+async def get_negotiation_status(conflict_id: int, session: Optional[str] = Cookie(None)):
+    """Get current negotiation status for a conflict."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT c.negotiation_status, c.attacker_counter_count, c.defender_counter_count,
+                   c.negotiation_started_at, c.status,
+                   a.display_name as attacker_name,
+                   d.display_name as defender_name
+            FROM conflicts c
+            JOIN partner_accounts a ON c.attacker_partner_id = a.id
+            JOIN partner_accounts d ON c.defender_partner_id = d.id
+            WHERE c.id = ?
+        ''', (conflict_id,))
+        conflict = cursor.fetchone()
+
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+
+        # Get pending proposal if any
+        cursor.execute('''
+            SELECT pp.id, pp.proposer_partner_id, pp.recipient_partner_id, pp.proposal_type,
+                   pp.counter_number, pp.proposed_at, pp.message,
+                   prop.display_name as proposer_name
+            FROM peace_proposals pp
+            JOIN partner_accounts prop ON pp.proposer_partner_id = prop.id
+            WHERE pp.conflict_id = ? AND pp.status = 'pending'
+            ORDER BY pp.proposed_at DESC LIMIT 1
+        ''', (conflict_id,))
+        pending = cursor.fetchone()
+
+        return {
+            'negotiation_status': conflict[0],
+            'attacker_counter_count': conflict[1],
+            'defender_counter_count': conflict[2],
+            'attacker_counters_remaining': 2 - conflict[1],
+            'defender_counters_remaining': 2 - conflict[2],
+            'negotiation_started_at': conflict[3],
+            'conflict_status': conflict[4],
+            'attacker_name': conflict[5],
+            'defender_name': conflict[6],
+            'pending_proposal': {
+                'id': pending[0],
+                'proposer_partner_id': pending[1],
+                'recipient_partner_id': pending[2],
+                'proposal_type': pending[3],
+                'counter_number': pending[4],
+                'proposed_at': pending[5],
+                'message': pending[6],
+                'proposer_name': pending[7]
+            } if pending else None
+        }
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':
