@@ -141,9 +141,11 @@ NMS-Save-Watcher/logs/
 # -----------------
 # Exclude user databases (contain personal discovery data)
 # Be specific to avoid excluding required data files
-Haven-UI/data/*.db
-Haven-UI/data/*.db.backup
-Haven-UI/data/data.json
+# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
+# Haven-UI/data/*.db
+# Haven-UI/data/*.db.backup
+# Haven-UI/data/data.json
+# === END TEMPORARY ===
 NMS-Save-Watcher/data/watcher.db
 !Haven-UI/data/.gitkeep
 
@@ -166,7 +168,9 @@ NMS-Save-Watcher/data/watcher.db
 # PHOTOS & UPLOADS
 # -----------------
 # User-uploaded discovery photos
-Haven-UI/photos/*
+# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
+# Haven-UI/photos/*
+# === END TEMPORARY ===
 !Haven-UI/photos/.gitkeep
 
 # -----------------
@@ -183,9 +187,11 @@ Documents/Haven-Extractor/
 # CONFIG FILES WITH SECRETS
 # -----------------
 # Keep example configs, exclude real ones with secrets
-config.json
+# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
+# config.json
+# NMS-Save-Watcher/config.json
+# === END TEMPORARY ===
 !config.example.json
-NMS-Save-Watcher/config.json
 
 # -----------------
 # MISC
