@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react'
 import { AuthContext } from '../utils/AuthContext'
+import { clearPersonalColorCache } from '../utils/usePersonalColor'
 import Card from '../components/Card'
 import Button from '../components/Button'
 
@@ -10,9 +11,11 @@ export default function Settings() {
   const [settings, setSettings] = useState({})
   const [partnerTheme, setPartnerTheme] = useState({})
   const [regionColor, setRegionColor] = useState('#00C2B3')
+  const [personalColor, setPersonalColor] = useState('#c026d3')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingRegionColor, setSavingRegionColor] = useState(false)
+  const [savingPersonalColor, setSavingPersonalColor] = useState(false)
 
   // Change password state
   const [currentPassword, setCurrentPassword] = useState('')
@@ -30,7 +33,12 @@ export default function Settings() {
     // Load global settings
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => setSettings(s || {}))
+      .then(s => {
+        setSettings(s || {})
+        if (s && s.personal_color) {
+          setPersonalColor(s.personal_color)
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
 
@@ -120,6 +128,24 @@ export default function Settings() {
       alert('Failed to save region color: ' + e.message)
     }
     setSavingRegionColor(false)
+  }
+
+  const savePersonalColor = async () => {
+    setSavingPersonalColor(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personal_color: personalColor })
+      })
+      if (!res.ok) throw new Error(await res.text())
+      clearPersonalColorCache() // Clear cache so other components get the new color
+      alert('Personal submission color saved!')
+    } catch (e) {
+      alert('Failed to save personal color: ' + e)
+    }
+    setSavingPersonalColor(false)
   }
 
   const doBackup = async () => {
@@ -550,6 +576,65 @@ export default function Settings() {
 
             <Button className="mt-4" onClick={saveGlobalSettings} disabled={saving}>
               {saving ? 'Saving...' : 'Save Global Theme'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Super Admin: Personal Submission Color */}
+      {isSuperAdmin && (
+        <Card className="bg-gray-800/50">
+          <div className="p-4">
+            <h3 className="text-lg font-semibold text-white mb-2">Personal Submission Badge Color</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Customize the color used for personal submissions (submissions without a community tag).
+              This color is visible across the UI where personal badges are displayed.
+            </p>
+
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Badge Color</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={personalColor}
+                    onChange={e => setPersonalColor(e.target.value)}
+                    className="w-16 h-10 rounded cursor-pointer border-2 border-gray-600"
+                  />
+                  <input
+                    type="text"
+                    value={personalColor}
+                    onChange={e => {
+                      const val = e.target.value
+                      if (/^#[0-9A-Fa-f]{0,6}$/.test(val)) {
+                        setPersonalColor(val)
+                      }
+                    }}
+                    placeholder="#c026d3"
+                    className="w-28 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* Color preview */}
+              <div className="flex-1">
+                <label className="block text-sm text-gray-300 mb-1">Preview</label>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="px-2 py-1 rounded text-xs font-semibold text-white"
+                    style={{ backgroundColor: personalColor }}
+                  >
+                    PERSONAL
+                  </span>
+                  <span className="text-sm text-gray-400">
+                    Badge preview
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <Button className="mt-4" onClick={savePersonalColor} disabled={savingPersonalColor}>
+              {savingPersonalColor ? 'Saving...' : 'Save Personal Color'}
             </Button>
           </div>
         </Card>

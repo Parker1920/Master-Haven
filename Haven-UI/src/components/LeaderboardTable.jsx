@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 
 const rankColors = {
   1: { bg: 'rgba(255, 215, 0, 0.15)', border: 'rgba(255, 215, 0, 0.3)', text: '#FFD700' },
@@ -16,15 +16,25 @@ const tagColors = {
   'Personal': 'bg-gray-500',
 }
 
+const hashColorPalette = ['bg-indigo-500', 'bg-violet-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500']
+
+// Module-level cache for hash-computed colors - persists across renders
+const tagColorCache = new Map()
+
 function getTagColor(tag) {
   if (tagColors[tag]) return tagColors[tag]
-  // Hash-based color for unknown tags
-  const colors = ['bg-indigo-500', 'bg-violet-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500']
+
+  // Check cache first
+  if (tagColorCache.has(tag)) return tagColorCache.get(tag)
+
+  // Hash-based color for unknown tags - compute once and cache
   let hash = 0
   for (let i = 0; i < (tag || '').length; i++) {
     hash = tag.charCodeAt(i) + ((hash << 5) - hash)
   }
-  return colors[Math.abs(hash) % colors.length]
+  const color = hashColorPalette[Math.abs(hash) % hashColorPalette.length]
+  tagColorCache.set(tag, color)
+  return color
 }
 
 export default function LeaderboardTable({ data, showCommunity = true, showRank = true, loading = false }) {

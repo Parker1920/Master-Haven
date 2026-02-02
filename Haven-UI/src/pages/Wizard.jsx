@@ -317,7 +317,7 @@ export default function Wizard(){
               placeholder="Search by number or name..."
             />
             <p className="text-xs text-gray-500 mt-1">
-              Search by galaxy index (0-255) or name
+              Search by galaxy number (1-256) or name
             </p>
           </div>
         </div>

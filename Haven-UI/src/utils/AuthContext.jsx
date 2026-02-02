@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect } from 'react'
+import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react'
 
 // Feature constants for permission checking
 export const FEATURES = {
@@ -71,15 +71,15 @@ export function AuthProvider({ children }) {
   const isHavenSubAdmin = user?.isHavenSubAdmin || false
   const isCorrespondent = user?.type === 'correspondent'
 
-  function canAccess(feature) {
+  const canAccess = useCallback((feature) => {
     if (!user) return false
     if (isSuperAdmin) return true
     const enabled = user.enabledFeatures || []
     if (enabled.includes('all')) return true
     return enabled.includes(feature)
-  }
+  }, [user, isSuperAdmin])
 
-  async function login(username, password) {
+  const login = useCallback(async (username, password) => {
     const r = await fetch('/api/admin/login', {
       method: 'POST',
       credentials: 'include',
@@ -102,32 +102,35 @@ export function AuthProvider({ children }) {
       isHavenSubAdmin: data.is_haven_sub_admin || false
     })
     return data
-  }
+  }, [])
 
-  async function logout() {
+  const logout = useCallback(async () => {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
     setUser(null)
-  }
+  }, [])
 
-  async function refreshAuth() {
+  const refreshAuth = useCallback(async () => {
     await checkAuth()
-  }
+  }, [])
+
+  // Memoize context value to prevent unnecessary re-renders of all consumers
+  const contextValue = useMemo(() => ({
+    isAdmin,
+    isSuperAdmin,
+    isPartner,
+    isSubAdmin,
+    isHavenSubAdmin,
+    isCorrespondent,
+    user,
+    loading,
+    login,
+    logout,
+    canAccess,
+    refreshAuth
+  }), [isAdmin, isSuperAdmin, isPartner, isSubAdmin, isHavenSubAdmin, isCorrespondent, user, loading, login, logout, canAccess, refreshAuth])
 
   return (
-    <AuthContext.Provider value={{
-      isAdmin,
-      isSuperAdmin,
-      isPartner,
-      isSubAdmin,
-      isHavenSubAdmin,
-      isCorrespondent,
-      user,
-      loading,
-      login,
-      logout,
-      canAccess,
-      refreshAuth
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   )

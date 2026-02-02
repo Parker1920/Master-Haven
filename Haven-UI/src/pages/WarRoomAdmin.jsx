@@ -20,6 +20,17 @@ export default function WarRoomAdmin() {
   const [regionSearchResults, setRegionSearchResults] = useState([])
   const [searchingRegions, setSearchingRegions] = useState(false)
 
+  // Reporting Organizations state
+  const [reportingOrgs, setReportingOrgs] = useState([])
+  const [newOrg, setNewOrg] = useState({ name: '', description: '', discord_server_name: '' })
+  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [orgMembers, setOrgMembers] = useState([])
+  const [newOrgMember, setNewOrgMember] = useState({ username: '', password: '', display_name: '' })
+  const [conflictHistory, setConflictHistory] = useState([])
+
+  // News management state
+  const [newsArticles, setNewsArticles] = useState([])
+
   // Redirect if not super admin
   useEffect(() => {
     if (!auth.loading && !auth.isSuperAdmin) {
@@ -29,19 +40,68 @@ export default function WarRoomAdmin() {
 
   const fetchData = async () => {
     try {
-      const [enrollmentRes, partnersRes, correspondentsRes] = await Promise.all([
+      const [enrollmentRes, partnersRes, correspondentsRes, orgsRes, historyRes, newsRes] = await Promise.all([
         axios.get('/api/warroom/enrollment'),
         axios.get('/api/partners'),
-        axios.get('/api/warroom/correspondents')
+        axios.get('/api/warroom/correspondents'),
+        axios.get('/api/warroom/reporting-orgs'),
+        axios.get('/api/warroom/conflicts?status=resolved'),
+        axios.get('/api/warroom/news?limit=50')
       ])
 
       setEnrolledCivs(enrollmentRes.data)
       setAllPartners(partnersRes.data.partners || [])
       setCorrespondents(correspondentsRes.data)
+      setReportingOrgs(orgsRes.data)
+      setConflictHistory(historyRes.data)
+      setNewsArticles(newsRes.data)
     } catch (err) {
       console.error('Failed to fetch admin data:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Fetch org members when selecting an org
+  const fetchOrgMembers = async (orgId) => {
+    try {
+      const res = await axios.get(`/api/warroom/reporting-orgs/${orgId}/members`)
+      setOrgMembers(res.data)
+    } catch (err) {
+      console.error('Failed to fetch org members:', err)
+      setOrgMembers([])
+    }
+  }
+
+  // Create reporting organization
+  const createReportingOrg = async () => {
+    if (!newOrg.name) {
+      setMessage({ type: 'error', text: 'Organization name is required' })
+      return
+    }
+    try {
+      await axios.post('/api/warroom/reporting-orgs', newOrg)
+      setMessage({ type: 'success', text: 'News organization created!' })
+      setNewOrg({ name: '', description: '', discord_server_name: '' })
+      fetchData()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to create organization' })
+    }
+  }
+
+  // Add member to reporting org
+  const addOrgMember = async () => {
+    if (!selectedOrg || !newOrgMember.username || !newOrgMember.password) {
+      setMessage({ type: 'error', text: 'Username and password required' })
+      return
+    }
+    try {
+      await axios.post(`/api/warroom/reporting-orgs/${selectedOrg.id}/members`, newOrgMember)
+      setMessage({ type: 'success', text: 'Member added!' })
+      setNewOrgMember({ username: '', password: '', display_name: '' })
+      fetchOrgMembers(selectedOrg.id)
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to add member' })
     }
   }
 
@@ -53,12 +113,48 @@ export default function WarRoomAdmin() {
     if (!selectedPartner) return
 
     try {
-      await axios.post('/api/warroom/enrollment', { partner_id: parseInt(selectedPartner) })
-      setMessage({ type: 'success', text: 'Partner enrolled successfully!' })
+      const res = await axios.post('/api/warroom/enrollment', { partner_id: parseInt(selectedPartner) })
+      const systemsClaimed = res.data.systems_claimed || 0
+      setMessage({
+        type: 'success',
+        text: `Partner enrolled successfully! Auto-claimed ${systemsClaimed} systems based on discord_tag.`
+      })
       setSelectedPartner('')
       fetchData()
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to enroll partner' })
+    }
+  }
+
+  const syncTerritory = async (partnerId) => {
+    try {
+      const res = await axios.post(`/api/warroom/enrollment/${partnerId}/sync-territory`)
+      setMessage({
+        type: 'success',
+        text: `Synced ${res.data.systems_claimed} new systems for ${res.data.display_name}`
+      })
+      fetchData()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to sync territory' })
+    }
+  }
+
+  const syncAllTerritory = async () => {
+    try {
+      const res = await axios.post('/api/warroom/sync-all-territory')
+      const results = res.data.civs_updated || []
+      const totalSystems = res.data.total_systems_claimed || 0
+      if (totalSystems === 0) {
+        setMessage({ type: 'success', text: 'All civilizations are already synced - no new systems to claim.' })
+      } else {
+        setMessage({
+          type: 'success',
+          text: `Synced ${totalSystems} total systems across ${results.length} civilizations.`
+        })
+      }
+      fetchData()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to sync all territory' })
     }
   }
 
@@ -93,9 +189,22 @@ export default function WarRoomAdmin() {
   const recalculateStats = async () => {
     try {
       await axios.post('/api/warroom/statistics/recalculate')
-      setMessage({ type: 'success', text: 'Statistics recalculated!' })
+      setMessage({ type: 'success', text: 'Statistics recalculated! Note: Stats require resolved conflicts to populate.' })
     } catch (err) {
-      setMessage({ type: 'error', text: 'Failed to recalculate statistics' })
+      console.error('Recalculate stats error:', err)
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to recalculate statistics' })
+    }
+  }
+
+  const deleteNewsArticle = async (newsId, headline) => {
+    if (!confirm(`Are you sure you want to delete "${headline}"?`)) return
+
+    try {
+      await axios.delete(`/api/warroom/news/${newsId}`)
+      setMessage({ type: 'success', text: 'News article deleted successfully' })
+      fetchData()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to delete news article' })
     }
   }
 
@@ -225,12 +334,21 @@ export default function WarRoomAdmin() {
                           <div className="text-xs text-gray-500">{civ.discord_tag}</div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => unenrollPartner(civ.partner_id)}
-                        className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs"
-                      >
-                        Unenroll
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => syncTerritory(civ.partner_id)}
+                          className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs"
+                          title="Sync new systems from discord_tag"
+                        >
+                          Sync
+                        </button>
+                        <button
+                          onClick={() => unenrollPartner(civ.partner_id)}
+                          className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs"
+                        >
+                          Unenroll
+                        </button>
+                      </div>
                     </div>
                     {/* Home Region */}
                     <div className="mt-2 pt-2 border-t border-gray-700">
@@ -343,12 +461,238 @@ export default function WarRoomAdmin() {
           </div>
         </div>
 
+        {/* Reporting Organizations */}
+        <div className="bg-gray-900/80 border border-yellow-500/20 rounded-lg">
+          <div className="px-4 py-3 border-b border-yellow-500/20">
+            <h2 className="text-lg font-bold text-yellow-400">News Organizations ({reportingOrgs.length})</h2>
+          </div>
+          <div className="p-4">
+            {reportingOrgs.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {reportingOrgs.map(org => (
+                  <div
+                    key={org.id}
+                    onClick={() => {
+                      setSelectedOrg(org)
+                      fetchOrgMembers(org.id)
+                    }}
+                    className={`p-3 rounded cursor-pointer transition-all ${
+                      selectedOrg?.id === org.id
+                        ? 'bg-yellow-500/20 border border-yellow-500/50'
+                        : 'bg-gray-800/50 hover:bg-gray-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-white">{org.name}</div>
+                        {org.discord_server_name && (
+                          <div className="text-xs text-gray-400">{org.discord_server_name}</div>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-500">{org.member_count} members</span>
+                    </div>
+                    {org.description && (
+                      <p className="text-xs text-gray-500 mt-1">{org.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Selected Org Members */}
+            {selectedOrg && (
+              <div className="bg-gray-800/50 rounded p-3 mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-bold text-yellow-400">{selectedOrg.name} Members</h4>
+                  <button
+                    onClick={() => setSelectedOrg(null)}
+                    className="text-xs text-gray-400 hover:text-white"
+                  >
+                    Close
+                  </button>
+                </div>
+                {orgMembers.length > 0 ? (
+                  <div className="space-y-1 mb-3">
+                    {orgMembers.map(m => (
+                      <div key={m.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-300">{m.display_name || m.username}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${m.is_active ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                          {m.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mb-3">No members yet</p>
+                )}
+                <div className="space-y-2 border-t border-gray-700 pt-3">
+                  <input
+                    type="text"
+                    placeholder="Username"
+                    value={newOrgMember.username}
+                    onChange={(e) => setNewOrgMember(prev => ({ ...prev, username: e.target.value }))}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={newOrgMember.password}
+                    onChange={(e) => setNewOrgMember(prev => ({ ...prev, password: e.target.value }))}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Display Name (optional)"
+                    value={newOrgMember.display_name}
+                    onChange={(e) => setNewOrgMember(prev => ({ ...prev, display_name: e.target.value }))}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs"
+                  />
+                  <button
+                    onClick={addOrgMember}
+                    className="w-full py-1.5 bg-yellow-600 hover:bg-yellow-500 rounded text-xs font-bold"
+                  >
+                    Add Member
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Create new org */}
+            <div className="space-y-2 pt-3 border-t border-gray-700">
+              <label className="block text-sm text-gray-400">Create News Organization</label>
+              <input
+                type="text"
+                placeholder="Organization Name"
+                value={newOrg.name}
+                onChange={(e) => setNewOrg(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Discord Server (optional)"
+                value={newOrg.discord_server_name}
+                onChange={(e) => setNewOrg(prev => ({ ...prev, discord_server_name: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+              />
+              <textarea
+                placeholder="Description (optional)"
+                value={newOrg.description}
+                onChange={(e) => setNewOrg(prev => ({ ...prev, description: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+                rows={2}
+              />
+              <button
+                onClick={createReportingOrg}
+                className="w-full py-2 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-bold"
+              >
+                Create Organization
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Conflict History */}
+        <div className="bg-gray-900/80 border border-gray-500/20 rounded-lg">
+          <div className="px-4 py-3 border-b border-gray-500/20">
+            <h2 className="text-lg font-bold text-gray-400">Conflict History ({conflictHistory.length})</h2>
+          </div>
+          <div className="p-4">
+            {conflictHistory.length === 0 ? (
+              <p className="text-gray-500 text-sm">No resolved conflicts yet</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {conflictHistory.slice(0, 20).map(c => (
+                  <div key={c.id} className="bg-gray-800/50 rounded p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-white font-medium text-sm">{c.target_system_name}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        c.resolution === 'attacker_victory' ? 'bg-red-500/20 text-red-400' :
+                        c.resolution === 'defender_victory' ? 'bg-blue-500/20 text-blue-400' :
+                        c.resolution === 'surrender' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-green-500/20 text-green-400'
+                      }`}>
+                        {c.resolution?.replace(/_/g, ' ') || 'Resolved'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      <span style={{ color: c.attacker?.color }}>{c.attacker?.display_name}</span>
+                      {' vs '}
+                      <span style={{ color: c.defender?.color }}>{c.defender?.display_name}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {c.resolved_at ? new Date(c.resolved_at).toLocaleDateString() : 'Unknown date'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* News Management */}
+        <div className="bg-gray-900/80 border border-yellow-500/20 rounded-lg lg:col-span-2">
+          <div className="px-4 py-3 border-b border-yellow-500/20">
+            <h2 className="text-lg font-bold text-yellow-400">News & Reports ({newsArticles.length})</h2>
+          </div>
+          <div className="p-4">
+            {newsArticles.length === 0 ? (
+              <p className="text-gray-500 text-sm">No news articles yet</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {newsArticles.map(article => (
+                  <div key={article.id} className="bg-gray-800/50 rounded p-3 flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          article.article_type === 'breaking' ? 'bg-red-500/20 text-red-400' :
+                          article.article_type === 'editorial' ? 'bg-purple-500/20 text-purple-400' :
+                          article.article_type === 'report' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {article.article_type || 'news'}
+                        </span>
+                        {article.is_pinned && (
+                          <span className="text-xs text-yellow-400">📌 Pinned</span>
+                        )}
+                      </div>
+                      <div className="text-white font-medium text-sm truncate">{article.headline}</div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        By {article.author_name || article.author_username}
+                        {article.reporting_org_name && (
+                          <span className="text-yellow-400"> • {article.reporting_org_name}</span>
+                        )}
+                        <span className="ml-2 text-gray-500">
+                          {new Date(article.published_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteNewsArticle(article.id, article.headline)}
+                      className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs flex-shrink-0"
+                      title="Delete this article"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Admin Actions */}
         <div className="bg-gray-900/80 border border-red-500/20 rounded-lg lg:col-span-2">
           <div className="px-4 py-3 border-b border-red-500/20">
             <h2 className="text-lg font-bold text-red-400">Admin Actions</h2>
           </div>
           <div className="p-4 flex flex-wrap gap-4">
+            <button
+              onClick={syncAllTerritory}
+              className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-bold"
+              title="Sync all enrolled civs' territory from their discord_tags"
+            >
+              Sync All Territory
+            </button>
             <button
               onClick={recalculateStats}
               className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-bold"

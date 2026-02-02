@@ -792,8 +792,11 @@ export const resourcesList = [
   "Void Mote",
   // Special Harvestables (shown on planet discovery)
   "Ancient Bones",
+  "Buried Technology",
   "Salvageable Scrap",
   "Storm Crystals",
+  "Vile Brood Detected",
+  "Whispering Eggs",
   // Cave & Underground Collectibles
   "Albumen Pearl",
   "Vortex Cube",

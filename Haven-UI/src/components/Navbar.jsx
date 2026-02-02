@@ -11,7 +11,9 @@ export default function Navbar() {
   const [showLogin, setShowLogin] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [activeConflictCount, setActiveConflictCount] = useState(0)
   const intervalRef = useRef(null)
+  const warIntervalRef = useRef(null)
   const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
 
   const { isAdmin, isSuperAdmin, isPartner, isSubAdmin, isCorrespondent, user, canAccess } = auth
@@ -64,6 +66,36 @@ export default function Navbar() {
     }
   }, [isAdmin, isDisconnected, registerConnection, unregisterConnection])
 
+  // Fetch active conflict count for War Room badge
+  useEffect(() => {
+    const hasWarRoomAccess = canAccess(FEATURES.WAR_ROOM) || isCorrespondent
+
+    if (!hasWarRoomAccess) {
+      setActiveConflictCount(0)
+      return
+    }
+
+    if (isDisconnected) return
+
+    const fetchConflictCount = async () => {
+      try {
+        const response = await axios.get('/api/warroom/conflicts/active')
+        setActiveConflictCount(response.data?.length || 0)
+      } catch (err) {
+        // Silent fail
+      }
+    }
+
+    fetchConflictCount()
+    warIntervalRef.current = setInterval(fetchConflictCount, 60000) // Update every 60 seconds
+
+    return () => {
+      if (warIntervalRef.current) {
+        clearInterval(warIntervalRef.current)
+      }
+    }
+  }, [canAccess, isCorrespondent, isDisconnected])
+
   const closeMenu = () => setMobileMenuOpen(false)
 
   return (
@@ -115,7 +147,14 @@ export default function Navbar() {
             {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/analytics">Analytics</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/events">Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
-              <Link className="px-3 py-1 hover:underline text-red-400 font-bold" to="/war-room">War Room</Link>
+              <Link className="px-3 py-1 hover:underline text-red-400 font-bold relative" to="/war-room">
+                War Room
+                {activeConflictCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                    {activeConflictCount > 9 ? '9+' : activeConflictCount}
+                  </span>
+                )}
+              </Link>
             )}
             {(isSuperAdmin || isPartner) && <Link className="px-3 py-1 hover:underline" to="/admin/sub-admins">Sub-Admins</Link>}
             {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-1 hover:underline" to="/csv-import">CSV Import</Link>}
@@ -163,7 +202,14 @@ export default function Navbar() {
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/analytics" onClick={closeMenu}>Analytics</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/events" onClick={closeMenu}>Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
-              <Link className="px-3 py-2 hover:bg-gray-700 rounded text-red-400 font-bold" to="/war-room" onClick={closeMenu}>War Room</Link>
+              <Link className="px-3 py-2 hover:bg-gray-700 rounded text-red-400 font-bold flex justify-between items-center" to="/war-room" onClick={closeMenu}>
+                <span>War Room</span>
+                {activeConflictCount > 0 && (
+                  <span className="bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                    {activeConflictCount > 9 ? '9+' : activeConflictCount}
+                  </span>
+                )}
+              </Link>
             )}
             {(isSuperAdmin || isPartner) && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/sub-admins" onClick={closeMenu}>Sub-Admins</Link>}
             {canAccess(FEATURES.CSV_IMPORT) && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/csv-import" onClick={closeMenu}>CSV Import</Link>}

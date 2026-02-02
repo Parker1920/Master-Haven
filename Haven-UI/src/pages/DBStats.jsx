@@ -3,6 +3,8 @@ import { AuthContext } from '../utils/AuthContext'
 
 // Format stat labels for display
 function formatLabel(key) {
+  // Check for custom labels first
+  if (customLabels[key]) return customLabels[key]
   return key
     .replace(/_/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase())
@@ -13,11 +15,18 @@ function formatNumber(num) {
   return num.toLocaleString()
 }
 
+// Custom labels for specific stats
+const customLabels = {
+  'total_regions': 'Named Regions',
+  'populated_regions': 'Populated Regions',
+  'regions': 'Named Regions'
+}
+
 // Group stats into categories for super admin view
 function categorizeStats(stats, userType) {
   if (userType === 'super_admin') {
     return {
-      'Core Data': ['total_systems', 'total_planets', 'total_moons', 'total_regions', 'total_space_stations', 'total_planet_pois', 'total_discoveries', 'unique_galaxies'],
+      'Core Data': ['total_systems', 'total_planets', 'total_moons', 'populated_regions', 'total_regions', 'total_space_stations', 'total_planet_pois', 'total_discoveries', 'unique_galaxies'],
       'Administration': ['partner_accounts', 'sub_admin_accounts', 'api_keys', 'active_communities'],
       'Pending Approvals': ['pending_systems', 'pending_region_names', 'pending_edit_requests'],
       'Audit & Activity': ['approval_audit_entries', 'activity_log_entries', 'data_restrictions']

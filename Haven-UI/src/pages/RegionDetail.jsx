@@ -4,6 +4,7 @@ import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
+import DiscordTagBadge from '../components/DiscordTagBadge'
 import { AuthContext } from '../utils/AuthContext'
 import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
@@ -46,23 +47,6 @@ function getStarTypeBadge(starType) {
   )
 }
 
-// Discord tag badge
-function getDiscordTagBadge(tag) {
-  if (!tag) return null
-  if (tag === 'personal') {
-    return <span className="text-xs bg-fuchsia-600 text-white px-1.5 py-0.5 rounded">Personal</span>
-  }
-  const tagColors = {
-    'Haven': 'bg-cyan-500 text-white',
-    'IEA': 'bg-green-500 text-white',
-    'B.E.S': 'bg-orange-500 text-white',
-    'ARCH': 'bg-purple-500 text-white',
-    'TBH': 'bg-yellow-500 text-black',
-    'EVRN': 'bg-pink-500 text-white',
-  }
-  const colorClass = tagColors[tag] || 'bg-indigo-500 text-white'
-  return <span className={`text-xs px-1.5 py-0.5 rounded ${colorClass}`}>{tag}</span>
-}
 
 // System Card Component
 function SystemCard({ system, isSelected, onSelect, showCheckbox, onClick }) {
@@ -117,7 +101,7 @@ function SystemCard({ system, isSelected, onSelect, showCheckbox, onClick }) {
           <span className="text-xs bg-blue-600/50 text-blue-200 px-1.5 py-0.5 rounded">
             {system.galaxy || 'Euclid'}
           </span>
-          {getDiscordTagBadge(system.discord_tag)}
+          <DiscordTagBadge tag={system.discord_tag} />
         </div>
 
         {/* Stats */}

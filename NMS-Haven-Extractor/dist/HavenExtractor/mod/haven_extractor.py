@@ -5,10 +5,84 @@
 # start_exe = true
 # ///
 """
-Haven Extractor v10.1.4 - Display formatting fixes for weather/biome
+Haven Extractor v10.3.8 - Fixed all flora/fauna/sentinel/weather mappings
 
 Extracts planet data from NMS and sends directly to Haven UI via API.
 Features session configuration for user identification and community routing.
+
+CHANGELOG v10.3.8:
+- FIXED SENTINEL_RARE mappings based on Jedexoi-Ikom system screenshots:
+  * Index 1: "Require Orthodoxy" → "Enforcing" (Obushart)
+  * Index 3: "Unwavering" → "Inescapable" (Ilva VI)
+  * Index 4: "Answer To None" → "Regular Patrols" (Roin V)
+  * Index 8: "Regular Patrols" → "Unwavering" (Xumin)
+  * Index 12: "Low" → "Infrequent" (Toya 23/L2)
+- FIXED RARITY_HIGH mapping:
+  * Index 4: "Bountiful" → "Frequent" (Ilva VI Flora)
+- ADDED RARITY_MID mappings for medium flora/fauna levels:
+  * Index 4: "Typical" (Roin V Fauna: RARITY_MID4 → "Typical")
+- ADDED weather enum-to-adjective mapping function:
+  * WEATHER_COLD7 → "Ice Storms" (Toya 23/L2)
+  * WEATHER_TOXIC_CLEAR3 → "Poison Rain" (Roin V)
+  * WEATHER_HEAT10 → "Burning Air" (Xumin)
+  * WEATHER_TOXIC7 → "Caustic Winds" (Ilva VI)
+  * WEATHER_HEAT3 → "Superheated Gas Pockets" (Yalosalci)
+  * WEATHER_HEAT7 → "Heated Atmosphere" (Obushart)
+
+CHANGELOG v10.3.7:
+- CRITICAL FIX: Fixed "Failed to extract data" bug in batch save/export
+  * _save_current_system_to_batch was not caching sys_data address before extraction
+  * _extract_single_planet needs _cached_sys_data_addr for direct memory reads
+  * Also caches coordinates for deterministic weather hash selection
+  * This caused 0 planets to be extracted even when data was captured correctly
+
+CHANGELOG v10.3.6:
+- FIXED RARITY_HIGH mappings based on actual game screenshots:
+  * Index 1: "Generous" → "Abundant" (verified on Sozop III Flora)
+  * Index 6: "Lush" → "Generous" (verified on Tinanta J15 Flora)
+  * Index 9: "Frequent" → "Rich" (verified on Nokak 62/S5 Fauna)
+- FIXED RARITY_NONE mappings:
+  * Index 3: "Empty" → "Undetected" (verified on Fotesburs Delta Fauna)
+- FIXED SENTINEL_RARE mappings (ALL were wrong!):
+  * Index 3: "Ever-present" → "Unwavering" (verified on Fotesburs Delta)
+  * Index 8: "De-Harmonised" → "Regular Patrols" (verified on Abet)
+  * Index 9: "Rebellious" → "Ever-present" (verified on Sozop III)
+  * Index 10: "Missing" → "Few" (verified on Nokak 62/S5)
+  * Index 11: "Isolated" → "Sparse" (verified on Tinanta J15)
+- FIXED Weather selection: Now uses deterministic hash based on glyph code + planet index
+  (still picks from category list, but consistently - may not match game exactly)
+- FIXED Resource mappings:
+  * YELLOW2/RED2/GREEN2/BLUE2 now map to base metals (Copper/Cadmium/Emeril/Indium)
+    instead of Chromatic Metal to match game display
+  * Added missing special resources: Ancient Bones, Salvageable Scrap, Buried Technology,
+    Vile Brood Detected, Whispering Eggs, Storm Crystals
+- TODO: Biome, economy, conflict also use random picker - need same fix treatment
+
+CHANGELOG v10.3.5:
+- Added DEBUG logging to Refresh Display Strings to diagnose adjective mismatches
+- Logs raw values for Flora, Fauna, Sentinel (all difficulty levels), Weather
+- Shows which Sentinel array index each value comes from
+- Includes raw value in output when adjectives are updated
+
+CHANGELOG v10.3.4:
+- Fixed adjective mappings to use EXACT index-to-adjective lookups based on NMS game data
+- RARITY_HIGH3 now correctly maps to "Ample", RARITY_HIGH8 to "Copious", etc.
+- SENTINEL_RARE7 now correctly maps to "Low Security", SENTINEL_RARE3 to "Ever-present", etc.
+
+CHANGELOG v10.3.3:
+- Fixed duplicate "Moon Moon" badge: planet_size now shows "Small" for moons instead of "Moon"
+  (is_moon: true already indicates it's a moon, so planet_size was redundant)
+- Applied adjective mapping during extraction (not just Refresh button)
+
+CHANGELOG v10.3.2:
+- Added mapping for internal enum names (RARITY_HIGH3, SENTINEL_RARE7, etc.) to proper adjectives
+- Refresh Display Strings button now converts raw game values to human-readable adjectives
+
+CHANGELOG v10.3.1:
+- Fixed weather mapping: no longer overwrites good adjectives with raw lookup keys
+- Fixed "Refresh Display Strings" button (was using invalid nmse.GcSolarSystemData)
+- Cleaned up terminal output: detailed debug messages now hidden by default
+- Added validation to prevent storing bad weather values from PlanetInfo
 
 WORKFLOW:
 1. Run the extractor - Config GUI appears on first launch
@@ -308,16 +382,18 @@ STORM_FREQUENCY = {
 }
 
 # Resource ID to human-readable name mapping
+# NOTE: The game displays base stellar metals (Copper, Cadmium, etc.) even when
+# the internal ID is the "2" variant. We map YELLOW2->Copper etc. to match game display.
 RESOURCE_NAMES = {
-    # Stellar metals (found in deposits)
+    # Stellar metals (found in deposits) - map "2" variants to base resource for display
     "YELLOW": "Copper",
-    "YELLOW2": "Chromatic Metal",
+    "YELLOW2": "Copper",        # Game shows Copper, not Chromatic Metal
     "RED": "Cadmium",
-    "RED2": "Chromatic Metal",
+    "RED2": "Cadmium",          # Game shows Cadmium, not Chromatic Metal
     "GREEN": "Emeril",
-    "GREEN2": "Chromatic Metal",
+    "GREEN2": "Emeril",         # Game shows Emeril, not Chromatic Metal
     "BLUE": "Indium",
-    "BLUE2": "Chromatic Metal",
+    "BLUE2": "Indium",          # Game shows Indium, not Chromatic Metal
     "PURPLE": "Indium",
     "PURPLE2": "Indium",
     # Activated stellar metals (extreme weather planets)
@@ -379,6 +455,28 @@ RESOURCE_NAMES = {
     "GAS1": "Nitrogen",
     "GAS2": "Sulphurine",
     "GAS3": "Radon",
+    # Buried/excavation resources (v10.3.6)
+    "FOSSIL1": "Ancient Bones",
+    "FOSSIL2": "Ancient Bones",
+    "CREATURE1": "Ancient Bones",
+    "BONES": "Ancient Bones",
+    "ANCIENT": "Ancient Bones",
+    "SALVAGE": "Salvageable Scrap",
+    "SALVAGE1": "Salvageable Scrap",
+    "TECHFRAG": "Salvageable Scrap",
+    "BURIED": "Buried Technology",
+    "BURIED1": "Buried Technology",
+    # Infestation indicators (shown as resources)
+    "INFESTATION": "Vile Brood Detected",
+    "VILEBROOD": "Vile Brood Detected",
+    "LARVA": "Whispering Eggs",
+    "LARVAL": "Whispering Eggs",
+    # Gas Giant resources
+    "GASGIANT1": "Activated Indium",
+    "GASGIANT": "Hydrogen",
+    # Storm crystals
+    "STORM1": "Storm Crystals",
+    "STORM_CRYSTAL": "Storm Crystals",
 }
 
 
@@ -544,9 +642,391 @@ def clean_weather_string(weather_str: str) -> str:
     return weather_str
 
 
+def map_display_string_to_adjective(value: str, field_type: str) -> str:
+    """
+    Map internal enum names like 'RARITY_HIGH3' or 'SENTINEL_RARE7' to actual adjectives.
+
+    The number suffix is the INDEX into the game's internal adjective list.
+    These mappings are based on NMS game data analysis.
+
+    Args:
+        value: The raw display string from PlanetInfo
+        field_type: 'flora', 'fauna', or 'sentinel'
+
+    Returns:
+        The proper in-game adjective, or the original value if already valid
+    """
+    if not value or value == "None":
+        return "Unknown"
+
+    # If already a valid adjective (doesn't look like an internal name), return as-is
+    if not value.startswith("RARITY_") and not value.startswith("SENTINEL_"):
+        return value
+
+    # Extract the number from the end of the string (e.g., RARITY_HIGH3 -> 3)
+    import re
+    match = re.search(r'(\d+)$', value)
+    idx = int(match.group(1)) if match else 0
+
+    # =============================================================================
+    # FLORA/FAUNA RARITY MAPPINGS - Index to exact in-game adjective
+    # Based on NMS game data (GcCreatureRoleDescriptionTable.MBIN)
+    # =============================================================================
+
+    # RARITY_HIGH: High flora/fauna - indexed list (0-10+)
+    # CORRECTED v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+    RARITY_HIGH_MAP = {
+        0: "Rich",
+        1: "Abundant",      # Verified (Toya 23/L2 Fauna: RARITY_HIGH1 → "Abundant")
+        2: "High",          # Verified (Obushart Fauna: RARITY_HIGH2 → "High")
+        3: "Ample",
+        4: "Frequent",      # Was "Bountiful" - FIXED (Ilva VI Flora: RARITY_HIGH4 → "Frequent")
+        5: "Full",          # Verified (Roin V Flora: RARITY_HIGH5 → "Full")
+        6: "Generous",
+        7: "Numerous",
+        8: "Copious",       # Verified (Toya 23/L2 Flora, Xumin Flora: RARITY_HIGH8 → "Copious")
+        9: "Rich",          # Verified (Xumin Fauna: RARITY_HIGH9 → "Rich")
+        10: "Abundant",     # Verified (Ilva VI Fauna, Yalosalci Flora: RARITY_HIGH10 → "Abundant")
+        11: "Thriving",
+        12: "Flourishing",
+    }
+
+    # RARITY_NONE: None/absent flora/fauna - indexed list
+    # CORRECTED v10.3.6 based on actual game screenshots
+    RARITY_NONE_MAP = {
+        0: "Absent",
+        1: "None",
+        2: "Devoid",
+        3: "Undetected",    # Was "Empty" - FIXED (Fotesburs Delta Fauna: RARITY_NONE3 → "Undetected")
+        4: "Lacking",
+        5: "Barren",
+        6: "Nonexistent",
+        7: "Empty",         # Swapped with index 3
+        8: "Not Present",
+        9: "Sparse",
+        10: "Barren",       # Confirmed correct (Fotesburs Delta Flora)
+        11: "Deficient",
+        12: "Low",
+    }
+
+    # RARITY_LOW: Low flora/fauna - indexed list
+    RARITY_LOW_MAP = {
+        0: "Sparse",
+        1: "Rare",
+        2: "Scarce",
+        3: "Uncommon",
+        4: "Infrequent",
+        5: "Limited",
+        6: "Few",
+        7: "Low",
+        8: "Uncommon",
+        9: "Minimal",
+        10: "Sporadic",
+        11: "Occasional",
+        12: "Intermittent",
+    }
+
+    # RARITY_MID: Medium/typical flora/fauna - indexed list
+    # Added v10.3.7 (Roin V Fauna: RARITY_MID4 → "Typical")
+    # Updated v10.3.8 (Pellarni Fauna: RARITY_MID10 → "Medium")
+    RARITY_MID_MAP = {
+        0: "Average",
+        1: "Regular",
+        2: "Moderate",
+        3: "Common",
+        4: "Typical",       # Verified (Roin V Fauna: RARITY_MID4 → "Typical")
+        5: "Ordinary",
+        6: "Standard",
+        7: "Normal",
+        8: "Usual",
+        9: "Fair",
+        10: "Medium",        # Verified (Pellarni Fauna: RARITY_MID10 → "Medium")
+        11: "Adequate",
+        12: "Sufficient",
+    }
+
+    # RARITY_WEIRD: Exotic/anomaly flora/fauna - indexed list
+    RARITY_WEIRD_MAP = {
+        0: "Displaced",
+        1: "Unusual",
+        2: "Twisted",
+        3: "Infected",
+        4: "Invasive",
+        5: "From Elsewhere",
+        6: "Misplaced",
+        7: "Lost",
+        8: "Between Worlds",
+        9: "Diseased",
+        10: "Forfeited",
+        11: "Uprooted",
+        12: "Viral",
+        13: "Screaming",
+    }
+
+    # =============================================================================
+    # SENTINEL RARITY MAPPINGS - Index to exact in-game adjective
+    # SENTINEL_RARE = rare to encounter sentinels (low security)
+    # =============================================================================
+
+    # SENTINEL_RARE: Sentinel levels - indexed list
+    # CORRECTED v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+    SENTINEL_RARE_MAP = {
+        0: "None Present",
+        1: "Enforcing",       # Was "Require Orthodoxy" - FIXED (Obushart: SENTINEL_RARE1 → "Enforcing")
+        2: "Forsaken",
+        3: "Inescapable",     # Was "Unwavering" - FIXED (Ilva VI: SENTINEL_RARE3 → "Inescapable")
+        4: "Regular Patrols", # Was "Answer To None" - FIXED (Roin V: SENTINEL_RARE4 → "Regular Patrols")
+        5: "Spread Thin",
+        6: "Intermittent",
+        7: "Low Security",    # Verified (Yalosalci: SENTINEL_RARE7 → "Low Security")
+        8: "Unwavering",      # Was "Regular Patrols" - FIXED (Xumin: SENTINEL_RARE8 → "Unwavering")
+        9: "Ever-present",
+        10: "Few",
+        11: "Sparse",
+        12: "Infrequent",     # Was "Low" - FIXED (Toya 23/L2: SENTINEL_RARE12 → "Infrequent")
+        13: "Minimal",
+        14: "Missing",
+    }
+
+    SENTINEL_HIGH_MAP = {
+        0: "High Security",
+        1: "Aggressive",
+        2: "Hostile Patrols",
+        3: "Frenzied",
+        4: "Threatening",
+        5: "Inescapable",
+        6: "Hateful",
+        7: "Corrupted",
+        8: "Enforcing",
+        9: "Zealous",
+        10: "Unwavering",
+        11: "Malicious",
+    }
+
+    SENTINEL_NORMAL_MAP = {
+        0: "Normal",
+        1: "Regular Patrols",
+        2: "Observant",
+        3: "Attentive",
+        4: "Frequent",
+        5: "Require Obedience",
+        6: "Require Orthodoxy",
+    }
+
+    # Map based on prefix pattern
+    if value.startswith("RARITY_HIGH"):
+        return RARITY_HIGH_MAP.get(idx, f"High ({idx})")
+    elif value.startswith("RARITY_MID"):
+        return RARITY_MID_MAP.get(idx, f"Typical ({idx})")
+    elif value.startswith("RARITY_NONE"):
+        return RARITY_NONE_MAP.get(idx, f"Absent ({idx})")
+    elif value.startswith("RARITY_LOW"):
+        return RARITY_LOW_MAP.get(idx, f"Low ({idx})")
+    elif value.startswith("RARITY_WEIRD") or value.startswith("RARITY_EXOTIC"):
+        return RARITY_WEIRD_MAP.get(idx, f"Unusual ({idx})")
+    elif value.startswith("SENTINEL_RARE") or value.startswith("SENTINEL_NONE"):
+        return SENTINEL_RARE_MAP.get(idx, f"Low ({idx})")
+    elif value.startswith("SENTINEL_HIGH") or value.startswith("SENTINEL_AGGRESSIVE"):
+        return SENTINEL_HIGH_MAP.get(idx, f"Aggressive ({idx})")
+    elif value.startswith("SENTINEL_MED") or value.startswith("SENTINEL_NORMAL"):
+        return SENTINEL_NORMAL_MAP.get(idx, f"Normal ({idx})")
+
+    # Unknown pattern, return original value
+    return value
+
+
+def map_weather_enum_to_adjective(value: str) -> str:
+    """
+    Map weather enum strings like 'WEATHER_COLD7' to actual game adjectives.
+
+    The pattern is: WEATHER_{TYPE}{INDEX} or WEATHER_{TYPE}_CLEAR{INDEX}
+    Added v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+
+    Args:
+        value: The raw weather string from PlanetInfo.Weather
+
+    Returns:
+        The proper in-game weather adjective, or the original value if already valid
+    """
+    if not value or value == "None":
+        return "Unknown"
+
+    # If already a valid adjective (doesn't look like an internal name), return as-is
+    if not value.startswith("WEATHER_") and not value.startswith("Weather_"):
+        return value
+
+    # Direct mappings from game screenshots
+    # Format: WEATHER_{TYPE}{INDEX} -> actual game adjective
+    WEATHER_ENUM_MAP = {
+        # Cold/Frozen weather
+        "WEATHER_COLD1": "Icy",
+        "WEATHER_COLD2": "Freezing",
+        "WEATHER_COLD3": "Snowy",
+        "WEATHER_COLD4": "Blizzard",
+        "WEATHER_COLD5": "Bitter Cold",
+        "WEATHER_COLD6": "Permafrost",
+        "WEATHER_COLD7": "Ice Storms",         # Verified (Toya 23/L2)
+        "WEATHER_COLD8": "Harsh Frost",
+        "WEATHER_COLD9": "Deep Freeze",
+        "WEATHER_COLD10": "Glacial Winds",
+
+        # Heat/Scorched weather
+        "WEATHER_HEAT1": "Hot",
+        "WEATHER_HEAT2": "Sweltering",
+        "WEATHER_HEAT3": "Superheated Gas Pockets",  # Verified (Yalosalci)
+        "WEATHER_HEAT4": "Firestorms",
+        "WEATHER_HEAT5": "Blistering",
+        "WEATHER_HEAT6": "Scorching",
+        "WEATHER_HEAT7": "Heated Atmosphere",  # Verified (Obushart)
+        "WEATHER_HEAT8": "Extreme Heat",
+        "WEATHER_HEAT9": "Inferno",
+        "WEATHER_HEAT10": "Burning Air",       # Verified (Xumin)
+
+        # Toxic weather
+        "WEATHER_TOXIC1": "Toxic Mist",
+        "WEATHER_TOXIC2": "Acid Rain",
+        "WEATHER_TOXIC3": "Poison Fog",
+        "WEATHER_TOXIC4": "Noxious Gas",
+        "WEATHER_TOXIC5": "Acidic Dust Pockets",
+        "WEATHER_TOXIC6": "Choking Atmosphere",
+        "WEATHER_TOXIC7": "Caustic Winds",     # Verified (Ilva VI)
+        "WEATHER_TOXIC8": "Corrosive Storms",
+        "WEATHER_TOXIC9": "Dangerously Toxic Rain",
+        "WEATHER_TOXIC10": "Toxic Dust",
+
+        # Toxic Clear (mild toxic)
+        "WEATHER_TOXIC_CLEAR1": "Mild Toxins",
+        "WEATHER_TOXIC_CLEAR2": "Occasional Toxins",
+        "WEATHER_TOXIC_CLEAR3": "Poison Rain",  # Verified (Roin V)
+        "WEATHER_TOXIC_CLEAR4": "Toxic Atmosphere",
+        "WEATHER_TOXIC_CLEAR5": "Light Toxicity",
+
+        # Radiation weather
+        "WEATHER_RADIO1": "Radioactive",
+        "WEATHER_RADIO2": "Irradiated",
+        "WEATHER_RADIO3": "Gamma Dust",
+        "WEATHER_RADIO4": "Nuclear Fallout",
+        "WEATHER_RADIO5": "Contaminated",
+        "WEATHER_RADIO6": "High Radiation",
+        "WEATHER_RADIO7": "Roaring Nuclear Wind",
+        "WEATHER_RADIO8": "Extreme Radiation",
+        "WEATHER_RADIO9": "Lethal Radiation",
+        "WEATHER_RADIO10": "Radioactive Decay",
+
+        # Swamp/Humid weather
+        "WEATHER_SWAMP1": "Humid",
+        "WEATHER_SWAMP2": "Muggy",
+        "WEATHER_SWAMP3": "Soggy",
+        "WEATHER_SWAMP4": "Marshy",
+        "WEATHER_SWAMP5": "Sweltering Damp",
+        "WEATHER_SWAMP6": "Heavy Fog",
+        "WEATHER_SWAMP7": "Soggy Danger",
+        "WEATHER_SWAMP8": "Choking Humidity",
+        "WEATHER_SWAMP9": "Superheated Drizzle",
+        "WEATHER_SWAMP10": "Infrequent Heat Storms",
+
+        # Lush/temperate weather
+        "WEATHER_LUSH1": "Temperate",
+        "WEATHER_LUSH2": "Mild",
+        "WEATHER_LUSH3": "Pleasant",
+        "WEATHER_LUSH4": "Light Showers",
+        "WEATHER_LUSH5": "Occasional Storms",
+        "WEATHER_LUSH6": "Heavy Rain",
+        "WEATHER_LUSH7": "Downpour",
+        "WEATHER_LUSH8": "Monsoon",
+        "WEATHER_LUSH9": "Tropical Storm",
+        "WEATHER_LUSH10": "Boiling Superstorms",
+
+        # Lush Clear (calm lush) - v10.3.8 Iksana system
+        "WEATHER_LUSH_CLEAR1": "Temperate",
+        "WEATHER_LUSH_CLEAR2": "Mild",
+        "WEATHER_LUSH_CLEAR3": "Pleasant",
+        "WEATHER_LUSH_CLEAR4": "Light Showers",
+        "WEATHER_LUSH_CLEAR5": "Refreshing Breeze",
+        "WEATHER_LUSH_CLEAR6": "Gentle Rain",
+        "WEATHER_LUSH_CLEAR7": "Balmy",           # Verified (Hagioni)
+        "WEATHER_LUSH_CLEAR8": "Warm",
+        "WEATHER_LUSH_CLEAR9": "Usually Mild",
+        "WEATHER_LUSH_CLEAR10": "Mellow",
+
+        # Cold Clear (calm cold) - v10.3.8 Iksana system
+        "WEATHER_COLD_CLEAR1": "Chilly",
+        "WEATHER_COLD_CLEAR2": "Crisp",
+        "WEATHER_COLD_CLEAR3": "Cool",
+        "WEATHER_COLD_CLEAR4": "Frosty",
+        "WEATHER_COLD_CLEAR5": "Fresh",
+        "WEATHER_COLD_CLEAR6": "Occasional Frost",
+        "WEATHER_COLD_CLEAR7": "Freezing",
+        "WEATHER_COLD_CLEAR8": "Permafrost",       # Verified (Pellarni)
+        "WEATHER_COLD_CLEAR9": "Frozen",
+        "WEATHER_COLD_CLEAR10": "Sub-Zero",
+
+        # Cold Extreme (stormy cold) - v10.3.8 Iksana system
+        "WEATHER_COLDEXTREME1": "Howling Blizzards",  # Verified (Markelic)
+        "WEATHER_COLDEXTREME2": "Frozen Storms",
+        "WEATHER_COLDEXTREME3": "Icebound Tempests",
+        "WEATHER_COLDEXTREME4": "Whiteout Blizzards",
+        "WEATHER_COLDEXTREME5": "Arctic Storms",
+        "WEATHER_COLDEXTREME6": "Extreme Snowfall",
+        "WEATHER_COLDEXTREME7": "Violent Frost",
+        "WEATHER_COLDEXTREME8": "Glacial Tempests",
+        "WEATHER_COLDEXTREME9": "Brutal Blizzards",
+        "WEATHER_COLDEXTREME10": "Deadly Cold Fronts",
+
+        # Lush Extreme (stormy lush) - v10.3.8 Iksana system
+        "WEATHER_LUSHEXTREME1": "Severe Storms",
+        "WEATHER_LUSHEXTREME2": "Torrential Downpours",
+        "WEATHER_LUSHEXTREME3": "Violent Thunderstorms",
+        "WEATHER_LUSHEXTREME4": "Catastrophic Storms",
+        "WEATHER_LUSHEXTREME5": "Superheated Rain",
+        "WEATHER_LUSHEXTREME6": "Boiling Rainfall",
+        "WEATHER_LUSHEXTREME7": "Extreme Monsoons",
+        "WEATHER_LUSHEXTREME8": "Scalding Showers",
+        "WEATHER_LUSHEXTREME9": "Scalding Rainstorms",  # Verified (Vapuscurna)
+        "WEATHER_LUSHEXTREME10": "Boiling Superstorms",
+
+        # Dead planet weather - v10.3.8 Iksana system
+        "WEATHER_DEAD1": "Airless",
+        "WEATHER_DEAD2": "Airless",
+        "WEATHER_DEAD3": "Airless",
+        "WEATHER_DEAD4": "Airless",
+        "WEATHER_DEAD5": "Airless",
+        "WEATHER_DEAD6": "Airless",
+        "WEATHER_DEAD7": "Airless",                # Verified (Itchelories)
+        "WEATHER_DEAD8": "Airless",
+        "WEATHER_DEAD9": "Airless",
+        "WEATHER_DEAD10": "Airless",
+
+        # Lava planet weather - v10.3.8 Iksana system
+        "WEATHER_LAVA1": "Volcanic",
+        "WEATHER_LAVA2": "Lava Flows",
+        "WEATHER_LAVA3": "Molten",
+        "WEATHER_LAVA4": "Fiery",
+        "WEATHER_LAVA5": "Magma Storms",
+        "WEATHER_LAVA6": "Inferno",
+        "WEATHER_LAVA7": "Volcanic Eruptions",
+        "WEATHER_LAVA8": "Plumes of Fire",          # Verified (Gourn)
+        "WEATHER_LAVA9": "Flaming Tornadoes",
+        "WEATHER_LAVA10": "Extreme Volcanism",
+    }
+
+    # Clean the value and look it up
+    cleaned = value.strip().upper()
+    if cleaned in WEATHER_ENUM_MAP:
+        return WEATHER_ENUM_MAP[cleaned]
+
+    # Try case-insensitive match
+    for key, adj in WEATHER_ENUM_MAP.items():
+        if key.upper() == cleaned:
+            return adj
+
+    # Unknown weather enum, return original
+    return value
+
+
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "10.3.0"
+    __version__ = "1.3.8"
     __description__ = "Batch mode planet data extraction - adjectives match Haven UI adjectives.js"
 
     # ==========================================================================
@@ -847,7 +1327,7 @@ class HavenExtractorMod(Mod):
         self._system_saved_to_batch = False
 
         logger.info("=" * 60)
-        logger.info("Haven Extractor v10.1.4 - Direct API Integration")
+        logger.info("Haven Extractor v10.3.8 - Direct API Integration")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
@@ -985,33 +1465,38 @@ class HavenExtractorMod(Mod):
             planet_gen_addr = sys_data_addr + SolarSystemDataOffsets.PLANET_GEN_INPUTS
             planet_gen_addr += planet_index * PlanetGenInputOffsets.STRUCT_SIZE
 
-            logger.info(f"    [DIRECT] Planet {planet_index} gen input at 0x{planet_gen_addr:X}")
+            logger.debug(f"    [DIRECT] Planet {planet_index} gen input at 0x{planet_gen_addr:X}")
 
             # Read biome
             biome_val = self._read_uint32(planet_gen_addr, PlanetGenInputOffsets.BIOME)
             result["biome_raw"] = biome_val
             result["biome"] = BIOME_TYPES.get(biome_val, f"Unknown({biome_val})")
-            logger.info(f"    [DIRECT] Biome: {result['biome']} (raw: {biome_val})")
+            logger.debug(f"    [DIRECT] Biome: {result['biome']} (raw: {biome_val})")
 
             # Read biome subtype
             biome_subtype_val = self._read_uint32(planet_gen_addr, PlanetGenInputOffsets.BIOME_SUBTYPE)
             result["biome_subtype_raw"] = biome_subtype_val
             result["biome_subtype"] = BIOME_SUBTYPES.get(biome_subtype_val, f"Unknown({biome_subtype_val})")
-            logger.info(f"    [DIRECT] BiomeSubType: {result['biome_subtype']} (raw: {biome_subtype_val})")
+            logger.debug(f"    [DIRECT] BiomeSubType: {result['biome_subtype']} (raw: {biome_subtype_val})")
 
             # Read planet size (critical for moon detection)
             size_val = self._read_uint32(planet_gen_addr, PlanetGenInputOffsets.PLANET_SIZE)
             result["planet_size_raw"] = size_val
-            result["planet_size"] = PLANET_SIZES.get(size_val, f"Unknown({size_val})")
             result["is_moon"] = (size_val == 3)  # Moon = 3
-            logger.info(f"    [DIRECT] Size: {result['planet_size']} (raw: {size_val}, is_moon: {result['is_moon']})")
+            # For moons, don't set planet_size to "Moon" - use "Small" to avoid duplicate badge
+            # (is_moon already indicates it's a moon)
+            if result["is_moon"]:
+                result["planet_size"] = "Small"
+            else:
+                result["planet_size"] = PLANET_SIZES.get(size_val, f"Unknown({size_val})")
+            logger.debug(f"    [DIRECT] Size: {result['planet_size']} (raw: {size_val}, is_moon: {result['is_moon']})")
 
             # Read resources (16-byte strings) and translate to human-readable names
             raw_common = self._read_string(planet_gen_addr, PlanetGenInputOffsets.COMMON_SUBSTANCE, 16)
             raw_rare = self._read_string(planet_gen_addr, PlanetGenInputOffsets.RARE_SUBSTANCE, 16)
             result["common_resource"] = translate_resource(raw_common)
             result["rare_resource"] = translate_resource(raw_rare)
-            logger.info(f"    [DIRECT] Resources: common={result['common_resource']} ({raw_common}), rare={result['rare_resource']} ({raw_rare})")
+            logger.debug(f"    [DIRECT] Resources: common={result['common_resource']} ({raw_common}), rare={result['rare_resource']} ({raw_rare})")
 
         except Exception as e:
             logger.error(f"Direct planet gen input read failed: {e}")
@@ -1079,6 +1564,18 @@ class HavenExtractorMod(Mod):
             # Get system data
             sys_data = self._cached_solar_system.mSolarSystemData
 
+            # CRITICAL: Cache sys_data address for direct memory reads in _extract_single_planet
+            # v10.3.7: Fixed bug where _cached_sys_data_addr was never set in batch save path
+            try:
+                self._cached_sys_data_addr = get_addressof(sys_data)
+                logger.debug(f"[BATCH] Cached sys_data address: 0x{self._cached_sys_data_addr:X}")
+            except Exception as e:
+                logger.warning(f"[BATCH] Could not get sys_data address: {e}")
+                self._cached_sys_data_addr = None
+
+            # Also cache coordinates for deterministic weather hash
+            self._cached_coords = coords
+
             # Build the system extraction
             data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
 
@@ -1091,7 +1588,7 @@ class HavenExtractorMod(Mod):
 
             system_data = {
                 "extraction_time": datetime.now().isoformat(),
-                "extractor_version": "10.0.0",
+                "extractor_version": "10.3.8",
                 "trigger": "batch_auto_save",
                 "source": "live_extraction",
                 "data_source": data_source,
@@ -1209,7 +1706,7 @@ class HavenExtractorMod(Mod):
                     galaxy_idx = self._safe_int(location.RealityIndex)
 
                     # DEBUG: Log raw values from GalacticAddress struct
-                    logger.info(f"  [DEBUG] GalacticAddress struct fields:")
+                    logger.debug(f"  [DEBUG] GalacticAddress struct fields:")
                     logger.info(f"    VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
                     logger.info(f"    SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
                     # Calculate what portal/region values these produce
@@ -1281,7 +1778,7 @@ class HavenExtractorMod(Mod):
                     galaxy_idx = (universe_addr >> 56) & 0xFF
 
                     # DEBUG: Log raw packed address decode
-                    logger.info(f"  [DEBUG] mUniverseAddress packed decode (Method 2) - v10.1.0 CORRECT layout:")
+                    logger.debug(f"  [DEBUG] mUniverseAddress packed decode (Method 2) - v10.1.0 CORRECT layout:")
                     logger.info(f"    Raw addr: 0x{universe_addr:016X}")
                     logger.info(f"    x_region={x_region} (0x{x_region:03X}), y_region={y_region} (0x{y_region:02X}), z_region={z_region} (0x{z_region:03X})")
                     logger.info(f"    system_idx={system_idx} (0x{system_idx:03X}), planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
@@ -1326,7 +1823,7 @@ class HavenExtractorMod(Mod):
                         logger.info(f"    Voxel coords (signed): [{voxel_x}, {voxel_y}, {voxel_z}]")
                         logger.info(f"    Region coords (raw): [{x_region}, {y_region}, {z_region}]")
                     else:
-                        logger.info(f"  [DEBUG] Method 2 failed sanity check: x_region={x_region}, y_region={y_region}, z_region={z_region}")
+                        logger.debug(f"  [DEBUG] Method 2 failed sanity check: x_region={x_region}, y_region={y_region}, z_region={z_region}")
                 except Exception as e:
                     # "Uninitialized mUniverseAddress" is expected - skip quietly
                     if "Uninitialized" not in str(e):
@@ -1410,7 +1907,7 @@ class HavenExtractorMod(Mod):
                         planet_idx = max(0, planet_idx_raw - 1)
                         galaxy_idx = (universe_addr >> 56) & 0xFF
 
-                        logger.info(f"  [DEBUG] GenerateCreatureRoles mUniverseAddress decode (v10.1.0):")
+                        logger.debug(f"  [DEBUG] GenerateCreatureRoles mUniverseAddress decode (v10.1.0):")
                         logger.info(f"    Raw addr: 0x{universe_addr:016X}")
                         logger.info(f"    x_region={x_region}, y_region={y_region}, z_region={z_region}")
                         logger.info(f"    system_idx={system_idx}, planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
@@ -1577,8 +2074,12 @@ class HavenExtractorMod(Mod):
                             planet_size_raw = size_val.value
                         else:
                             planet_size_raw = int(size_val) if size_val is not None else -1
-                        planet_size_name = PLANET_SIZES.get(planet_size_raw, f"Unknown({planet_size_raw})")
                         is_moon = (planet_size_raw == 3)  # Moon = 3
+                        # For moons, use "Small" instead of "Moon" to avoid duplicate badge
+                        if is_moon:
+                            planet_size_name = "Small"
+                        else:
+                            planet_size_name = PLANET_SIZES.get(planet_size_raw, f"Unknown({planet_size_raw})")
                     logger.debug(f"    Biome={biome_name}, SubType={biome_subtype_name}, Size={planet_size_name}")
             except Exception as e:
                 logger.debug(f"Biome extraction from GenerationData failed: {e}")
@@ -1713,13 +2214,18 @@ class HavenExtractorMod(Mod):
                                 sentinel_display = ""
 
                     # Weather display string - cTkFixedString0x80 at offset 0x480
+                    # v10.3.6: Log ALL values (even empty) to diagnose why weather isn't working
                     if hasattr(info, 'Weather'):
                         val = str(info.Weather) or ""
                         weather_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        # ALWAYS log what we get so we can see the pattern
+                        logger.info(f"    [WEATHER CHECK] Raw value: '{val[:50]}...' -> Cleaned: '{weather_display}'")
                         if weather_display and weather_display != "None" and len(weather_display) >= 2:
                             logger.info(f"    [DISPLAY] Weather: '{weather_display}'")
                         else:
                             weather_display = ""
+                    else:
+                        logger.info(f"    [WEATHER CHECK] info.Weather attribute not found!")
             except Exception as e:
                 logger.debug(f"PlanetInfo display string extraction failed: {e}")
 
@@ -1774,10 +2280,10 @@ class HavenExtractorMod(Mod):
             # should be available by the time planets are generating
             # =====================================================
             if self._current_system_coords is None:
-                logger.info(f"    [DEBUG] Attempting planet capture fallback for coordinates...")
+                logger.debug(f"    [DEBUG] Attempting planet capture fallback for coordinates...")
                 try:
                     player_state = gameData.player_state
-                    logger.info(f"    [DEBUG] player_state = {player_state}")
+                    logger.debug(f"    [DEBUG] player_state = {player_state}")
                     if player_state:
                         location = player_state.mLocation
                         galactic_addr = location.GalacticAddress
@@ -1790,7 +2296,7 @@ class HavenExtractorMod(Mod):
                         galaxy_idx = self._safe_int(location.RealityIndex)
 
                         # DEBUG: Log raw values from GalacticAddress struct (planet capture fallback)
-                        logger.info(f"    [DEBUG] GalacticAddress struct (planet capture fallback):")
+                        logger.debug(f"    [DEBUG] GalacticAddress struct (planet capture fallback):")
                         logger.info(f"      VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
                         logger.info(f"      SolarSystemIndex={system_idx}, PlanetIndex={planet_idx_coord}, Galaxy={galaxy_idx}")
                         dbg_px = (voxel_x + 2047) & 0xFFF
@@ -1834,7 +2340,7 @@ class HavenExtractorMod(Mod):
                     else:
                         logger.info("    [DEBUG] player_state is None during planet capture")
                 except Exception as e:
-                    logger.info(f"    [DEBUG] Planet capture fallback failed: {e}")
+                    logger.debug(f"    [DEBUG] Planet capture fallback failed: {e}")
 
         except Exception as e:
             logger.error(f"GenerateCreatureRoles capture failed: {e}")
@@ -2291,15 +2797,14 @@ class HavenExtractorMod(Mod):
             logger.info("=" * 60)
             return
 
-        # Get solar system data
+        # Get solar system data from cached hook data
         try:
-            solar_system = nmse.GcSolarSystemData.get()
-            if solar_system is None:
-                logger.error("  ERROR: Cannot access solar system data")
+            if not self._cached_solar_system:
+                logger.error("  ERROR: No cached solar system data - warp to a system first!")
                 logger.info("=" * 60)
                 return
 
-            planets = solar_system.mPlanetData
+            planets = self._cached_solar_system.maPlanets
             if planets is None:
                 logger.error("  ERROR: Cannot access planet data array")
                 logger.info("=" * 60)
@@ -2315,53 +2820,81 @@ class HavenExtractorMod(Mod):
                     if planet is None:
                         continue
 
+                    # Access mPlanetData first (cGcPlanet -> mPlanetData -> PlanetInfo)
+                    planet_data = None
+                    if hasattr(planet, 'mPlanetData'):
+                        planet_data = planet.mPlanetData
+
+                    if planet_data is None:
+                        continue
+
                     # Try to read PlanetInfo display strings
-                    if hasattr(planet, 'PlanetInfo'):
-                        info = planet.PlanetInfo
+                    if hasattr(planet_data, 'PlanetInfo'):
+                        info = planet_data.PlanetInfo
                         captured = self._captured_planets[index]
                         fields_updated = []
 
                         # Flora display string
                         if hasattr(info, 'Flora'):
                             val = str(info.Flora) or ""
-                            flora_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if flora_display and flora_display != "None" and len(flora_display) >= 2:
+                            flora_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            logger.debug(f"    [DEBUG] Planet {index} Flora raw: '{flora_raw}'")
+                            if flora_raw and flora_raw != "None" and len(flora_raw) >= 2:
+                                # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
+                                flora_display = map_display_string_to_adjective(flora_raw, 'flora')
                                 old_val = captured.get('flora_display', '')
                                 if flora_display != old_val:
                                     captured['flora_display'] = flora_display
-                                    fields_updated.append(f"Flora='{flora_display}'")
+                                    fields_updated.append(f"Flora='{flora_display}' (raw: '{flora_raw}')")
 
                         # Fauna display string
                         if hasattr(info, 'Fauna'):
                             val = str(info.Fauna) or ""
-                            fauna_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if fauna_display and fauna_display != "None" and len(fauna_display) >= 2:
+                            fauna_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            logger.debug(f"    [DEBUG] Planet {index} Fauna raw: '{fauna_raw}'")
+                            if fauna_raw and fauna_raw != "None" and len(fauna_raw) >= 2:
+                                # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
+                                fauna_display = map_display_string_to_adjective(fauna_raw, 'fauna')
                                 old_val = captured.get('fauna_display', '')
                                 if fauna_display != old_val:
                                     captured['fauna_display'] = fauna_display
-                                    fields_updated.append(f"Fauna='{fauna_display}'")
+                                    fields_updated.append(f"Fauna='{fauna_display}' (raw: '{fauna_raw}')")
 
                         # Sentinel display string
                         if hasattr(info, 'SentinelsPerDifficulty'):
                             sent_arr = info.SentinelsPerDifficulty
                             if hasattr(sent_arr, '__getitem__'):
+                                # Log ALL difficulty levels to see what's in the array
+                                for diff_idx in range(min(4, len(sent_arr) if hasattr(sent_arr, '__len__') else 4)):
+                                    try:
+                                        diff_val = str(sent_arr[diff_idx]) or ""
+                                        diff_clean = ''.join(c for c in diff_val if c.isprintable() and ord(c) < 128).strip()
+                                        logger.debug(f"    [DEBUG] Planet {index} Sentinel[{diff_idx}] raw: '{diff_clean}'")
+                                    except:
+                                        pass
                                 val = str(sent_arr[0]) or ""
-                                sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                                if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
+                                sentinel_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                                if sentinel_raw and sentinel_raw != "None" and len(sentinel_raw) >= 2:
+                                    # Map internal enum names like 'SENTINEL_RARE7' to actual adjectives
+                                    sentinel_display = map_display_string_to_adjective(sentinel_raw, 'sentinel')
                                     old_val = captured.get('sentinel_display', '')
                                     if sentinel_display != old_val:
                                         captured['sentinel_display'] = sentinel_display
-                                        fields_updated.append(f"Sentinel='{sentinel_display}'")
+                                        fields_updated.append(f"Sentinel='{sentinel_display}' (raw: '{sentinel_raw}')")
 
-                        # Weather display string
+                        # Weather display string - v10.3.7: Map weather enum to actual adjective
                         if hasattr(info, 'Weather'):
                             val = str(info.Weather) or ""
-                            weather_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if weather_display and weather_display != "None" and len(weather_display) >= 2:
+                            weather_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if weather_raw and weather_raw != "None" and len(weather_raw) >= 2:
+                                logger.info(f"    [WEATHER RAW] Planet {index}: '{weather_raw}'")
+                                # Map weather enum to actual game adjective
+                                weather_display = map_weather_enum_to_adjective(weather_raw)
                                 old_val = captured.get('weather_display', '')
                                 if weather_display != old_val:
+                                    captured['weather_raw_string'] = weather_raw  # Store raw for analysis
                                     captured['weather_display'] = weather_display
-                                    fields_updated.append(f"Weather='{weather_display}'")
+                                    fields_updated.append(f"Weather='{weather_display}' (raw: '{weather_raw}')")
 
                         if fields_updated:
                             planet_name = captured.get('planet_name', f'Planet {index}')
@@ -2397,7 +2930,7 @@ class HavenExtractorMod(Mod):
         """
         logger.info("")
         logger.info("=" * 60)
-        logger.info(">>> BATCH DATA STATUS (v10.0.0) <<<")
+        logger.info(">>> BATCH DATA STATUS <<<")
         logger.info("=" * 60)
 
         logger.info(f"  Systems in batch: {len(self._batch_systems)}")
@@ -2461,7 +2994,7 @@ class HavenExtractorMod(Mod):
         """
         logger.info("")
         logger.info("=" * 60)
-        logger.info(">>> EXPORT TO HAVEN UI (v10.0.0) <<<")
+        logger.info(">>> EXPORT TO HAVEN UI <<<")
         logger.info("=" * 60)
 
         # Check if config is complete
@@ -2581,7 +3114,7 @@ class HavenExtractorMod(Mod):
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
                 'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
-                'User-Agent': 'HavenExtractor/10.0.0',
+                'User-Agent': 'HavenExtractor/10.3.8',
             })
 
             with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
@@ -2662,7 +3195,7 @@ class HavenExtractorMod(Mod):
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
                 'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
-                'User-Agent': 'HavenExtractor/10.0.0',
+                'User-Agent': 'HavenExtractor/10.3.8',
             })
 
             with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
@@ -2756,7 +3289,7 @@ class HavenExtractorMod(Mod):
 
         extraction = {
             "extraction_time": datetime.now().isoformat(),
-            "extractor_version": "10.0.0",
+            "extractor_version": "10.3.8",
             "trigger": trigger,
             "source": "live_extraction",
             "data_source": data_source,
@@ -2963,49 +3496,47 @@ class HavenExtractorMod(Mod):
         prime_planet_count = 0
         try:
             sys_data = solar_system.mSolarSystemData
-            logger.info(f"  sys_data object: {sys_data}")
+            logger.debug(f"  sys_data object: {sys_data}")
 
             if hasattr(sys_data, 'Planets'):
                 planets_raw = sys_data.Planets
                 actual_planet_count = self._safe_int(planets_raw)
-                logger.info(f"  *** VALID PLANET COUNT: {actual_planet_count} (raw: {planets_raw}, type: {type(planets_raw).__name__})")
+                logger.debug(f"  VALID PLANET COUNT: {actual_planet_count} (raw: {planets_raw})")
 
             if hasattr(sys_data, 'PrimePlanets'):
                 prime_raw = sys_data.PrimePlanets
                 prime_planet_count = self._safe_int(prime_raw)
-                logger.info(f"  *** PRIME PLANETS: {prime_planet_count} (raw: {prime_raw}, type: {type(prime_raw).__name__})")
+                logger.debug(f"  PRIME PLANETS: {prime_planet_count} (raw: {prime_raw})")
             else:
-                logger.warning(f"  *** PrimePlanets attribute not found!")
+                logger.debug(f"  PrimePlanets attribute not found")
         except Exception as e:
-            logger.warning(f"  Could not get planet count: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
+            logger.debug(f"  Could not get planet count: {e}")
 
         # Calculate expected moons: total - prime = moons
         expected_moons = actual_planet_count - prime_planet_count
-        logger.info(f"  *** EXPECTED MOONS: {expected_moons}")
+        logger.debug(f"  EXPECTED MOONS: {expected_moons}")
 
         try:
             planets_array = solar_system.maPlanets
-            logger.info(f"  planets_array object: {planets_array}")
+            logger.debug(f"  planets_array object: {planets_array}")
 
             # CRITICAL FIX: Only iterate through VALID planet slots
             # Remaining slots (N to 5) contain default/empty data
             for i in range(min(actual_planet_count, 6)):
                 try:
                     planet = planets_array[i]
-                    logger.info(f"  --- Processing slot {i} ---")
+                    logger.debug(f"  --- Processing slot {i} ---")
 
                     if planet is None:
-                        logger.warning(f"  Slot {i}: None (unexpected for valid slot)")
+                        logger.debug(f"  Slot {i}: None (unexpected for valid slot)")
                         continue
 
                     planet_addr = get_addressof(planet)
                     if planet_addr == 0:
-                        logger.warning(f"  Slot {i}: NULL pointer (unexpected for valid slot)")
+                        logger.debug(f"  Slot {i}: NULL pointer (unexpected for valid slot)")
                         continue
 
-                    logger.info(f"  Slot {i}: address 0x{planet_addr:X}")
+                    logger.debug(f"  Slot {i}: address 0x{planet_addr:X}")
 
                     planet_data = self._extract_single_planet(planet, i)
                     if planet_data:
@@ -3061,27 +3592,27 @@ class HavenExtractorMod(Mod):
             # This is the CORRECT memory location - struct mapping was unreliable!
             # =====================================================
             if self._cached_sys_data_addr:
-                logger.info(f"    [DIRECT] Using direct memory read for planet {index}")
+                logger.debug(f"    [DIRECT] Using direct memory read for planet {index}")
                 direct_data = self._read_planet_gen_input_direct(self._cached_sys_data_addr, index)
 
                 # Apply direct-read biome (CRITICAL - this is the fix!)
                 raw_biome = direct_data.get("biome_raw", -1)
                 if raw_biome >= 0:
                     result["biome"] = direct_data["biome"]
-                    logger.info(f"    [DIRECT] Biome = {result['biome']} (raw: {raw_biome})")
+                    logger.debug(f"    [DIRECT] Biome = {result['biome']} (raw: {raw_biome})")
 
                 # Apply direct-read planet_size (CRITICAL - this is the fix!)
                 raw_size = direct_data.get("planet_size_raw", -1)
                 if raw_size >= 0:
                     result["planet_size"] = direct_data["planet_size"]
                     result["is_moon"] = direct_data.get("is_moon", False)
-                    logger.info(f"    [DIRECT] PlanetSize = {result['planet_size']} (raw: {raw_size}, is_moon: {result['is_moon']})")
+                    logger.debug(f"    [DIRECT] PlanetSize = {result['planet_size']} (raw: {raw_size}, is_moon: {result['is_moon']})")
 
                 # Apply direct-read biome_subtype
                 raw_subtype = direct_data.get("biome_subtype_raw", -1)
                 if raw_subtype >= 0:
                     result["biome_subtype"] = direct_data["biome_subtype"]
-                    logger.info(f"    [DIRECT] BiomeSubType = {result['biome_subtype']} (raw: {raw_subtype})")
+                    logger.debug(f"    [DIRECT] BiomeSubType = {result['biome_subtype']} (raw: {raw_subtype})")
 
                 # Apply direct-read resources
                 if direct_data.get("common_resource"):
@@ -3097,23 +3628,23 @@ class HavenExtractorMod(Mod):
             # =====================================================
             if index in self._captured_planets:
                 captured = self._captured_planets[index]
-                logger.info(f"    [CAPTURED] Using captured data for planet {index}")
+                logger.debug(f"    [CAPTURED] Using captured data for planet {index}")
 
                 # CRITICAL v8.1.6: Apply captured BIOME data (from GenerationData - reliable!)
                 # This overrides the unreliable direct memory read
                 if captured.get('biome_raw', -1) >= 0:
                     result["biome"] = captured.get('biome', result["biome"])
-                    logger.info(f"    [CAPTURED] Biome = {result['biome']} (raw: {captured.get('biome_raw')})")
+                    logger.debug(f"    [CAPTURED] Biome = {result['biome']} (raw: {captured.get('biome_raw')})")
                 if captured.get('biome_subtype_raw', -1) >= 0:
                     result["biome_subtype"] = captured.get('biome_subtype', result["biome_subtype"])
-                    logger.info(f"    [CAPTURED] BiomeSubType = {result['biome_subtype']} (raw: {captured.get('biome_subtype_raw')})")
+                    logger.debug(f"    [CAPTURED] BiomeSubType = {result['biome_subtype']} (raw: {captured.get('biome_subtype_raw')})")
 
                 # CRITICAL v8.1.9: Apply captured PLANET SIZE data (from GenerationData.Size - reliable!)
                 # This overrides the GARBAGE values from direct memory read (was showing 256, 33554432, etc)
                 if captured.get('planet_size_raw', -1) >= 0:
                     result["planet_size"] = captured.get('planet_size', result["planet_size"])
                     result["is_moon"] = captured.get('is_moon', False)
-                    logger.info(f"    [CAPTURED] PlanetSize = {result['planet_size']} (raw: {captured.get('planet_size_raw')}, is_moon: {result['is_moon']})")
+                    logger.debug(f"    [CAPTURED] PlanetSize = {result['planet_size']} (raw: {captured.get('planet_size_raw')}, is_moon: {result['is_moon']})")
 
                 # =============================================================
                 # v10.3.0: Apply flora/fauna/sentinel - PREFER DISPLAY STRINGS
@@ -3124,8 +3655,9 @@ class HavenExtractorMod(Mod):
                 # Flora - prefer display string from PlanetInfo.Flora
                 flora_display = captured.get('flora_display', '')
                 if flora_display:
-                    result["flora_level"] = flora_display
-                    logger.info(f"    [DISPLAY] Using Flora display string: '{flora_display}'")
+                    # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
+                    result["flora_level"] = map_display_string_to_adjective(flora_display, 'flora')
+                    logger.debug(f"    [DISPLAY] Using Flora: '{result['flora_level']}' (raw: '{flora_display}')")
                 else:
                     # Fallback to list-based selection
                     flora_raw = captured.get('flora_raw', -1)
@@ -3138,8 +3670,9 @@ class HavenExtractorMod(Mod):
                 # Fauna - prefer display string from PlanetInfo.Fauna
                 fauna_display = captured.get('fauna_display', '')
                 if fauna_display:
-                    result["fauna_level"] = fauna_display
-                    logger.info(f"    [DISPLAY] Using Fauna display string: '{fauna_display}'")
+                    # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
+                    result["fauna_level"] = map_display_string_to_adjective(fauna_display, 'fauna')
+                    logger.debug(f"    [DISPLAY] Using Fauna: '{result['fauna_level']}' (raw: '{fauna_display}')")
                 else:
                     # Fallback to list-based selection
                     fauna_raw = captured.get('fauna_raw', -1)
@@ -3152,8 +3685,9 @@ class HavenExtractorMod(Mod):
                 # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[0]
                 sentinel_display = captured.get('sentinel_display', '')
                 if sentinel_display:
-                    result["sentinel_level"] = sentinel_display
-                    logger.info(f"    [DISPLAY] Using Sentinel display string: '{sentinel_display}'")
+                    # Map internal enum names like 'SENTINEL_RARE7' to actual adjectives
+                    result["sentinel_level"] = map_display_string_to_adjective(sentinel_display, 'sentinel')
+                    logger.debug(f"    [DISPLAY] Using Sentinel: '{result['sentinel_level']}' (raw: '{sentinel_display}')")
                 else:
                     # Fallback to list-based selection
                     sentinel_raw = captured.get('sentinel_raw', -1)
@@ -3180,41 +3714,50 @@ class HavenExtractorMod(Mod):
                 if weather_display:
                     # Use the actual game display string - clean it if needed
                     result["weather"] = clean_weather_string(weather_display)
-                    logger.info(f"    [DISPLAY] Using Weather display string: '{result['weather']}' (raw: '{weather_display}')")
+                    logger.debug(f"    [DISPLAY] Using Weather display string: '{result['weather']}' (raw: '{weather_display}')")
                 elif captured.get('weather') and captured.get('weather_raw', -1) >= 0:
                     # Fallback to list-based selection
+                    # v10.3.6: Use deterministic hash based on glyph code + planet index
+                    # This should produce consistent results for the same planet
                     weather_raw = captured.get('weather_raw', -1)
                     storm_raw = captured.get('storm_raw', 0)
                     storm_info = captured.get('storm_frequency', '')
+
+                    # Create deterministic hash from glyph code + planet index
+                    glyph_code = self._cached_coords.get('glyph_code', '') if self._cached_coords else ''
+                    hash_input = f"{glyph_code}_{index}_{weather_raw}_{storm_raw}"
+                    weather_hash = hash(hash_input) & 0x7FFFFFFF  # Positive integer
 
                     # Try list-based weather lookup: (weather_raw, storm_raw) -> list
                     weather_key = (weather_raw, storm_raw)
                     weather_list = self.WEATHER_BY_TYPE_STORM.get(weather_key)
 
                     if weather_list:
-                        result["weather"] = weather_list[index % len(weather_list)]
-                        logger.info(f"    [LIST] Weather = {result['weather']} (from list: weather={weather_raw}, storm={storm_raw}, idx={index})")
+                        weather_idx = weather_hash % len(weather_list)
+                        result["weather"] = weather_list[weather_idx]
+                        logger.debug(f"    [LIST] Weather = {result['weather']} (from list: weather={weather_raw}, storm={storm_raw}, hash_idx={weather_idx})")
                     else:
                         # Fallback: try storm_raw=0 (calm weather) if specific storm level not found
                         weather_key_calm = (weather_raw, 0)
                         weather_list_calm = self.WEATHER_BY_TYPE_STORM.get(weather_key_calm)
                         if weather_list_calm:
-                            result["weather"] = weather_list_calm[index % len(weather_list_calm)]
-                            logger.info(f"    [LIST] Weather = {result['weather']} (calm fallback: weather={weather_raw})")
+                            weather_idx = weather_hash % len(weather_list_calm)
+                            result["weather"] = weather_list_calm[weather_idx]
+                            logger.debug(f"    [LIST] Weather = {result['weather']} (calm fallback: weather={weather_raw}, hash_idx={weather_idx})")
                         else:
                             # Last resort: use captured weather name
                             result["weather"] = captured['weather']
-                            logger.info(f"    [RAW] Weather = {result['weather']} (raw fallback)")
+                            logger.debug(f"    [RAW] Weather = {result['weather']} (raw fallback)")
                 elif result["weather"] == "Unknown" and captured.get('weather'):
                     # Fallback when weather_raw not available
                     result["weather"] = captured['weather']
-                    logger.info(f"    [RAW] Weather = {result['weather']} (no raw value)")
+                    logger.debug(f"    [RAW] Weather = {result['weather']} (no raw value)")
 
                 # v8.1.7: Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires
                 if captured.get('planet_name'):
                     result["planet_name"] = captured['planet_name']
-                    logger.info(f"    [CAPTURED] PlanetName = {result['planet_name']}")
+                    logger.debug(f"    [CAPTURED] PlanetName = {result['planet_name']}")
 
                 logger.info(f"    [CAPTURED] Applied: flora={result['flora_level']}, fauna={result['fauna_level']}, sentinel={result['sentinel_level']}")
             else:
@@ -3232,7 +3775,7 @@ class HavenExtractorMod(Mod):
             # FALLBACK: NMS.py struct mapping (only if direct read failed)
             # This is unreliable but kept as a last resort
             if result["biome"] == "Unknown" or result["planet_size"] == "Unknown":
-                logger.info(f"    [FALLBACK] Direct read incomplete, trying NMS.py struct mapping...")
+                logger.debug(f"    [FALLBACK] Direct read incomplete, trying NMS.py struct mapping...")
                 try:
                     if hasattr(planet, 'mPlanetGenerationInputData'):
                         gen_input = planet.mPlanetGenerationInputData
@@ -3250,10 +3793,13 @@ class HavenExtractorMod(Mod):
                                 pass
 
                             if raw_size is not None and 0 <= raw_size <= 4:
-                                size_name = self._safe_enum(size_val)
-                                result["planet_size"] = size_name
                                 result["is_moon"] = (raw_size == 3)
-                                logger.info(f"    [FALLBACK] PlanetSize = {size_name} (raw: {raw_size})")
+                                # For moons, use "Small" instead of "Moon" to avoid duplicate badge
+                                if result["is_moon"]:
+                                    result["planet_size"] = "Small"
+                                else:
+                                    result["planet_size"] = self._safe_enum(size_val)
+                                logger.debug(f"    [FALLBACK] PlanetSize = {result['planet_size']} (raw: {raw_size})")
 
                         # Biome - only if not already set
                         if result["biome"] == "Unknown" and hasattr(gen_input, 'Biome'):
@@ -3269,12 +3815,12 @@ class HavenExtractorMod(Mod):
 
                             if raw_biome is not None and 0 <= raw_biome <= 16:
                                 result["biome"] = self._validate_biome(biome_val, raw_biome)
-                                logger.info(f"    [FALLBACK] Biome = {result['biome']} (raw: {raw_biome})")
+                                logger.debug(f"    [FALLBACK] Biome = {result['biome']} (raw: {raw_biome})")
 
                         # BiomeSubType
                         if result["biome_subtype"] == "Unknown" and hasattr(gen_input, 'BiomeSubType'):
                             result["biome_subtype"] = self._safe_enum(gen_input.BiomeSubType)
-                            logger.info(f"    [FALLBACK] BiomeSubType = {result['biome_subtype']}")
+                            logger.debug(f"    [FALLBACK] BiomeSubType = {result['biome_subtype']}")
 
                 except Exception as e:
                     logger.warning(f"    [FALLBACK] NMS.py struct mapping failed: {e}")
@@ -3308,7 +3854,9 @@ class HavenExtractorMod(Mod):
                             if pt and pt != "None" and len(pt) > 0:
                                 result["biome"] = pt
 
-                        if hasattr(info, 'Weather'):
+                        # CRITICAL v10.3.1: Only use fallback weather if not already set
+                        # The captured data has CORRECT adjectives; PlanetInfo.Weather has raw lookup keys
+                        if result["weather"] == "Unknown" and hasattr(info, 'Weather'):
                             val = str(info.Weather)
                             if val and val != "None":
                                 result["weather"] = clean_weather_string(val)

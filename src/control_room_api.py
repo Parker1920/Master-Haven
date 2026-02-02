@@ -90,6 +90,68 @@ else:
 
 DATA_JSON = HAVEN_UI_DIR / 'data' / 'data.json'
 
+# Discovery type emoji-to-slug mapping for URL routing
+DISCOVERY_EMOJI_TO_SLUG = {
+    '🦗': 'fauna',
+    '🌿': 'flora',
+    '💎': 'mineral',
+    '🏛️': 'ancient',
+    '📜': 'history',
+    '🦴': 'bones',
+    '👽': 'alien',
+    '🚀': 'starship',
+    '⚙️': 'multitool',
+    '📖': 'lore',
+    '🏠': 'base',
+    '🆕': 'other',
+}
+
+# Reverse mapping: slug to emoji
+DISCOVERY_SLUG_TO_EMOJI = {v: k for k, v in DISCOVERY_EMOJI_TO_SLUG.items()}
+
+# All valid discovery type slugs
+DISCOVERY_TYPE_SLUGS = list(DISCOVERY_SLUG_TO_EMOJI.keys())
+
+# Discovery type display info (for frontend)
+DISCOVERY_TYPE_INFO = {
+    'fauna': {'emoji': '🦗', 'label': 'Fauna', 'color': '#22c55e'},
+    'flora': {'emoji': '🌿', 'label': 'Flora', 'color': '#10b981'},
+    'mineral': {'emoji': '💎', 'label': 'Mineral', 'color': '#a855f7'},
+    'ancient': {'emoji': '🏛️', 'label': 'Ancient', 'color': '#eab308'},
+    'history': {'emoji': '📜', 'label': 'History', 'color': '#f59e0b'},
+    'bones': {'emoji': '🦴', 'label': 'Bones', 'color': '#78716c'},
+    'alien': {'emoji': '👽', 'label': 'Alien', 'color': '#06b6d4'},
+    'starship': {'emoji': '🚀', 'label': 'Starship', 'color': '#3b82f6'},
+    'multitool': {'emoji': '⚙️', 'label': 'Multi-tool', 'color': '#f97316'},
+    'lore': {'emoji': '📖', 'label': 'Lore', 'color': '#6366f1'},
+    'base': {'emoji': '🏠', 'label': 'Custom Base', 'color': '#14b8a6'},
+    'other': {'emoji': '🆕', 'label': 'Other', 'color': '#6b7280'},
+}
+
+
+def get_discovery_type_slug(discovery_type: str) -> str:
+    """Convert discovery type emoji or text to URL-friendly slug."""
+    if not discovery_type:
+        return 'other'
+    # Check if it's already a slug
+    if discovery_type.lower() in DISCOVERY_TYPE_SLUGS:
+        return discovery_type.lower()
+    # Check emoji mapping
+    if discovery_type in DISCOVERY_EMOJI_TO_SLUG:
+        return DISCOVERY_EMOJI_TO_SLUG[discovery_type]
+    # Try text-based mapping
+    text_lower = discovery_type.lower()
+    text_mappings = {
+        'fauna': 'fauna', 'flora': 'flora', 'mineral': 'mineral',
+        'ancient': 'ancient', 'history': 'history', 'bones': 'bones',
+        'alien': 'alien', 'starship': 'starship', 'ship': 'starship',
+        'multi-tool': 'multitool', 'multitool': 'multitool', 'tool': 'multitool',
+        'lore': 'lore', 'custom base': 'base', 'base': 'base',
+        'other': 'other', 'unknown': 'other',
+    }
+    return text_mappings.get(text_lower, 'other')
+
+
 # Load galaxies reference data for validation
 GALAXIES_JSON_PATH = Path(__file__).resolve().parents[1] / 'NMS-Save-Watcher' / 'data' / 'galaxies.json'
 
@@ -193,6 +255,11 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 photos_dir = HAVEN_UI_DIR / 'photos'
 if photos_dir.exists():
     app.mount('/haven-ui-photos', StaticFiles(directory=str(photos_dir)), name='haven-ui-photos')
+
+# Mount war-media directory for war room uploaded images
+war_media_dir = HAVEN_UI_DIR / 'public' / 'war-media'
+war_media_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+app.mount('/war-media', StaticFiles(directory=str(war_media_dir)), name='war-media')
 
 ui_static_dir = HAVEN_UI_DIR / 'static'
 ui_dist_dir = HAVEN_UI_DIR / 'dist'
@@ -1014,29 +1081,37 @@ def query_discoveries_from_db(q: str = '', system_id: str = None, planet_id: int
 
 @app.on_event('startup')
 async def on_startup():
+    """Fast startup - only initialize database schema, don't preload data.
+
+    PERFORMANCE OPTIMIZATION: Previously loaded all systems/planets/moons into
+    _systems_cache on startup (12,000+ records), causing 5-10 second delays.
+    Now we only initialize the DB schema and let queries hit the database directly.
+    The cache is only populated on-demand for legacy JSON fallback scenarios.
+    """
     # Initialize DB on startup so import-time failures are avoided.
     try:
         init_database()
     except Exception as e:
-        # Log the error but continue — we'll still attempt to load systems
+        # Log the error but continue
         logger.exception('Database initialization failed during startup: %s', e)
-    # Load systems from DB if available, otherwise fallback to data.json
-    systems = []
+
+    # Load persisted settings into cache (fast - single row query)
+    _settings_cache['personal_color'] = get_personal_color()
+
+    # Log startup without loading all systems (count query is fast)
     try:
         db_path = get_db_path()
         if db_path.exists():
-            systems = load_systems_from_db()
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM systems')
+            count = cursor.fetchone()[0]
+            conn.close()
+            logger.info('Control Room API started - database has %d systems (lazy-loaded)', count)
         else:
-            data = load_data_json()
-            systems = data.get('systems', [])
-    except Exception:
-        data = load_data_json()
-        systems = data.get('systems', [])
-    async with _systems_lock:
-        _systems_cache.clear()
-        for s in systems:
-            _systems_cache[s.get('name')] = s
-    logger.info('Control Room API started with %d systems', len(_systems_cache))
+            logger.info('Control Room API started - no database found, using JSON fallback')
+    except Exception as e:
+        logger.info('Control Room API started - count query failed: %s', e)
 
 @app.get('/')
 async def root():
@@ -1196,7 +1271,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': 'minimal-api'}
+    return {'status': 'ok', 'version': '1.31.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -1231,6 +1306,113 @@ async def api_stats():
     except Exception as e:
         logger.error(f"Stats query error: {e}")
         return {'total': 0, 'galaxies': []}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/stats/daily_changes')
+async def api_stats_daily_changes():
+    """Get 24-hour change counts for dashboard stats.
+
+    Returns the number of new systems, planets, moons, regions, and discoveries
+    added in the last 24 hours. Uses activity_logs as the primary source since
+    it reliably tracks all submissions regardless of table schema.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'changes': {
+                'systems': 0, 'planets': 0, 'moons': 0,
+                'regions': 0, 'discoveries': 0
+            }}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        changes = {}
+
+        # Use activity_logs to count approved systems in the last 24 hours
+        # This is more reliable than created_at which may not exist on older databases
+        cursor.execute("""
+            SELECT COUNT(*) FROM activity_logs
+            WHERE event_type IN ('system_approved', 'system_saved')
+            AND timestamp >= datetime('now', '-1 day')
+        """)
+        system_changes = cursor.fetchone()[0]
+        changes['systems'] = system_changes
+
+        # For planets and moons, extract system names from activity logs
+        # and count their planets/moons directly
+        if system_changes > 0:
+            # Get system names from recent activity logs
+            # Message format is typically "System 'SystemName' approved" or similar
+            cursor.execute("""
+                SELECT message FROM activity_logs
+                WHERE event_type IN ('system_approved', 'system_saved')
+                AND timestamp >= datetime('now', '-1 day')
+            """)
+            messages = [row[0] for row in cursor.fetchall()]
+
+            # Extract system names from messages and find their IDs
+            # Message format: "System 'SystemName' approved and ..."
+            system_ids = []
+            for msg in messages:
+                match = re.search(r"System '([^']+)'", msg)
+                if match:
+                    system_name = match.group(1).strip()
+                    cursor.execute("SELECT id FROM systems WHERE name = ?", (system_name,))
+                    row = cursor.fetchone()
+                    if row:
+                        system_ids.append(row[0])
+
+            if system_ids:
+                # Count planets for these systems
+                placeholders = ','.join('?' * len(system_ids))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM planets WHERE system_id IN ({placeholders})
+                """, system_ids)
+                changes['planets'] = cursor.fetchone()[0]
+
+                # Count moons for these systems
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM moons m
+                    JOIN planets p ON m.planet_id = p.id
+                    WHERE p.system_id IN ({placeholders})
+                """, system_ids)
+                changes['moons'] = cursor.fetchone()[0]
+            else:
+                # Fallback: estimate based on system count
+                changes['planets'] = system_changes * 3
+                changes['moons'] = system_changes
+        else:
+            changes['planets'] = 0
+            changes['moons'] = 0
+
+        # Regions from activity_logs
+        cursor.execute("""
+            SELECT COUNT(*) FROM activity_logs
+            WHERE event_type = 'region_approved'
+            AND timestamp >= datetime('now', '-1 day')
+        """)
+        changes['regions'] = cursor.fetchone()[0]
+
+        # Discoveries from activity_logs
+        cursor.execute("""
+            SELECT COUNT(*) FROM activity_logs
+            WHERE event_type = 'discovery_added'
+            AND timestamp >= datetime('now', '-1 day')
+        """)
+        changes['discoveries'] = cursor.fetchone()[0]
+
+        return {'changes': changes}
+    except Exception as e:
+        logger.error(f"Daily changes query error: {e}")
+        return {'changes': {
+            'systems': 0, 'planets': 0, 'moons': 0,
+            'regions': 0, 'discoveries': 0
+        }}
     finally:
         if conn:
             conn.close()
@@ -1634,6 +1816,9 @@ async def get_settings():
 async def save_settings(settings: dict):
     """Save settings"""
     _settings_cache.update(settings)
+    # Persist personal_color to database if provided
+    if 'personal_color' in settings:
+        set_personal_color(settings['personal_color'])
     return {'status': 'ok'}
 
 # Admin authentication (session-based with cookies)
@@ -1680,6 +1865,45 @@ def set_super_admin_password_hash(password_hash: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to set super admin password: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# Default personal submission color (fuchsia)
+DEFAULT_PERSONAL_COLOR = '#c026d3'
+
+def get_personal_color() -> str:
+    """Get personal submission color from database, or return default"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM super_admin_settings WHERE key = 'personal_color'")
+        row = cursor.fetchone()
+        if row:
+            return row['value']
+    except Exception as e:
+        logger.warning(f"Failed to get personal color from DB: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return DEFAULT_PERSONAL_COLOR
+
+def set_personal_color(color: str) -> bool:
+    """Store personal submission color in database"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO super_admin_settings (key, value, updated_at)
+            VALUES ('personal_color', ?, ?)
+        ''', (color, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set personal color: {e}")
         return False
     finally:
         if conn:
@@ -1829,6 +2053,56 @@ def get_restriction_for_system(system_id: int) -> Optional[dict]:
         if conn:
             conn.close()
 
+
+def get_restrictions_batch(system_ids: list) -> dict:
+    """Batch fetch restrictions for multiple systems in a single query.
+
+    PERFORMANCE: This replaces N individual queries with 1 query, dramatically
+    improving performance when filtering large lists of systems.
+
+    Args:
+        system_ids: List of system IDs to fetch restrictions for
+
+    Returns:
+        Dict mapping system_id -> restriction dict (only for systems with restrictions)
+    """
+    if not system_ids:
+        return {}
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Use IN clause with placeholders for batch query
+        placeholders = ','.join('?' * len(system_ids))
+        cursor.execute(f'''
+            SELECT id, system_id, discord_tag, is_hidden_from_public, hidden_fields,
+                   map_visibility, created_at, updated_at, created_by
+            FROM data_restrictions WHERE system_id IN ({placeholders})
+        ''', system_ids)
+
+        restrictions = {}
+        for row in cursor.fetchall():
+            restrictions[row['system_id']] = {
+                'id': row['id'],
+                'system_id': row['system_id'],
+                'discord_tag': row['discord_tag'],
+                'is_hidden_from_public': bool(row['is_hidden_from_public']),
+                'hidden_fields': json.loads(row['hidden_fields'] or '[]'),
+                'map_visibility': row['map_visibility'] or 'normal',
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at'],
+                'created_by': row['created_by']
+            }
+        return restrictions
+    except Exception as e:
+        logger.error(f"Failed to batch fetch restrictions: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
 def get_restrictions_by_discord_tag(discord_tag: str) -> list:
     """Get all restrictions for a specific discord_tag."""
     conn = None
@@ -1909,6 +2183,10 @@ def apply_field_restrictions(system: dict, hidden_fields: list) -> dict:
 def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map: bool = False) -> list:
     """Filter systems based on data restrictions and viewer permissions.
 
+    PERFORMANCE OPTIMIZED: Uses batch query to fetch all restrictions at once,
+    instead of N individual queries. This dramatically improves performance
+    for large system lists (e.g., 6000+ systems reduced from 6000 queries to 1).
+
     Args:
         systems: List of system dictionaries
         session_data: Current session data (None for public)
@@ -1928,6 +2206,10 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
     if session_data and session_data.get('user_type') == 'partner':
         viewer_discord_tag = session_data.get('discord_tag')
 
+    # OPTIMIZATION: Batch fetch all restrictions in ONE query instead of N queries
+    system_ids = [s.get('id') for s in systems if s.get('id')]
+    restrictions_map = get_restrictions_batch(system_ids) if system_ids else {}
+
     result = []
     for system in systems:
         system_id = system.get('id')
@@ -1938,8 +2220,8 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
             result.append(system)
             continue
 
-        # Check for restrictions
-        restriction = get_restriction_for_system(system_id) if system_id else None
+        # Check for restrictions using pre-fetched map
+        restriction = restrictions_map.get(system_id) if system_id else None
 
         if not restriction:
             # No restrictions - include as-is
@@ -1980,7 +2262,7 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
 
     return result
 
-def check_rate_limit(client_ip: str, limit: int = 15, window_hours: int = 1) -> tuple:
+def check_rate_limit(client_ip: str, limit: int = 60, window_hours: int = 1) -> tuple:
     """
     Check if IP has exceeded rate limit for system submissions.
     Returns (is_allowed, remaining_requests).
@@ -4404,6 +4686,10 @@ async def get_discord_tag_colors():
 
         # Add default Haven color (super admin's systems)
         colors['Haven'] = {'color': '#00C2B3', 'name': 'Haven'}
+
+        # Add personal submission color from settings
+        personal_color = get_personal_color()
+        colors['personal'] = {'color': personal_color, 'name': 'Personal'}
 
         return {'colors': colors}
     finally:
@@ -7604,6 +7890,16 @@ async def db_stats(session: Optional[str] = Cookie(None)):
             cursor.execute("SELECT COUNT(*) FROM regions")
             stats['total_regions'] = cursor.fetchone()[0]
 
+            # Count populated regions (distinct region coordinates with at least one system)
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT region_x, region_y, region_z
+                    FROM systems
+                    WHERE region_x IS NOT NULL AND region_y IS NOT NULL AND region_z IS NOT NULL
+                )
+            """)
+            stats['populated_regions'] = cursor.fetchone()[0]
+
             cursor.execute("SELECT COUNT(*) FROM space_stations")
             stats['total_space_stations'] = cursor.fetchone()[0]
 
@@ -7735,7 +8031,9 @@ async def db_stats(session: Optional[str] = Cookie(None)):
             # ============================================
 
             cursor.execute("SELECT COUNT(*) FROM systems")
-            stats['star_systems'] = cursor.fetchone()[0]
+            system_count = cursor.fetchone()[0]
+            stats['star_systems'] = system_count
+            stats['systems'] = system_count  # Alias for Dashboard compatibility
 
             cursor.execute("SELECT COUNT(*) FROM planets")
             stats['planets'] = cursor.fetchone()[0]
@@ -7746,8 +8044,21 @@ async def db_stats(session: Optional[str] = Cookie(None)):
             cursor.execute("SELECT COUNT(*) FROM regions")
             stats['regions'] = cursor.fetchone()[0]
 
+            # Count populated regions (distinct region coordinates with at least one system)
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT region_x, region_y, region_z
+                    FROM systems
+                    WHERE region_x IS NOT NULL AND region_y IS NOT NULL AND region_z IS NOT NULL
+                )
+            """)
+            stats['populated_regions'] = cursor.fetchone()[0]
+
             cursor.execute("SELECT COUNT(*) FROM planet_pois")
             stats['planet_pois'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM discoveries")
+            stats['discoveries'] = cursor.fetchone()[0]
 
             return {'stats': stats, 'user_type': 'public'}
 
@@ -8649,38 +8960,6 @@ async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
         if conn:
             conn.close()
 
-@app.get('/api/discoveries/{discovery_id}')
-async def get_discovery(discovery_id: int):
-    """Get a specific discovery by ID"""
-    conn = None
-    try:
-        db_path = get_db_path()
-        if db_path.exists():
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM discoveries WHERE id = ?', (discovery_id,))
-            row = cursor.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail='Discovery not found')
-            return dict(row)
-
-        data = load_data_json()
-        discoveries = data.get('discoveries', [])
-
-        if discovery_id < 1 or discovery_id > len(discoveries):
-            raise HTTPException(status_code=404, detail='Discovery not found')
-
-        return discoveries[discovery_id - 1]
-    except HTTPException:
-        raise
-    except IndexError:
-        raise HTTPException(status_code=404, detail='Discovery not found')
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if conn:
-            conn.close()
-
 @app.post('/api/discoveries')
 async def create_discovery(payload: dict):
     """Accept a discovery submission and store in the database."""
@@ -8716,12 +8995,16 @@ async def create_discovery(payload: dict):
         # Get submission timestamp
         submission_ts = payload.get('submission_timestamp') or datetime.now().isoformat()
 
+        # Get discovery type and compute slug
+        discovery_type = payload.get('discovery_type') or 'Unknown'
+        type_slug = get_discovery_type_slug(discovery_type)
+
         cursor.execute('''
             INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            payload.get('discovery_type') or 'Unknown',
+            discovery_type,
             discovery_name,
             system_id,
             payload.get('planet_id'),
@@ -8739,6 +9022,7 @@ async def create_discovery(payload: dict):
             payload.get('discord_guild_id'),
             payload.get('photo_url'),
             payload.get('evidence_urls'),
+            type_slug,
         ))
         conn.commit()
         discovery_id = cursor.lastrowid
@@ -8774,6 +9058,355 @@ async def legacy_discoveries(payload: dict):
     if isinstance(result, dict) and 'id' in result:
         return JSONResponse({'status': result.get('status', 'ok'), 'discovery_id': result['id']}, status_code=201)
     return JSONResponse(result, status_code=201)
+
+
+# =============================================================================
+# DISCOVERIES SHOWCASE API - Browse, Stats, Recent, Feature
+# =============================================================================
+
+@app.get('/api/discoveries/types')
+async def get_discovery_types():
+    """Get all discovery type definitions with metadata for the frontend."""
+    return {
+        'types': DISCOVERY_TYPE_INFO,
+        'slugs': DISCOVERY_TYPE_SLUGS
+    }
+
+
+@app.get('/api/discoveries/browse')
+async def browse_discoveries(
+    type: str = None,
+    q: str = '',
+    sort: str = 'newest',
+    discoverer: str = None,
+    page: int = 0,
+    limit: int = 24
+):
+    """
+    Browse discoveries with filtering, pagination, and sorting.
+
+    Args:
+        type: Filter by type slug (fauna, flora, starship, etc.)
+        q: Search query (searches name, description, location)
+        sort: Sort order - newest, oldest, name, views
+        discoverer: Filter by discovered_by field
+        page: Page number (0-indexed)
+        limit: Items per page (max 100)
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'discoveries': [], 'total': 0, 'pages': 0, 'page': page}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build WHERE clause
+        where_clauses = []
+        params = []
+
+        # Filter by type slug
+        if type and type in DISCOVERY_TYPE_SLUGS:
+            where_clauses.append("type_slug = ?")
+            params.append(type)
+
+        # Search query
+        if q:
+            q_pattern = f"%{q}%"
+            where_clauses.append("(discovery_name LIKE ? OR description LIKE ? OR location_name LIKE ?)")
+            params.extend([q_pattern, q_pattern, q_pattern])
+
+        # Filter by discoverer
+        if discoverer:
+            where_clauses.append("discovered_by LIKE ?")
+            params.append(f"%{discoverer}%")
+
+        # Build base query
+        where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        # Get total count
+        count_sql = f"SELECT COUNT(*) FROM discoveries{where_sql}"
+        cursor.execute(count_sql, params)
+        total = cursor.fetchone()[0]
+
+        # Calculate pagination
+        limit = min(limit, 100)  # Cap at 100
+        offset = page * limit
+        pages = (total + limit - 1) // limit if total > 0 else 0
+
+        # Sort order
+        sort_map = {
+            'newest': 'submission_timestamp DESC',
+            'oldest': 'submission_timestamp ASC',
+            'name': 'discovery_name ASC',
+            'views': 'view_count DESC',
+        }
+        order_by = sort_map.get(sort, 'submission_timestamp DESC')
+
+        # Fetch discoveries with system info
+        query = f'''
+            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy
+            FROM discoveries d
+            LEFT JOIN systems s ON d.system_id = s.id
+            {where_sql}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?
+        '''
+        cursor.execute(query, params + [limit, offset])
+        discoveries = [dict(row) for row in cursor.fetchall()]
+
+        # Add type info to each discovery
+        for d in discoveries:
+            slug = d.get('type_slug') or get_discovery_type_slug(d.get('discovery_type', ''))
+            d['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
+
+        return {
+            'discoveries': discoveries,
+            'total': total,
+            'pages': pages,
+            'page': page
+        }
+
+    except Exception as e:
+        logger.error(f"Error browsing discoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/discoveries/stats')
+async def get_discovery_stats():
+    """
+    Get discovery statistics by type for the landing page.
+
+    Returns total counts overall and per type, plus this week's count.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {
+                'total': 0,
+                'by_type': {slug: 0 for slug in DISCOVERY_TYPE_SLUGS},
+                'this_week': 0,
+                'featured_count': 0
+            }
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Total count
+        cursor.execute("SELECT COUNT(*) FROM discoveries")
+        total = cursor.fetchone()[0]
+
+        # Count by type_slug
+        cursor.execute('''
+            SELECT COALESCE(type_slug, 'other') as slug, COUNT(*) as cnt
+            FROM discoveries
+            GROUP BY type_slug
+        ''')
+        by_type = {slug: 0 for slug in DISCOVERY_TYPE_SLUGS}
+        for row in cursor.fetchall():
+            slug = row[0] if row[0] in DISCOVERY_TYPE_SLUGS else 'other'
+            by_type[slug] = by_type.get(slug, 0) + row[1]
+
+        # This week's count
+        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        cursor.execute("SELECT COUNT(*) FROM discoveries WHERE submission_timestamp > ?", (week_ago,))
+        this_week = cursor.fetchone()[0]
+
+        # Featured count
+        cursor.execute("SELECT COUNT(*) FROM discoveries WHERE is_featured = 1")
+        featured_count = cursor.fetchone()[0]
+
+        return {
+            'total': total,
+            'by_type': by_type,
+            'this_week': this_week,
+            'featured_count': featured_count,
+            'type_info': DISCOVERY_TYPE_INFO
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting discovery stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/discoveries/recent')
+async def get_recent_discoveries(limit: int = 8):
+    """
+    Get the most recent discoveries for the landing page.
+
+    Prioritizes discoveries with photos for better visual display.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'discoveries': []}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get recent discoveries, prioritizing those with photos
+        limit = min(limit, 20)
+        cursor.execute('''
+            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy
+            FROM discoveries d
+            LEFT JOIN systems s ON d.system_id = s.id
+            ORDER BY
+                CASE WHEN d.photo_url IS NOT NULL AND d.photo_url != '' THEN 0 ELSE 1 END,
+                d.submission_timestamp DESC
+            LIMIT ?
+        ''', (limit,))
+
+        discoveries = [dict(row) for row in cursor.fetchall()]
+
+        # Add type info to each discovery
+        for d in discoveries:
+            slug = d.get('type_slug') or get_discovery_type_slug(d.get('discovery_type', ''))
+            d['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
+
+        return {'discoveries': discoveries}
+
+    except Exception as e:
+        logger.error(f"Error getting recent discoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/discoveries/{discovery_id}')
+async def get_discovery(discovery_id: int):
+    """Get a specific discovery by ID"""
+    conn = None
+    try:
+        db_path = get_db_path()
+        if db_path.exists():
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM discoveries WHERE id = ?', (discovery_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Discovery not found')
+            return dict(row)
+
+        data = load_data_json()
+        discoveries = data.get('discoveries', [])
+
+        if discovery_id < 1 or discovery_id > len(discoveries):
+            raise HTTPException(status_code=404, detail='Discovery not found')
+
+        return discoveries[discovery_id - 1]
+    except HTTPException:
+        raise
+    except IndexError:
+        raise HTTPException(status_code=404, detail='Discovery not found')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/discoveries/{discovery_id}/feature')
+async def toggle_discovery_featured(discovery_id: int, request: Request):
+    """
+    Toggle the featured status of a discovery.
+
+    Requires admin or partner session.
+    """
+    conn = None
+    try:
+        # Check for admin/partner session
+        session = get_session_from_request(request)
+        if not session:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        # Only admins and partners can feature discoveries
+        if session.get('role') not in ['super_admin', 'partner', 'sub_admin']:
+            raise HTTPException(status_code=403, detail="Not authorized to feature discoveries")
+
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=404, detail="Database not found")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get current featured status
+        cursor.execute("SELECT is_featured FROM discoveries WHERE id = ?", (discovery_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Discovery not found")
+
+        # Toggle the status
+        current_featured = row[0] or 0
+        new_featured = 0 if current_featured else 1
+
+        cursor.execute(
+            "UPDATE discoveries SET is_featured = ? WHERE id = ?",
+            (new_featured, discovery_id)
+        )
+        conn.commit()
+
+        # Log the action
+        action = 'featured' if new_featured else 'unfeatured'
+        add_activity_log(
+            'discovery_featured',
+            f"Discovery #{discovery_id} {action}",
+            user_name=session.get('username', 'Unknown')
+        )
+
+        return {'success': True, 'is_featured': bool(new_featured)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling discovery featured status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/discoveries/{discovery_id}/view')
+async def increment_discovery_view(discovery_id: int):
+    """
+    Increment the view count for a discovery.
+
+    Called when a user opens the discovery detail modal.
+    """
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {'success': False}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "UPDATE discoveries SET view_count = COALESCE(view_count, 0) + 1 WHERE id = ?",
+            (discovery_id,)
+        )
+        conn.commit()
+
+        return {'success': True}
+
+    except Exception as e:
+        logger.error(f"Error incrementing discovery view count: {e}")
+        return {'success': False}
+    finally:
+        if conn:
+            conn.close()
+
 
 # Simple WebSocket endpoints for logs and RT-AI
 @app.websocket('/ws/logs')
@@ -8931,7 +9564,7 @@ async def submit_system(
             logger.info(f"Rate limit exceeded for IP {client_ip}")
             raise HTTPException(
                 status_code=429,
-                detail="Rate limit exceeded. Maximum 15 submissions per hour. Please try again later.",
+                detail="Rate limit exceeded. Maximum 60 submissions per hour. Please try again later.",
                 headers={"Retry-After": "3600"}
             )
 
@@ -11431,11 +12064,13 @@ async def enroll_in_war_room(request: Request, session: Optional[str] = Cookie(N
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Check partner exists and get current enabled_features
-        cursor.execute('SELECT id, display_name, enabled_features FROM partner_accounts WHERE id = ?', (partner_id,))
+        # Check partner exists and get current enabled_features + discord_tag
+        cursor.execute('SELECT id, display_name, enabled_features, discord_tag FROM partner_accounts WHERE id = ?', (partner_id,))
         partner = cursor.fetchone()
         if not partner:
             raise HTTPException(status_code=404, detail="Partner not found")
+
+        discord_tag = partner[3]
 
         # Check if already enrolled (only check active enrollments)
         cursor.execute('SELECT id, is_active FROM war_room_enrollment WHERE partner_id = ?', (partner_id,))
@@ -11464,10 +12099,38 @@ async def enroll_in_war_room(request: Request, session: Optional[str] = Cookie(N
                 UPDATE partner_accounts SET enabled_features = ? WHERE id = ?
             ''', (json.dumps(current_features), partner_id))
 
+        # Auto-claim all systems with this partner's discord_tag as initial territory
+        systems_claimed = 0
+        if discord_tag:
+            cursor.execute('''
+                SELECT id, name, region_x, region_y, region_z, galaxy, reality
+                FROM systems
+                WHERE discord_tag = ?
+            ''', (discord_tag,))
+            systems = cursor.fetchall()
+
+            for system in systems:
+                system_id, name, region_x, region_y, region_z, galaxy, reality = system
+                # Check if already claimed
+                cursor.execute('SELECT id FROM territorial_claims WHERE system_id = ?', (system_id,))
+                if not cursor.fetchone():
+                    cursor.execute('''
+                        INSERT INTO territorial_claims (system_id, claimant_partner_id, region_x, region_y, region_z, galaxy, reality, claim_type, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'initial', 'Auto-claimed on enrollment')
+                    ''', (system_id, partner_id, region_x, region_y, region_z, galaxy, reality))
+                    systems_claimed += 1
+
+            logger.info(f"War Room: Auto-claimed {systems_claimed} systems for {partner[1]} based on discord_tag '{discord_tag}'")
+
         conn.commit()
 
         logger.info(f"War Room: Enrolled {partner[1]} (ID: {partner_id})")
-        return {'status': 'enrolled', 'partner_id': partner_id, 'display_name': partner[1]}
+        return {
+            'status': 'enrolled',
+            'partner_id': partner_id,
+            'display_name': partner[1],
+            'systems_claimed': systems_claimed
+        }
     finally:
         conn.close()
 
@@ -11547,10 +12210,19 @@ async def get_enrollment_status(session: Optional[str] = Cookie(None)):
 
 @app.put('/api/warroom/enrollment/{partner_id}/home-region')
 async def set_home_region(partner_id: int, request: Request, session: Optional[str] = Cookie(None)):
-    """Set home region for an enrolled civilization (super admin only)."""
+    """Set home region for an enrolled civilization (super admin or own civ)."""
     session_data = get_session(session)
-    if not session_data or session_data.get('user_type') != 'super_admin':
-        raise HTTPException(status_code=403, detail="Super admin access required")
+    partner_info = get_war_room_partner_info(session_data)
+
+    if not partner_info:
+        raise HTTPException(status_code=403, detail="Must be enrolled in War Room")
+
+    # Allow super admin or the partner themselves
+    is_super_admin = partner_info.get('is_super_admin')
+    is_own_civ = partner_info.get('partner_id') == partner_id
+
+    if not is_super_admin and not is_own_civ:
+        raise HTTPException(status_code=403, detail="Can only set home region for your own civilization")
 
     data = await request.json()
     region_x = data.get('region_x')
@@ -11577,6 +12249,233 @@ async def set_home_region(partner_id: int, request: Request, session: Optional[s
 
         logger.info(f"War Room: Set home region for partner {partner_id}: ({region_x}, {region_y}, {region_z})")
         return {'status': 'updated', 'partner_id': partner_id}
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/enrollment/{partner_id}/sync-territory')
+async def sync_territory(partner_id: int, session: Optional[str] = Cookie(None)):
+    """Sync territory claims for an enrolled civilization based on their discord_tag.
+    This adds any new systems with their discord_tag that aren't already claimed.
+    Super admin only."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get partner's discord_tag
+        cursor.execute('''
+            SELECT pa.discord_tag, pa.display_name
+            FROM partner_accounts pa
+            JOIN war_room_enrollment wre ON pa.id = wre.partner_id
+            WHERE wre.partner_id = ? AND wre.is_active = 1
+        ''', (partner_id,))
+        partner = cursor.fetchone()
+        if not partner:
+            raise HTTPException(status_code=404, detail="Enrollment not found")
+
+        discord_tag = partner[0]
+        display_name = partner[1]
+
+        if not discord_tag:
+            return {'status': 'skipped', 'message': 'Partner has no discord_tag', 'systems_claimed': 0}
+
+        # Find all systems with this discord_tag that aren't already claimed
+        cursor.execute('''
+            SELECT s.id, s.name, s.region_x, s.region_y, s.region_z, s.galaxy, s.reality
+            FROM systems s
+            WHERE s.discord_tag = ?
+            AND s.id NOT IN (SELECT system_id FROM territorial_claims)
+        ''', (discord_tag,))
+        systems = cursor.fetchall()
+
+        systems_claimed = 0
+        for system in systems:
+            system_id, name, region_x, region_y, region_z, galaxy, reality = system
+            cursor.execute('''
+                INSERT INTO territorial_claims (system_id, claimant_partner_id, region_x, region_y, region_z, galaxy, reality, claim_type, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', 'Auto-synced from discord_tag')
+            ''', (system_id, partner_id, region_x, region_y, region_z, galaxy, reality))
+            systems_claimed += 1
+
+        conn.commit()
+        logger.info(f"War Room: Synced {systems_claimed} new systems for {display_name}")
+
+        return {
+            'status': 'synced',
+            'partner_id': partner_id,
+            'display_name': display_name,
+            'systems_claimed': systems_claimed
+        }
+    finally:
+        conn.close()
+
+
+@app.post('/api/warroom/sync-all-territory')
+async def sync_all_territory(session: Optional[str] = Cookie(None)):
+    """Sync territory claims for ALL enrolled civilizations. Super admin only."""
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get all enrolled partners with their discord_tags
+        cursor.execute('''
+            SELECT pa.id, pa.discord_tag, pa.display_name
+            FROM partner_accounts pa
+            JOIN war_room_enrollment wre ON pa.id = wre.partner_id
+            WHERE wre.is_active = 1 AND pa.discord_tag IS NOT NULL
+        ''')
+        partners = cursor.fetchall()
+
+        total_systems = 0
+        results = []
+
+        for partner_id, discord_tag, display_name in partners:
+            # Find systems with this discord_tag that aren't claimed
+            cursor.execute('''
+                SELECT s.id, s.name, s.region_x, s.region_y, s.region_z, s.galaxy, s.reality
+                FROM systems s
+                WHERE s.discord_tag = ?
+                AND s.id NOT IN (SELECT system_id FROM territorial_claims)
+            ''', (discord_tag,))
+            systems = cursor.fetchall()
+
+            partner_claimed = 0
+            for system in systems:
+                system_id, name, region_x, region_y, region_z, galaxy, reality = system
+                cursor.execute('''
+                    INSERT INTO territorial_claims (system_id, claimant_partner_id, region_x, region_y, region_z, galaxy, reality, claim_type, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', 'Auto-synced from discord_tag')
+                ''', (system_id, partner_id, region_x, region_y, region_z, galaxy, reality))
+                partner_claimed += 1
+
+            total_systems += partner_claimed
+            if partner_claimed > 0:
+                results.append({'display_name': display_name, 'systems_claimed': partner_claimed})
+
+        conn.commit()
+        logger.info(f"War Room: Bulk sync completed - {total_systems} total systems across {len(results)} civs")
+
+        return {
+            'status': 'synced',
+            'total_systems_claimed': total_systems,
+            'civs_updated': results
+        }
+    finally:
+        conn.close()
+
+
+@app.get('/api/warroom/region-search')
+async def search_regions_for_warroom(search: str = '', limit: int = 20, session: Optional[str] = Cookie(None)):
+    """Search for regions by name or coordinates. Searches both named regions and regions with systems."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if not search or len(search) < 2:
+        return []
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        results = []
+        search_lower = search.lower()
+
+        # First, search named regions
+        cursor.execute('''
+            SELECT r.region_x, r.region_y, r.region_z, r.custom_name as name, r.galaxy,
+                   (SELECT COUNT(*) FROM systems s
+                    WHERE s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z) as system_count
+            FROM regions r
+            WHERE LOWER(r.custom_name) LIKE ?
+            ORDER BY r.custom_name
+            LIMIT ?
+        ''', (f'%{search_lower}%', limit))
+
+        for row in cursor.fetchall():
+            results.append({
+                'region_x': row[0],
+                'region_y': row[1],
+                'region_z': row[2],
+                'name': row[3],
+                'region_name': row[3],
+                'galaxy': row[4] or 'Euclid',
+                'system_count': row[5],
+                'source': 'named'
+            })
+
+        # Also search for systems whose names match (to find regions by system name)
+        if len(results) < limit:
+            remaining = limit - len(results)
+            cursor.execute('''
+                SELECT DISTINCT s.region_x, s.region_y, s.region_z, s.galaxy,
+                       r.custom_name as region_name,
+                       (SELECT COUNT(*) FROM systems s2
+                        WHERE s2.region_x = s.region_x AND s2.region_y = s.region_y AND s2.region_z = s.region_z) as system_count,
+                       GROUP_CONCAT(s.name, ', ') as sample_systems
+                FROM systems s
+                LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+                WHERE LOWER(s.name) LIKE ?
+                GROUP BY s.region_x, s.region_y, s.region_z
+                LIMIT ?
+            ''', (f'%{search_lower}%', remaining))
+
+            seen_coords = {(r['region_x'], r['region_y'], r['region_z']) for r in results}
+            for row in cursor.fetchall():
+                coords = (row[0], row[1], row[2])
+                if coords not in seen_coords:
+                    results.append({
+                        'region_x': row[0],
+                        'region_y': row[1],
+                        'region_z': row[2],
+                        'name': row[4] or f"Region ({row[0]}, {row[1]}, {row[2]})",
+                        'region_name': row[4],
+                        'galaxy': row[3] or 'Euclid',
+                        'system_count': row[5],
+                        'sample_systems': row[6][:100] if row[6] else None,  # Truncate
+                        'source': 'system_match'
+                    })
+                    seen_coords.add(coords)
+
+        # Also try to parse as coordinates (e.g., "123, 456, 789" or "123 456 789")
+        import re
+        coord_match = re.match(r'[-]?\d+[,\s]+[-]?\d+[,\s]+[-]?\d+', search.strip())
+        if coord_match and len(results) < limit:
+            parts = re.split(r'[,\s]+', search.strip())
+            if len(parts) >= 3:
+                try:
+                    rx, ry, rz = int(parts[0]), int(parts[1]), int(parts[2])
+                    # Check if we already have this
+                    if (rx, ry, rz) not in {(r['region_x'], r['region_y'], r['region_z']) for r in results}:
+                        # Look up the region
+                        cursor.execute('''
+                            SELECT r.custom_name,
+                                   (SELECT COUNT(*) FROM systems s
+                                    WHERE s.region_x = ? AND s.region_y = ? AND s.region_z = ?) as system_count,
+                                   (SELECT galaxy FROM systems WHERE region_x = ? AND region_y = ? AND region_z = ? LIMIT 1) as galaxy
+                            FROM regions r
+                            WHERE r.region_x = ? AND r.region_y = ? AND r.region_z = ?
+                        ''', (rx, ry, rz, rx, ry, rz, rx, ry, rz))
+                        row = cursor.fetchone()
+                        results.insert(0, {  # Put coordinate match first
+                            'region_x': rx,
+                            'region_y': ry,
+                            'region_z': rz,
+                            'name': row[0] if row and row[0] else f"Region ({rx}, {ry}, {rz})",
+                            'region_name': row[0] if row else None,
+                            'galaxy': row[2] if row and row[2] else 'Euclid',
+                            'system_count': row[1] if row else 0,
+                            'source': 'coordinates'
+                        })
+                except ValueError:
+                    pass
+
+        return results[:limit]
     finally:
         conn.close()
 
@@ -11796,8 +12695,12 @@ async def get_conflicts(status: str = None, partner_id: int = None, session: Opt
 
 
 @app.get('/api/warroom/conflicts/active')
-async def get_active_conflicts(session: Optional[str] = Cookie(None)):
-    """Get currently active conflicts for the live feed."""
+async def get_active_conflicts(include_practice: bool = False, session: Optional[str] = Cookie(None)):
+    """Get currently active conflicts for the live feed.
+
+    Args:
+        include_practice: If True, include practice conflicts (default: False)
+    """
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -11805,15 +12708,18 @@ async def get_active_conflicts(session: Optional[str] = Cookie(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('''
+        # Filter out practice conflicts by default
+        practice_filter = "" if include_practice else "AND (c.is_practice IS NULL OR c.is_practice = 0)"
+        cursor.execute(f'''
             SELECT c.id, c.target_system_id, c.target_system_name,
                    att.display_name as attacker_name, att.region_color as attacker_color,
                    def.display_name as defender_name, def.region_color as defender_color,
-                   c.declared_at, c.status
+                   c.declared_at, c.status, COALESCE(c.is_practice, 0) as is_practice
             FROM conflicts c
             JOIN partner_accounts att ON c.attacker_partner_id = att.id
             JOIN partner_accounts def ON c.defender_partner_id = def.id
             WHERE c.status IN ('pending', 'acknowledged', 'active')
+            {practice_filter}
             ORDER BY c.declared_at DESC
         ''')
         rows = cursor.fetchall()
@@ -11827,7 +12733,8 @@ async def get_active_conflicts(session: Optional[str] = Cookie(None)):
             'defender_name': r[5],
             'defender_color': r[6],
             'declared_at': r[7],
-            'status': r[8]
+            'status': r[8],
+            'is_practice': bool(r[9])
         } for r in rows]
     finally:
         conn.close()
@@ -11849,7 +12756,8 @@ async def get_conflict_detail(conflict_id: int, session: Optional[str] = Cookie(
                    c.attacker_partner_id, att.display_name, att.region_color,
                    c.defender_partner_id, def.display_name, def.region_color,
                    c.declared_at, c.declared_by, c.acknowledged_at, c.acknowledged_by,
-                   c.resolved_at, c.resolved_by, c.status, c.resolution, c.victor_partner_id, c.notes
+                   c.resolved_at, c.resolved_by, c.status, c.resolution, c.victor_partner_id, c.notes,
+                   COALESCE(c.is_practice, 0) as is_practice
             FROM conflicts c
             JOIN partner_accounts att ON c.attacker_partner_id = att.id
             JOIN partner_accounts def ON c.defender_partner_id = def.id
@@ -11884,6 +12792,7 @@ async def get_conflict_detail(conflict_id: int, session: Optional[str] = Cookie(
             'resolution': r[16],
             'victor_partner_id': r[17],
             'notes': r[18],
+            'is_practice': bool(r[19]),
             'timeline': [{
                 'id': e[0],
                 'event_type': e[1],
@@ -11912,6 +12821,9 @@ async def declare_conflict(request: Request, session: Optional[str] = Cookie(Non
     attacker_id = data.get('attacker_partner_id') if partner_info.get('is_super_admin') else partner_info['partner_id']
     if not attacker_id:
         raise HTTPException(status_code=400, detail="attacker_partner_id required for super admin")
+
+    # Practice mode - creates a conflict that doesn't affect real stats
+    is_practice = data.get('is_practice', False)
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -11946,45 +12858,50 @@ async def declare_conflict(request: Request, session: Optional[str] = Cookie(Non
         # Create conflict
         username = session_data.get('username')
         cursor.execute('''
-            INSERT INTO conflicts (target_system_id, target_system_name, attacker_partner_id, defender_partner_id, declared_by)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (target_system_id, system_name, attacker_id, defender_id, username))
+            INSERT INTO conflicts (target_system_id, target_system_name, attacker_partner_id, defender_partner_id, declared_by, is_practice)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (target_system_id, system_name, attacker_id, defender_id, username, 1 if is_practice else 0))
         conflict_id = cursor.lastrowid
 
         # Add declaration event
+        event_details = f"{'[PRACTICE] ' if is_practice else ''}Attack declared on {system_name}"
         cursor.execute('''
             INSERT INTO conflict_events (conflict_id, event_type, actor_partner_id, actor_username, details)
             VALUES (?, 'declared', ?, ?, ?)
-        ''', (conflict_id, attacker_id, username, f"Attack declared on {system_name}"))
+        ''', (conflict_id, attacker_id, username, event_details))
         conn.commit()
 
-        # Send notification to defender
         attacker_name = partner_info.get('display_name', 'Unknown')
-        await send_war_notification(
-            defender_id,
-            'attack_declared',
-            f"Attack Declaration: {system_name}",
-            f"{attacker_name} has declared an attack on {system_name}! Respond to acknowledge the conflict.",
-            conflict_id
-        )
 
-        # Add to public activity feed
-        await add_activity_feed_entry(
-            event_type='war_declared',
-            headline=f"{attacker_name} declares war on {defender_name}",
-            actor_partner_id=attacker_id,
-            actor_name=attacker_name,
-            target_partner_id=defender_id,
-            target_name=defender_name,
-            conflict_id=conflict_id,
-            system_id=str(target_system_id),
-            system_name=system_name,
-            details=f"Attack declared on system {system_name}. Awaiting defender acknowledgement.",
-            is_public=True
-        )
+        # Skip notifications and activity feed for practice conflicts
+        if not is_practice:
+            # Send notification to defender
+            await send_war_notification(
+                defender_id,
+                'attack_declared',
+                f"Attack Declaration: {system_name}",
+                f"{attacker_name} has declared an attack on {system_name}! Respond to acknowledge the conflict.",
+                conflict_id
+            )
 
-        logger.info(f"War Room: Conflict declared - {attacker_name} attacking {defender_name} at {system_name}")
-        return {'status': 'declared', 'conflict_id': conflict_id, 'target_system': system_name}
+            # Add to public activity feed
+            await add_activity_feed_entry(
+                event_type='war_declared',
+                headline=f"{attacker_name} declares war on {defender_name}",
+                actor_partner_id=attacker_id,
+                actor_name=attacker_name,
+                target_partner_id=defender_id,
+                target_name=defender_name,
+                conflict_id=conflict_id,
+                system_id=str(target_system_id),
+                system_name=system_name,
+                details=f"Attack declared on system {system_name}. Awaiting defender acknowledgement.",
+                is_public=True
+            )
+
+        practice_label = " (PRACTICE)" if is_practice else ""
+        logger.info(f"War Room: Conflict declared{practice_label} - {attacker_name} attacking {defender_name} at {system_name}")
+        return {'status': 'declared', 'conflict_id': conflict_id, 'target_system': system_name, 'is_practice': is_practice}
     finally:
         conn.close()
 
@@ -12087,14 +13004,15 @@ async def resolve_conflict(conflict_id: int, request: Request, session: Optional
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            SELECT attacker_partner_id, defender_partner_id, status, target_system_id, target_system_name
+            SELECT attacker_partner_id, defender_partner_id, status, target_system_id, target_system_name,
+                   COALESCE(is_practice, 0) as is_practice
             FROM conflicts WHERE id = ?
         ''', (conflict_id,))
         conflict = cursor.fetchone()
         if not conflict:
             raise HTTPException(status_code=404, detail="Conflict not found")
 
-        attacker_id, defender_id, status, system_id, system_name = conflict
+        attacker_id, defender_id, status, system_id, system_name, is_practice = conflict
 
         # Check authorization - only super admin or involved parties
         if not partner_info.get('is_super_admin'):
@@ -12113,6 +13031,7 @@ async def resolve_conflict(conflict_id: int, request: Request, session: Optional
         username = session_data.get('username')
         now = datetime.now(timezone.utc).isoformat()
 
+        practice_label = "[PRACTICE] " if is_practice else ""
         cursor.execute('''
             UPDATE conflicts SET status = 'resolved', resolution = ?, victor_partner_id = ?,
                    resolved_at = ?, resolved_by = ?
@@ -12122,10 +13041,10 @@ async def resolve_conflict(conflict_id: int, request: Request, session: Optional
         cursor.execute('''
             INSERT INTO conflict_events (conflict_id, event_type, actor_username, details)
             VALUES (?, 'resolved', ?, ?)
-        ''', (conflict_id, username, f"Conflict resolved: {resolution}"))
+        ''', (conflict_id, username, f"{practice_label}Conflict resolved: {resolution}"))
 
-        # Transfer territory if attacker won
-        if resolution == 'attacker_victory':
+        # Transfer territory if attacker won (skip for practice conflicts)
+        if resolution == 'attacker_victory' and not is_practice:
             cursor.execute('''
                 UPDATE territorial_claims SET claimant_partner_id = ?, claimed_at = ?
                 WHERE system_id = ?
@@ -12134,64 +13053,67 @@ async def resolve_conflict(conflict_id: int, request: Request, session: Optional
 
         conn.commit()
 
-        # Recalculate statistics
+        # Recalculate statistics (practice conflicts are already excluded in the function)
         await recalculate_war_statistics_internal(conn)
 
-        # Notify both parties
-        for pid in [attacker_id, defender_id]:
-            await send_war_notification(
-                pid,
-                'conflict_resolved',
-                f"Conflict Resolved: {system_name}",
-                f"The battle for {system_name} has ended. Resolution: {resolution.replace('_', ' ').title()}",
-                conflict_id
+        # Skip notifications and activity feed for practice conflicts
+        if not is_practice:
+            # Notify both parties
+            for pid in [attacker_id, defender_id]:
+                await send_war_notification(
+                    pid,
+                    'conflict_resolved',
+                    f"Conflict Resolved: {system_name}",
+                    f"The battle for {system_name} has ended. Resolution: {resolution.replace('_', ' ').title()}",
+                    conflict_id
+                )
+
+            # Get names for activity feed
+            cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (attacker_id,))
+            attacker_row = cursor.fetchone()
+            attacker_name = attacker_row[0] if attacker_row else 'Unknown'
+
+            cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (defender_id,))
+            defender_row = cursor.fetchone()
+            defender_name = defender_row[0] if defender_row else 'Unknown'
+
+            victor_name = None
+            if victor_id == attacker_id:
+                victor_name = attacker_name
+            elif victor_id == defender_id:
+                victor_name = defender_name
+
+            # Add to public activity feed
+            if resolution == 'attacker_victory':
+                headline = f"{attacker_name} conquers {system_name} from {defender_name}"
+                details = f"{attacker_name} has seized control of {system_name}. Territory transferred to the victor."
+            elif resolution == 'defender_victory':
+                headline = f"{defender_name} repels {attacker_name}'s invasion of {system_name}"
+                details = f"{defender_name} has successfully defended {system_name} against {attacker_name}."
+            elif resolution == 'stalemate':
+                headline = f"Battle for {system_name} ends in stalemate"
+                details = f"The conflict between {attacker_name} and {defender_name} over {system_name} has ended without a clear victor."
+            else:
+                headline = f"Conflict over {system_name} cancelled"
+                details = f"The conflict between {attacker_name} and {defender_name} has been cancelled."
+
+            await add_activity_feed_entry(
+                event_type='conflict_resolved',
+                headline=headline,
+                actor_partner_id=victor_id,
+                actor_name=victor_name,
+                target_partner_id=defender_id if victor_id == attacker_id else attacker_id,
+                target_name=defender_name if victor_id == attacker_id else attacker_name,
+                conflict_id=conflict_id,
+                system_id=str(system_id) if system_id else None,
+                system_name=system_name,
+                details=details,
+                is_public=True
             )
 
-        # Get names for activity feed
-        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (attacker_id,))
-        attacker_row = cursor.fetchone()
-        attacker_name = attacker_row[0] if attacker_row else 'Unknown'
-
-        cursor.execute('SELECT display_name FROM partner_accounts WHERE id = ?', (defender_id,))
-        defender_row = cursor.fetchone()
-        defender_name = defender_row[0] if defender_row else 'Unknown'
-
-        victor_name = None
-        if victor_id == attacker_id:
-            victor_name = attacker_name
-        elif victor_id == defender_id:
-            victor_name = defender_name
-
-        # Add to public activity feed
-        if resolution == 'attacker_victory':
-            headline = f"{attacker_name} conquers {system_name} from {defender_name}"
-            details = f"{attacker_name} has seized control of {system_name}. Territory transferred to the victor."
-        elif resolution == 'defender_victory':
-            headline = f"{defender_name} repels {attacker_name}'s invasion of {system_name}"
-            details = f"{defender_name} has successfully defended {system_name} against {attacker_name}."
-        elif resolution == 'stalemate':
-            headline = f"Battle for {system_name} ends in stalemate"
-            details = f"The conflict between {attacker_name} and {defender_name} over {system_name} has ended without a clear victor."
-        else:
-            headline = f"Conflict over {system_name} cancelled"
-            details = f"The conflict between {attacker_name} and {defender_name} has been cancelled."
-
-        await add_activity_feed_entry(
-            event_type='conflict_resolved',
-            headline=headline,
-            actor_partner_id=victor_id,
-            actor_name=victor_name,
-            target_partner_id=defender_id if victor_id == attacker_id else attacker_id,
-            target_name=defender_name if victor_id == attacker_id else attacker_name,
-            conflict_id=conflict_id,
-            system_id=str(system_id) if system_id else None,
-            system_name=system_name,
-            details=details,
-            is_public=True
-        )
-
-        logger.info(f"War Room: Conflict {conflict_id} resolved as {resolution}")
-        return {'status': 'resolved', 'resolution': resolution, 'victor_partner_id': victor_id}
+        practice_log = " (PRACTICE)" if is_practice else ""
+        logger.info(f"War Room: Conflict {conflict_id} resolved as {resolution}{practice_log}")
+        return {'status': 'resolved', 'resolution': resolution, 'victor_partner_id': victor_id, 'is_practice': bool(is_practice)}
     finally:
         conn.close()
 
@@ -12484,25 +13406,38 @@ async def get_news_ticker(session: Optional[str] = Cookie(None)):
 
 @app.post('/api/warroom/news')
 async def create_war_news(request: Request, session: Optional[str] = Cookie(None)):
-    """Create a news article (super admin or correspondent)."""
+    """Create a news article (super admin, correspondent, or enrolled partner)."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # Check if super admin or correspondent
-    is_super_admin = session_data.get('user_type') == 'super_admin'
     username = session_data.get('username')
-    author_type = 'super_admin' if is_super_admin else 'correspondent'
+    is_super_admin = session_data.get('user_type') == 'super_admin'
+    author_type = 'super_admin'
+    author_display_name = username
 
-    if not is_super_admin:
-        # Check if they're a correspondent
+    if is_super_admin:
+        author_type = 'super_admin'
+    else:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM war_correspondents WHERE username = ? AND is_active = 1', (username,))
-        if not cursor.fetchone():
+
+        # Check if they're a correspondent
+        cursor.execute('SELECT id, display_name FROM war_correspondents WHERE username = ? AND is_active = 1', (username,))
+        correspondent = cursor.fetchone()
+        if correspondent:
+            author_type = 'correspondent'
+            author_display_name = correspondent[1] or username
             conn.close()
-            raise HTTPException(status_code=403, detail="Must be super admin or war correspondent")
-        conn.close()
+        else:
+            # Check if they're an enrolled partner
+            partner_info = get_war_room_partner_info(session_data)
+            conn.close()
+            if partner_info and not partner_info.get('is_super_admin'):
+                author_type = 'partner'
+                author_display_name = partner_info.get('display_name', username)
+            else:
+                raise HTTPException(status_code=403, detail="Must be super admin, war correspondent, or enrolled partner")
 
     data = await request.json()
     headline = data.get('headline')
@@ -12522,7 +13457,7 @@ async def create_war_news(request: Request, session: Optional[str] = Cookie(None
         cursor.execute('''
             INSERT INTO war_news (headline, body, author_username, author_type, related_conflict_id, is_pinned, article_type)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (headline, body, username, author_type, data.get('conflict_id'), data.get('is_pinned', False), article_type))
+        ''', (headline, body, author_display_name, author_type, data.get('conflict_id'), data.get('is_pinned', False), article_type))
         news_id = cursor.lastrowid
         conn.commit()
 
@@ -12530,12 +13465,12 @@ async def create_war_news(request: Request, session: Optional[str] = Cookie(None
         await add_activity_feed_entry(
             event_type='news_published',
             headline=f"News: {headline}",
-            actor_name=username,
-            details=f"New {article_type} article published",
+            actor_name=author_display_name,
+            details=f"New {article_type} article published by {author_display_name}",
             is_public=True
         )
 
-        logger.info(f"War Room: News created by {username}: {headline}")
+        logger.info(f"War Room: News created by {author_display_name} ({author_type}): {headline}")
         return {'status': 'created', 'news_id': news_id}
     finally:
         conn.close()
@@ -12684,7 +13619,7 @@ async def correspondent_login(request: Request, response: Response):
 # --- Statistics Endpoints ---
 
 async def recalculate_war_statistics_internal(conn=None):
-    """Internal function to recalculate war statistics."""
+    """Internal function to recalculate war statistics (excludes practice conflicts)."""
     close_conn = False
     if conn is None:
         conn = get_db_connection()
@@ -12695,6 +13630,8 @@ async def recalculate_war_statistics_internal(conn=None):
         # Clear existing stats
         cursor.execute('DELETE FROM war_statistics')
 
+        # Note: All queries exclude practice conflicts with (is_practice IS NULL OR is_practice = 0)
+
         # Longest Defense: defender_victory with max duration
         cursor.execute('''
             SELECT defender_partner_id, pa.display_name,
@@ -12703,6 +13640,7 @@ async def recalculate_war_statistics_internal(conn=None):
             FROM conflicts c
             JOIN partner_accounts pa ON c.defender_partner_id = pa.id
             WHERE resolution = 'defender_victory' AND resolved_at IS NOT NULL
+              AND (c.is_practice IS NULL OR c.is_practice = 0)
             ORDER BY hours DESC LIMIT 1
         ''')
         row = cursor.fetchone()
@@ -12720,6 +13658,7 @@ async def recalculate_war_statistics_internal(conn=None):
             FROM conflicts c
             JOIN partner_accounts pa ON c.attacker_partner_id = pa.id
             WHERE resolution = 'attacker_victory' AND resolved_at IS NOT NULL
+              AND (c.is_practice IS NULL OR c.is_practice = 0)
             ORDER BY hours ASC LIMIT 1
         ''')
         row = cursor.fetchone()
@@ -12737,6 +13676,7 @@ async def recalculate_war_statistics_internal(conn=None):
             JOIN partner_accounts att ON c.attacker_partner_id = att.id
             JOIN partner_accounts def ON c.defender_partner_id = def.id
             LEFT JOIN conflict_events ce ON c.id = ce.conflict_id
+            WHERE (c.is_practice IS NULL OR c.is_practice = 0)
             GROUP BY c.id
             ORDER BY event_count DESC LIMIT 1
         ''')
@@ -12756,6 +13696,7 @@ async def recalculate_war_statistics_internal(conn=None):
             FROM conflicts c
             JOIN partner_accounts pa ON c.attacker_partner_id = pa.id
             WHERE resolution = 'attacker_victory'
+              AND (c.is_practice IS NULL OR c.is_practice = 0)
             GROUP BY attacker_partner_id
             ORDER BY wins DESC LIMIT 1
         ''')
@@ -12815,13 +13756,13 @@ async def get_war_leaderboard(session: Optional[str] = Cookie(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Get all enrolled civs with their stats
+        # Get all enrolled civs with their stats (excludes practice conflicts)
         cursor.execute('''
             SELECT pa.id, pa.display_name, pa.region_color,
                    (SELECT COUNT(*) FROM territorial_claims WHERE claimant_partner_id = pa.id) as systems_controlled,
-                   (SELECT COUNT(*) FROM conflicts WHERE attacker_partner_id = pa.id AND resolution = 'attacker_victory') as systems_conquered,
-                   (SELECT COUNT(*) FROM conflicts WHERE defender_partner_id = pa.id AND resolution = 'attacker_victory') as systems_lost,
-                   (SELECT COUNT(*) FROM conflicts WHERE (attacker_partner_id = pa.id OR defender_partner_id = pa.id) AND status IN ('pending', 'acknowledged', 'active')) as active_conflicts
+                   (SELECT COUNT(*) FROM conflicts WHERE attacker_partner_id = pa.id AND resolution = 'attacker_victory' AND (is_practice IS NULL OR is_practice = 0)) as systems_conquered,
+                   (SELECT COUNT(*) FROM conflicts WHERE defender_partner_id = pa.id AND resolution = 'attacker_victory' AND (is_practice IS NULL OR is_practice = 0)) as systems_lost,
+                   (SELECT COUNT(*) FROM conflicts WHERE (attacker_partner_id = pa.id OR defender_partner_id = pa.id) AND status IN ('pending', 'acknowledged', 'active') AND (is_practice IS NULL OR is_practice = 0)) as active_conflicts
             FROM partner_accounts pa
             JOIN war_room_enrollment wre ON pa.id = wre.partner_id
             WHERE wre.is_active = 1

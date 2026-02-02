@@ -1886,3 +1886,150 @@ def migration_1_29_0_system_update_tracking(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.29.0")
+
+
+@register_migration("1.30.0", "War Room - Practice mode for conflict testing")
+def migration_1_30_0_war_room_practice_mode(conn: sqlite3.Connection):
+    """
+    Jan 2026 - War Room Practice Mode.
+
+    Adds is_practice column to conflicts table to support practice/training
+    conflicts that don't affect real statistics or territory.
+
+    Practice conflicts:
+    - Don't send notifications
+    - Don't appear in activity feed
+    - Don't affect leaderboard statistics
+    - Are filtered from active conflicts display by default
+    - Allow civs to test the war system safely
+    """
+    cursor = conn.cursor()
+
+    # Add is_practice column to conflicts table
+    try:
+        cursor.execute('ALTER TABLE conflicts ADD COLUMN is_practice INTEGER DEFAULT 0')
+        logger.info("Added is_practice column to conflicts table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.30.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.30.0")
+
+
+@register_migration("1.31.0", "Discoveries showcase - featured, view tracking, and type slugs")
+def migration_1_31_0_discoveries_showcase(conn: sqlite3.Connection):
+    """
+    Jan 2026 - Discoveries Page Showcase Overhaul.
+
+    Adds columns to support the new showcase-style discoveries page:
+    - is_featured: Allows admins/partners to feature specific discoveries
+    - view_count: Tracks popularity for sorting
+    - type_slug: Normalized type identifier for URL routing
+
+    Also adds indexes for efficient filtering and sorting.
+    """
+    cursor = conn.cursor()
+
+    # Add is_featured column
+    try:
+        cursor.execute('ALTER TABLE discoveries ADD COLUMN is_featured INTEGER DEFAULT 0')
+        logger.info("Added is_featured column to discoveries table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add view_count column
+    try:
+        cursor.execute('ALTER TABLE discoveries ADD COLUMN view_count INTEGER DEFAULT 0')
+        logger.info("Added view_count column to discoveries table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add type_slug column (normalized type for URL routing)
+    try:
+        cursor.execute('ALTER TABLE discoveries ADD COLUMN type_slug TEXT')
+        logger.info("Added type_slug column to discoveries table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Create indexes for efficient queries
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_discoveries_type_slug ON discoveries(type_slug)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_discoveries_featured ON discoveries(is_featured)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_discoveries_timestamp ON discoveries(submission_timestamp DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_discoveries_views ON discoveries(view_count DESC)')
+    logger.info("Created indexes for discoveries table")
+
+    # Backfill type_slug based on existing discovery_type emoji values
+    emoji_to_slug = {
+        '🦗': 'fauna',
+        '🌿': 'flora',
+        '💎': 'mineral',
+        '🏛️': 'ancient',
+        '📜': 'history',
+        '🦴': 'bones',
+        '👽': 'alien',
+        '🚀': 'starship',
+        '⚙️': 'multitool',
+        '📖': 'lore',
+        '🏠': 'base',
+        '🆕': 'other',
+    }
+
+    for emoji, slug in emoji_to_slug.items():
+        cursor.execute(
+            'UPDATE discoveries SET type_slug = ? WHERE discovery_type = ? AND type_slug IS NULL',
+            (slug, emoji)
+        )
+        updated = cursor.rowcount
+        if updated > 0:
+            logger.info(f"Set type_slug='{slug}' for {updated} discoveries with type={emoji}")
+
+    # Handle any discoveries with text-based types (fallback)
+    text_to_slug = {
+        'Fauna': 'fauna', 'fauna': 'fauna',
+        'Flora': 'flora', 'flora': 'flora',
+        'Mineral': 'mineral', 'mineral': 'mineral',
+        'Ancient': 'ancient', 'ancient': 'ancient',
+        'History': 'history', 'history': 'history',
+        'Bones': 'bones', 'bones': 'bones',
+        'Alien': 'alien', 'alien': 'alien',
+        'Starship': 'starship', 'starship': 'starship',
+        'Multi-tool': 'multitool', 'Multitool': 'multitool', 'multitool': 'multitool',
+        'Lore': 'lore', 'lore': 'lore',
+        'Custom Base': 'base', 'Base': 'base', 'base': 'base',
+        'Other': 'other', 'other': 'other',
+    }
+
+    for text, slug in text_to_slug.items():
+        cursor.execute(
+            'UPDATE discoveries SET type_slug = ? WHERE discovery_type = ? AND type_slug IS NULL',
+            (slug, text)
+        )
+
+    # Set remaining NULL type_slugs to 'other'
+    cursor.execute("UPDATE discoveries SET type_slug = 'other' WHERE type_slug IS NULL")
+    logger.info("Set type_slug='other' for remaining discoveries without type")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.31.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.31.0")

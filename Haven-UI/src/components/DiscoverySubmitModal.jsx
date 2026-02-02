@@ -16,6 +16,7 @@ const DISCOVERY_TYPES = [
   { value: '🚀', label: '🚀 Starship' },
   { value: '⚙️', label: '⚙️ Multi-tool' },
   { value: '📖', label: '📖 Lore' },
+  { value: '🏠', label: '🏠 Custom Base' },
   { value: '🆕', label: '🆕 Other' }
 ]
 

@@ -14,6 +14,10 @@ export default defineConfig({
       '/ws': {
         target: 'ws://127.0.0.1:8005',
         ws: true
+      },
+      '/war-media': {
+        target: 'http://127.0.0.1:8005',
+        changeOrigin: true
       }
     }
   },
@@ -22,9 +26,12 @@ export default defineConfig({
   base: process.env.NODE_ENV === 'production' ? '/haven-ui/' : '/',
   plugins: [react(), VitePWA({
     registerType: 'autoUpdate',
-    includeAssets: ['favicon.svg', 'icon.svg', 'VH-Map.html'],
+    includeAssets: ['favicon.svg', 'icon.svg'],
     workbox: {
-      maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB limit for Three.js bundle
+      maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      // Don't precache lazy-loaded chunks - they'll be cached on-demand
+      // This prevents the initial burst of requests for all JS files
+      globPatterns: ['**/*.{html,css}', 'assets/index-*.js', 'assets/vendor-react-*.js', 'assets/vendor-ui-*.js'],
     },
     manifest: {
       name: 'Haven Control Room',
@@ -41,6 +48,19 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Code splitting for better caching and faster initial load
+        manualChunks: {
+          // Core React - rarely changes, cache separately
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Three.js and related - only loaded when War Room is visited
+          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei'],
+          // UI utilities
+          'vendor-ui': ['axios', '@heroicons/react'],
+        }
+      }
+    }
   },
   resolve: {
     alias: {

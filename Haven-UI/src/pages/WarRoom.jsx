@@ -58,7 +58,7 @@ function NewsTicker({ news }) {
   if (!news.length) return null
 
   return (
-    <div className="bg-gray-900/90 border-t border-red-500/30 py-2 overflow-hidden">
+    <div className="bg-gray-900/90 border-b border-red-500/30 py-2 overflow-hidden">
       <div className="flex animate-marquee whitespace-nowrap">
         {news.concat(news).map((item, i) => (
           <span key={i} className="mx-8 text-sm">
@@ -523,40 +523,105 @@ function WarMap({ leaderboard }) {
   )
 }
 
-// Leaderboard component
-function CivLeaderboard({ leaderboard }) {
+// Leaderboard component with expanded stats
+function CivLeaderboard({ leaderboard, activeConflicts = [] }) {
+  const [expanded, setExpanded] = useState(null)
+
+  // Calculate additional stats per civ
+  const getExtraStats = (civ) => {
+    const civConflicts = activeConflicts.filter(
+      c => c.attacker_partner_id === civ.partner_id || c.defender_partner_id === civ.partner_id
+    )
+    const attacking = civConflicts.filter(c => c.attacker_partner_id === civ.partner_id).length
+    const defending = civConflicts.filter(c => c.defender_partner_id === civ.partner_id).length
+    return { activeWars: civConflicts.length, attacking, defending }
+  }
+
   return (
     <WarCard title="Civilization Rankings">
       {leaderboard.length === 0 ? (
         <p className="text-gray-500 text-sm">No enrolled civilizations yet.</p>
       ) : (
         <div className="space-y-2">
-          {leaderboard.map((civ, i) => (
-            <div key={civ.partner_id} className="flex items-center justify-between bg-gray-800/50 rounded p-2">
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-bold text-gray-500">#{i + 1}</span>
+          {leaderboard.map((civ, i) => {
+            const extraStats = getExtraStats(civ)
+            const isExpanded = expanded === civ.partner_id
+
+            return (
+              <div
+                key={civ.partner_id}
+                className={`bg-gray-800/50 rounded overflow-hidden transition-all ${
+                  isExpanded ? 'ring-1 ring-red-500/50' : ''
+                }`}
+              >
                 <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: civ.color }}
-                />
-                <span className="font-medium text-gray-200">{civ.display_name}</span>
+                  onClick={() => setExpanded(isExpanded ? null : civ.partner_id)}
+                  className="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-800/70"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`text-lg font-bold ${
+                      i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-300' : i === 2 ? 'text-amber-600' : 'text-gray-500'
+                    }`}>
+                      #{i + 1}
+                    </span>
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: civ.color }}
+                    />
+                    <span className="font-medium text-gray-200">{civ.display_name}</span>
+                    {extraStats.activeWars > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded animate-pulse">
+                        {extraStats.activeWars} war{extraStats.activeWars > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-3 text-xs">
+                    <div className="text-center min-w-[50px]">
+                      <div className="text-gray-500 text-[10px]">Systems</div>
+                      <div className="font-bold text-green-400">{civ.systems_controlled || 0}</div>
+                    </div>
+                    <div className="text-center min-w-[50px]">
+                      <div className="text-gray-500 text-[10px]">Victories</div>
+                      <div className="font-bold text-red-400">{civ.systems_conquered || 0}</div>
+                    </div>
+                    <div className="text-center min-w-[50px]">
+                      <div className="text-gray-500 text-[10px]">Win Rate</div>
+                      <div className="font-bold text-yellow-400">{civ.win_rate || 0}%</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="px-3 pb-3 pt-1 border-t border-gray-700 bg-gray-900/50">
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div>
+                        <div className="text-gray-500">Wars Won</div>
+                        <div className="font-bold text-green-400">{civ.wars_won || 0}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Wars Lost</div>
+                        <div className="font-bold text-red-400">{civ.wars_lost || 0}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Attacking</div>
+                        <div className="font-bold text-orange-400">{extraStats.attacking}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Defending</div>
+                        <div className="font-bold text-blue-400">{extraStats.defending}</div>
+                      </div>
+                    </div>
+                    {civ.last_war_date && (
+                      <div className="text-xs text-gray-500 mt-2 text-center">
+                        Last conflict: {new Date(civ.last_war_date).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-4 text-xs">
-                <div className="text-center">
-                  <div className="text-gray-400">Controlled</div>
-                  <div className="font-bold text-green-400">{civ.systems_controlled}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Conquered</div>
-                  <div className="font-bold text-red-400">{civ.systems_conquered}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Win Rate</div>
-                  <div className="font-bold text-yellow-400">{civ.win_rate}%</div>
-                </div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </WarCard>
@@ -597,23 +662,82 @@ function WarStats({ stats }) {
   )
 }
 
-// Declare War Modal with improved UI
-function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrolledCivs, myPartnerId }) {
+// War goals / Casus Belli options
+const WAR_GOALS = [
+  { id: 'expansion', label: 'Expansion', icon: '🏴', desc: 'Expand your territory' },
+  { id: 'revenge', label: 'Revenge', icon: '⚔️', desc: 'Retaliation for past aggression' },
+  { id: 'border_dispute', label: 'Border Dispute', icon: '🗺️', desc: 'Contested territory claim' },
+  { id: 'economic', label: 'Economic', icon: '💰', desc: 'Control valuable resources' },
+  { id: 'liberation', label: 'Liberation', icon: '🕊️', desc: 'Free the system from occupation' }
+]
+
+// Declare War Modal with improved UI, filtering, and war goals
+function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrolledCivs, myPartnerId, preSelectedSystem, onClearPreSelected }) {
   const [selectedClaim, setSelectedClaim] = useState(null)
   const [attackerPartnerId, setAttackerPartnerId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [searchFilter, setSearchFilter] = useState('')
+  const [selectedEnemy, setSelectedEnemy] = useState('all')
+  const [warGoal, setWarGoal] = useState('expansion')
+  const [isPractice, setIsPractice] = useState(false)
+
+  // Pre-select claim when a system is clicked from the map
+  useEffect(() => {
+    if (preSelectedSystem && open && claims.length > 0) {
+      // Find the matching claim for this system
+      const matchingClaim = claims.find(c => c.system_id === preSelectedSystem.id)
+      if (matchingClaim) {
+        setSelectedClaim(matchingClaim)
+        // Also set the enemy filter to this civ
+        setSelectedEnemy(matchingClaim.claimant_partner_id.toString())
+      }
+    }
+  }, [preSelectedSystem, open, claims])
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!open) {
+      setSelectedClaim(null)
+      setAttackerPartnerId('')
+      setSearchFilter('')
+      setSelectedEnemy('all')
+      setIsPractice(false)
+      onClearPreSelected?.()
+    }
+  }, [open, onClearPreSelected])
 
   if (!open) return null
 
   // Filter claims: for regular partner, exclude own claims; for super admin with attacker selected, exclude that attacker's claims
   const attackerIdToExclude = isSuperAdmin ? parseInt(attackerPartnerId) : myPartnerId
-  const availableTargets = claims.filter(c => c.claimant_partner_id !== attackerIdToExclude)
+  let availableTargets = claims.filter(c => c.claimant_partner_id !== attackerIdToExclude)
+
+  // Apply search filter
+  if (searchFilter) {
+    const query = searchFilter.toLowerCase()
+    availableTargets = availableTargets.filter(c =>
+      (c.system_name || '').toLowerCase().includes(query) ||
+      (c.region_name || '').toLowerCase().includes(query) ||
+      (c.claimant_display_name || '').toLowerCase().includes(query)
+    )
+  }
+
+  // Apply enemy filter
+  if (selectedEnemy !== 'all') {
+    availableTargets = availableTargets.filter(c => c.claimant_partner_id === parseInt(selectedEnemy))
+  }
+
+  // Get unique enemy civs for filter dropdown
+  const enemyCivs = [...new Map(claims
+    .filter(c => c.claimant_partner_id !== attackerIdToExclude)
+    .map(c => [c.claimant_partner_id, { id: c.claimant_partner_id, name: c.claimant_display_name, color: c.claimant_color }])
+  ).values()]
 
   // Group claims by owner for easier viewing
   const claimsByOwner = availableTargets.reduce((acc, claim) => {
     const key = claim.claimant_display_name
-    if (!acc[key]) acc[key] = { color: claim.claimant_color, claims: [] }
+    if (!acc[key]) acc[key] = { color: claim.claimant_color, partnerId: claim.claimant_partner_id, claims: [] }
     acc[key].claims.push(claim)
     return acc
   }, {})
@@ -630,7 +754,11 @@ function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrol
     setLoading(true)
     setError(null)
     try {
-      const payload = { target_system_id: selectedClaim.system_id }
+      const payload = {
+        target_system_id: selectedClaim.system_id,
+        war_goal: warGoal,
+        is_practice: isPractice
+      }
       if (isSuperAdmin) {
         payload.attacker_partner_id = parseInt(attackerPartnerId)
       }
@@ -639,6 +767,9 @@ function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrol
       onClose()
       setSelectedClaim(null)
       setAttackerPartnerId('')
+      setSearchFilter('')
+      setSelectedEnemy('all')
+      setIsPractice(false)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to declare attack')
     } finally {
@@ -649,8 +780,8 @@ function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrol
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
       <div className="bg-gray-900 border border-red-500/30 rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
-        <h2 className="text-xl font-bold text-red-500 mb-4">DECLARE WAR</h2>
-        {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+        <h2 className="text-xl font-bold text-red-500 mb-4">⚔️ DECLARE WAR</h2>
+        {error && <p className="text-red-400 text-sm mb-4 p-2 bg-red-950/30 rounded">{error}</p>}
 
         {/* Super admin: select attacker */}
         {isSuperAdmin && (
@@ -668,6 +799,28 @@ function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrol
             </select>
           </div>
         )}
+
+        {/* War Goal Selection */}
+        <div className="mb-4">
+          <label className="block text-sm text-gray-400 mb-2">War Goal (Casus Belli)</label>
+          <div className="grid grid-cols-5 gap-1">
+            {WAR_GOALS.map(goal => (
+              <button
+                key={goal.id}
+                onClick={() => setWarGoal(goal.id)}
+                className={`p-2 rounded text-center transition-all ${
+                  warGoal === goal.id
+                    ? 'bg-red-600 border-2 border-red-400'
+                    : 'bg-gray-800 border border-gray-700 hover:border-red-500/50'
+                }`}
+                title={goal.desc}
+              >
+                <div className="text-lg">{goal.icon}</div>
+                <div className="text-[10px] text-gray-300 truncate">{goal.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Selected target display */}
         {selectedClaim && (
@@ -691,51 +844,97 @@ function DeclareWarModal({ open, onClose, onSuccess, claims, isSuperAdmin, enrol
           </div>
         )}
 
-        {/* Target selection - scrollable list of claims grouped by owner */}
+        {/* Target selection with filters */}
         {!selectedClaim && (
-          <div className="mb-4 flex-1 overflow-hidden">
+          <div className="mb-4 flex-1 overflow-hidden flex flex-col">
             <label className="block text-sm text-gray-400 mb-2">Select Target System</label>
+
             {(isSuperAdmin && !attackerPartnerId) ? (
               <p className="text-gray-500 text-sm text-center py-8">Select an attacking civilization first</p>
-            ) : Object.keys(claimsByOwner).length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-8">No enemy territories to attack</p>
             ) : (
-              <div className="max-h-64 overflow-y-auto space-y-3 pr-2">
-                {Object.entries(claimsByOwner).map(([ownerName, { color, claims: ownerClaims }]) => (
-                  <div key={ownerName} className="bg-gray-800/50 rounded border border-gray-700">
-                    <div className="px-3 py-2 border-b border-gray-700 flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                      <span className="text-sm font-medium" style={{ color }}>{ownerName}</span>
-                      <span className="text-xs text-gray-500">({ownerClaims.length} systems)</span>
-                    </div>
-                    <div className="p-2 space-y-1">
-                      {ownerClaims.map(claim => (
-                        <button
-                          key={claim.id}
-                          onClick={() => setSelectedClaim(claim)}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-red-900/30 border border-transparent hover:border-red-500/50 transition-colors"
-                        >
-                          <div className="font-medium text-white text-sm">{claim.system_name || claim.system_id}</div>
-                          <div className="text-xs text-gray-400">
-                            Region ({claim.region_x}, {claim.region_y}, {claim.region_z}) &bull; {claim.galaxy}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+              <>
+                {/* Filters */}
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value)}
+                    placeholder="Search systems..."
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+                  />
+                  <select
+                    value={selectedEnemy}
+                    onChange={(e) => setSelectedEnemy(e.target.value)}
+                    className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                  >
+                    <option value="all">All Enemies</option>
+                    {enemyCivs.map(civ => (
+                      <option key={civ.id} value={civ.id}>{civ.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {Object.keys(claimsByOwner).length === 0 ? (
+                  <p className="text-gray-500 text-sm text-center py-8">
+                    {searchFilter || selectedEnemy !== 'all' ? 'No matching targets' : 'No enemy territories to attack'}
+                  </p>
+                ) : (
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+                    {Object.entries(claimsByOwner).map(([ownerName, { color, claims: ownerClaims }]) => (
+                      <div key={ownerName} className="bg-gray-800/50 rounded border border-gray-700">
+                        <div className="px-3 py-2 border-b border-gray-700 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="text-sm font-medium" style={{ color }}>{ownerName}</span>
+                          <span className="text-xs text-gray-500">({ownerClaims.length} systems)</span>
+                        </div>
+                        <div className="p-2 space-y-1 max-h-40 overflow-y-auto">
+                          {ownerClaims.map(claim => (
+                            <button
+                              key={claim.id}
+                              onClick={() => setSelectedClaim(claim)}
+                              className="w-full text-left px-3 py-2 rounded hover:bg-red-900/30 border border-transparent hover:border-red-500/50 transition-colors"
+                            >
+                              <div className="font-medium text-white text-sm">{claim.system_name || claim.system_id}</div>
+                              <div className="text-xs text-gray-400">
+                                Region ({claim.region_x}, {claim.region_y}, {claim.region_z}) &bull; {claim.galaxy}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
+
+        {/* Practice Mode Toggle */}
+        <div className="mb-4 p-3 rounded border border-dashed border-cyan-500/30 bg-cyan-950/20">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPractice}
+              onChange={(e) => setIsPractice(e.target.checked)}
+              className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-cyan-500 focus:ring-cyan-500"
+            />
+            <div>
+              <span className="text-cyan-400 font-medium">Practice Mode</span>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Test war mechanics without affecting real stats or sending notifications
+              </p>
+            </div>
+          </label>
+        </div>
 
         <div className="flex gap-3 pt-2 border-t border-gray-700">
           <button
             onClick={handleDeclare}
             disabled={loading || !selectedClaim}
-            className="flex-1 py-2 bg-red-600 hover:bg-red-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-bold"
+            className={`flex-1 py-2 ${isPractice ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-red-600 hover:bg-red-500'} disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-bold`}
           >
-            {loading ? 'Declaring...' : 'DECLARE ATTACK'}
+            {loading ? 'Declaring...' : isPractice ? '🎯 START PRACTICE WAR' : `⚔️ DECLARE WAR (${WAR_GOALS.find(g => g.id === warGoal)?.label})`}
           </button>
           <button onClick={onClose} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
             Cancel
@@ -950,8 +1149,281 @@ function ClaimTerritoryModal({ open, onClose, onSuccess, isSuperAdmin, enrolledC
   )
 }
 
+// Home Region Modal - allows partners to set their HQ location
+function HomeRegionModal({ open, onClose, onSuccess, partnerId }) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [selectedRegion, setSelectedRegion] = useState(null)
+  const [customRegion, setCustomRegion] = useState({ region_x: '', region_y: '', region_z: '', region_name: '', galaxy: 'Euclid' })
+  const [loading, setLoading] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState(null)
+  const [mode, setMode] = useState('search') // 'search' or 'manual'
+  const searchTimeoutRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('')
+      setSearchResults([])
+      setSelectedRegion(null)
+      setError(null)
+      setMode('search')
+    }
+  }, [open])
+
+  // Debounced region search - uses war room region search endpoint
+  useEffect(() => {
+    if (!open || mode !== 'search') return
+
+    if (searchQuery.length < 2) {
+      setSearchResults([])
+      return
+    }
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        // Use war room region search which searches both named regions and systems
+        const res = await axios.get(`/api/warroom/region-search?search=${encodeURIComponent(searchQuery)}&limit=15`)
+        setSearchResults(res.data || [])
+      } catch (err) {
+        console.error('Region search failed:', err)
+        setSearchResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 300)
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    }
+  }, [searchQuery, open, mode])
+
+  const handleSelectRegion = (region) => {
+    setSelectedRegion(region)
+    setSearchQuery('')
+    setSearchResults([])
+  }
+
+  const handleSave = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      let payload
+      if (mode === 'manual' || selectedRegion) {
+        if (mode === 'manual') {
+          if (!customRegion.region_x || !customRegion.region_y || !customRegion.region_z) {
+            setError('Please enter all coordinates')
+            setLoading(false)
+            return
+          }
+          payload = {
+            region_x: parseInt(customRegion.region_x),
+            region_y: parseInt(customRegion.region_y),
+            region_z: parseInt(customRegion.region_z),
+            region_name: customRegion.region_name || null,
+            galaxy: customRegion.galaxy
+          }
+        } else {
+          payload = {
+            region_x: selectedRegion.region_x,
+            region_y: selectedRegion.region_y,
+            region_z: selectedRegion.region_z,
+            region_name: selectedRegion.name || selectedRegion.region_name,
+            galaxy: selectedRegion.galaxy || 'Euclid'
+          }
+        }
+      } else {
+        setError('Please select or enter a home region')
+        setLoading(false)
+        return
+      }
+
+      await axios.put(`/api/warroom/enrollment/${partnerId}/home-region`, payload)
+      onSuccess()
+      onClose()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to set home region')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+      <div className="bg-gray-900 border border-cyan-500/30 rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-bold text-cyan-400 mb-4">Set Home Region (HQ)</h2>
+        {error && <p className="text-red-400 text-sm mb-4 p-2 bg-red-950/30 rounded">{error}</p>}
+
+        {/* Mode Toggle */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setMode('search')}
+            className={`flex-1 py-2 rounded text-sm font-medium ${
+              mode === 'search' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300'
+            }`}
+          >
+            Search Regions
+          </button>
+          <button
+            onClick={() => setMode('manual')}
+            className={`flex-1 py-2 rounded text-sm font-medium ${
+              mode === 'manual' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300'
+            }`}
+          >
+            Enter Coordinates
+          </button>
+        </div>
+
+        {mode === 'search' ? (
+          <>
+            {/* Selected region display */}
+            {selectedRegion && (
+              <div className="mb-4 p-3 bg-cyan-950/30 border border-cyan-500/50 rounded">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="text-cyan-400 font-medium">{selectedRegion.name || selectedRegion.region_name || 'Unnamed Region'}</div>
+                    <div className="text-xs text-gray-400">
+                      ({selectedRegion.region_x}, {selectedRegion.region_y}, {selectedRegion.region_z}) - {selectedRegion.galaxy || 'Euclid'}
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedRegion(null)} className="text-gray-400 hover:text-white">
+                    Change
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Search input */}
+            {!selectedRegion && (
+              <div className="mb-4 relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search regions by name..."
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+                />
+                {searching && <div className="absolute right-3 top-2 text-gray-400 text-sm">Searching...</div>}
+
+                {searchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-64 overflow-y-auto">
+                    {searchResults.map((region, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSelectRegion(region)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700 last:border-b-0"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium text-white">{region.name || region.region_name || `Region (${region.region_x}, ${region.region_y}, ${region.region_z})`}</div>
+                          {region.system_count > 0 && (
+                            <span className="text-xs text-cyan-400">{region.system_count} systems</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          ({region.region_x}, {region.region_y}, {region.region_z}) - {region.galaxy || 'Euclid'}
+                          {region.source === 'system_match' && region.sample_systems && (
+                            <span className="ml-1 text-gray-500">• Contains: {region.sample_systems}</span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded p-3 text-sm text-gray-400">
+                    No regions found. Try searching by system name or enter coordinates manually.
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          /* Manual coordinate entry */
+          <div className="space-y-3 mb-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">X</label>
+                <input
+                  type="number"
+                  value={customRegion.region_x}
+                  onChange={(e) => setCustomRegion(prev => ({ ...prev, region_x: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Y</label>
+                <input
+                  type="number"
+                  value={customRegion.region_y}
+                  onChange={(e) => setCustomRegion(prev => ({ ...prev, region_y: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Z</label>
+                <input
+                  type="number"
+                  value={customRegion.region_z}
+                  onChange={(e) => setCustomRegion(prev => ({ ...prev, region_z: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Region Name (optional)</label>
+              <input
+                type="text"
+                value={customRegion.region_name}
+                onChange={(e) => setCustomRegion(prev => ({ ...prev, region_name: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+                placeholder="Your home region name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Galaxy</label>
+              <select
+                value={customRegion.galaxy}
+                onChange={(e) => setCustomRegion(prev => ({ ...prev, galaxy: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+              >
+                <option value="Euclid">Euclid</option>
+                <option value="Hilbert Dimension">Hilbert Dimension</option>
+                <option value="Calypso">Calypso</option>
+                <option value="Hesperius Dimension">Hesperius Dimension</option>
+                <option value="Hyades">Hyades</option>
+                <option value="Eissentam">Eissentam</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={handleSave}
+            disabled={loading || (mode === 'search' && !selectedRegion)}
+            className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-bold"
+          >
+            {loading ? 'Saving...' : 'Set Home Region'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Activity Feed Panel - shows public war activity
-function ActivityFeedPanel({ maxItems = 15 }) {
+function ActivityFeedPanel({ maxItems = 15, onConflictClick }) {
   const [feed, setFeed] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -986,17 +1458,20 @@ function ActivityFeedPanel({ maxItems = 15 }) {
       'resolution_proposed': '📝',
       'resolution_agreed': '✅',
       'territory_claimed': '📍',
-      'news_published': '📰'
+      'news_published': '📰',
+      'surrender': '🏳️',
+      'peace_proposed': '🕊️'
     }
     return icons[eventType] || '📌'
   }
 
   const getEventColor = (eventType) => {
-    if (eventType.includes('battle')) return 'border-orange-500/30 bg-orange-950/20'
-    if (eventType.includes('resolved') || eventType.includes('agreed')) return 'border-green-500/30 bg-green-950/20'
-    if (eventType.includes('declared') || eventType.includes('war')) return 'border-red-500/30 bg-red-950/20'
-    if (eventType.includes('cancelled')) return 'border-gray-500/30 bg-gray-950/20'
-    return 'border-yellow-500/30 bg-yellow-950/20'
+    if (eventType.includes('battle')) return 'border-orange-500/30 bg-orange-950/20 hover:bg-orange-900/30'
+    if (eventType.includes('resolved') || eventType.includes('agreed')) return 'border-green-500/30 bg-green-950/20 hover:bg-green-900/30'
+    if (eventType.includes('declared') || eventType.includes('war')) return 'border-red-500/30 bg-red-950/20 hover:bg-red-900/30'
+    if (eventType.includes('cancelled') || eventType.includes('surrender')) return 'border-gray-500/30 bg-gray-950/20 hover:bg-gray-800/30'
+    if (eventType.includes('peace') || eventType.includes('ally')) return 'border-amber-500/30 bg-amber-950/20 hover:bg-amber-900/30'
+    return 'border-yellow-500/30 bg-yellow-950/20 hover:bg-yellow-900/30'
   }
 
   if (loading) {
@@ -1016,12 +1491,25 @@ function ActivityFeedPanel({ maxItems = 15 }) {
           {feed.map((entry) => (
             <div
               key={entry.id}
-              className={`p-3 rounded border ${getEventColor(entry.event_type)}`}
+              onClick={() => entry.conflict_id && onConflictClick?.(entry.conflict_id)}
+              className={`p-3 rounded border transition-colors ${getEventColor(entry.event_type)} ${
+                entry.conflict_id ? 'cursor-pointer' : ''
+              }`}
             >
               <div className="flex items-start gap-2">
                 <span className="text-lg">{getEventIcon(entry.event_type)}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-white text-sm">{entry.headline}</div>
+                  <div className="font-medium text-white text-sm">
+                    {/* Color the involved parties */}
+                    {entry.actor_name && entry.actor_color ? (
+                      <span>
+                        <span style={{ color: entry.actor_color }}>{entry.actor_name}</span>
+                        {entry.headline.replace(entry.actor_name, '')}
+                      </span>
+                    ) : (
+                      entry.headline
+                    )}
+                  </div>
                   {entry.details && (
                     <div className="text-xs text-gray-400 mt-1">{entry.details}</div>
                   )}
@@ -1029,6 +1517,9 @@ function ActivityFeedPanel({ maxItems = 15 }) {
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
                     {entry.system_name && (
                       <span className="text-cyan-400">@ {entry.system_name}</span>
+                    )}
+                    {entry.conflict_id && (
+                      <span className="text-red-400 text-[10px]">Click to view →</span>
                     )}
                   </div>
                 </div>
@@ -1129,6 +1620,294 @@ function NotificationsPanel({ count, onRead }) {
         </>
       )}
     </div>
+  )
+}
+
+// Discord Webhook Configuration Panel
+function WebhookConfigPanel({ isEnrolled }) {
+  const [webhookConfig, setWebhookConfig] = useState(null)
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [isActive, setIsActive] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [showConfig, setShowConfig] = useState(false)
+
+  useEffect(() => {
+    if (!isEnrolled) return
+    const fetchWebhook = async () => {
+      try {
+        const res = await axios.get('/api/warroom/webhooks')
+        setWebhookConfig(res.data)
+        setIsActive(res.data.is_active !== false)
+      } catch (err) {
+        console.error('Failed to fetch webhook config:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchWebhook()
+  }, [isEnrolled])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      await axios.put('/api/warroom/webhooks', {
+        webhook_url: webhookUrl || null,
+        is_active: isActive
+      })
+      setMessage({ type: 'success', text: 'Webhook saved!' })
+      setWebhookUrl('')
+      // Refresh config
+      const res = await axios.get('/api/warroom/webhooks')
+      setWebhookConfig(res.data)
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to save webhook' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Remove Discord webhook notifications?')) return
+    setSaving(true)
+    try {
+      await axios.delete('/api/warroom/webhooks')
+      setWebhookConfig({ configured: false })
+      setMessage({ type: 'success', text: 'Webhook removed' })
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to remove webhook' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!isEnrolled) return null
+  if (loading) return null
+
+  return (
+    <WarCard title="Discord Notifications">
+      {!showConfig ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-400">
+              {webhookConfig?.configured ? (
+                <span className="text-green-400">✓ Webhook configured</span>
+              ) : (
+                <span className="text-gray-500">No webhook configured</span>
+              )}
+            </span>
+            <button
+              onClick={() => setShowConfig(true)}
+              className="text-xs text-cyan-400 hover:text-cyan-300"
+            >
+              {webhookConfig?.configured ? 'Edit' : 'Setup'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            Get notified in your Discord when you're attacked or receive peace proposals.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {message && (
+            <div className={`text-xs p-2 rounded ${message.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+              {message.text}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Discord Webhook URL</label>
+            <input
+              type="text"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://discord.com/api/webhooks/..."
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {webhookConfig?.configured
+                ? `Current: ${webhookConfig.webhook_url || 'configured'}`
+                : 'Create a webhook in your Discord server settings'}
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-gray-300">Notifications enabled</span>
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 rounded text-xs font-bold"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            {webhookConfig?.configured && (
+              <button
+                onClick={handleDelete}
+                disabled={saving}
+                className="px-3 py-1.5 bg-red-600/50 hover:bg-red-600 rounded text-xs"
+              >
+                Remove
+              </button>
+            )}
+            <button
+              onClick={() => { setShowConfig(false); setMessage(null); }}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </WarCard>
+  )
+}
+
+// Media Upload Panel for war screenshots
+function MediaUploadPanel({ onUpload }) {
+  const [uploading, setUploading] = useState(false)
+  const [recentMedia, setRecentMedia] = useState([])
+  const [showUpload, setShowUpload] = useState(false)
+  const [caption, setCaption] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [message, setMessage] = useState(null)
+  const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    const fetchMedia = async () => {
+      try {
+        const res = await axios.get('/api/warroom/media?limit=6')
+        setRecentMedia(res.data)
+      } catch (err) {
+        console.error('Failed to fetch media:', err)
+      }
+    }
+    fetchMedia()
+  }, [])
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setMessage({ type: 'error', text: 'File too large. Max 5MB.' })
+        return
+      }
+      setSelectedFile(file)
+      setMessage(null)
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!selectedFile) return
+    setUploading(true)
+    setMessage(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      if (caption) formData.append('caption', caption)
+
+      await axios.post('/api/warroom/media/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setMessage({ type: 'success', text: 'Image uploaded!' })
+      setSelectedFile(null)
+      setCaption('')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+
+      // Refresh media list
+      const res = await axios.get('/api/warroom/media?limit=6')
+      setRecentMedia(res.data)
+      onUpload?.()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Upload failed' })
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <WarCard title="War Media">
+      {!showUpload ? (
+        <div className="space-y-3">
+          {recentMedia.length > 0 ? (
+            <div className="grid grid-cols-3 gap-1">
+              {recentMedia.slice(0, 6).map(m => (
+                <div
+                  key={m.id}
+                  className="aspect-square bg-gray-800 rounded overflow-hidden"
+                  title={m.caption || 'War screenshot'}
+                >
+                  <img
+                    src={m.url}
+                    alt={m.caption || 'War media'}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { e.target.style.display = 'none' }}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 text-center py-2">No war media uploaded yet</p>
+          )}
+          <button
+            onClick={() => setShowUpload(true)}
+            className="w-full py-2 bg-purple-600/50 hover:bg-purple-600 border border-purple-500/30 rounded text-sm font-medium"
+          >
+            📷 Upload Screenshot
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {message && (
+            <div className={`text-xs p-2 rounded ${message.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+              {message.text}
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="w-full text-xs text-gray-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-gray-700 file:text-gray-300 hover:file:bg-gray-600"
+          />
+          {selectedFile && (
+            <div className="text-xs text-green-400">
+              Selected: {selectedFile.name}
+            </div>
+          )}
+          <input
+            type="text"
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="Caption (optional)"
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleUpload}
+              disabled={uploading || !selectedFile}
+              className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 rounded text-xs font-bold"
+            >
+              {uploading ? 'Uploading...' : 'Upload'}
+            </button>
+            <button
+              onClick={() => { setShowUpload(false); setMessage(null); setSelectedFile(null); }}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </WarCard>
   )
 }
 
@@ -1271,6 +2050,12 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
   const [searching, setSearching] = useState(false)
   const [showProposalForm, setShowProposalForm] = useState(false)
 
+  // Conflict party info
+  const [conflictInfo, setConflictInfo] = useState(null)
+  const [myTerritory, setMyTerritory] = useState([])
+  const [enemyTerritory, setEnemyTerritory] = useState([])
+  const [territoryTab, setTerritoryTab] = useState('mine') // 'mine' or 'enemy'
+
   useEffect(() => {
     if (!open || !conflictId) return
     fetchNegotiationData()
@@ -1279,12 +2064,31 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
   const fetchNegotiationData = async () => {
     setLoading(true)
     try {
-      const [statusRes, proposalsRes] = await Promise.all([
+      const [statusRes, proposalsRes, conflictRes] = await Promise.all([
         axios.get(`/api/warroom/conflicts/${conflictId}/negotiation-status`),
-        axios.get(`/api/warroom/conflicts/${conflictId}/peace-proposals`)
+        axios.get(`/api/warroom/conflicts/${conflictId}/peace-proposals`),
+        axios.get(`/api/warroom/conflicts/${conflictId}`)
       ])
       setNegotiationStatus(statusRes.data)
       setProposals(proposalsRes.data)
+      setConflictInfo(conflictRes.data)
+
+      // Fetch territory for both parties
+      const myTag = isAttacker ? conflictRes.data.attacker_discord_tag : conflictRes.data.defender_discord_tag
+      const enemyTag = isAttacker ? conflictRes.data.defender_discord_tag : conflictRes.data.attacker_discord_tag
+
+      if (myTag) {
+        try {
+          const myRes = await axios.get(`/api/warroom/territory/by-tag?discord_tag=${encodeURIComponent(myTag)}`)
+          setMyTerritory(myRes.data.systems?.slice(0, 50) || [])
+        } catch (e) { setMyTerritory([]) }
+      }
+      if (enemyTag) {
+        try {
+          const enemyRes = await axios.get(`/api/warroom/territory/by-tag?discord_tag=${encodeURIComponent(enemyTag)}`)
+          setEnemyTerritory(enemyRes.data.systems?.slice(0, 50) || [])
+        } catch (e) { setEnemyTerritory([]) }
+      }
     } catch (err) {
       console.error('Failed to fetch negotiation data:', err)
       setError('Failed to load negotiation data')
@@ -1293,7 +2097,7 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
     }
   }
 
-  // Search for systems to include in proposal
+  // Search for systems to include in proposal (for manual search)
   useEffect(() => {
     if (searchQuery.length < 2) {
       setSearchResults([])
@@ -1303,8 +2107,7 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
       setSearching(true)
       try {
         const res = await axios.get(`/api/warroom/territory/search?q=${encodeURIComponent(searchQuery)}&limit=20`)
-        // Filter to only show partner-owned systems
-        setSearchResults(res.data.filter(s => s.is_partner_owned))
+        setSearchResults(res.data)
       } catch (err) {
         console.error('Search failed:', err)
       } finally {
@@ -1314,11 +2117,11 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const handleAddSystem = (system) => {
+  const handleAddSystem = (system, direction) => {
     if (!selectedSystems.find(s => s.id === system.id)) {
       setSelectedSystems([...selectedSystems, {
         ...system,
-        direction: 'give' // Default to giving
+        direction: direction || 'give'
       }])
     }
     setSearchQuery('')
@@ -1349,7 +2152,7 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
           type: 'system',
           direction: s.direction,
           system_id: s.id,
-          system_name: s.name,
+          system_name: s.name || s.system_name,
           from_partner_id: s.direction === 'give' ? myPartnerId : null,
           to_partner_id: s.direction === 'receive' ? myPartnerId : null
         })),
@@ -1529,28 +2332,95 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
                       {pendingProposal ? 'COUNTER-OFFER' : 'PEACE PROPOSAL'}
                     </h3>
 
-                    {/* System Search */}
+                    {/* Explanation */}
+                    <div className="bg-gray-900/50 border border-gray-600 rounded p-3 mb-4 text-xs text-gray-400">
+                      <p><span className="text-red-400 font-bold">OFFER</span> = Systems you will give to the enemy</p>
+                      <p><span className="text-green-400 font-bold">DEMAND</span> = Systems you want from the enemy</p>
+                    </div>
+
+                    {/* Territory Selection Tabs */}
+                    <div className="flex gap-1 mb-3 bg-gray-800/50 rounded p-1">
+                      <button
+                        onClick={() => setTerritoryTab('mine')}
+                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded ${
+                          territoryTab === 'mine' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        My Territory ({myTerritory.length}) - Offer
+                      </button>
+                      <button
+                        onClick={() => setTerritoryTab('enemy')}
+                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded ${
+                          territoryTab === 'enemy' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Enemy Territory ({enemyTerritory.length}) - Demand
+                      </button>
+                    </div>
+
+                    {/* Territory List */}
+                    <div className="mb-4 max-h-32 overflow-y-auto bg-gray-800/30 rounded border border-gray-700">
+                      {territoryTab === 'mine' ? (
+                        myTerritory.length === 0 ? (
+                          <p className="text-gray-500 text-xs text-center py-4">No territory to offer</p>
+                        ) : (
+                          <div className="divide-y divide-gray-700">
+                            {myTerritory.map(s => (
+                              <button
+                                key={s.id}
+                                onClick={() => handleAddSystem(s, 'give')}
+                                disabled={selectedSystems.some(sel => sel.id === s.id)}
+                                className="w-full text-left px-3 py-2 hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-between"
+                              >
+                                <span className="text-white">{s.name || s.system_name}</span>
+                                <span className="text-red-400 text-xs">+ Offer</span>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      ) : (
+                        enemyTerritory.length === 0 ? (
+                          <p className="text-gray-500 text-xs text-center py-4">No enemy territory found</p>
+                        ) : (
+                          <div className="divide-y divide-gray-700">
+                            {enemyTerritory.map(s => (
+                              <button
+                                key={s.id}
+                                onClick={() => handleAddSystem(s, 'receive')}
+                                disabled={selectedSystems.some(sel => sel.id === s.id)}
+                                className="w-full text-left px-3 py-2 hover:bg-green-900/30 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-between"
+                              >
+                                <span className="text-white">{s.name || s.system_name}</span>
+                                <span className="text-green-400 text-xs">+ Demand</span>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    {/* Manual Search (fallback) */}
                     <div className="mb-4">
-                      <label className="block text-sm text-gray-400 mb-2">Search Systems to Include</label>
+                      <label className="block text-xs text-gray-500 mb-1">Or search any system:</label>
                       <div className="relative">
                         <input
                           type="text"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           placeholder="Search by system name..."
-                          className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                          className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-xs"
                         />
-                        {searching && <span className="absolute right-3 top-2 text-gray-400 text-sm">...</span>}
+                        {searching && <span className="absolute right-3 top-1.5 text-gray-400 text-xs">...</span>}
                         {searchResults.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-y-auto">
+                          <div className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
                             {searchResults.map(s => (
                               <button
                                 key={s.id}
-                                onClick={() => handleAddSystem(s)}
-                                className="w-full text-left px-3 py-2 hover:bg-gray-700 text-sm"
+                                onClick={() => handleAddSystem(s, 'give')}
+                                className="w-full text-left px-3 py-2 hover:bg-gray-700 text-xs"
                               >
-                                <span className="font-medium text-white">{s.name}</span>
-                                <span className="text-gray-400 ml-2">({s.owner_name})</span>
+                                <span className="font-medium text-white">{s.name || s.system_name}</span>
+                                {s.discord_tag && <span className="text-gray-400 ml-2">({s.discord_tag})</span>}
                               </button>
                             ))}
                           </div>
@@ -1558,22 +2428,24 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
                       </div>
                     </div>
 
-                    {/* Selected Systems */}
+                    {/* Selected Systems / Treaty Terms */}
                     {selectedSystems.length > 0 && (
-                      <div className="mb-4">
-                        <label className="block text-sm text-gray-400 mb-2">Terms ({selectedSystems.length} systems)</label>
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                      <div className="mb-4 bg-amber-950/30 border border-amber-500/30 rounded p-3">
+                        <label className="block text-sm text-amber-400 font-bold mb-2">
+                          TREATY TERMS ({selectedSystems.length} items)
+                        </label>
+                        <div className="space-y-2 max-h-32 overflow-y-auto">
                           {selectedSystems.map(s => (
-                            <div key={s.id} className="flex items-center gap-2 bg-gray-700/50 rounded p-2">
+                            <div key={s.id} className="flex items-center gap-2 bg-gray-800/50 rounded p-2">
                               <button
                                 onClick={() => handleToggleDirection(s.id)}
                                 className={`px-2 py-1 rounded text-xs font-bold ${
                                   s.direction === 'give' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
                                 }`}
                               >
-                                {s.direction === 'give' ? '↑ GIVE' : '↓ RECEIVE'}
+                                {s.direction === 'give' ? '↑ OFFER' : '↓ DEMAND'}
                               </button>
-                              <span className="flex-1 text-sm text-white">{s.name}</span>
+                              <span className="flex-1 text-sm text-white">{s.name || s.system_name}</span>
                               <button
                                 onClick={() => handleRemoveSystem(s.id)}
                                 className="text-red-400 hover:text-red-300 text-sm"
@@ -1668,7 +2540,7 @@ function PeaceTreatyModal({ open, onClose, conflictId, onSuccess, isAttacker, my
 }
 
 // Conflict Detail Modal - shows full conflict info with timeline
-function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId }) {
+function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId, enrolledCivs = [] }) {
   const [conflict, setConflict] = useState(null)
   const [events, setEvents] = useState([])
   const [parties, setParties] = useState([])
@@ -1677,30 +2549,73 @@ function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId 
   const [newEventDetails, setNewEventDetails] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [showPeaceTreaty, setShowPeaceTreaty] = useState(false)
+  const [joiningAs, setJoiningAs] = useState(null) // 'attacker' or 'defender'
+  const [showSurrenderConfirm, setShowSurrenderConfirm] = useState(false)
+
+  const fetchConflictDetails = async () => {
+    setLoading(true)
+    try {
+      const [conflictsRes, eventsRes, partiesRes] = await Promise.all([
+        axios.get('/api/warroom/conflicts/active'),
+        axios.get(`/api/warroom/conflicts/${conflictId}/events`),
+        axios.get(`/api/warroom/conflicts/${conflictId}/parties`)
+      ])
+      const thisConflict = conflictsRes.data.find(c => c.id === conflictId)
+      setConflict(thisConflict)
+      setEvents(eventsRes.data)
+      setParties(partiesRes.data)
+    } catch (err) {
+      console.error('Failed to fetch conflict details:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!open || !conflictId) return
-
-    const fetchConflictDetails = async () => {
-      setLoading(true)
-      try {
-        const [conflictsRes, eventsRes, partiesRes] = await Promise.all([
-          axios.get('/api/warroom/conflicts/active'),
-          axios.get(`/api/warroom/conflicts/${conflictId}/events`),
-          axios.get(`/api/warroom/conflicts/${conflictId}/parties`)
-        ])
-        const thisConflict = conflictsRes.data.find(c => c.id === conflictId)
-        setConflict(thisConflict)
-        setEvents(eventsRes.data)
-        setParties(partiesRes.data)
-      } catch (err) {
-        console.error('Failed to fetch conflict details:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
     fetchConflictDetails()
   }, [open, conflictId])
+
+  // Check if current user is already a party to this conflict
+  const isAlreadyParty = myPartnerId && parties.some(p => p.partner_id === myPartnerId)
+  const myPartySide = parties.find(p => p.partner_id === myPartnerId)?.side
+
+  const handleJoinConflict = async (side) => {
+    if (!myPartnerId) return
+    setJoiningAs(side)
+    try {
+      await axios.post(`/api/warroom/conflicts/${conflictId}/join`, { side })
+      await fetchConflictDetails()
+      onUpdate?.()
+    } catch (err) {
+      console.error('Failed to join conflict:', err)
+      alert(err.response?.data?.detail || 'Failed to join conflict')
+    } finally {
+      setJoiningAs(null)
+    }
+  }
+
+  const handleSurrender = async () => {
+    if (!myPartnerId || !myPartySide) return
+    setSubmitting(true)
+    try {
+      // Resolve in favor of the other side
+      const victorSide = myPartySide === 'attacker' ? 'defender' : 'attacker'
+      await axios.put(`/api/warroom/conflicts/${conflictId}/resolve`, {
+        resolution: 'surrender',
+        victor: victorSide,
+        notes: `${myPartySide === 'attacker' ? conflict.attacker_name : conflict.defender_name} surrendered`
+      })
+      setShowSurrenderConfirm(false)
+      onUpdate?.()
+      onClose()
+    } catch (err) {
+      console.error('Failed to surrender:', err)
+      alert(err.response?.data?.detail || 'Failed to surrender')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handleAddEvent = async () => {
     if (!newEventDetails.trim()) return
@@ -1794,6 +2709,36 @@ function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId 
               </div>
             )}
 
+            {/* Join Ally - show if user is enrolled but not already in this conflict */}
+            {conflict.status !== 'resolved' && myPartnerId && !isAlreadyParty && (
+              <div className="bg-gradient-to-r from-blue-950/50 to-purple-950/50 border border-blue-500/30 rounded p-4 mb-4">
+                <h3 className="text-sm font-bold text-blue-400 mb-3">JOIN THIS CONFLICT</h3>
+                <p className="text-xs text-gray-400 mb-3">Choose a side to join as an ally:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleJoinConflict('attacker')}
+                    disabled={joiningAs}
+                    className="py-3 px-4 bg-red-600/80 hover:bg-red-500 disabled:bg-gray-600 rounded border border-red-500/50 transition-all"
+                  >
+                    <div className="text-xs text-red-200 mb-1">Join Attackers</div>
+                    <div className="font-bold" style={{ color: conflict.attacker_color }}>
+                      {joiningAs === 'attacker' ? 'Joining...' : `⚔️ ${conflict.attacker_name}`}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleJoinConflict('defender')}
+                    disabled={joiningAs}
+                    className="py-3 px-4 bg-blue-600/80 hover:bg-blue-500 disabled:bg-gray-600 rounded border border-blue-500/50 transition-all"
+                  >
+                    <div className="text-xs text-blue-200 mb-1">Join Defenders</div>
+                    <div className="font-bold" style={{ color: conflict.defender_color }}>
+                      {joiningAs === 'defender' ? 'Joining...' : `🛡️ ${conflict.defender_name}`}
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Timeline */}
             <div className="mb-4">
               <h3 className="text-sm font-bold text-red-400 mb-2">BATTLE TIMELINE</h3>
@@ -1863,15 +2808,49 @@ function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId 
               </div>
             )}
 
-            {/* Peace Treaty Button (if conflict is active and user is a party) */}
-            {conflict.status === 'active' && myPartnerId && (
-              <div className="mt-4">
-                <button
-                  onClick={() => setShowPeaceTreaty(true)}
-                  className="w-full py-3 bg-amber-600 hover:bg-amber-500 rounded font-bold text-lg"
-                >
-                  Propose Peace Treaty
-                </button>
+            {/* Actions - Peace Treaty and Surrender (if conflict is active and user is a party) */}
+            {conflict.status === 'active' && myPartnerId && isAlreadyParty && (
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setShowPeaceTreaty(true)}
+                    className="py-3 bg-amber-600 hover:bg-amber-500 rounded font-bold"
+                  >
+                    🕊️ Propose Peace
+                  </button>
+                  <button
+                    onClick={() => setShowSurrenderConfirm(true)}
+                    className="py-3 bg-gray-700 hover:bg-red-900 border border-red-500/30 rounded font-bold text-red-400"
+                  >
+                    🏳️ Surrender
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Surrender Confirmation */}
+            {showSurrenderConfirm && (
+              <div className="mt-4 bg-red-950/50 border border-red-500/50 rounded p-4">
+                <h4 className="text-red-400 font-bold mb-2">⚠️ Confirm Surrender</h4>
+                <p className="text-sm text-gray-300 mb-3">
+                  Surrendering will immediately end this conflict in favor of your opponent.
+                  The enemy will be declared victorious and may claim the contested territory.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSurrender}
+                    disabled={submitting}
+                    className="flex-1 py-2 bg-red-600 hover:bg-red-500 disabled:bg-gray-600 rounded font-bold"
+                  >
+                    {submitting ? 'Surrendering...' : 'Confirm Surrender'}
+                  </button>
+                  <button
+                    onClick={() => setShowSurrenderConfirm(false)}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2002,10 +2981,11 @@ function NewsRoomPanel({ isCorrespondent, isSuperAdmin, onCreateNews }) {
 }
 
 // Create News Modal - Enhanced with article types
-function CreateNewsModal({ open, onClose, onSuccess }) {
+function CreateNewsModal({ open, onClose, onSuccess, activeConflicts = [] }) {
   const [headline, setHeadline] = useState('')
   const [body, setBody] = useState('')
   const [articleType, setArticleType] = useState('breaking')
+  const [linkedConflictId, setLinkedConflictId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -2019,12 +2999,17 @@ function CreateNewsModal({ open, onClose, onSuccess }) {
     setLoading(true)
     setError(null)
     try {
-      await axios.post('/api/warroom/news', { headline, body, article_type: articleType })
+      const payload = { headline, body, article_type: articleType }
+      if (linkedConflictId) {
+        payload.conflict_id = parseInt(linkedConflictId)
+      }
+      await axios.post('/api/warroom/news', payload)
       onSuccess()
       onClose()
       setHeadline('')
       setBody('')
       setArticleType('breaking')
+      setLinkedConflictId('')
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to create news')
     } finally {
@@ -2034,23 +3019,41 @@ function CreateNewsModal({ open, onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-yellow-500/30 rounded-lg p-6 w-full max-w-lg">
-        <h2 className="text-xl font-bold text-yellow-500 mb-4">CREATE WAR NEWS</h2>
-        {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+      <div className="bg-gray-900 border border-yellow-500/30 rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <h2 className="text-xl font-bold text-yellow-500 mb-4">📰 CREATE WAR NEWS</h2>
+        {error && <p className="text-red-400 text-sm mb-4 p-2 bg-red-950/30 rounded">{error}</p>}
 
-        <div className="mb-4">
-          <label className="block text-sm text-gray-400 mb-2">Article Type</label>
-          <select
-            value={articleType}
-            onChange={(e) => setArticleType(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
-          >
-            <option value="breaking">🔴 Breaking News</option>
-            <option value="report">📋 Battle Report</option>
-            <option value="analysis">📊 Analysis</option>
-            <option value="editorial">✍️ Editorial</option>
-            <option value="announcement">📢 Announcement</option>
-          </select>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Article Type</label>
+            <select
+              value={articleType}
+              onChange={(e) => setArticleType(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+            >
+              <option value="breaking">🔴 Breaking News</option>
+              <option value="report">📋 Battle Report</option>
+              <option value="analysis">📊 Analysis</option>
+              <option value="editorial">✍️ Editorial</option>
+              <option value="announcement">📢 Announcement</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Link to Conflict</label>
+            <select
+              value={linkedConflictId}
+              onChange={(e) => setLinkedConflictId(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm"
+            >
+              <option value="">No linked conflict</option>
+              {activeConflicts.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.target_system_name} ({c.attacker_name} vs {c.defender_name})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="mb-4">
@@ -2111,7 +3114,29 @@ export default function WarRoom() {
   const [showDeclareWar, setShowDeclareWar] = useState(false)
   const [showClaimTerritory, setShowClaimTerritory] = useState(false)
   const [showCreateNews, setShowCreateNews] = useState(false)
+  const [showHomeRegion, setShowHomeRegion] = useState(false)
   const [selectedConflictId, setSelectedConflictId] = useState(null)
+  const [preSelectedSystem, setPreSelectedSystem] = useState(null)
+
+  // Handler for when a system is clicked on the war map
+  const handleMapSystemSelect = (system) => {
+    // Only allow declaring war if user is enrolled or is super admin
+    if (!enrollmentStatus?.enrolled && !auth.isSuperAdmin) {
+      return
+    }
+    // Check if this system is in the claims (meaning it's a valid target owned by someone)
+    const matchingClaim = allClaims.find(c => c.system_id === system.id)
+    if (!matchingClaim) {
+      return // Can't declare war on unclaimed systems
+    }
+    // Don't allow declaring war on your own systems
+    if (matchingClaim.claimant_partner_id === enrollmentStatus?.partner_id && !auth.isSuperAdmin) {
+      return
+    }
+    // Pre-select the system and open the declare war modal
+    setPreSelectedSystem(system)
+    setShowDeclareWar(true)
+  }
 
   const fetchData = async () => {
     try {
@@ -2254,8 +3279,14 @@ export default function WarRoom() {
           </div>
           <div className="flex items-center gap-2">
             {/* Action Buttons - only show if enrolled */}
-            {enrollmentStatus?.enrolled && !enrollmentStatus?.is_super_admin && (
+            {enrollmentStatus?.enrolled && !enrollmentStatus?.is_super_admin && !auth.isCorrespondent && (
               <>
+                <button
+                  onClick={() => setShowDeclareWar(true)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-bold border-2 border-red-400 shadow-lg shadow-red-500/20 animate-pulse"
+                >
+                  ⚔️ DECLARE WAR
+                </button>
                 <button
                   onClick={() => setShowClaimTerritory(true)}
                   className="px-3 py-1 bg-green-600 hover:bg-green-500 rounded text-sm font-bold"
@@ -2263,10 +3294,17 @@ export default function WarRoom() {
                   Claim Territory
                 </button>
                 <button
-                  onClick={() => setShowDeclareWar(true)}
-                  className="px-3 py-1 bg-red-600 hover:bg-red-500 rounded text-sm font-bold"
+                  onClick={() => setShowCreateNews(true)}
+                  className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-bold text-black"
                 >
-                  Declare War
+                  + News
+                </button>
+                <button
+                  onClick={() => setShowHomeRegion(true)}
+                  className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-sm"
+                  title="Set your civilization's home region"
+                >
+                  HQ
                 </button>
               </>
             )}
@@ -2282,6 +3320,12 @@ export default function WarRoom() {
             {auth.isSuperAdmin && (
               <>
                 <button
+                  onClick={() => setShowDeclareWar(true)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-bold border-2 border-red-400 shadow-lg shadow-red-500/20"
+                >
+                  ⚔️ WAR
+                </button>
+                <button
                   onClick={() => setShowCreateNews(true)}
                   className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-bold text-black"
                 >
@@ -2292,12 +3336,6 @@ export default function WarRoom() {
                   className="px-3 py-1 bg-green-600 hover:bg-green-500 rounded text-sm font-bold"
                 >
                   Claim
-                </button>
-                <button
-                  onClick={() => setShowDeclareWar(true)}
-                  className="px-3 py-1 bg-red-600 hover:bg-red-500 rounded text-sm font-bold"
-                >
-                  War
                 </button>
               </>
             )}
@@ -2318,6 +3356,9 @@ export default function WarRoom() {
         </div>
       </div>
 
+      {/* News Ticker - always visible at top */}
+      <NewsTicker news={newsTicker} />
+
       {/* Main content - switches based on active tab */}
       {activeTab === 'command' ? (
         /* COMMAND CENTER VIEW */
@@ -2326,7 +3367,7 @@ export default function WarRoom() {
             {/* Left Column - War Map */}
             <div className="lg:col-span-2">
               <WarCard title="Galactic War Map" className="h-[550px]">
-                <WarMap3D className="h-full rounded" />
+                <WarMap3D className="h-full rounded" onSystemSelect={handleMapSystemSelect} />
               </WarCard>
 
               {/* Active Conflicts - clickable for details */}
@@ -2363,7 +3404,7 @@ export default function WarRoom() {
               />
 
               {/* Live Activity Feed */}
-              <ActivityFeedPanel maxItems={10} />
+              <ActivityFeedPanel maxItems={10} onConflictClick={setSelectedConflictId} />
 
               {/* My Territory - only if enrolled */}
               {(enrollmentStatus?.enrolled || auth.isSuperAdmin) && (
@@ -2375,11 +3416,21 @@ export default function WarRoom() {
                 />
               )}
 
+              {/* Discord Webhook Config - only for enrolled partners */}
+              {enrollmentStatus?.enrolled && !auth.isSuperAdmin && (
+                <WebhookConfigPanel isEnrolled={enrollmentStatus?.enrolled} />
+              )}
+
+              {/* Media Upload - for enrolled partners and super admin */}
+              {(enrollmentStatus?.enrolled || auth.isSuperAdmin || auth.isCorrespondent) && (
+                <MediaUploadPanel onUpload={fetchData} />
+              )}
+
               {/* Statistics */}
               <WarStats stats={statistics} />
 
               {/* Leaderboard */}
-              <CivLeaderboard leaderboard={leaderboard} />
+              <CivLeaderboard leaderboard={leaderboard} activeConflicts={activeConflicts} />
             </div>
           </div>
         </div>
@@ -2448,9 +3499,6 @@ export default function WarRoom() {
         </div>
       )}
 
-      {/* News Ticker - always visible at bottom */}
-      <NewsTicker news={newsTicker} />
-
       {/* Modals */}
       <DeclareWarModal
         open={showDeclareWar}
@@ -2460,6 +3508,8 @@ export default function WarRoom() {
         isSuperAdmin={auth.isSuperAdmin}
         enrolledCivs={leaderboard}
         myPartnerId={enrollmentStatus?.partner_id}
+        preSelectedSystem={preSelectedSystem}
+        onClearPreSelected={() => setPreSelectedSystem(null)}
       />
       <ClaimTerritoryModal
         open={showClaimTerritory}
@@ -2472,6 +3522,7 @@ export default function WarRoom() {
         open={showCreateNews}
         onClose={() => setShowCreateNews(false)}
         onSuccess={fetchData}
+        activeConflicts={activeConflicts}
       />
       <ConflictDetailModal
         open={!!selectedConflictId}
@@ -2479,6 +3530,13 @@ export default function WarRoom() {
         conflictId={selectedConflictId}
         onUpdate={fetchData}
         myPartnerId={enrollmentStatus?.partner_id}
+        enrolledCivs={leaderboard}
+      />
+      <HomeRegionModal
+        open={showHomeRegion}
+        onClose={() => setShowHomeRegion(false)}
+        onSuccess={fetchData}
+        partnerId={enrollmentStatus?.partner_id}
       />
     </div>
   )

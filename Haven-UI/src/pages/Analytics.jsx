@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import DateRangePicker from '../components/DateRangePicker'
@@ -132,9 +132,12 @@ export default function Analytics() {
     return null
   }
 
-  const approvalRate = totals.total_submissions > 0
-    ? ((totals.total_approved / totals.total_submissions) * 100).toFixed(1)
-    : 0
+  // Memoize approval rate calculation to avoid recalculating on every render
+  const approvalRate = useMemo(() => {
+    return totals.total_submissions > 0
+      ? ((totals.total_approved / totals.total_submissions) * 100).toFixed(1)
+      : 0
+  }, [totals.total_submissions, totals.total_approved])
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--app-bg)' }}>

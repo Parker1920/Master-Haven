@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo, useCallback } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
@@ -6,48 +6,14 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
+import { usePersonalColor } from '../utils/usePersonalColor'
 
 export default function PendingApprovals() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isHavenSubAdmin, user, loading: authLoading, canAccess } = auth || {}
 
-  // Normalize Discord username by stripping #XXXX discriminator and lowercasing
-  function normalizeDiscordUsername(username) {
-    if (!username) return ''
-    let normalized = username.toLowerCase().trim()
-    // Strip Discord discriminator (#0000 to #9999)
-    if (normalized.includes('#')) {
-      normalized = normalized.split('#')[0]
-    }
-    return normalized
-  }
-
-  // Check if a submission was made by the current user (self-submission)
-  function isSelfSubmission(submission) {
-    if (!user) return false
-    // Super admin can approve their own (trusted role)
-    if (isSuperAdmin) return false
-    // Check by account ID first (most reliable for logged-in submissions)
-    if (submission.submitter_account_id && submission.submitter_account_type) {
-      return user.type === submission.submitter_account_type &&
-             user.accountId === submission.submitter_account_id
-    }
-    // Check by username against both submitted_by and personal_discord_username
-    // Uses normalized comparison to handle Discord #XXXX discriminator (e.g., TurpitZz vs TurpitZz#9999)
-    if (user.username) {
-      const normalizedUser = normalizeDiscordUsername(user.username)
-      // Check submitted_by
-      if (submission.submitted_by && normalizeDiscordUsername(submission.submitted_by) === normalizedUser) {
-        return true
-      }
-      // Check personal_discord_username (for personal uploads where user wasn't logged in)
-      if (submission.personal_discord_username && normalizeDiscordUsername(submission.personal_discord_username) === normalizedUser) {
-        return true
-      }
-    }
-    return false
-  }
+  // State declarations first
   const [loading, setLoading] = useState(true)
   const [submissions, setSubmissions] = useState([])
   const [regionSubmissions, setRegionSubmissions] = useState([])
@@ -72,6 +38,57 @@ export default function PendingApprovals() {
   // Discord tag filtering (super admin only)
   const [discordTags, setDiscordTags] = useState([])
   const [filterTag, setFilterTag] = useState('all') // 'all', 'untagged', or specific tag
+
+  // Get personal submission color from settings
+  const { personalColor } = usePersonalColor()
+
+  // Normalize Discord username by stripping #XXXX discriminator and lowercasing
+  const normalizeDiscordUsername = useCallback((username) => {
+    if (!username) return ''
+    let normalized = username.toLowerCase().trim()
+    if (normalized.includes('#')) {
+      normalized = normalized.split('#')[0]
+    }
+    return normalized
+  }, [])
+
+  // Memoized normalized username for current user
+  const normalizedCurrentUser = useMemo(() => {
+    return user?.username ? normalizeDiscordUsername(user.username) : ''
+  }, [user?.username, normalizeDiscordUsername])
+
+  // Check if a submission was made by the current user (self-submission) - memoized
+  const isSelfSubmission = useCallback((submission) => {
+    if (!user) return false
+    if (isSuperAdmin) return false
+    if (submission.submitter_account_id && submission.submitter_account_type) {
+      return user.type === submission.submitter_account_type &&
+             user.accountId === submission.submitter_account_id
+    }
+    if (normalizedCurrentUser) {
+      if (submission.submitted_by && normalizeDiscordUsername(submission.submitted_by) === normalizedCurrentUser) {
+        return true
+      }
+      if (submission.personal_discord_username && normalizeDiscordUsername(submission.personal_discord_username) === normalizedCurrentUser) {
+        return true
+      }
+    }
+    return false
+  }, [user, isSuperAdmin, normalizedCurrentUser, normalizeDiscordUsername])
+
+  // Pre-compute self-submission status for all submissions (O(n) once instead of O(n*k) per render)
+  const selfSubmissionMap = useMemo(() => {
+    const map = new Map()
+    for (const submission of submissions) {
+      map.set(submission.id, isSelfSubmission(submission))
+    }
+    return map
+  }, [submissions, isSelfSubmission])
+
+  // Helper to check self-submission using cached map
+  const checkSelfSubmission = useCallback((submission) => {
+    return selfSubmissionMap.get(submission.id) || false
+  }, [selfSubmissionMap])
 
   // Fetch available discord tags for filter dropdown
   useEffect(() => {
@@ -284,7 +301,7 @@ export default function PendingApprovals() {
 
   function selectAllEligible() {
     const eligibleIds = filteredPendingSubmissions
-      .filter(s => !isSelfSubmission(s))
+      .filter(s => !checkSelfSubmission(s))
       .map(s => s.id)
     setSelectedIds(new Set(eligibleIds))
   }
@@ -345,6 +362,47 @@ export default function PendingApprovals() {
     }
   }
 
+  // Single-pass filtering - categorize and filter in one iteration (O(n) instead of O(4n))
+  // MUST be before any early returns to satisfy React's rules of hooks
+  const { filteredPendingSubmissions, filteredReviewedSubmissions, pendingSubmissionsCount, reviewedSubmissionsCount } = useMemo(() => {
+    const pending = []
+    const reviewed = []
+    let pendingCount = 0
+    let reviewedCount = 0
+
+    for (const s of submissions) {
+      const isPending = s.status === 'pending'
+
+      // Apply discord_tag filter for super admin
+      let passesFilter = true
+      if (isSuperAdmin && filterTag !== 'all') {
+        if (filterTag === 'untagged') {
+          passesFilter = !s.discord_tag
+        } else {
+          passesFilter = s.discord_tag === filterTag
+        }
+      }
+
+      if (isPending) {
+        pendingCount++
+        if (passesFilter) pending.push(s)
+      } else {
+        reviewedCount++
+        if (passesFilter) reviewed.push(s)
+      }
+    }
+
+    return {
+      filteredPendingSubmissions: pending,
+      filteredReviewedSubmissions: reviewed,
+      pendingSubmissionsCount: pendingCount,
+      reviewedSubmissionsCount: reviewedCount
+    }
+  }, [submissions, isSuperAdmin, filterTag])
+
+  const pendingRegions = useMemo(() => regionSubmissions.filter(r => r.status === 'pending'), [regionSubmissions])
+  const pendingEdits = useMemo(() => editRequests.filter(e => e.status === 'pending'), [editRequests])
+
   function getStatusBadge(status) {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -358,39 +416,49 @@ export default function PendingApprovals() {
     )
   }
 
-  if (authLoading || loading) {
-    return (
-      <div className="p-4">
-        <Card>
-          <p>Loading submissions...</p>
-        </Card>
-      </div>
-    )
-  }
+  // Pre-computed color palette for unknown tags
+  const colorPalette = useMemo(() => [
+    'bg-indigo-500 text-white',
+    'bg-violet-500 text-white',
+    'bg-fuchsia-500 text-white',
+    'bg-amber-500 text-black',
+    'bg-lime-500 text-black',
+    'bg-teal-500 text-white',
+    'bg-sky-500 text-white',
+    'bg-rose-500 text-white',
+  ], [])
 
-  const pendingSubmissions = submissions.filter(s => s.status === 'pending')
-  const reviewedSubmissions = submissions.filter(s => s.status !== 'pending')
+  // Pre-defined colors for known tags
+  const knownTagColors = useMemo(() => ({
+    'Haven': 'bg-cyan-500 text-white',
+    'IEA': 'bg-green-500 text-white',
+    'B.E.S': 'bg-orange-500 text-white',
+    'ARCH': 'bg-purple-500 text-white',
+    'TBH': 'bg-yellow-500 text-black',
+    'EVRN': 'bg-pink-500 text-white',
+  }), [])
 
-  // Apply discord_tag filter for super admin
-  const filteredPendingSubmissions = isSuperAdmin && filterTag !== 'all'
-    ? pendingSubmissions.filter(s => {
-        if (filterTag === 'untagged') return !s.discord_tag
-        return s.discord_tag === filterTag
-      })
-    : pendingSubmissions
+  // Cache for hash-based colors - computed once per unique tag
+  const tagColorCache = useMemo(() => new Map(), [])
 
-  const filteredReviewedSubmissions = isSuperAdmin && filterTag !== 'all'
-    ? reviewedSubmissions.filter(s => {
-        if (filterTag === 'untagged') return !s.discord_tag
-        return s.discord_tag === filterTag
-      })
-    : reviewedSubmissions
+  // Helper to get tag color class - O(1) with caching instead of O(n) hash per render
+  const getTagColorClass = useCallback((tag) => {
+    if (knownTagColors[tag]) return knownTagColors[tag]
 
-  const pendingRegions = regionSubmissions.filter(r => r.status === 'pending')
-  const pendingEdits = editRequests.filter(e => e.status === 'pending')
+    if (tagColorCache.has(tag)) return tagColorCache.get(tag)
+
+    // Compute hash once and cache
+    let hash = 0
+    for (let i = 0; i < tag.length; i++) {
+      hash = tag.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    const colorClass = colorPalette[Math.abs(hash) % colorPalette.length]
+    tagColorCache.set(tag, colorClass)
+    return colorClass
+  }, [knownTagColors, colorPalette, tagColorCache])
 
   // Helper to get discord tag badge color - each tag gets its own unique color
-  function getDiscordTagBadge(tag, personalDiscordUsername = null) {
+  const getDiscordTagBadge = useCallback((tag, personalDiscordUsername = null) => {
     if (!tag) {
       return (
         <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-500 text-white">
@@ -399,58 +467,35 @@ export default function PendingApprovals() {
       )
     }
 
-    // Special handling for "personal" tag - magenta color
+    // Special handling for "personal" tag - configurable color
     // Show the discord username inside the badge if provided (super admin only)
     if (tag === 'personal') {
       return (
-        <span className="px-2 py-1 rounded text-xs font-semibold bg-fuchsia-600 text-white">
+        <span
+          className="px-2 py-1 rounded text-xs font-semibold text-white"
+          style={{ backgroundColor: personalColor }}
+        >
           PERSONAL{personalDiscordUsername ? ` - ${personalDiscordUsername}` : ''}
         </span>
       )
     }
 
-    // Predefined colors for known tags (actual partner discord tags)
-    const tagColors = {
-      'Haven': 'bg-cyan-500 text-white',
-      'IEA': 'bg-green-500 text-white',
-      'B.E.S': 'bg-orange-500 text-white',
-      'ARCH': 'bg-purple-500 text-white',
-      'TBH': 'bg-yellow-500 text-black',
-      'EVRN': 'bg-pink-500 text-white',
-    }
-
-    // If tag has a predefined color, use it
-    if (tagColors[tag]) {
-      return (
-        <span className={`px-2 py-1 rounded text-xs font-semibold ${tagColors[tag]}`}>
-          {tag}
-        </span>
-      )
-    }
-
-    // For unknown tags, generate a color based on the tag name hash
-    const colorPalette = [
-      'bg-indigo-500 text-white',
-      'bg-violet-500 text-white',
-      'bg-fuchsia-500 text-white',
-      'bg-amber-500 text-black',
-      'bg-lime-500 text-black',
-      'bg-teal-500 text-white',
-      'bg-sky-500 text-white',
-      'bg-rose-500 text-white',
-    ]
-
-    // Simple hash to get consistent color per tag
-    let hash = 0
-    for (let i = 0; i < tag.length; i++) {
-      hash = tag.charCodeAt(i) + ((hash << 5) - hash)
-    }
-    const colorIndex = Math.abs(hash) % colorPalette.length
-
+    const colorClass = getTagColorClass(tag)
     return (
-      <span className={`px-2 py-1 rounded text-xs font-semibold ${colorPalette[colorIndex]}`}>
+      <span className={`px-2 py-1 rounded text-xs font-semibold ${colorClass}`}>
         {tag}
       </span>
+    )
+  }, [getTagColorClass, personalColor])
+
+  // Early return for loading state - MUST be after all hooks
+  if (authLoading || loading) {
+    return (
+      <div className="p-4">
+        <Card>
+          <p>Loading submissions...</p>
+        </Card>
+      </div>
     )
   }
 
@@ -595,7 +640,7 @@ export default function PendingApprovals() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                 <span className="text-white font-semibold text-sm">
-                  {selectedIds.size}/{filteredPendingSubmissions.filter(s => !isSelfSubmission(s)).length} selected
+                  {selectedIds.size}/{filteredPendingSubmissions.filter(s => !checkSelfSubmission(s)).length} selected
                 </span>
                 <button
                   onClick={selectAllEligible}
@@ -638,7 +683,7 @@ export default function PendingApprovals() {
         <div className="mb-6">
           <h3 className="text-xl font-semibold mb-3">
             Pending Systems ({filteredPendingSubmissions.length}
-            {isSuperAdmin && filterTag !== 'all' && ` of ${pendingSubmissions.length}`})
+            {isSuperAdmin && filterTag !== 'all' && ` of ${pendingSubmissionsCount}`})
           </h3>
 
           {filteredPendingSubmissions.length === 0 ? (
@@ -662,9 +707,9 @@ export default function PendingApprovals() {
                           type="checkbox"
                           checked={selectedIds.has(submission.id)}
                           onChange={() => toggleSelection(submission.id)}
-                          disabled={isSelfSubmission(submission)}
+                          disabled={checkSelfSubmission(submission)}
                           className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={isSelfSubmission(submission) ? 'Cannot select your own submission' : ''}
+                          title={checkSelfSubmission(submission) ? 'Cannot select your own submission' : ''}
                         />
                       </div>
                     )}
@@ -685,7 +730,7 @@ export default function PendingApprovals() {
                           </span>
                         )}
                         {/* Self-submission badge - user cannot approve their own */}
-                        {isSelfSubmission(submission) && (
+                        {checkSelfSubmission(submission) && (
                           <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500 text-black">
                             YOURS
                           </span>
@@ -728,7 +773,7 @@ export default function PendingApprovals() {
           <div>
             <h3 className="text-xl font-semibold mb-3">
               Recently Reviewed ({filteredReviewedSubmissions.length}
-              {isSuperAdmin && filterTag !== 'all' && ` of ${reviewedSubmissions.length}`})
+              {isSuperAdmin && filterTag !== 'all' && ` of ${reviewedSubmissionsCount}`})
             </h3>
             <div className="space-y-2">
               {filteredReviewedSubmissions.slice(0, 10).map(submission => (

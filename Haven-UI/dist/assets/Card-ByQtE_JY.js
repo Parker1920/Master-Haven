@@ -1,0 +1,1 @@
+import{j as o}from"./vendor-three-pXgRM845.js";import"./vendor-react-DGfbrl1l.js";function p({children:r,className:s="",thin:e=!1,...a}){return o.jsx("div",{...a,className:`bg-card p-4 sm:p-6 rounded-lg shadow-sm border border-gray-100 ${s}`,style:{backgroundColor:"var(--app-card)"},children:r})}export{p as C};

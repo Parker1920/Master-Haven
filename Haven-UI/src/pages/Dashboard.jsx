@@ -32,6 +32,7 @@ const EVENT_CONFIG = {
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [dbStats, setDbStats] = useState(null)
+  const [dailyChanges, setDailyChanges] = useState({ systems: 0, planets: 0, moons: 0, regions: 0, discoveries: 0 })
   const [recent, setRecent] = useState([])
   const [pending, setPending] = useState({ systems: 0, regions: 0 })
   const [regions, setRegions] = useState([])
@@ -49,17 +50,20 @@ export default function Dashboard() {
         // Use optimized endpoints that don't load all data:
         // - /api/stats: uses direct COUNT queries (fast)
         // - /api/db_stats: uses COUNT queries for all tables (fast)
+        // - /api/stats/daily_changes: 24-hour change counts (fast)
         // - /api/regions/grouped?include_systems=false&limit=5: just region summaries (fast)
         // - /api/systems/recent?limit=10: only recent systems (new fast endpoint)
-        const [statsRes, dbStatsRes, regionsRes, recentRes] = await Promise.all([
+        const [statsRes, dbStatsRes, changesRes, regionsRes, recentRes] = await Promise.all([
           axios.get('/api/stats').catch(() => ({ data: null })),
           axios.get('/api/db_stats').catch(() => ({ data: { stats: {} } })),
+          axios.get('/api/stats/daily_changes').catch(() => ({ data: { changes: {} } })),
           axios.get('/api/regions/grouped?include_systems=false&limit=5').catch(() => ({ data: { regions: [] } })),
           axios.get('/api/systems/recent?limit=10').catch(() => ({ data: { systems: [] } }))
         ])
 
         setStats(statsRes.data)
         setDbStats(dbStatsRes.data?.stats || {})
+        setDailyChanges(changesRes.data?.changes || { systems: 0, planets: 0, moons: 0, regions: 0, discoveries: 0 })
 
         // Recent systems from the optimized endpoint
         setRecent(recentRes.data?.systems || [])
@@ -149,7 +153,7 @@ export default function Dashboard() {
   const totalSystems = stats?.total || dbStats?.systems || 0
   const totalPlanets = dbStats?.planets || 0
   const totalMoons = dbStats?.moons || 0
-  const totalRegions = dbStats?.regions || stats?.regions?.length || 0
+  const totalRegions = dbStats?.populated_regions || dbStats?.regions || stats?.regions?.length || 0
   const totalDiscoveries = dbStats?.discoveries || 0
 
   const formatTime = (timestamp) => {
@@ -202,11 +206,11 @@ export default function Dashboard() {
           {/* Stats row */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 lg:gap-6 mb-8">
             {[
-              { icon: '⭐', label: 'Systems', value: totalSystems, change: '+12' },
-              { icon: '🪐', label: 'Planets', value: totalPlanets, change: '+45' },
-              { icon: '🌙', label: 'Moons', value: totalMoons, change: '+18' },
-              { icon: '🗺️', label: 'Regions', value: totalRegions, change: '+3' },
-              { icon: '🔭', label: 'Discoveries', value: totalDiscoveries, change: '+24' },
+              { icon: '⭐', label: 'Systems', value: totalSystems, change: dailyChanges.systems },
+              { icon: '🪐', label: 'Planets', value: totalPlanets, change: dailyChanges.planets },
+              { icon: '🌙', label: 'Moons', value: totalMoons, change: dailyChanges.moons },
+              { icon: '🗺️', label: 'Regions', value: totalRegions, change: dailyChanges.regions },
+              { icon: '🔭', label: 'Discoveries', value: totalDiscoveries, change: dailyChanges.discoveries },
             ].map((stat, i) => (
               <div key={i} className="text-center p-4 rounded-xl transition-all duration-300 hover:scale-105"
                    style={{
@@ -220,9 +224,15 @@ export default function Dashboard() {
                 <div className="text-xs uppercase tracking-wider mt-1" style={{ color: 'var(--muted)' }}>
                   {stat.label}
                 </div>
-                <div className="text-xs mt-1" style={{ color: '#4ade80' }}>
-                  ▲ {stat.change}
-                </div>
+                {stat.change > 0 ? (
+                  <div className="text-xs mt-1" style={{ color: '#4ade80' }}>
+                    ▲ +{stat.change}
+                  </div>
+                ) : (
+                  <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    — 24h
+                  </div>
+                )}
               </div>
             ))}
           </div>

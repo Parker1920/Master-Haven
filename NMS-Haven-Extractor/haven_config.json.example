@@ -1,4 +1,7 @@
 {
-    "api_url": "https://your-ngrok-url.ngrok-free.app",
-    "api_key": ""
+    "api_url": "https://voyagers-haven-3dmap.ngrok.io",
+    "api_key": "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG",
+    "discord_username": "YourDiscordName",
+    "discord_tag": "personal",
+    "reality": "Normal"
 }

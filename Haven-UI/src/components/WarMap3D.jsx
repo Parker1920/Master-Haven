@@ -562,6 +562,30 @@ export default function WarMap3D({ className = '', onSystemSelect }) {
         )}
       </div>
 
+      {/* Quick Navigation */}
+      <div className="absolute top-14 left-3 bg-black/70 border border-gray-700 rounded p-2 text-xs">
+        <div className="text-gray-400 mb-2">Quick Focus:</div>
+        <div className="space-y-1">
+          {homeRegions.slice(0, 5).map((hr, i) => (
+            <button
+              key={i}
+              onClick={() => setFocusTarget({
+                region_x: hr.region_x,
+                region_y: hr.region_y,
+                region_z: hr.region_z
+              })}
+              className="w-full text-left px-2 py-1 rounded hover:bg-red-900/30 flex items-center gap-2"
+            >
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: hr.civ?.color || '#666' }}
+              />
+              <span className="text-gray-300 truncate">{hr.civ?.display_name || 'HQ'}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Controls hint */}
       <div className="absolute bottom-3 left-3 text-xs text-gray-500 bg-black/50 px-3 py-2 rounded">
         <span className="text-gray-400">Controls:</span> Drag to rotate • Scroll to zoom • Right-drag to pan • Double-click to drill down

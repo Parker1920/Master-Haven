@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo, useCallback } from 'react'
 import axios from 'axios'
 import { Link } from 'react-router-dom'
 import Card from './Card'
 import { StarIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
+import { usePersonalColor } from '../utils/usePersonalColor'
 
 /**
  * Level 4 Hierarchy: Systems List
@@ -18,6 +19,7 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState({ total: 0, pages: 0 })
   const limit = 50 // Systems per page
+  const { personalColor } = usePersonalColor()
 
   useEffect(() => {
     // In global mode, we don't need a region - just load all systems for the filter
@@ -100,31 +102,40 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
     'Power Generation': 'bg-yellow-600'
   }
 
-  // Discord tag badge
-  function getDiscordTagBadge(tag) {
+  // Pre-defined tag colors (memoized)
+  const tagColors = useMemo(() => ({
+    'Haven': 'bg-cyan-500 text-white',
+    'IEA': 'bg-green-500 text-white',
+    'B.E.S': 'bg-orange-500 text-white',
+    'ARCH': 'bg-purple-500 text-white',
+    'TBH': 'bg-yellow-500 text-black',
+    'EVRN': 'bg-pink-500 text-white',
+  }), [])
+
+  // Discord tag badge - memoized
+  const getDiscordTagBadge = useCallback((tag) => {
     if (!tag) return null
     if (tag === 'personal') {
-      return <span className="text-xs bg-fuchsia-600 text-white px-1.5 py-0.5 rounded">Personal</span>
-    }
-    const tagColors = {
-      'Haven': 'bg-cyan-500 text-white',
-      'IEA': 'bg-green-500 text-white',
-      'B.E.S': 'bg-orange-500 text-white',
-      'ARCH': 'bg-purple-500 text-white',
-      'TBH': 'bg-yellow-500 text-black',
-      'EVRN': 'bg-pink-500 text-white',
+      return (
+        <span
+          className="text-xs text-white px-1.5 py-0.5 rounded"
+          style={{ backgroundColor: personalColor }}
+        >
+          Personal
+        </span>
+      )
     }
     const colorClass = tagColors[tag] || 'bg-indigo-500 text-white'
     return <span className={`text-xs px-1.5 py-0.5 rounded ${colorClass}`}>{tag}</span>
-  }
+  }, [tagColors, personalColor])
 
   // Pagination controls
   const canPrevPage = page > 1
   const canNextPage = page < pagination.pages
   const totalPages = pagination.pages || 0
 
-  // Generate page numbers to display (show up to 7 pages with ellipsis)
-  function getPageNumbers() {
+  // Generate page numbers to display (show up to 7 pages with ellipsis) - memoized
+  const pageNumbers = useMemo(() => {
     const pages = []
     const currentPage = page
 
@@ -139,12 +150,16 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
         pages.push('...')
       }
 
-      // Show pages around current
+      // Show pages around current - use Set for O(1) lookup instead of includes O(n)
       const start = Math.max(2, currentPage - 1)
       const end = Math.min(totalPages - 1, currentPage + 1)
+      const pagesSet = new Set(pages)
 
       for (let i = start; i <= end; i++) {
-        if (!pages.includes(i)) pages.push(i)
+        if (!pagesSet.has(i)) {
+          pages.push(i)
+          pagesSet.add(i)
+        }
       }
 
       if (currentPage < totalPages - 2) {
@@ -152,11 +167,11 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
       }
 
       // Always show last page
-      if (!pages.includes(totalPages)) pages.push(totalPages)
+      if (!pagesSet.has(totalPages)) pages.push(totalPages)
     }
 
     return pages
-  }
+  }, [page, totalPages])
 
   if (loading && systems.length === 0) {
     return (
@@ -242,7 +257,7 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
             {/* Page numbers */}
-            {getPageNumbers().map((pageNum, idx) => (
+            {pageNumbers.map((pageNum, idx) => (
               pageNum === '...' ? (
                 <span key={`ellipsis-${idx}`} className="px-2 text-gray-500">...</span>
               ) : (
@@ -376,7 +391,7 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
             Previous
           </button>
           {/* Page numbers */}
-          {getPageNumbers().map((pageNum, idx) => (
+          {pageNumbers.map((pageNum, idx) => (
             pageNum === '...' ? (
               <span key={`ellipsis-bottom-${idx}`} className="px-2 text-gray-500">...</span>
             ) : (

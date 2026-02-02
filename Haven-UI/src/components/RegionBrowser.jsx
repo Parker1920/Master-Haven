@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo } from 'react'
 import axios from 'axios'
 import Card from './Card'
 import Modal from './Modal'
@@ -138,8 +138,8 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
   const canPrevPage = page > 0
   const canNextPage = page < totalPages - 1
 
-  // Generate page numbers to display (show up to 7 pages with ellipsis)
-  function getPageNumbers() {
+  // Generate page numbers to display (show up to 7 pages with ellipsis) - memoized
+  const pageNumbers = useMemo(() => {
     const pages = []
     const currentPage = page + 1 // Convert to 1-based for display
 
@@ -154,12 +154,16 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
         pages.push('...')
       }
 
-      // Show pages around current
+      // Show pages around current - use Set for O(1) lookup instead of includes O(n)
       const start = Math.max(2, currentPage - 1)
       const end = Math.min(totalPages - 1, currentPage + 1)
+      const pagesSet = new Set(pages)
 
       for (let i = start; i <= end; i++) {
-        if (!pages.includes(i)) pages.push(i)
+        if (!pagesSet.has(i)) {
+          pages.push(i)
+          pagesSet.add(i)
+        }
       }
 
       if (currentPage < totalPages - 2) {
@@ -167,11 +171,11 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
       }
 
       // Always show last page
-      if (!pages.includes(totalPages)) pages.push(totalPages)
+      if (!pagesSet.has(totalPages)) pages.push(totalPages)
     }
 
     return pages
-  }
+  }, [page, totalPages])
 
   // Check if a specific discord tag is selected (not 'all', 'untagged', 'personal')
   const isSpecificTagSelected = discordTag && !['all', 'untagged', 'personal'].includes(discordTag)
@@ -255,7 +259,7 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
             {/* Page numbers */}
-            {getPageNumbers().map((pageNum, idx) => (
+            {pageNumbers.map((pageNum, idx) => (
               pageNum === '...' ? (
                 <span key={`ellipsis-${idx}`} className="px-2 text-gray-500">...</span>
               ) : (
@@ -449,7 +453,7 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
             Previous
           </button>
           {/* Page numbers */}
-          {getPageNumbers().map((pageNum, idx) => (
+          {pageNumbers.map((pageNum, idx) => (
             pageNum === '...' ? (
               <span key={`ellipsis-bottom-${idx}`} className="px-2 text-gray-500">...</span>
             ) : (
