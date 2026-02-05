@@ -1,0 +1,36 @@
+# ============================================================
+# .dockerignore — Files Docker should NOT copy into the image
+# ============================================================
+# Works exactly like .gitignore but for Docker builds.
+# Keeps the image small and avoids leaking secrets.
+# ============================================================
+
+# --- Node.js build tools (NOT needed at runtime) ---
+# dist/ IS needed (built React frontend), but node_modules is build-only
+node_modules/
+
+# --- Python virtual environments (use container's Python instead) ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- Git history (not needed in container) ---
+.git/
+.gitignore
+
+# --- Development files ---
+*.md
+tests/
+.claude/
+
+# --- Logs (container generates its own) ---
+logs/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Environment files (secrets stay on the Pi, not baked into image) ---
+.env
+.env.*

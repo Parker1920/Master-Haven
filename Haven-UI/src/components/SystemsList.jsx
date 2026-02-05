@@ -12,7 +12,7 @@ import { usePersonalColor } from '../utils/usePersonalColor'
  * Shows a paginated list of systems within the selected region.
  * Clicking a system navigates to the system detail page.
  */
-export default function SystemsList({ reality, galaxy, region, discordTag = 'all', globalMode = false, globalModeTitle = null }) {
+export default function SystemsList({ reality, galaxy, region, discordTag = 'all', globalMode = false, globalModeTitle = null, filters = {} }) {
   const [systems, setSystems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -21,6 +21,11 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
   const limit = 50 // Systems per page
   const { personalColor } = usePersonalColor()
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [JSON.stringify(filters)])
+
   useEffect(() => {
     // In global mode, we don't need a region - just load all systems for the filter
     if (globalMode) {
@@ -28,7 +33,7 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
     } else if (reality && galaxy && region) {
       loadSystems()
     }
-  }, [reality, galaxy, region, page, discordTag, globalMode])
+  }, [reality, galaxy, region, page, discordTag, globalMode, JSON.stringify(filters)])
 
   async function loadSystems() {
     setLoading(true)
@@ -55,6 +60,15 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
 
       if (discordTag && discordTag !== 'all') {
         params.append('discord_tag', discordTag)
+      }
+
+      // Append advanced filter params
+      if (filters) {
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== '' && value !== null && value !== undefined) {
+            params.append(key, value.toString())
+          }
+        })
       }
 
       const res = await axios.get(`/api/systems?${params.toString()}`)

@@ -1,31 +1,34 @@
 """
-Standalone server to run the Haven Control Room web UI using the existing repo back-end.
-This works when run from the repository root.
+Standalone server to run the Haven Control Room web UI.
+Haven-UI is now self-contained with backend code in the backend/ folder.
 
 Usage:
+    cd Haven-UI
     python server.py
 
-It imports the FastAPI `app` from `src.control_room_api` and runs uvicorn.
+It imports the FastAPI `app` from `backend.control_room_api` and runs uvicorn.
 """
 import os
 import sys
 from pathlib import Path
 
-# Ensure project root and src in path so imports like 'common' and 'src' work
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-src_dir = REPO_ROOT / 'src'
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
+# Haven-UI directory structure (self-contained)
+HAVEN_UI_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = HAVEN_UI_DIR / 'backend'
+REPO_ROOT = HAVEN_UI_DIR.parent  # Master-Haven root (for cross-project access)
 
-# Ensure control_room_api picks up the right HAVEN_UI_DIR BEFORE importing it
-os.environ['HAVEN_UI_DIR'] = str(REPO_ROOT / 'Haven-UI')
+# Add backend to path for imports
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+# Set environment variable for Haven UI directory
+os.environ['HAVEN_UI_DIR'] = str(HAVEN_UI_DIR)
+
 try:
     from fastapi.staticfiles import StaticFiles
     # Importing control_room_api can execute initialization logic. Wrap it so we
     # provide an actionable error message if an import-time exception occurs
-    from src.control_room_api import app, init_rtai
+    from control_room_api import app, init_rtai
 except Exception as exc:
     print("ERROR: Failed to import critical server modules. This often means there\n      "
           "was a startup-time failure (missing dependency, corrupted DB, or bad paths).\n      "
@@ -35,8 +38,9 @@ except Exception as exc:
     # Re-raise so the calling process sees the same failure, but we've provided
     # a clearer message in case this comes from a systemd/cron supervisor.
     raise
+
 # Mount the photos folder for static serving
-photos_dir = REPO_ROOT / 'Haven-UI' / 'photos'
+photos_dir = HAVEN_UI_DIR / 'photos'
 if photos_dir.exists():
     app.mount('/haven-ui-photos', StaticFiles(directory=str(photos_dir)), name='haven-ui-photos')
 
@@ -47,7 +51,7 @@ if __name__ == '__main__':
     import uvicorn
     try:
         # Attempt to init RT-AI if available. Keep it optional.
-        init_rtai(str(REPO_ROOT / 'Haven-UI'))
+        init_rtai(str(HAVEN_UI_DIR))
     except Exception:
         pass
     print("Starting Haven Control Room Web Server on 0.0.0.0:8005")

@@ -303,22 +303,41 @@ const GALAXY_TYPES = {
  * Each galaxy card shows system count and region count.
  * Galaxies are sorted by their canonical number.
  */
-export default function GalaxyGrid({ reality, onSelect, selectedGalaxy }) {
+export default function GalaxyGrid({ reality, onSelect, selectedGalaxy, filters = {}, discordTag = 'all' }) {
   const [galaxies, setGalaxies] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Check if any advanced filters are active
+  const hasActiveFilters = Object.values(filters).some(v => v !== '' && v !== null && v !== undefined)
 
   useEffect(() => {
     if (reality) {
       loadGalaxies()
     }
-  }, [reality])
+  }, [reality, JSON.stringify(filters), discordTag])
 
   async function loadGalaxies() {
     setLoading(true)
     setError(null)
     try {
-      const res = await axios.get(`/api/galaxies/summary?reality=${encodeURIComponent(reality)}`)
+      const params = new URLSearchParams({ reality })
+
+      // Pass discord tag filter
+      if (discordTag && discordTag !== 'all') {
+        params.append('discord_tag', discordTag)
+      }
+
+      // Pass advanced filters
+      if (filters) {
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== '' && value !== null && value !== undefined) {
+            params.append(key, value.toString())
+          }
+        })
+      }
+
+      const res = await axios.get(`/api/galaxies/summary?${params.toString()}`)
       setGalaxies(res.data.galaxies || [])
     } catch (err) {
       console.error('Failed to load galaxies:', err)
@@ -396,6 +415,9 @@ export default function GalaxyGrid({ reality, onSelect, selectedGalaxy }) {
           </h2>
           <p className="text-sm text-gray-400 mt-1">
             {sortedGalaxies.length} galaxies with data • {totalSystems.toLocaleString()} systems • {totalRegions.toLocaleString()} regions
+            {hasActiveFilters && (
+              <span className="ml-2 text-cyan-400">(filtered)</span>
+            )}
           </p>
         </div>
       </div>

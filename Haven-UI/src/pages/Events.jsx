@@ -5,6 +5,12 @@ import LeaderboardTable from '../components/LeaderboardTable'
 import { format, parseISO } from 'date-fns'
 import { AuthContext } from '../utils/AuthContext'
 
+const EVENT_TYPE_LABELS = {
+  submissions: { label: 'System Submissions', icon: '🌌', color: 'bg-cyan-500' },
+  discoveries: { label: 'Discoveries', icon: '🔬', color: 'bg-purple-500' },
+  both: { label: 'Systems + Discoveries', icon: '🏆', color: 'bg-amber-500' }
+}
+
 export default function Events() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
@@ -20,6 +26,7 @@ export default function Events() {
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [eventLeaderboard, setEventLeaderboard] = useState({ leaderboard: [], totals: {} })
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [leaderboardTab, setLeaderboardTab] = useState('submissions')
 
   // Form state
   const [formData, setFormData] = useState({
@@ -27,7 +34,8 @@ export default function Events() {
     discord_tag: '',
     start_date: '',
     end_date: '',
-    description: ''
+    description: '',
+    event_type: 'submissions'
   })
 
   // Redirect if not admin or partner
@@ -84,7 +92,7 @@ export default function Events() {
         })
         setEvents(eventsRes.data.events || [])
         setShowCreateModal(false)
-        setFormData({ name: '', discord_tag: '', start_date: '', end_date: '', description: '' })
+        setFormData({ name: '', discord_tag: '', start_date: '', end_date: '', description: '', event_type: 'submissions' })
       }
     } catch (err) {
       console.error('Failed to create event:', err)
@@ -92,12 +100,21 @@ export default function Events() {
     }
   }
 
-  const handleViewLeaderboard = async (event) => {
+  const handleViewLeaderboard = async (event, tab = null) => {
+    const eventType = event.event_type || 'submissions'
+    // Determine the default tab based on event type
+    const defaultTab = eventType === 'discoveries' ? 'discoveries'
+      : eventType === 'both' ? 'combined'
+      : 'submissions'
+    const selectedTab = tab || defaultTab
+
     setSelectedEvent(event)
+    setLeaderboardTab(selectedTab)
     setShowLeaderboardModal(true)
     setLeaderboardLoading(true)
     try {
       const res = await axios.get(`/api/events/${event.id}/leaderboard`, {
+        params: { tab: selectedTab },
         withCredentials: true
       })
       setEventLeaderboard({
@@ -108,6 +125,12 @@ export default function Events() {
       console.error('Failed to fetch event leaderboard:', err)
     } finally {
       setLeaderboardLoading(false)
+    }
+  }
+
+  const handleTabChange = (tab) => {
+    if (selectedEvent) {
+      handleViewLeaderboard(selectedEvent, tab)
     }
   }
 
@@ -161,6 +184,14 @@ export default function Events() {
     return { label: 'Active', color: 'bg-green-500' }
   }
 
+  // Get available tabs for event's leaderboard modal
+  const getAvailableTabs = (event) => {
+    const eventType = event?.event_type || 'submissions'
+    if (eventType === 'submissions') return ['submissions']
+    if (eventType === 'discoveries') return ['discoveries']
+    return ['combined', 'submissions', 'discoveries']
+  }
+
   // Show loading while auth is loading
   if (auth.loading || loading) {
     return (
@@ -180,9 +211,9 @@ export default function Events() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--app-text)' }}>Submission Events</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--app-text)' }}>Community Events</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
-            Track submissions during event periods
+            Track submissions and discoveries during event periods
           </p>
         </div>
         <button
@@ -209,7 +240,7 @@ export default function Events() {
           <div className="text-4xl mb-4">📅</div>
           <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--app-text)' }}>No Events Yet</h3>
           <p className="text-sm mb-4" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
-            Create your first submission event to start tracking
+            Create your first event to start tracking
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
@@ -223,6 +254,8 @@ export default function Events() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {events.map((event) => {
             const status = getEventStatus(event)
+            const eventType = event.event_type || 'submissions'
+            const typeInfo = EVENT_TYPE_LABELS[eventType] || EVENT_TYPE_LABELS.submissions
             return (
               <div
                 key={event.id}
@@ -234,12 +267,17 @@ export default function Events() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl">🏆</span>
+                    <span className="text-2xl">{typeInfo.icon}</span>
                     <div>
                       <h3 className="font-semibold" style={{ color: 'var(--app-text)' }}>{event.name}</h3>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium text-white ${status.color}`}>
-                        {status.label}
-                      </span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium text-white ${status.color}`}>
+                          {status.label}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium text-white ${typeInfo.color}`}>
+                          {typeInfo.label}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <span
@@ -260,15 +298,24 @@ export default function Events() {
                   </p>
                 )}
 
-                <div className="flex items-center gap-4 mb-4 text-sm" style={{ color: 'var(--app-text)' }}>
-                  <div>
-                    <span className="font-semibold" style={{ color: 'var(--app-primary)' }}>
-                      {event.submission_count}
-                    </span> submissions
-                  </div>
+                <div className="flex items-center gap-4 mb-4 text-sm flex-wrap" style={{ color: 'var(--app-text)' }}>
+                  {(eventType === 'submissions' || eventType === 'both') && (
+                    <div>
+                      <span className="font-semibold" style={{ color: 'var(--app-primary)' }}>
+                        {event.submission_count}
+                      </span> submissions
+                    </div>
+                  )}
+                  {(eventType === 'discoveries' || eventType === 'both') && (
+                    <div>
+                      <span className="font-semibold" style={{ color: '#a855f7' }}>
+                        {event.discovery_count}
+                      </span> discoveries
+                    </div>
+                  )}
                   <div>
                     <span className="font-semibold" style={{ color: 'var(--app-accent-2)' }}>
-                      {event.participant_count}
+                      {Math.max(event.participant_count || 0, event.discovery_participant_count || 0)}
                     </span> participants
                   </div>
                 </div>
@@ -340,6 +387,21 @@ export default function Events() {
                     className="w-full px-3 py-2 rounded-lg"
                     placeholder="Winter Exploration Event"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--app-text)' }}>
+                    Event Type
+                  </label>
+                  <select
+                    value={formData.event_type}
+                    onChange={(e) => setFormData({ ...formData, event_type: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg"
+                  >
+                    <option value="submissions">System Submissions</option>
+                    <option value="discoveries">Discoveries</option>
+                    <option value="both">Both (Systems + Discoveries)</option>
+                  </select>
                 </div>
 
                 {isSuperAdmin && (
@@ -438,7 +500,8 @@ export default function Events() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-xl font-semibold" style={{ color: 'var(--app-text)' }}>
-                  🏆 {selectedEvent.name}
+                  {(EVENT_TYPE_LABELS[selectedEvent.event_type] || EVENT_TYPE_LABELS.submissions).icon}{' '}
+                  {selectedEvent.name}
                 </h2>
                 <p className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
                   {formatDate(selectedEvent.start_date)} - {formatDate(selectedEvent.end_date)}
@@ -455,52 +518,209 @@ export default function Events() {
               </button>
             </div>
 
+            {/* Tab Switcher */}
+            {getAvailableTabs(selectedEvent).length > 1 && (
+              <div className="flex items-center rounded-lg overflow-hidden mb-4" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {getAvailableTabs(selectedEvent).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => handleTabChange(tab)}
+                    className="px-4 py-2 text-sm font-medium transition-colors flex-1"
+                    style={{
+                      background: leaderboardTab === tab ? 'var(--app-primary)' : 'transparent',
+                      color: leaderboardTab === tab ? '#000' : 'var(--app-text)'
+                    }}
+                  >
+                    {tab === 'submissions' ? 'Systems' : tab === 'discoveries' ? 'Discoveries' : 'Combined'}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Event Stats */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div
-                className="p-4 rounded-lg text-center"
-                style={{ background: 'rgba(0, 194, 179, 0.1)' }}
-              >
-                <div className="text-2xl font-bold" style={{ color: 'var(--app-primary)' }}>
-                  {eventLeaderboard.totals.total_submissions || 0}
-                </div>
-                <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
-                  Total Submissions
-                </div>
-              </div>
-              <div
-                className="p-4 rounded-lg text-center"
-                style={{ background: 'rgba(34, 197, 94, 0.1)' }}
-              >
-                <div className="text-2xl font-bold" style={{ color: '#22c55e' }}>
-                  {eventLeaderboard.totals.total_approved || 0}
-                </div>
-                <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
-                  Approved
-                </div>
-              </div>
-              <div
-                className="p-4 rounded-lg text-center"
-                style={{ background: 'rgba(157, 78, 221, 0.1)' }}
-              >
-                <div className="text-2xl font-bold" style={{ color: 'var(--app-accent-2)' }}>
-                  {eventLeaderboard.totals.participants || 0}
-                </div>
-                <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
-                  Participants
-                </div>
-              </div>
+            <div className={`grid gap-4 mb-6 ${
+              leaderboardTab === 'combined' ? 'grid-cols-4' :
+              leaderboardTab === 'submissions' ? 'grid-cols-3' : 'grid-cols-2'
+            }`}>
+              {leaderboardTab === 'submissions' && (
+                <>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(0, 194, 179, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: 'var(--app-primary)' }}>
+                      {eventLeaderboard.totals.total_submissions || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Submissions</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(34, 197, 94, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: '#22c55e' }}>
+                      {eventLeaderboard.totals.total_approved || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Approved</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(157, 78, 221, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: 'var(--app-accent-2)' }}>
+                      {eventLeaderboard.totals.participants || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Participants</div>
+                  </div>
+                </>
+              )}
+              {leaderboardTab === 'discoveries' && (
+                <>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: '#a855f7' }}>
+                      {eventLeaderboard.totals.total_discoveries || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Discoveries</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(157, 78, 221, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: 'var(--app-accent-2)' }}>
+                      {eventLeaderboard.totals.participants || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Discoverers</div>
+                  </div>
+                </>
+              )}
+              {leaderboardTab === 'combined' && (
+                <>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(0, 194, 179, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: 'var(--app-primary)' }}>
+                      {eventLeaderboard.totals.total_submissions || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Submissions</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: '#a855f7' }}>
+                      {eventLeaderboard.totals.total_discoveries || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Discoveries</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: '#f59e0b' }}>
+                      {eventLeaderboard.totals.combined_total || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Combined</div>
+                  </div>
+                  <div className="p-4 rounded-lg text-center" style={{ background: 'rgba(157, 78, 221, 0.1)' }}>
+                    <div className="text-2xl font-bold" style={{ color: 'var(--app-accent-2)' }}>
+                      {eventLeaderboard.totals.participants || 0}
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.7 }}>Participants</div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Leaderboard */}
-            <LeaderboardTable
-              data={eventLeaderboard.leaderboard}
-              showCommunity={false}
-              loading={leaderboardLoading}
-            />
+            {/* Leaderboard Table */}
+            {leaderboardTab === 'discoveries' ? (
+              <DiscoveryLeaderboard data={eventLeaderboard.leaderboard} loading={leaderboardLoading} />
+            ) : leaderboardTab === 'combined' ? (
+              <CombinedLeaderboard data={eventLeaderboard.leaderboard} loading={leaderboardLoading} />
+            ) : (
+              <LeaderboardTable
+                data={eventLeaderboard.leaderboard}
+                showCommunity={false}
+                loading={leaderboardLoading}
+              />
+            )}
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+function DiscoveryLeaderboard({ data, loading }) {
+  if (loading) {
+    return <div className="text-center py-8 text-gray-400">Loading leaderboard...</div>
+  }
+
+  if (!data || data.length === 0) {
+    return <div className="text-center py-8 text-gray-400">No discoveries during this event period.</div>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <th className="text-left py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Rank</th>
+            <th className="text-left py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Discoverer</th>
+            <th className="text-right py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Discoveries</th>
+            <th className="text-right py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Types</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((entry) => (
+            <tr key={entry.rank} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <td className="py-3 px-2">
+                <span className={`font-bold ${entry.rank <= 3 ? 'text-amber-400' : ''}`} style={{ color: entry.rank > 3 ? 'var(--app-text)' : undefined }}>
+                  {entry.rank <= 3 ? ['', '1st', '2nd', '3rd'][entry.rank] : `#${entry.rank}`}
+                </span>
+              </td>
+              <td className="py-3 px-2 font-medium" style={{ color: 'var(--app-text)' }}>
+                {entry.username}
+              </td>
+              <td className="py-3 px-2 text-right font-semibold" style={{ color: '#a855f7' }}>
+                {entry.total_discoveries}
+              </td>
+              <td className="py-3 px-2 text-right" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+                {entry.types_count} {entry.types_count === 1 ? 'type' : 'types'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+
+function CombinedLeaderboard({ data, loading }) {
+  if (loading) {
+    return <div className="text-center py-8 text-gray-400">Loading leaderboard...</div>
+  }
+
+  if (!data || data.length === 0) {
+    return <div className="text-center py-8 text-gray-400">No activity during this event period.</div>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <th className="text-left py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Rank</th>
+            <th className="text-left py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>User</th>
+            <th className="text-right py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Systems</th>
+            <th className="text-right py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Discoveries</th>
+            <th className="text-right py-3 px-2" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((entry) => (
+            <tr key={entry.rank} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <td className="py-3 px-2">
+                <span className={`font-bold ${entry.rank <= 3 ? 'text-amber-400' : ''}`} style={{ color: entry.rank > 3 ? 'var(--app-text)' : undefined }}>
+                  {entry.rank <= 3 ? ['', '1st', '2nd', '3rd'][entry.rank] : `#${entry.rank}`}
+                </span>
+              </td>
+              <td className="py-3 px-2 font-medium" style={{ color: 'var(--app-text)' }}>
+                {entry.username}
+              </td>
+              <td className="py-3 px-2 text-right" style={{ color: 'var(--app-primary)' }}>
+                {entry.total_submissions}
+              </td>
+              <td className="py-3 px-2 text-right" style={{ color: '#a855f7' }}>
+                {entry.total_discoveries}
+              </td>
+              <td className="py-3 px-2 text-right font-semibold" style={{ color: '#f59e0b' }}>
+                {entry.combined_total}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -8,6 +8,7 @@ import GalaxyGrid from '../components/GalaxyGrid'
 import RegionBrowser from '../components/RegionBrowser'
 import SystemsList from '../components/SystemsList'
 import DiscordTagBadge from '../components/DiscordTagBadge'
+import AdvancedFilters, { EMPTY_FILTERS } from '../components/AdvancedFilters'
 import {
   MagnifyingGlassIcon,
   ChevronRightIcon,
@@ -79,6 +80,9 @@ export default function Systems() {
 
   // Mobile filter panel toggle
   const [showFilters, setShowFilters] = useState(false)
+
+  // Advanced filters state
+  const [advancedFilters, setAdvancedFilters] = useState({ ...EMPTY_FILTERS })
 
   // Fetch discord tags for filter dropdown
   useEffect(() => {
@@ -297,6 +301,14 @@ export default function Systems() {
           </div>
         )}
 
+        {/* Advanced Filters */}
+        <AdvancedFilters
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          reality={selectedReality}
+          galaxy={selectedGalaxy}
+        />
+
         {/* Breadcrumb Navigation */}
         <nav className="flex items-center gap-1 text-sm flex-wrap">
           {breadcrumbs.map((item, idx) => (
@@ -390,6 +402,8 @@ export default function Systems() {
             reality={selectedReality}
             onSelect={handleGalaxySelect}
             selectedGalaxy={selectedGalaxy}
+            filters={advancedFilters}
+            discordTag={filterTag}
           />
         )}
 
@@ -410,6 +424,7 @@ export default function Systems() {
             galaxy={selectedGalaxy}
             region={selectedRegion}
             discordTag={filterTag}
+            filters={advancedFilters}
           />
         )}
 
@@ -420,6 +435,7 @@ export default function Systems() {
             discordTag={filterTag}
             globalMode={true}
             globalModeTitle={`All ${filterTag} Systems in ${selectedGalaxy}`}
+            filters={advancedFilters}
           />
         )}
       </div>

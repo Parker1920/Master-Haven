@@ -145,6 +145,7 @@ export default function Navbar() {
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/partners">Partners</Link>}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/audit">Audit Log</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/analytics">Analytics</Link>}
+            {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/partner-analytics">Partner Analytics</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/events">Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
               <Link className="px-3 py-1 hover:underline text-red-400 font-bold relative" to="/war-room">
@@ -200,6 +201,7 @@ export default function Navbar() {
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/partners" onClick={closeMenu}>Partners</Link>}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/audit" onClick={closeMenu}>Audit Log</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/analytics" onClick={closeMenu}>Analytics</Link>}
+            {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/partner-analytics" onClick={closeMenu}>Partner Analytics</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/events" onClick={closeMenu}>Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
               <Link className="px-3 py-2 hover:bg-gray-700 rounded text-red-400 font-bold flex justify-between items-center" to="/war-room" onClick={closeMenu}>

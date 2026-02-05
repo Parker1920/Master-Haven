@@ -23,6 +23,7 @@ const PartnerManagement = lazy(() => import('./pages/PartnerManagement'))
 const SubAdminManagement = lazy(() => import('./pages/SubAdminManagement'))
 const ApprovalAudit = lazy(() => import('./pages/ApprovalAudit'))
 const Analytics = lazy(() => import('./pages/Analytics'))
+const PartnerAnalytics = lazy(() => import('./pages/PartnerAnalytics'))
 const Events = lazy(() => import('./pages/Events'))
 const CsvImport = lazy(() => import('./pages/CsvImport'))
 const DataRestrictions = lazy(() => import('./pages/DataRestrictions'))
@@ -121,6 +122,7 @@ export default function App() {
 
               {/* Analytics (admin or partner) */}
               <Route path="/analytics" element={<RequireAdmin><Analytics /></RequireAdmin>} />
+              <Route path="/partner-analytics" element={<RequireAdmin><PartnerAnalytics /></RequireAdmin>} />
               <Route path="/events" element={<RequireAdmin><Events /></RequireAdmin>} />
 
               {/* Partners can manage their own sub-admins */}
