@@ -18,17 +18,13 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-# Database paths
-DB_PATHS = [
-    Path(r"C:\Master-Haven\Haven-UI\data\haven_ui.db"),
-    Path(r"c:\Master-Haven\Haven-UI\data\haven_ui.db"),
-]
+# Database path — resolved relative to this script's location
+DB_PATH = Path(__file__).parent.parent / 'data' / 'haven_ui.db'
 
 def find_database():
     """Find the database file."""
-    for db_path in DB_PATHS:
-        if db_path.exists():
-            return db_path
+    if DB_PATH.exists():
+        return DB_PATH
     return None
 
 def backup_database(db_path: Path) -> Path:

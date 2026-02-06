@@ -8,7 +8,7 @@ so they can be re-approved with the fixed code.
 import sqlite3
 from pathlib import Path
 
-db_path = Path('Haven-UI/data/haven_ui.db')
+db_path = Path(__file__).parent.parent / 'data' / 'haven_ui.db'
 conn = sqlite3.connect(str(db_path))
 cursor = conn.cursor()
 

@@ -1,0 +1,37 @@
+# ============================================================
+# Haven Control Room — Docker Compose
+# ============================================================
+# Runs Haven in a container with persistent data stored OUTSIDE
+# the git repo so that git pull never touches your database or photos.
+#
+# First-time setup on the Pi:
+#   mkdir -p ~/haven-data ~/haven-photos
+#   # If migrating from an existing install, copy your data:
+#   cp /path/to/old/Haven-UI/data/haven_ui.db ~/haven-data/
+#   cp -r /path/to/old/Haven-UI/photos/* ~/haven-photos/
+#
+# Usage:
+#   docker compose up -d --build    # build & start
+#   docker compose logs -f          # watch logs
+#   docker compose down             # stop
+#   docker compose up -d --build    # rebuild after git pull
+# ============================================================
+
+services:
+  haven:
+    build: .
+    container_name: haven-control-room
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    volumes:
+      # Persistent data — lives OUTSIDE the repo, safe from git pull
+      - ~/haven-data:/app/Haven-UI/data
+      - ~/haven-photos:/app/Haven-UI/photos
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/api/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

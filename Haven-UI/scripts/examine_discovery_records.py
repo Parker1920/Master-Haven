@@ -1,6 +1,7 @@
 import sys
 import json
-sys.path.insert(0, r'c:\Master-Haven\NMS-Save-Watcher\src')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'NMS-Save-Watcher' / 'src'))
 
 from parser import parse_save
 

@@ -8,8 +8,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-# Get database path
-db_path = Path('Haven-UI/data/haven_ui.db')
+# Get database path — relative to this script (scripts/ -> Haven-UI/data/)
+db_path = Path(__file__).parent.parent / 'data' / 'haven_ui.db'
 
 # Connect to database
 conn = sqlite3.connect(str(db_path))

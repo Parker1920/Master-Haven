@@ -31,6 +31,23 @@ logs/
 Thumbs.db
 *.swp
 
+# --- Persistent data (mounted as volumes at runtime, NOT baked into image) ---
+Haven-UI/data/
+Haven-UI/photos/
+
 # --- Environment files (secrets stay on the Pi, not baked into image) ---
 .env
 .env.*
+*.env.backup
+
+# --- Databases (never in the image) ---
+*.db
+*.db.backup
+
+# --- Other components not needed in Haven-UI container ---
+keeper-discord-bot-main/
+roundtable_ai/
+NMS-Memory-Browser/
+NMS-Save-Watcher/
+NMS-Haven-Extractor/haven_extractor_mod/
+scripts/

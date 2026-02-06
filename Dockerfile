@@ -20,8 +20,10 @@ LABEL maintainer="Parker1920"
 LABEL description="Haven Control Room — Voyager's Haven community web app"
 
 # --- WORKING DIRECTORY ---
-# Creates /app inside the container and makes it the default folder.
-# Every command after this runs from /app (like doing `cd /app`).
+# Creates /app inside the container and sets it as the default folder.
+# The app structure inside the container mirrors Haven-UI/ from the repo.
+# Docker volumes mount data/ and photos/ from outside the repo so they
+# survive rebuilds and are never baked into the image.
 WORKDIR /app
 
 # --- INSTALL DEPENDENCIES FIRST ---
@@ -53,7 +55,14 @@ EXPOSE 8005
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8005/api/status')" || exit 1
 
+# --- PERSISTENT DATA VOLUMES ---
+# These directories are mounted from the host at runtime via docker-compose.
+# They are NOT baked into the image — the host owns the data.
+#   ./haven-data   -> /app/Haven-UI/data    (SQLite databases, backups)
+#   ./haven-photos -> /app/Haven-UI/photos  (user-uploaded screenshots)
+# Create the mount points so the app doesn't crash if volumes aren't attached.
+RUN mkdir -p Haven-UI/data Haven-UI/photos
+
 # --- START COMMAND ---
-# The command that runs when the container starts.
-# This is exactly what you typed manually: python server.py
-CMD ["python", "server.py"]
+# The repo root is /app, so server.py is at /app/Haven-UI/server.py.
+CMD ["python", "Haven-UI/server.py"]

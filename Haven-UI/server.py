@@ -39,13 +39,8 @@ except Exception as exc:
     # a clearer message in case this comes from a systemd/cron supervisor.
     raise
 
-# Mount the photos folder for static serving
-photos_dir = HAVEN_UI_DIR / 'photos'
-if photos_dir.exists():
-    app.mount('/haven-ui-photos', StaticFiles(directory=str(photos_dir)), name='haven-ui-photos')
-
-# Note: Static mounts are already configured in control_room_api.py
-# This prevents duplicate mount errors
+# Note: Static mounts (photos, dist, war-media) are configured in control_room_api.py.
+# Do NOT mount them again here — duplicate mounts cause startup errors.
 
 if __name__ == '__main__':
     import uvicorn

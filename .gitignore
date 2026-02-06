@@ -141,11 +141,10 @@ NMS-Save-Watcher/logs/
 # -----------------
 # Exclude user databases (contain personal discovery data)
 # Be specific to avoid excluding required data files
-# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
-# Haven-UI/data/*.db
-# Haven-UI/data/*.db.backup
-# Haven-UI/data/data.json
-# === END TEMPORARY ===
+Haven-UI/data/*.db
+Haven-UI/data/*.db.backup
+Haven-UI/data/backups/
+Haven-UI/data/data.json
 NMS-Save-Watcher/data/watcher.db
 !Haven-UI/data/.gitkeep
 
@@ -168,9 +167,7 @@ NMS-Save-Watcher/data/watcher.db
 # PHOTOS & UPLOADS
 # -----------------
 # User-uploaded discovery photos
-# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
-# Haven-UI/photos/*
-# === END TEMPORARY ===
+Haven-UI/photos/*
 !Haven-UI/photos/.gitkeep
 
 # -----------------
@@ -187,10 +184,8 @@ Documents/Haven-Extractor/
 # CONFIG FILES WITH SECRETS
 # -----------------
 # Keep example configs, exclude real ones with secrets
-# === TEMPORARILY COMMENTED FOR ONE-TIME TRANSFER ===
-# config.json
-# NMS-Save-Watcher/config.json
-# === END TEMPORARY ===
+config.json
+NMS-Save-Watcher/config.json
 !config.example.json
 
 # -----------------
@@ -199,9 +194,8 @@ Documents/Haven-Extractor/
 *.map
 .netlify/
 .vercel/
-"Haven-UI/.env.backup" 
-nul
 Haven-UI/.env.backup
+*.env.backup
 
 # -----------------
 # NMS-HAVEN-EXTRACTOR DEVELOPMENT FILES

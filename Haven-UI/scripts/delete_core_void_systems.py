@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from glyph_decoder import is_in_core_void, CORE_VOID_RADIUS_XZ, CORE_VOID_RADIUS_Y
 
-# Database path
-DB_PATH = r'C:\Master-Haven\Haven-UI\data\haven_ui.db'
+# Database path — resolved relative to this script's location
+DB_PATH = str(Path(__file__).parent.parent / 'data' / 'haven_ui.db')
 
 
 def main():

@@ -24,17 +24,14 @@ sys.path.insert(0, str(backend_dir))
 
 from glyph_decoder import decode_glyph_to_coords
 
-# Database paths
-DB_PATHS = [
-    Path(r"C:\Master-Haven\Haven-UI\data\haven_ui.db"),
-    Path(r"c:\Master-Haven\Haven-UI\data\haven_ui.db"),
-]
+# Database path — resolved relative to this script's location
+# Script is at Haven-UI/scripts/, so data is at Haven-UI/data/
+DB_PATH = Path(__file__).parent.parent / 'data' / 'haven_ui.db'
 
 def find_database():
     """Find the database file."""
-    for db_path in DB_PATHS:
-        if db_path.exists():
-            return db_path
+    if DB_PATH.exists():
+        return DB_PATH
     return None
 
 def backfill_star_positions(db_path: Path, dry_run: bool = False) -> dict:
