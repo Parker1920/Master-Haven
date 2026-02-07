@@ -58,7 +58,9 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8005/api/status')" || exit 1
 
 # --- PERSISTENT DATA VOLUMES ---
-RUN mkdir -p Haven-UI/data Haven-UI/photos
+# These get mounted from docker-compose volumes
+RUN mkdir -p data photos
 
 # --- START COMMAND ---
-CMD ["python", "Haven-UI/server.py"]
+# Since build context is Haven-UI/, server.py is at /app/server.py
+CMD ["python", "server.py"]
