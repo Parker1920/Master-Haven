@@ -2563,7 +2563,13 @@ function ConflictDetailModal({ open, onClose, conflictId, onUpdate, myPartnerId,
       const thisConflict = conflictsRes.data.find(c => c.id === conflictId)
       setConflict(thisConflict)
       setEvents(eventsRes.data)
-      setParties(partiesRes.data)
+      // Flatten parties from { attackers: [...], defenders: [...] } to single array with side property
+      const partiesData = partiesRes.data
+      const flatParties = [
+        ...(partiesData.attackers || []).map(p => ({ ...p, side: 'attacker' })),
+        ...(partiesData.defenders || []).map(p => ({ ...p, side: 'defender' }))
+      ]
+      setParties(flatParties)
     } catch (err) {
       console.error('Failed to fetch conflict details:', err)
     } finally {

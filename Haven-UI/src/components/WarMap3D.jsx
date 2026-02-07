@@ -4,8 +4,8 @@ import { OrbitControls, Text, Line } from '@react-three/drei'
 import * as THREE from 'three'
 import axios from 'axios'
 
-// Scale factor for positions (smaller = tighter grouping)
-const POSITION_SCALE = 0.02
+// Scale factor for positions (larger = more spread out)
+const POSITION_SCALE = 0.06
 
 // War Room color palette
 const WAR_COLORS = {
@@ -33,7 +33,7 @@ function TacticalGrid({ size = 200 }) {
       />
       {/* Secondary faint grid */}
       <gridHelper
-        args={[size, 80, WAR_COLORS.grid, 'transparent']}
+        args={[size, 80, WAR_COLORS.grid, WAR_COLORS.background]}
         rotation={[0, 0, 0]}
         position={[0, -50, 0]}
       />
@@ -42,7 +42,7 @@ function TacticalGrid({ size = 200 }) {
 }
 
 // Animated pulsing ring for contested regions
-function ContestedPulse({ position, color, size = 0.5 }) {
+function ContestedPulse({ position, color, size = 0.3 }) {
   const ringRef = useRef()
 
   useFrame((state) => {
@@ -136,10 +136,10 @@ function RegionPoint({ region, isSelected, onSelect, onHover, onDoubleClick }) {
            WAR_COLORS.defaultRegion
   }, [region])
 
-  // Much smaller base size
+  // Smaller base size to prevent overlap at higher scale
   const size = useMemo(() => {
-    const baseSize = 0.25
-    const systemBonus = Math.min((region.system_count || 1) * 0.02, 0.25)
+    const baseSize = 0.15
+    const systemBonus = Math.min((region.system_count || 1) * 0.015, 0.15)
     return baseSize + systemBonus
   }, [region])
 
@@ -250,8 +250,8 @@ function TerritoryConnections({ regions, enrolledCivs }) {
           const dz = r1.region_z - r2.region_z
           const dist = Math.sqrt(dx*dx + dy*dy + dz*dz)
 
-          // Only connect if reasonably close
-          if (dist < 500) {
+          // Only connect if very close (reduced from 500 to reduce line clutter)
+          if (dist < 150) {
             connections.push({
               start: [
                 (r1.region_x - 2048) * POSITION_SCALE,
@@ -298,8 +298,8 @@ function Scene({ regions, homeRegions, enrolledCivs, selectedRegion, onSelectReg
   const controlsRef = useRef()
 
   useEffect(() => {
-    // Set initial camera position
-    camera.position.set(20, 30, 40)
+    // Set initial camera position (adjusted for larger scale)
+    camera.position.set(40, 50, 60)
     camera.lookAt(0, 0, 0)
   }, [camera])
 
@@ -315,8 +315,8 @@ function Scene({ regions, homeRegions, enrolledCivs, selectedRegion, onSelectReg
       // Smoothly move camera target
       controlsRef.current.target.lerp(targetPos, 0.08)
 
-      // Move camera closer to the target
-      const cameraOffset = new THREE.Vector3(2, 2, 3)
+      // Move camera closer to the target (adjusted for larger scale)
+      const cameraOffset = new THREE.Vector3(5, 5, 8)
       const desiredCameraPos = targetPos.clone().add(cameraOffset)
       camera.position.lerp(desiredCameraPos, 0.05)
 
@@ -378,8 +378,8 @@ function Scene({ regions, homeRegions, enrolledCivs, selectedRegion, onSelectReg
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
-        minDistance={1}
-        maxDistance={150}
+        minDistance={2}
+        maxDistance={250}
         maxPolarAngle={Math.PI * 0.85}
         zoomSpeed={1.2}
       />
