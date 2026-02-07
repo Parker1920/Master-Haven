@@ -164,6 +164,10 @@ export default function RegionDetail() {
   const [newRegionDiscordTag, setNewRegionDiscordTag] = useState(null)
   const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
   const [submittingName, setSubmittingName] = useState(false)
+  // Personal discord username modal (like Wizard.jsx)
+  const [personalDiscordUsername, setPersonalDiscordUsername] = useState('')
+  const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
+  const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
 
   // Load data when region changes (reset to page 1)
   useEffect(() => {
@@ -385,11 +389,17 @@ export default function RegionDetail() {
     // Validation for non-super-admin users
     if (!auth?.isSuperAdmin) {
       if (!newRegionDiscordTag) {
-        alert('Please select a Discord Community')
+        alert('Please select a Discord Community or Personal')
         return
       }
-      // Only require manual Discord username for anonymous users
-      if (!isLoggedIn && !submitterDiscordUsername.trim()) {
+      // If personal is selected, personal discord username is required
+      if (newRegionDiscordTag === 'personal' && !personalDiscordUsername.trim()) {
+        alert('Discord username is required for personal submissions.')
+        setPersonalDiscordModalOpen(true)
+        return
+      }
+      // Only require manual Discord username for anonymous users (non-personal)
+      if (newRegionDiscordTag !== 'personal' && !isLoggedIn && !submitterDiscordUsername.trim()) {
         alert('Please enter your Discord Username')
         return
       }
@@ -401,17 +411,23 @@ export default function RegionDetail() {
         // Super admin can update directly
         await axios.put(`/api/regions/${rx}/${ry}/${rz}`, { custom_name: newRegionName.trim() })
       } else {
+        // Determine the username to submit
+        let usernameToSubmit = effectiveUsername
+        if (newRegionDiscordTag === 'personal') {
+          usernameToSubmit = personalDiscordUsername.trim()
+        }
         // Others submit for approval with Discord info
         await axios.post(`/api/regions/${rx}/${ry}/${rz}/submit`, {
           proposed_name: newRegionName.trim(),
           discord_tag: newRegionDiscordTag,
-          personal_discord_username: effectiveUsername
+          personal_discord_username: usernameToSubmit
         })
       }
       setEditNameModalOpen(false)
       setNewRegionName('')
       setNewRegionDiscordTag(null)
       setSubmitterDiscordUsername('')
+      setPersonalDiscordUsername('')
       loadData()
       alert(auth?.isSuperAdmin ? 'Region name updated!' : 'Name submitted for approval!')
     } catch (err) {
@@ -552,6 +568,13 @@ export default function RegionDetail() {
               className="bg-purple-600 hover:bg-purple-700"
               onClick={() => {
                 setNewRegionName(region?.custom_name || '')
+                // Set default discord tag for logged-in partners/sub-admins
+                if (auth?.isAdmin && !auth?.isSuperAdmin && auth?.user?.discord_tag) {
+                  setNewRegionDiscordTag(auth.user.discord_tag)
+                } else {
+                  setNewRegionDiscordTag(null)
+                }
+                setPersonalDiscordUsername('')
                 setEditNameModalOpen(true)
               }}
             >
@@ -1003,49 +1026,81 @@ export default function RegionDetail() {
                       !newRegionDiscordTag ? 'border-red-500' : 'border-gray-600 focus:border-purple-500'
                     }`}
                     value={newRegionDiscordTag || ''}
-                    onChange={e => setNewRegionDiscordTag(e.target.value || null)}
+                    onChange={e => {
+                      const value = e.target.value
+                      if (value === 'personal') {
+                        // Open modal to collect discord username
+                        setPersonalDiscordModalOpen(true)
+                        setPendingPersonalSelection(true)
+                      } else {
+                        setNewRegionDiscordTag(value || null)
+                        // Clear personal discord username if switching away from personal
+                        if (newRegionDiscordTag === 'personal') {
+                          setPersonalDiscordUsername('')
+                        }
+                      }
+                    }}
                     required
                   >
                     <option value="">-- Select Community (Required) --</option>
-                    {discordTags.map(t => (
+                    {discordTags.filter(t => t.tag !== 'Personal').map(t => (
                       <option key={t.tag} value={t.tag}>{t.name} ({t.tag})</option>
                     ))}
+                    <option value="personal">Personal (No Community Affiliation)</option>
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
-                    Which Discord community will review this region name?
+                    Select which Discord community will review this region name, or "Personal" if not affiliated.
                   </p>
+                  {/* Show personal discord username if personal is selected */}
+                  {newRegionDiscordTag === 'personal' && personalDiscordUsername && (
+                    <div className="mt-2 p-2 bg-fuchsia-900/30 border border-fuchsia-500 rounded flex justify-between items-center">
+                      <span className="text-fuchsia-300">
+                        Discord Username: <strong>{personalDiscordUsername}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        className="text-fuchsia-400 hover:text-fuchsia-200 text-sm underline"
+                        onClick={() => setPersonalDiscordModalOpen(true)}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* For logged-in users, show their username; for anonymous, show input field */}
-                {auth?.isAdmin ? (
-                  <div>
-                    <label className="block text-sm font-semibold mb-2">Submitting As</label>
-                    <div className="w-full px-3 py-2 rounded border border-gray-600 bg-gray-700 text-gray-300">
-                      {auth?.user?.username || 'Unknown'}
+                {/* Only show when NOT personal tag */}
+                {newRegionDiscordTag !== 'personal' && (
+                  auth?.isAdmin ? (
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Submitting As</label>
+                      <div className="w-full px-3 py-2 rounded border border-gray-600 bg-gray-700 text-gray-300">
+                        {auth?.user?.username || 'Unknown'}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Your logged-in username will be used for tracking
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Your logged-in username will be used for tracking
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-sm font-semibold mb-2">
-                      Your Discord Username <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={submitterDiscordUsername}
-                      onChange={e => setSubmitterDiscordUsername(e.target.value)}
-                      placeholder="e.g., YourName#1234"
-                      className={`w-full px-3 py-2 rounded border bg-gray-800 focus:outline-none ${
-                        !submitterDiscordUsername.trim() ? 'border-red-500' : 'border-gray-600 focus:border-purple-500'
-                      }`}
-                      required
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      So we can contact you if needed
-                    </p>
-                  </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">
+                        Your Discord Username <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={submitterDiscordUsername}
+                        onChange={e => setSubmitterDiscordUsername(e.target.value)}
+                        placeholder="e.g., YourName#1234"
+                        className={`w-full px-3 py-2 rounded border bg-gray-800 focus:outline-none ${
+                          !submitterDiscordUsername.trim() ? 'border-red-500' : 'border-gray-600 focus:border-purple-500'
+                        }`}
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        So we can contact you if needed
+                      </p>
+                    </div>
+                  )
                 )}
               </>
             )}
@@ -1068,6 +1123,66 @@ export default function RegionDetail() {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Personal Discord Username Modal */}
+      {personalDiscordModalOpen && (
+        <Modal
+          title="Personal Discord Username"
+          onClose={() => {
+            setPersonalDiscordModalOpen(false)
+            if (pendingPersonalSelection && !personalDiscordUsername.trim()) {
+              // Cancel the personal selection if no username provided
+              setPendingPersonalSelection(false)
+            }
+          }}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-400">
+              Since you selected "Personal" (no community affiliation), please provide your Discord username so we can contact you about this region name submission.
+            </p>
+            <div>
+              <label className="block text-sm font-semibold mb-2">
+                Your Discord Username <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={personalDiscordUsername}
+                onChange={e => setPersonalDiscordUsername(e.target.value)}
+                placeholder="e.g., YourName#1234"
+                className="w-full px-3 py-2 rounded border border-gray-600 bg-gray-800 focus:border-fuchsia-500 focus:outline-none"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                className="bg-fuchsia-600 hover:bg-fuchsia-700"
+                onClick={() => {
+                  if (!personalDiscordUsername.trim()) {
+                    alert('Discord username is required')
+                    return
+                  }
+                  // Set the discord_tag to personal and close modal
+                  setNewRegionDiscordTag('personal')
+                  setPendingPersonalSelection(false)
+                  setPersonalDiscordModalOpen(false)
+                }}
+              >
+                Confirm
+              </Button>
+              <Button
+                className="bg-gray-600 hover:bg-gray-700"
+                onClick={() => {
+                  setPersonalDiscordModalOpen(false)
+                  setPersonalDiscordUsername('')
+                  setPendingPersonalSelection(false)
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

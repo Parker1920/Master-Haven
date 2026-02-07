@@ -29,13 +29,14 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     planet_id: '',
     moon_id: '',
     location_name: '',
-    discovered_by: '',
-    discord_user_id: '',
+    discord_username: '',
+    discord_tag: '',
     evidence_urls: ''
   })
 
   const [photos, setPhotos] = useState([]) // Array of { file, preview, uploaded, path }
   const [systems, setSystems] = useState([])
+  const [communities, setCommunities] = useState([]) // For discord_tag dropdown
   const [selectedSystem, setSelectedSystem] = useState(null)
   const [systemSearch, setSystemSearch] = useState('')
   const [showSystemDropdown, setShowSystemDropdown] = useState(false)
@@ -45,6 +46,14 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
 
   const fileInputRef = useRef(null)
   const systemSearchRef = useRef(null)
+
+  // Fetch communities for dropdown on mount
+  useEffect(() => {
+    fetch('/api/discord_tags')
+      .then(r => r.json())
+      .then(data => setCommunities(data.tags || []))
+      .catch(() => setCommunities([{ tag: 'Personal', name: 'Personal (Not affiliated)' }]))
+  }, [])
 
   // Reset form when modal opens
   useEffect(() => {
@@ -57,8 +66,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         planet_id: '',
         moon_id: '',
         location_name: '',
-        discovered_by: '',
-        discord_user_id: '',
+        discord_username: '',
+        discord_tag: '',
         evidence_urls: ''
       })
       setPhotos([])
@@ -189,8 +198,12 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       setError('Discovery Name is required')
       return
     }
-    if (!form.discovered_by.trim()) {
-      setError('Discovered By is required')
+    if (!form.discord_username.trim()) {
+      setError('Discord Username is required')
+      return
+    }
+    if (!form.discord_tag) {
+      setError('Community (Discord Tag) is required')
       return
     }
 
@@ -214,8 +227,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         planet_id: form.planet_id ? parseInt(form.planet_id) : null,
         moon_id: form.moon_id ? parseInt(form.moon_id) : null,
         location_name: form.location_name.trim() || null,
-        discovered_by: form.discovered_by.trim(),
-        discord_user_id: form.discord_user_id.trim() || null,
+        discord_username: form.discord_username.trim(),
+        discord_tag: form.discord_tag,
         photo_url: primaryPhoto || null,
         evidence_urls: allEvidence.length > 0 ? allEvidence.join(',') : null
       }
@@ -392,25 +405,28 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
             Credits
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label={<>Discovered By <span className="text-red-400">*</span></>}>
+            <FormField label={<>Discord Username <span className="text-red-400">*</span></>} hint="Your Discord username for crediting">
               <input
                 type="text"
                 className="w-full p-2 rounded"
                 style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                value={form.discovered_by}
-                onChange={e => setField('discovered_by', e.target.value)}
-                placeholder="In-game name or real name"
+                value={form.discord_username}
+                onChange={e => setField('discord_username', e.target.value)}
+                placeholder="e.g., username or username#1234"
               />
             </FormField>
-            <FormField label="Discord Username" hint="For crediting on Discord">
-              <input
-                type="text"
+            <FormField label={<>Community <span className="text-red-400">*</span></>} hint="Which community are you submitting for?">
+              <select
                 className="w-full p-2 rounded"
                 style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                value={form.discord_user_id}
-                onChange={e => setField('discord_user_id', e.target.value)}
-                placeholder="e.g., username#1234"
-              />
+                value={form.discord_tag}
+                onChange={e => setField('discord_tag', e.target.value)}
+              >
+                <option value="">Select community...</option>
+                {communities.map(c => (
+                  <option key={c.tag} value={c.tag}>{c.name}</option>
+                ))}
+              </select>
             </FormField>
           </div>
         </div>

@@ -5047,8 +5047,8 @@ async def list_discord_tags():
             WHERE discord_tag IS NOT NULL AND is_active = 1
             ORDER BY display_name
         ''')
-        # Start with Haven as the primary tag (super admin's community)
-        tags = [{'tag': 'Haven', 'name': 'Haven'}]
+        # Start with Personal option for individual submissions
+        tags = [{'tag': 'Personal', 'name': 'Personal (Not affiliated)'}]
         # Add partner tags
         tags.extend([{'tag': row['discord_tag'], 'name': row['display_name'] or row['username']} for row in cursor.fetchall()])
         return {'tags': tags}
@@ -9889,8 +9889,8 @@ async def create_discovery(payload: dict):
 
         cursor.execute('''
             INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug, discord_tag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             discovery_type,
             discovery_name,
@@ -9901,7 +9901,7 @@ async def create_discovery(payload: dict):
             location_name,
             payload.get('description') or '',
             payload.get('significance') or 'Notable',
-            payload.get('discovered_by') or 'anonymous',
+            payload.get('discord_username') or 'anonymous',  # Use discord_username as discoverer
             submission_ts,
             payload.get('mystery_tier') or 1,
             payload.get('analysis_status') or 'pending',
@@ -9911,6 +9911,7 @@ async def create_discovery(payload: dict):
             payload.get('photo_url'),
             payload.get('evidence_urls'),
             type_slug,
+            payload.get('discord_tag'),  # Community tag for filtering
         ))
         conn.commit()
         discovery_id = cursor.lastrowid
