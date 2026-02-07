@@ -22,7 +22,7 @@ RUN npm ci --legacy-peer-deps
 # Copy source files needed for build
 COPY src/ ./src/
 COPY public/ ./public/
-COPY index.html vite.config.js tailwind.config.js postcss.config.js ./
+COPY index.html vite.config.mjs tailwind.config.cjs postcss.config.cjs ./
 
 # Build the frontend
 RUN npm run build
