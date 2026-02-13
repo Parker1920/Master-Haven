@@ -8,8 +8,6 @@
 # Keeper Discord Bot - maintained separately
 keeper-discord-bot-main/
 
-# Round Table AI - private/internal
-roundtable_ai/
 
 # -----------------
 # ENVIRONMENT & SECRETS
@@ -209,3 +207,10 @@ NMS-Haven-Extractor/RUN_DEBUG_TEST.bat
 NMS-Haven-Extractor/ANALYZE_DUMP.bat
 NMS-Haven-Extractor/logs/
 NMS-Haven-Extractor/haven_extractor_mod/
+
+# -----------------
+# NMS-DEBUG-ENABLER ANALYSIS FILES
+# -----------------
+# Large binary analysis outputs (14MB+ symbol dumps, string extractions)
+NMS-Debug-Enabler/analysis/
+NMS-Debug-Enabler/*.log
