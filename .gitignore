@@ -28,7 +28,6 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-# Note: NOT excluding dist/ globally - Haven-UI/dist/ contains production build
 downloads/
 eggs/
 .eggs/
@@ -90,8 +89,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Build outputs (keep dist for production, but not during dev)
-# Haven-UI/dist/  # Uncomment if you don't want to track production builds
+# Build outputs - Docker rebuilds frontend at container build time
+Haven-UI/dist/
 
 # -----------------
 # IDE & EDITORS

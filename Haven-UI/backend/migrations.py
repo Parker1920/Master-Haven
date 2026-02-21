@@ -2134,3 +2134,96 @@ def migration_1_33_0_discovery_tags_event_types(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.33.0")
+
+
+@register_migration("1.34.0", "Discovery system linking, stub systems, pending discoveries approval")
+def migration_1_34_0_discovery_system_linking(conn: sqlite3.Connection):
+    """
+    Feb 2026 - Discovery System Linking & Approval Workflow.
+
+    Adds:
+    - is_stub column to systems table for minimal placeholder systems
+    - type_metadata column to discoveries table for type-specific fields (JSON)
+    - pending_discoveries table for discovery approval workflow
+      (mirrors pending_systems pattern with discord_tag scoping)
+
+    Stub systems are created inline during discovery submission when
+    the system doesn't exist yet. They have is_stub=1 and display a
+    public badge indicating they need full data.
+
+    Pending discoveries follow the same approval rules as systems:
+    - Partners approve their own community's discoveries
+    - Super admin approves Haven + personal submissions
+    - Self-approval prevention
+    """
+    cursor = conn.cursor()
+
+    # Add is_stub to systems table
+    try:
+        cursor.execute('ALTER TABLE systems ADD COLUMN is_stub INTEGER DEFAULT 0')
+        logger.info("Added is_stub column to systems table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Add type_metadata to discoveries table (JSON string for type-specific fields)
+    try:
+        cursor.execute('ALTER TABLE discoveries ADD COLUMN type_metadata TEXT')
+        logger.info("Added type_metadata column to discoveries table")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' not in str(e).lower():
+            raise
+
+    # Index on is_stub for filtering
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_is_stub ON systems(is_stub)')
+    logger.info("Created idx_systems_is_stub index")
+
+    # Create pending_discoveries table
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='pending_discoveries'
+    """)
+    if not cursor.fetchone():
+        cursor.execute('''
+            CREATE TABLE pending_discoveries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discovery_data TEXT,
+                discovery_name TEXT,
+                discovery_type TEXT,
+                type_slug TEXT,
+                system_id INTEGER,
+                system_name TEXT,
+                planet_name TEXT,
+                moon_name TEXT,
+                location_type TEXT,
+                discord_tag TEXT,
+                submitted_by TEXT,
+                submitted_by_ip TEXT,
+                submitter_account_id INTEGER,
+                submitter_account_type TEXT,
+                submission_date TEXT,
+                photo_url TEXT,
+                status TEXT DEFAULT 'pending',
+                reviewed_by TEXT,
+                review_date TEXT,
+                rejection_reason TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_disc_status ON pending_discoveries(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_disc_discord_tag ON pending_discoveries(discord_tag)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_disc_submission_date ON pending_discoveries(submission_date DESC)')
+        logger.info("Created pending_discoveries table with indexes")
+    else:
+        logger.info("pending_discoveries table already exists")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.34.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.34.0")

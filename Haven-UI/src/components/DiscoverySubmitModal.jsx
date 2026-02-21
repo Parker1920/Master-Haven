@@ -20,6 +20,59 @@ const DISCOVERY_TYPES = [
   { value: '🆕', label: '🆕 Other' }
 ]
 
+// Simplified type-specific fields (2-3 per type, matching backend DISCOVERY_TYPE_FIELDS)
+const TYPE_FIELDS = {
+  '🦗': [
+    { key: 'species_name', label: 'Species Name', placeholder: 'Proc-gen name from scanner' },
+    { key: 'behavior', label: 'Behavior', placeholder: 'Aggressive, Passive, Herd Animal...' },
+  ],
+  '🌿': [
+    { key: 'species_name', label: 'Species Name', placeholder: 'Proc-gen name from scanner' },
+    { key: 'biome', label: 'Biome', placeholder: 'Toxic Swamps, Lush Forest...' },
+  ],
+  '💎': [
+    { key: 'resource_type', label: 'Resource Type', placeholder: 'Storm Crystals, Runaway Mold...' },
+    { key: 'deposit_richness', label: 'Deposit Richness', placeholder: 'Common, Rare, Extraordinary' },
+  ],
+  '🏛️': [
+    { key: 'age_era', label: 'Age / Era', placeholder: 'Pre-Atlas, Ancient, Unknown' },
+    { key: 'associated_race', label: 'Associated Race', placeholder: "Gek, Korvax, Vy'keen..." },
+  ],
+  '📜': [
+    { key: 'language_status', label: 'Language / Decryption', placeholder: 'Gek Language, Encrypted...' },
+    { key: 'author_origin', label: 'Author / Origin', placeholder: 'Unknown Traveler, Atlas Entity...' },
+  ],
+  '🦴': [
+    { key: 'species_type', label: 'Species Type', placeholder: 'Large Predator, Aquatic Life...' },
+    { key: 'estimated_age', label: 'Estimated Age', placeholder: 'Ancient, Millions of years old...' },
+  ],
+  '👽': [
+    { key: 'structure_type', label: 'Structure Type', placeholder: 'Monolith, Portal, Observatory...' },
+    { key: 'operational_status', label: 'Status', placeholder: 'Functional, Dormant, Damaged...' },
+  ],
+  '🚀': [
+    { key: 'ship_type', label: 'Ship Type', placeholder: 'Hauler, Fighter, Explorer, Exotic...' },
+    { key: 'ship_class', label: 'Ship Class', placeholder: 'C, B, A, S' },
+  ],
+  '⚙️': [
+    { key: 'tool_type', label: 'Multi-tool Type', placeholder: 'Pistol, Rifle, Experimental...' },
+    { key: 'tool_class', label: 'Class', placeholder: 'C, B, A, S' },
+  ],
+  '📖': [
+    { key: 'story_type', label: 'Story Type', placeholder: 'Journal Entry, Theory, Fiction...' },
+  ],
+  '🏠': [
+    { key: 'base_type', label: 'Base Type', placeholder: 'Farm, Trading Post, Monument...' },
+  ],
+  '🆕': [],
+}
+
+// Galaxy options for stub creation
+const GALAXIES = [
+  'Euclid', 'Hilbert Dimension', 'Calypso', 'Hesperius Dimension', 'Hyades',
+  'Ickjamatew', 'Budullangr', 'Kikolgallr', 'Eltiensleen', 'Eissentam'
+]
+
 export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
   const [form, setForm] = useState({
     discovery_name: '',
@@ -28,21 +81,30 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     system_id: '',
     planet_id: '',
     moon_id: '',
+    location_type: 'planet',
     location_name: '',
     discord_username: '',
     discord_tag: '',
     evidence_urls: ''
   })
 
-  const [photos, setPhotos] = useState([]) // Array of { file, preview, uploaded, path }
+  const [typeMetadata, setTypeMetadata] = useState({})
+  const [photos, setPhotos] = useState([])
   const [systems, setSystems] = useState([])
-  const [communities, setCommunities] = useState([]) // For discord_tag dropdown
+  const [communities, setCommunities] = useState([])
   const [selectedSystem, setSelectedSystem] = useState(null)
   const [systemSearch, setSystemSearch] = useState('')
   const [showSystemDropdown, setShowSystemDropdown] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
+
+  // Stub system creation state
+  const [showCreateSystem, setShowCreateSystem] = useState(false)
+  const [stubForm, setStubForm] = useState({ name: '', galaxy: 'Euclid', glyph_code: '' })
+  const [creatingStub, setCreatingStub] = useState(false)
+  const [isStubSystem, setIsStubSystem] = useState(false)
 
   const fileInputRef = useRef(null)
   const systemSearchRef = useRef(null)
@@ -65,15 +127,21 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         system_id: '',
         planet_id: '',
         moon_id: '',
+        location_type: 'planet',
         location_name: '',
         discord_username: '',
         discord_tag: '',
         evidence_urls: ''
       })
+      setTypeMetadata({})
       setPhotos([])
       setSelectedSystem(null)
       setSystemSearch('')
       setError('')
+      setSuccessMessage('')
+      setShowCreateSystem(false)
+      setStubForm({ name: '', galaxy: 'Euclid', glyph_code: '' })
+      setIsStubSystem(false)
     }
   }, [isOpen])
 
@@ -104,9 +172,17 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     }
     fetch(`/api/systems/${form.system_id}`)
       .then(r => r.json())
-      .then(data => setSelectedSystem(data))
+      .then(data => {
+        setSelectedSystem(data)
+        setIsStubSystem(!!data.is_stub)
+      })
       .catch(() => setSelectedSystem(null))
   }, [form.system_id])
+
+  // Clear type metadata when discovery type changes
+  useEffect(() => {
+    setTypeMetadata({})
+  }, [form.discovery_type])
 
   function setField(key, value) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -118,6 +194,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     setField('moon_id', '')
     setSystemSearch(sys.name)
     setShowSystemDropdown(false)
+    setShowCreateSystem(false)
+    setIsStubSystem(!!sys.is_stub)
   }
 
   function clearSystem() {
@@ -126,6 +204,44 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     setField('moon_id', '')
     setSystemSearch('')
     setSelectedSystem(null)
+    setIsStubSystem(false)
+  }
+
+  // Create stub system
+  async function handleCreateStub(e) {
+    e.preventDefault()
+    if (!stubForm.name.trim()) return
+
+    setCreatingStub(true)
+    try {
+      const res = await fetch('/api/systems/stub', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: stubForm.name.trim(),
+          galaxy: stubForm.galaxy,
+          glyph_code: stubForm.glyph_code.trim() || null,
+          discord_tag: form.discord_tag || null
+        })
+      })
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.detail || 'Failed to create system')
+      }
+
+      const data = await res.json()
+      // Auto-select the created/found system
+      setField('system_id', data.system_id)
+      setSystemSearch(data.name)
+      setShowCreateSystem(false)
+      setIsStubSystem(data.is_stub !== false)
+      setShowSystemDropdown(false)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreatingStub(false)
+    }
   }
 
   // Photo handling
@@ -146,7 +262,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       const photoEntry = { file, preview, uploaded: false, path: null }
       newPhotos.push(photoEntry)
 
-      // Upload immediately
       try {
         const formData = new FormData()
         formData.append('file', file)
@@ -176,7 +291,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     })
   }
 
-  // Drag and drop
   function handleDragOver(e) {
     e.preventDefault()
     e.stopPropagation()
@@ -192,10 +306,19 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setSuccessMessage('')
 
     // Validation
     if (!form.discovery_name.trim()) {
       setError('Discovery Name is required')
+      return
+    }
+    if (!form.discovery_type) {
+      setError('Discovery Type is required')
+      return
+    }
+    if (!form.system_id) {
+      setError('System is required. Search for a system or create a new one.')
       return
     }
     if (!form.discord_username.trim()) {
@@ -215,25 +338,35 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       const primaryPhoto = uploadedPhotos[0]?.path || ''
       const evidencePhotos = uploadedPhotos.slice(1).map(p => p.path)
 
-      // Combine evidence photos with external URLs
       const externalUrls = form.evidence_urls.split('\n').map(s => s.trim()).filter(Boolean)
       const allEvidence = [...evidencePhotos, ...externalUrls]
 
+      // Build type_metadata from filled fields
+      const metadata = {}
+      const fields = TYPE_FIELDS[form.discovery_type] || []
+      for (const field of fields) {
+        if (typeMetadata[field.key]?.trim()) {
+          metadata[field.key] = typeMetadata[field.key].trim()
+        }
+      }
+
       const payload = {
         discovery_name: form.discovery_name.trim(),
-        discovery_type: form.discovery_type || null,
+        discovery_type: form.discovery_type,
         description: form.description.trim() || null,
-        system_id: form.system_id ? parseInt(form.system_id) : null,
+        system_id: form.system_id,
         planet_id: form.planet_id ? parseInt(form.planet_id) : null,
         moon_id: form.moon_id ? parseInt(form.moon_id) : null,
+        location_type: form.location_type,
         location_name: form.location_name.trim() || null,
         discord_username: form.discord_username.trim(),
         discord_tag: form.discord_tag,
         photo_url: primaryPhoto || null,
-        evidence_urls: allEvidence.length > 0 ? allEvidence.join(',') : null
+        evidence_urls: allEvidence.length > 0 ? allEvidence.join(',') : null,
+        type_metadata: Object.keys(metadata).length > 0 ? metadata : null
       }
 
-      const res = await fetch('/api/discoveries', {
+      const res = await fetch('/api/submit_discovery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -244,7 +377,10 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         throw new Error(errData.detail || errData.message || 'Failed to submit discovery')
       }
 
-      onSuccess?.()
+      setSuccessMessage('Discovery submitted for approval! A community leader will review it shortly.')
+      setTimeout(() => {
+        onSuccess?.()
+      }, 2000)
     } catch (err) {
       setError(err.message || 'An error occurred')
     } finally {
@@ -252,9 +388,12 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     }
   }
 
-  const planets = selectedSystem?.planets || []
-  const selectedPlanet = planets.find(p => p.id === parseInt(form.planet_id))
-  const moons = selectedPlanet?.moons || []
+  const planets = (selectedSystem?.planets || []).filter(p => !p.is_moon)
+  const allPlanetsIncludingMoons = selectedSystem?.planets || []
+  const selectedPlanet = allPlanetsIncludingMoons.find(p => p.id === parseInt(form.planet_id))
+  // Flatten all moons across all planets for the moon dropdown
+  const allMoons = planets.flatMap(p => (p.moons || []).map(m => ({ ...m, parentPlanetName: p.name })))
+  const typeFields = TYPE_FIELDS[form.discovery_type] || []
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Submit Discovery">
@@ -264,60 +403,25 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
             {error}
           </div>
         )}
-
-        {/* Basic Info Section */}
-        <div className="mb-6">
-          <h4 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--app-primary)' }}>
-            Basic Info
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label={<>Discovery Name <span className="text-red-400">*</span></>}>
-              <input
-                type="text"
-                className="w-full p-2 rounded"
-                style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                value={form.discovery_name}
-                onChange={e => setField('discovery_name', e.target.value)}
-                placeholder="e.g., Giant Sand Worm"
-              />
-            </FormField>
-            <FormField label="Discovery Type">
-              <select
-                className="w-full p-2 rounded"
-                style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                value={form.discovery_type}
-                onChange={e => setField('discovery_type', e.target.value)}
-              >
-                {DISCOVERY_TYPES.map(t => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </FormField>
+        {successMessage && (
+          <div className="mb-4 p-3 rounded text-sm" style={{ backgroundColor: 'rgba(34,197,94,0.2)', color: '#86efac' }}>
+            {successMessage}
           </div>
-          <FormField label="Description">
-            <textarea
-              className="w-full p-2 rounded"
-              style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)', minHeight: 80 }}
-              value={form.description}
-              onChange={e => setField('description', e.target.value)}
-              placeholder="Describe the discovery, any notable characteristics, behaviors, etc."
-            />
-          </FormField>
-        </div>
+        )}
 
-        {/* Location Section */}
+        {/* Location Section - System Required */}
         <div className="mb-6">
           <h4 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--app-primary)' }}>
-            Location
+            Location <span className="text-red-400">*</span>
           </h4>
-          <FormField label="System" hint="Search by system name to link this discovery">
+          <FormField label={<>System <span className="text-red-400">*</span></>} hint="Search for the system where you made this discovery">
             <div className="relative">
               <div className="flex gap-2">
                 <input
                   ref={systemSearchRef}
                   type="text"
                   className="flex-1 p-2 rounded"
-                  style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                  style={{ backgroundColor: 'var(--app-bg)', border: `1px solid ${form.system_id ? 'var(--app-primary)' : 'var(--app-accent-3)'}` }}
                   value={systemSearch}
                   onChange={e => {
                     setSystemSearch(e.target.value)
@@ -331,9 +435,11 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
                   <Button type="button" variant="ghost" onClick={clearSystem}>Clear</Button>
                 )}
               </div>
-              {showSystemDropdown && systems.length > 0 && (
+
+              {/* System search results dropdown */}
+              {showSystemDropdown && systemSearch.length >= 2 && (
                 <div
-                  className="absolute z-10 w-full mt-1 rounded shadow-lg max-h-48 overflow-y-auto"
+                  className="absolute z-10 w-full mt-1 rounded shadow-lg max-h-60 overflow-y-auto"
                   style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
                 >
                   {systems.map(sys => (
@@ -343,58 +449,286 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
                       style={{ borderBottom: '1px solid var(--app-accent-3)' }}
                       onClick={() => selectSystem(sys)}
                     >
-                      <div className="font-medium">{sys.name}</div>
-                      {sys.galaxy && <div className="text-xs muted">{sys.galaxy}</div>}
+                      <div className="font-medium flex items-center gap-2">
+                        {sys.name}
+                        {sys.is_stub === 1 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium">Stub</span>
+                        )}
+                      </div>
+                      {sys.galaxy && <div className="text-xs muted">{sys.galaxy}{sys.planet_count ? ` - ${sys.planet_count} planets` : ''}</div>}
                     </div>
                   ))}
+
+                  {/* Create New System button */}
+                  <div
+                    className="p-3 cursor-pointer text-center font-medium"
+                    style={{ color: 'var(--app-primary)', borderTop: '2px solid var(--app-accent-3)' }}
+                    onClick={() => {
+                      setShowSystemDropdown(false)
+                      setShowCreateSystem(true)
+                      setStubForm(prev => ({ ...prev, name: systemSearch }))
+                    }}
+                  >
+                    + Create New System
+                  </div>
+                </div>
+              )}
+
+              {/* No results message with create option */}
+              {showSystemDropdown && systemSearch.length >= 2 && systems.length === 0 && (
+                <div
+                  className="absolute z-10 w-full mt-1 rounded shadow-lg"
+                  style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+                >
+                  <div className="p-3 text-sm muted text-center">No systems found</div>
+                  <div
+                    className="p-3 cursor-pointer text-center font-medium"
+                    style={{ color: 'var(--app-primary)', borderTop: '1px solid var(--app-accent-3)' }}
+                    onClick={() => {
+                      setShowSystemDropdown(false)
+                      setShowCreateSystem(true)
+                      setStubForm(prev => ({ ...prev, name: systemSearch }))
+                    }}
+                  >
+                    + Create New System
+                  </div>
                 </div>
               )}
             </div>
           </FormField>
 
-          {selectedSystem && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField label="Planet">
-                <select
-                  className="w-full p-2 rounded"
-                  style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                  value={form.planet_id}
-                  onChange={e => {
-                    setField('planet_id', e.target.value)
-                    setField('moon_id', '')
-                  }}
-                >
-                  <option value="">Select planet...</option>
-                  {planets.map(p => (
-                    <option key={p.id} value={p.id}>{p.name || `Planet ${p.planet_index || p.id}`}</option>
-                  ))}
-                </select>
-              </FormField>
-              <FormField label="Moon (optional)">
-                <select
-                  className="w-full p-2 rounded"
-                  style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-                  value={form.moon_id}
-                  onChange={e => setField('moon_id', e.target.value)}
-                  disabled={!form.planet_id || moons.length === 0}
-                >
-                  <option value="">Select moon...</option>
-                  {moons.map(m => (
-                    <option key={m.id} value={m.id}>{m.name || `Moon ${m.id}`}</option>
-                  ))}
-                </select>
-              </FormField>
+          {/* Selected system badge */}
+          {form.system_id && isStubSystem && (
+            <div className="mb-3 p-2 rounded text-sm flex items-center gap-2" style={{ backgroundColor: 'rgba(234,179,8,0.15)', border: '1px solid rgba(234,179,8,0.3)' }}>
+              <span className="text-yellow-400 font-medium">Stub System</span>
+              <span className="text-yellow-200/70">- This system has minimal data. It will need to be fully updated later.</span>
             </div>
           )}
 
-          <FormField label="Location Name" hint="Specific location on the planet (e.g., 'Near the Archive portal')">
-            <input
-              type="text"
+          {/* Inline stub creation form */}
+          {showCreateSystem && (
+            <div className="mb-4 p-4 rounded" style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-primary)' }}>
+              <h5 className="text-sm font-semibold mb-3" style={{ color: 'var(--app-primary)' }}>Create New System (Stub)</h5>
+              <p className="text-xs muted mb-3">This creates a minimal system record. Full details can be added later.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <FormField label={<>System Name <span className="text-red-400">*</span></>}>
+                  <input
+                    type="text"
+                    className="w-full p-2 rounded"
+                    style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+                    value={stubForm.name}
+                    onChange={e => setStubForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="System name"
+                  />
+                </FormField>
+                <FormField label="Galaxy">
+                  <select
+                    className="w-full p-2 rounded"
+                    style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+                    value={stubForm.galaxy}
+                    onChange={e => setStubForm(prev => ({ ...prev, galaxy: e.target.value }))}
+                  >
+                    {GALAXIES.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </FormField>
+              </div>
+              <FormField label="Glyph Code (optional)" hint="12-character hex portal code">
+                <input
+                  type="text"
+                  className="w-full p-2 rounded font-mono"
+                  style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+                  value={stubForm.glyph_code}
+                  onChange={e => setStubForm(prev => ({ ...prev, glyph_code: e.target.value }))}
+                  placeholder="e.g., 0042FA556C30"
+                  maxLength={12}
+                />
+              </FormField>
+              <div className="flex gap-2 mt-3">
+                <Button type="button" onClick={handleCreateStub} disabled={creatingStub || !stubForm.name.trim()}>
+                  {creatingStub ? 'Creating...' : 'Create System'}
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setShowCreateSystem(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Location Type Selector */}
+          {form.system_id && (
+            <>
+              <FormField label="Location Type">
+                <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--app-accent-3)' }}>
+                  {[
+                    { value: 'planet', label: 'Planet' },
+                    { value: 'moon', label: 'Moon' },
+                    { value: 'space', label: 'Space' }
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="flex-1 py-2 px-3 text-sm font-medium transition-colors"
+                      style={{
+                        backgroundColor: form.location_type === opt.value ? 'var(--app-primary)' : 'var(--app-bg)',
+                        color: form.location_type === opt.value ? '#fff' : 'inherit',
+                        borderRight: opt.value !== 'space' ? '1px solid var(--app-accent-3)' : 'none'
+                      }}
+                      onClick={() => {
+                        setField('location_type', opt.value)
+                        if (opt.value === 'space') {
+                          setField('planet_id', '')
+                          setField('moon_id', '')
+                        }
+                        if (opt.value === 'planet') {
+                          setField('moon_id', '')
+                        }
+                        if (opt.value === 'moon') {
+                          setField('planet_id', '')
+                        }
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </FormField>
+
+              {/* Planet or Moon dropdown (not both) */}
+              {form.location_type === 'planet' && (
+                isStubSystem && (!planets || planets.length === 0) ? (
+                  <FormField label="Planet Name" hint="This stub system has no planets yet - type the name">
+                    <input
+                      type="text"
+                      className="w-full p-2 rounded"
+                      style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                      value={form.location_name}
+                      onChange={e => setField('location_name', e.target.value)}
+                      placeholder="Enter planet name..."
+                    />
+                  </FormField>
+                ) : (
+                  <FormField label="Planet">
+                    <select
+                      className="w-full p-2 rounded"
+                      style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                      value={form.planet_id}
+                      onChange={e => setField('planet_id', e.target.value)}
+                    >
+                      <option value="">Select planet...</option>
+                      {planets.map(p => (
+                        <option key={p.id} value={p.id}>{p.name || `Planet ${p.planet_index || p.id}`}</option>
+                      ))}
+                    </select>
+                  </FormField>
+                )
+              )}
+
+              {form.location_type === 'moon' && (
+                isStubSystem && allMoons.length === 0 ? (
+                  <FormField label="Moon Name" hint="This stub system has no moons yet - type the name">
+                    <input
+                      type="text"
+                      className="w-full p-2 rounded"
+                      style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                      value={form.location_name}
+                      onChange={e => setField('location_name', e.target.value)}
+                      placeholder="Enter moon name..."
+                    />
+                  </FormField>
+                ) : (
+                  <FormField label="Moon">
+                    <select
+                      className="w-full p-2 rounded"
+                      style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                      value={form.moon_id}
+                      onChange={e => setField('moon_id', e.target.value)}
+                    >
+                      <option value="">Select moon...</option>
+                      {allMoons.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name || `Moon ${m.id}`}{m.parentPlanetName ? ` (${m.parentPlanetName})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                )
+              )}
+              )}
+
+              {form.location_type !== 'space' && !isStubSystem && (
+                <FormField label="Specific Location" hint="Optional: coordinates, landmark, etc.">
+                  <input
+                    type="text"
+                    className="w-full p-2 rounded"
+                    style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                    value={form.location_name}
+                    onChange={e => setField('location_name', e.target.value)}
+                    placeholder="e.g., Trading Post, Near portal, Coordinates +45.2, -12.8"
+                  />
+                </FormField>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Basic Info Section */}
+        <div className="mb-6">
+          <h4 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--app-primary)' }}>
+            Discovery Info
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label={<>Discovery Name <span className="text-red-400">*</span></>}>
+              <input
+                type="text"
+                className="w-full p-2 rounded"
+                style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                value={form.discovery_name}
+                onChange={e => setField('discovery_name', e.target.value)}
+                placeholder="e.g., Giant Sand Worm"
+              />
+            </FormField>
+            <FormField label={<>Discovery Type <span className="text-red-400">*</span></>}>
+              <select
+                className="w-full p-2 rounded"
+                style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                value={form.discovery_type}
+                onChange={e => setField('discovery_type', e.target.value)}
+              >
+                {DISCOVERY_TYPES.map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+
+          {/* Dynamic Type-Specific Fields */}
+          {typeFields.length > 0 && (
+            <div className="mt-3 p-3 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--app-accent-3)' }}>
+              <div className="text-xs muted mb-2 uppercase tracking-wide">Type Details</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {typeFields.map(field => (
+                  <FormField key={field.key} label={field.label}>
+                    <input
+                      type="text"
+                      className="w-full p-2 rounded"
+                      style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
+                      value={typeMetadata[field.key] || ''}
+                      onChange={e => setTypeMetadata(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                    />
+                  </FormField>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <FormField label="Description">
+            <textarea
               className="w-full p-2 rounded"
-              style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}
-              value={form.location_name}
-              onChange={e => setField('location_name', e.target.value)}
-              placeholder="e.g., Trading Post, Near portal, Coordinates +45.2, -12.8"
+              style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)', minHeight: 80 }}
+              value={form.description}
+              onChange={e => setField('description', e.target.value)}
+              placeholder="Describe the discovery, any notable characteristics, behaviors, etc."
             />
           </FormField>
         </div>
@@ -437,7 +771,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
             Photos & Evidence
           </h4>
 
-          {/* Photo Upload Area */}
           <div
             className="border-2 border-dashed rounded p-4 mb-4 text-center cursor-pointer transition-colors"
             style={{ borderColor: 'var(--app-accent-3)' }}
@@ -460,7 +793,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
             <div className="text-xs muted mt-1">First photo will be the main image</div>
           </div>
 
-          {/* Photo Previews */}
           {photos.length > 0 && (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-4">
               {photos.map((photo, idx) => (
@@ -509,13 +841,16 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         </div>
 
         {/* Submit Buttons */}
-        <div className="flex justify-end gap-3 pt-4" style={{ borderTop: '1px solid var(--app-accent-3)' }}>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isSubmitting || uploadingPhotos}>
-            {isSubmitting ? 'Submitting...' : 'Submit Discovery'}
-          </Button>
+        <div className="flex justify-between items-center pt-4" style={{ borderTop: '1px solid var(--app-accent-3)' }}>
+          <div className="text-xs muted">Submissions require approval from a community leader</div>
+          <div className="flex gap-3">
+            <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting || uploadingPhotos || !!successMessage}>
+              {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
+            </Button>
+          </div>
         </div>
       </form>
     </Modal>

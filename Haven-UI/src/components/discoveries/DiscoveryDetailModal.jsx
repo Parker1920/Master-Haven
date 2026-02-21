@@ -80,7 +80,12 @@ export default function DiscoveryDetailModal({
     system_id,
     system_name,
     system_galaxy,
+    planet_name,
+    moon_name,
+    system_is_stub,
+    location_type,
     location_name,
+    type_metadata,
     is_featured,
     view_count,
   } = discovery
@@ -224,7 +229,7 @@ export default function DiscoveryDetailModal({
           {/* Location */}
           <div className="mt-6">
             <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Location</h3>
-            <div className="flex flex-wrap items-center gap-4 text-gray-300">
+            <div className="flex flex-wrap items-center gap-2 text-gray-300">
               {system_id && system_name && (
                 <Link
                   to={`/systems/${system_id}`}
@@ -235,14 +240,54 @@ export default function DiscoveryDetailModal({
                   {system_galaxy && <span className="text-gray-500">({system_galaxy})</span>}
                 </Link>
               )}
-              {location_name && (
+              {system_is_stub === 1 && (
+                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                  Stub - Needs Update
+                </span>
+              )}
+              {planet_name && (
+                <span className="flex items-center gap-1 text-gray-300">
+                  <span className="text-gray-600">&rsaquo;</span>
+                  {planet_name}
+                </span>
+              )}
+              {moon_name && (
+                <span className="flex items-center gap-1 text-gray-300">
+                  <span className="text-gray-600">&rsaquo;</span>
+                  {moon_name}
+                </span>
+              )}
+              {location_type === 'space' && !planet_name && !moon_name && (
+                <span className="flex items-center gap-1 text-cyan-400">
+                  <span className="text-gray-600">&rsaquo;</span>
+                  Space
+                </span>
+              )}
+              {location_name && !planet_name && !moon_name && location_type !== 'space' && (
                 <span className="flex items-center gap-2 text-gray-400">
-                  <span className="text-gray-600">•</span>
+                  <span className="text-gray-600">&bull;</span>
                   {location_name}
                 </span>
               )}
             </div>
           </div>
+
+          {/* Type Details (metadata) */}
+          {type_metadata && typeof type_metadata === 'object' && Object.keys(type_metadata).length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Details</h3>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                {Object.entries(type_metadata).map(([key, value]) => (
+                  value && (
+                    <div key={key} className="text-sm">
+                      <span className="text-gray-500">{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}:</span>{' '}
+                      <span className="text-gray-300">{value}</span>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Metadata */}
           <div className="mt-6 pt-6 border-t border-gray-700 flex flex-wrap items-center gap-6 text-sm">

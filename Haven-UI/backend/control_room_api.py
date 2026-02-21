@@ -116,6 +116,22 @@ DISCOVERY_TYPE_INFO = {
     'other': {'emoji': '🆕', 'label': 'Other', 'color': '#6b7280'},
 }
 
+# Simplified type-specific fields for discovery submissions (2-3 per type)
+DISCOVERY_TYPE_FIELDS = {
+    'fauna':    ['species_name', 'behavior'],
+    'flora':    ['species_name', 'biome'],
+    'mineral':  ['resource_type', 'deposit_richness'],
+    'ancient':  ['age_era', 'associated_race'],
+    'history':  ['language_status', 'author_origin'],
+    'bones':    ['species_type', 'estimated_age'],
+    'alien':    ['structure_type', 'operational_status'],
+    'starship': ['ship_type', 'ship_class'],
+    'multitool':['tool_type', 'tool_class'],
+    'lore':     ['story_type'],
+    'base':     ['base_type'],
+    'other':    [],
+}
+
 
 def get_discovery_type_slug(discovery_type: str) -> str:
     """Convert discovery type emoji or text to URL-friendly slug."""
@@ -1260,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.32.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.33.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -5047,10 +5063,17 @@ async def list_discord_tags():
             WHERE discord_tag IS NOT NULL AND is_active = 1
             ORDER BY display_name
         ''')
-        # Start with Personal option for individual submissions
-        tags = [{'tag': 'Personal', 'name': 'Personal (Not affiliated)'}]
-        # Add partner tags
-        tags.extend([{'tag': row['discord_tag'], 'name': row['display_name'] or row['username']} for row in cursor.fetchall()])
+        # Start with Haven and Personal options (always available)
+        tags = [
+            {'tag': 'Haven', 'name': 'Haven'},
+            {'tag': 'Personal', 'name': 'Personal (Not affiliated)'},
+        ]
+        # Add partner tags (skip Haven if a partner already has it to avoid duplicates)
+        seen_tags = {t['tag'] for t in tags}
+        for row in cursor.fetchall():
+            if row['discord_tag'] not in seen_tags:
+                tags.append({'tag': row['discord_tag'], 'name': row['display_name'] or row['username']})
+                seen_tags.add(row['discord_tag'])
         return {'tags': tags}
     finally:
         if conn:
@@ -8341,6 +8364,135 @@ async def legacy_systems():
 async def legacy_systems_search(q: str = ''):
     return await api_search(q)
 
+@app.post('/api/systems/stub')
+async def create_system_stub(payload: dict, request: Request):
+    """
+    Create a minimal system stub for discovery linking.
+    No auth required. Rate-limited by IP (60/hr).
+
+    Required: name
+    Optional: galaxy (default Euclid), glyph_code, reality (default Normal), discord_tag
+
+    If a system with the same name or glyph_code already exists, returns it instead.
+    """
+    import uuid as uuid_mod
+
+    name = (payload.get('name') or '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail='System name is required')
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail='System name must be 100 characters or less')
+
+    galaxy = payload.get('galaxy', 'Euclid') or 'Euclid'
+    reality = payload.get('reality', 'Normal') or 'Normal'
+    glyph_code = (payload.get('glyph_code') or '').strip() or None
+    discord_tag = payload.get('discord_tag')
+
+    # Rate limit by IP
+    client_ip = request.client.host if request.client else 'unknown'
+    is_allowed, remaining = check_rate_limit(client_ip, 60, 1)
+    if not is_allowed:
+        raise HTTPException(status_code=429, detail='Rate limit exceeded. Please try again later.')
+
+    # Validate galaxy
+    if galaxy and not validate_galaxy(galaxy):
+        raise HTTPException(status_code=400, detail=f"Unknown galaxy: {galaxy}")
+
+    # Validate reality
+    if reality and not validate_reality(reality):
+        raise HTTPException(status_code=400, detail="Reality must be 'Normal' or 'Permadeath'")
+
+    # Decode glyph if provided
+    star_x, star_y, star_z = None, None, None
+    region_x, region_y, region_z = None, None, None
+    x, y, z = 0, 0, 0
+    glyph_planet, glyph_solar_system = 0, 1
+    if glyph_code:
+        try:
+            decoded = decode_glyph_to_coords(glyph_code)
+            x = decoded.get('x', 0)
+            y = decoded.get('y', 0)
+            z = decoded.get('z', 0)
+            star_x = decoded.get('star_x')
+            star_y = decoded.get('star_y')
+            star_z = decoded.get('star_z')
+            region_x = decoded.get('region_x')
+            region_y = decoded.get('region_y')
+            region_z = decoded.get('region_z')
+            glyph_planet = decoded.get('planet_index', 0)
+            glyph_solar_system = decoded.get('solar_system_index', 1)
+        except Exception as e:
+            logger.warning(f"Failed to decode glyph for stub system: {e}")
+            glyph_code = None  # Don't store invalid glyph
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check for duplicate by name (case-insensitive)
+        cursor.execute('SELECT id, name, galaxy, is_stub FROM systems WHERE LOWER(name) = LOWER(?)', (name,))
+        existing = cursor.fetchone()
+        if existing:
+            return {
+                'status': 'existing',
+                'system_id': existing['id'],
+                'name': existing['name'],
+                'galaxy': existing['galaxy'],
+                'is_stub': bool(existing['is_stub'])
+            }
+
+        # Check for duplicate by glyph_code
+        if glyph_code:
+            cursor.execute('SELECT id, name, galaxy, is_stub FROM systems WHERE glyph_code = ?', (glyph_code,))
+            existing = cursor.fetchone()
+            if existing:
+                return {
+                    'status': 'existing',
+                    'system_id': existing['id'],
+                    'name': existing['name'],
+                    'galaxy': existing['galaxy'],
+                    'is_stub': bool(existing['is_stub'])
+                }
+
+        # Create stub system
+        sys_id = str(uuid_mod.uuid4())
+        cursor.execute('''
+            INSERT INTO systems (
+                id, name, galaxy, reality, x, y, z,
+                star_x, star_y, star_z,
+                glyph_code, glyph_planet, glyph_solar_system,
+                region_x, region_y, region_z,
+                is_stub, data_source, discord_tag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'stub', ?)
+        ''', (
+            sys_id, name, galaxy, reality, x, y, z,
+            star_x, star_y, star_z,
+            glyph_code, glyph_planet, glyph_solar_system,
+            region_x, region_y, region_z,
+            discord_tag
+        ))
+        conn.commit()
+
+        logger.info(f"Created stub system '{name}' (ID: {sys_id})")
+        add_activity_log('system_stub_created', f"Stub system '{name}' created for discovery linking")
+
+        return {
+            'status': 'created',
+            'system_id': sys_id,
+            'name': name,
+            'galaxy': galaxy,
+            'is_stub': True
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating stub system: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.post('/api/save_system')
 async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
     """
@@ -8498,7 +8650,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             if editor_username and editor_username not in contributors_list:
                 contributors_list.append(editor_username)
 
-            # Update existing system (including contributor tracking)
+            # Update existing system (including contributor tracking, clear stub flag)
             cursor.execute('''
                 UPDATE systems SET
                     name = ?, galaxy = ?, reality = ?, x = ?, y = ?, z = ?,
@@ -8509,7 +8661,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     star_type = ?, economy_type = ?, economy_level = ?,
                     conflict_level = ?, dominant_lifeform = ?, discord_tag = ?,
                     stellar_classification = ?,
-                    last_updated_by = ?, last_updated_at = ?, contributors = ?
+                    last_updated_by = ?, last_updated_at = ?, contributors = ?,
+                    is_stub = 0
                 WHERE id = ?
             ''', (
                 name,
@@ -9887,10 +10040,14 @@ async def create_discovery(payload: dict):
         discovery_type = payload.get('discovery_type') or 'Unknown'
         type_slug = get_discovery_type_slug(discovery_type)
 
+        # Serialize type_metadata to JSON if provided
+        type_metadata_raw = payload.get('type_metadata')
+        type_metadata_json = json.dumps(type_metadata_raw) if type_metadata_raw and isinstance(type_metadata_raw, dict) else None
+
         cursor.execute('''
             INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug, discord_tag
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug, discord_tag, type_metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             discovery_type,
             discovery_name,
@@ -9901,7 +10058,7 @@ async def create_discovery(payload: dict):
             location_name,
             payload.get('description') or '',
             payload.get('significance') or 'Notable',
-            payload.get('discord_username') or 'anonymous',  # Use discord_username as discoverer
+            payload.get('discord_username') or payload.get('discovered_by') or 'anonymous',
             submission_ts,
             payload.get('mystery_tier') or 1,
             payload.get('analysis_status') or 'pending',
@@ -9911,7 +10068,8 @@ async def create_discovery(payload: dict):
             payload.get('photo_url'),
             payload.get('evidence_urls'),
             type_slug,
-            payload.get('discord_tag'),  # Community tag for filtering
+            payload.get('discord_tag'),
+            type_metadata_json,
         ))
         conn.commit()
         discovery_id = cursor.lastrowid
@@ -10033,11 +10191,15 @@ async def browse_discoveries(
         }
         order_by = sort_map.get(sort, 'submission_timestamp DESC')
 
-        # Fetch discoveries with system info
+        # Fetch discoveries with system, planet, moon info
         query = f'''
-            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy
+            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy,
+                   s.is_stub as system_is_stub,
+                   p.name as planet_name, m.name as moon_name
             FROM discoveries d
             LEFT JOIN systems s ON d.system_id = s.id
+            LEFT JOIN planets p ON d.planet_id = p.id
+            LEFT JOIN moons m ON d.moon_id = m.id
             {where_sql}
             ORDER BY {order_by}
             LIMIT ? OFFSET ?
@@ -10145,9 +10307,13 @@ async def get_recent_discoveries(limit: int = 8):
         # Get recent discoveries, prioritizing those with photos
         limit = min(limit, 20)
         cursor.execute('''
-            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy
+            SELECT d.*, s.name as system_name, s.galaxy as system_galaxy,
+                   s.is_stub as system_is_stub,
+                   p.name as planet_name, m.name as moon_name
             FROM discoveries d
             LEFT JOIN systems s ON d.system_id = s.id
+            LEFT JOIN planets p ON d.planet_id = p.id
+            LEFT JOIN moons m ON d.moon_id = m.id
             ORDER BY
                 CASE WHEN d.photo_url IS NOT NULL AND d.photo_url != '' THEN 0 ELSE 1 END,
                 d.submission_timestamp DESC
@@ -10173,18 +10339,34 @@ async def get_recent_discoveries(limit: int = 8):
 
 @app.get('/api/discoveries/{discovery_id}')
 async def get_discovery(discovery_id: int):
-    """Get a specific discovery by ID"""
+    """Get a specific discovery by ID with system/planet/moon info."""
     conn = None
     try:
         db_path = get_db_path()
         if db_path.exists():
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM discoveries WHERE id = ?', (discovery_id,))
+            cursor.execute('''
+                SELECT d.*, s.name as system_name, s.galaxy as system_galaxy,
+                       s.is_stub as system_is_stub,
+                       p.name as planet_name, m.name as moon_name
+                FROM discoveries d
+                LEFT JOIN systems s ON d.system_id = s.id
+                LEFT JOIN planets p ON d.planet_id = p.id
+                LEFT JOIN moons m ON d.moon_id = m.id
+                WHERE d.id = ?
+            ''', (discovery_id,))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='Discovery not found')
-            return dict(row)
+            discovery = dict(row)
+            # Parse type_metadata JSON if present
+            if discovery.get('type_metadata'):
+                try:
+                    discovery['type_metadata'] = json.loads(discovery['type_metadata'])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return discovery
 
         data = load_data_json()
         discoveries = data.get('discoveries', [])
@@ -10292,6 +10474,545 @@ async def increment_discovery_view(discovery_id: int):
     except Exception as e:
         logger.error(f"Error incrementing discovery view count: {e}")
         return {'success': False}
+    finally:
+        if conn:
+            conn.close()
+
+
+# =============================================================================
+# DISCOVERY APPROVAL WORKFLOW - Submit, Pending List, Approve, Reject
+# =============================================================================
+
+@app.post('/api/submit_discovery')
+async def submit_discovery(payload: dict, request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Submit a discovery for approval. Goes to pending_discoveries queue.
+    No auth required (rate-limited), but accepts session for logged-in users.
+    """
+    # Rate limit by IP
+    client_ip = request.client.host if request.client else 'unknown'
+    is_allowed, remaining = check_rate_limit(client_ip, 60, 1)
+    if not is_allowed:
+        raise HTTPException(status_code=429, detail='Rate limit exceeded. Please try again later.')
+
+    # Validate required fields
+    discovery_name = (payload.get('discovery_name') or '').strip()
+    if not discovery_name:
+        raise HTTPException(status_code=400, detail='Discovery name is required')
+
+    system_id = payload.get('system_id')
+    if not system_id:
+        raise HTTPException(status_code=400, detail='System is required. Please select or create a system.')
+
+    discord_username = (payload.get('discord_username') or '').strip()
+    if not discord_username:
+        raise HTTPException(status_code=400, detail='Discord username is required')
+
+    discord_tag = payload.get('discord_tag')
+    if not discord_tag:
+        raise HTTPException(status_code=400, detail='Community (discord tag) is required')
+
+    # Compute type slug
+    discovery_type = payload.get('discovery_type') or 'Unknown'
+    type_slug = get_discovery_type_slug(discovery_type)
+
+    # Serialize type_metadata
+    type_metadata_raw = payload.get('type_metadata')
+    if type_metadata_raw and isinstance(type_metadata_raw, dict):
+        payload['type_metadata'] = type_metadata_raw  # Keep as dict in JSON blob
+
+    # Check session for submitter info
+    session_data = get_session(session)
+    submitter_account_id = None
+    submitter_account_type = None
+    if session_data:
+        user_type = session_data.get('user_type')
+        if user_type == 'partner':
+            submitter_account_id = session_data.get('partner_id')
+            submitter_account_type = 'partner'
+        elif user_type == 'sub_admin':
+            submitter_account_id = session_data.get('sub_admin_id')
+            submitter_account_type = 'sub_admin'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Denormalize system_name, planet_name, moon_name for display
+        system_name = None
+        cursor.execute('SELECT name FROM systems WHERE id = ?', (str(system_id),))
+        sys_row = cursor.fetchone()
+        if sys_row:
+            system_name = sys_row['name']
+
+        planet_name = None
+        if payload.get('planet_id'):
+            cursor.execute('SELECT name FROM planets WHERE id = ?', (payload['planet_id'],))
+            p_row = cursor.fetchone()
+            if p_row:
+                planet_name = p_row['name']
+
+        moon_name = None
+        if payload.get('moon_id'):
+            cursor.execute('SELECT name FROM moons WHERE id = ?', (payload['moon_id'],))
+            m_row = cursor.fetchone()
+            if m_row:
+                moon_name = m_row['name']
+
+        # Store entire payload as JSON
+        discovery_data = json.dumps(payload)
+
+        cursor.execute('''
+            INSERT INTO pending_discoveries (
+                discovery_data, discovery_name, discovery_type, type_slug,
+                system_id, system_name, planet_name, moon_name, location_type,
+                discord_tag, submitted_by, submitted_by_ip,
+                submitter_account_id, submitter_account_type,
+                submission_date, photo_url, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        ''', (
+            discovery_data,
+            discovery_name,
+            discovery_type,
+            type_slug,
+            str(system_id),
+            system_name,
+            planet_name,
+            moon_name,
+            payload.get('location_type') or 'space',
+            discord_tag,
+            discord_username,
+            client_ip,
+            submitter_account_id,
+            submitter_account_type,
+            datetime.now(timezone.utc).isoformat(),
+            payload.get('photo_url'),
+        ))
+        conn.commit()
+        submission_id = cursor.lastrowid
+
+        logger.info(f"Discovery '{discovery_name}' submitted for approval (ID: {submission_id})")
+        add_activity_log(
+            'discovery_submitted',
+            f"Discovery '{discovery_name}' submitted for approval",
+            details=f"Type: {discovery_type}, Community: {discord_tag}",
+            user_name=discord_username
+        )
+
+        return JSONResponse({
+            'status': 'pending',
+            'message': 'Discovery submitted for approval!',
+            'submission_id': submission_id
+        }, status_code=201)
+
+    except Exception as e:
+        logger.error(f"Error submitting discovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/pending_discoveries')
+async def get_pending_discoveries(session: Optional[str] = Cookie(None)):
+    """
+    Get pending discovery submissions for approval.
+    Scoped by discord_tag like pending_systems:
+    - Super admin: sees ALL
+    - Haven sub-admins: sees Haven + additional_discord_tags (+ personal if permitted)
+    - Partners/sub-admins: sees only their discord_tag
+    Self-submissions are filtered out for non-super-admins.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False)
+    partner_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        select_cols = '''
+            id, discovery_name, discovery_type, type_slug,
+            system_name, planet_name, moon_name, location_type,
+            discord_tag, submitted_by, submission_date, photo_url,
+            status, reviewed_by, review_date, rejection_reason,
+            submitter_account_id, submitter_account_type
+        '''
+
+        if is_super:
+            cursor.execute(f'''
+                SELECT {select_cols} FROM pending_discoveries
+                ORDER BY
+                    CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
+                    submission_date DESC
+            ''')
+        elif is_haven_sub_admin:
+            additional_tags = session_data.get('additional_discord_tags', [])
+            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
+            all_tags = ['Haven'] + additional_tags
+            placeholders = ','.join(['?' for _ in all_tags])
+
+            if can_approve_personal:
+                cursor.execute(f'''
+                    SELECT {select_cols} FROM pending_discoveries
+                    WHERE discord_tag IN ({placeholders}) OR discord_tag = 'personal'
+                    ORDER BY
+                        CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
+                        submission_date DESC
+                ''', all_tags)
+            else:
+                cursor.execute(f'''
+                    SELECT {select_cols} FROM pending_discoveries
+                    WHERE discord_tag IN ({placeholders})
+                    ORDER BY
+                        CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
+                        submission_date DESC
+                ''', all_tags)
+        else:
+            cursor.execute(f'''
+                SELECT {select_cols} FROM pending_discoveries
+                WHERE discord_tag = ?
+                ORDER BY
+                    CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
+                    submission_date DESC
+            ''', (partner_tag,))
+
+        submissions = [dict(row) for row in cursor.fetchall()]
+
+        # Filter out self-submissions for non-super-admins
+        if not is_super:
+            logged_in_username = normalize_discord_username(session_data.get('username', ''))
+            logged_in_account_id = session_data.get('sub_admin_id') or session_data.get('partner_id')
+            logged_in_account_type = session_data.get('user_type')
+
+            def is_self_submission(sub):
+                if sub.get('submitter_account_id') and sub.get('submitter_account_type'):
+                    if (sub['submitter_account_id'] == logged_in_account_id and
+                        sub['submitter_account_type'] == logged_in_account_type):
+                        return True
+                if sub.get('submitted_by') and normalize_discord_username(sub['submitted_by']) == logged_in_username:
+                    return True
+                return False
+
+            submissions = [s for s in submissions if not is_self_submission(s)]
+
+        # Add type info
+        for sub in submissions:
+            slug = sub.get('type_slug') or get_discovery_type_slug(sub.get('discovery_type', ''))
+            sub['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
+
+        return {'submissions': submissions}
+
+    except Exception as e:
+        logger.error(f"Error getting pending discoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/pending_discoveries/{submission_id}')
+async def get_pending_discovery_detail(submission_id: int, session: Optional[str] = Cookie(None)):
+    """Get full details of a pending discovery submission."""
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        submission = dict(row)
+        if submission.get('discovery_data'):
+            try:
+                submission['discovery_data'] = json.loads(submission['discovery_data'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return submission
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pending discovery detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/approve_discovery/{submission_id}')
+async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(None)):
+    """
+    Approve a pending discovery submission.
+    Self-approval blocking applies (same rules as systems).
+    """
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        submission = dict(row)
+
+        if submission['status'] != 'pending':
+            raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
+
+        # Self-approval blocking for non-super-admins
+        if current_user_type != 'super_admin':
+            submitter_account_id = submission.get('submitter_account_id')
+            submitter_account_type = submission.get('submitter_account_type')
+            submitted_by = submission.get('submitted_by')
+
+            normalized_current = normalize_discord_username(current_username)
+            is_self = False
+
+            if submitter_account_id is not None and submitter_account_type:
+                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                    is_self = True
+            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
+                is_self = True
+
+            if is_self:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You cannot approve your own submission. Another admin must review it."
+                )
+
+        # Parse discovery data and insert into discoveries table
+        discovery_data = {}
+        if submission.get('discovery_data'):
+            try:
+                discovery_data = json.loads(submission['discovery_data'])
+            except (json.JSONDecodeError, TypeError):
+                discovery_data = {}
+
+        discovery_type = discovery_data.get('discovery_type') or submission.get('discovery_type') or 'Unknown'
+        type_slug = get_discovery_type_slug(discovery_type)
+        discovery_name = discovery_data.get('discovery_name') or submission.get('discovery_name') or 'Unnamed Discovery'
+
+        # Serialize type_metadata
+        type_metadata_raw = discovery_data.get('type_metadata')
+        type_metadata_json = json.dumps(type_metadata_raw) if type_metadata_raw and isinstance(type_metadata_raw, dict) else None
+
+        cursor.execute('''
+            INSERT INTO discoveries (
+                discovery_type, discovery_name, system_id, planet_id, moon_id,
+                location_type, location_name, description, significance,
+                discovered_by, submission_timestamp,
+                mystery_tier, analysis_status, pattern_matches,
+                discord_user_id, discord_guild_id,
+                photo_url, evidence_url, type_slug, discord_tag, type_metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            discovery_type,
+            discovery_name,
+            discovery_data.get('system_id'),
+            discovery_data.get('planet_id'),
+            discovery_data.get('moon_id'),
+            discovery_data.get('location_type') or 'space',
+            discovery_data.get('location_name') or '',
+            discovery_data.get('description') or '',
+            discovery_data.get('significance') or 'Notable',
+            discovery_data.get('discord_username') or submission.get('submitted_by') or 'anonymous',
+            submission.get('submission_date') or datetime.now(timezone.utc).isoformat(),
+            discovery_data.get('mystery_tier') or 1,
+            'approved',
+            0,
+            discovery_data.get('discord_user_id'),
+            discovery_data.get('discord_guild_id'),
+            discovery_data.get('photo_url') or submission.get('photo_url'),
+            discovery_data.get('evidence_urls'),
+            type_slug,
+            discovery_data.get('discord_tag') or submission.get('discord_tag'),
+            type_metadata_json,
+        ))
+        discovery_id = cursor.lastrowid
+
+        # Update pending status
+        cursor.execute('''
+            UPDATE pending_discoveries
+            SET status = 'approved', reviewed_by = ?, review_date = ?
+            WHERE id = ?
+        ''', (current_username, datetime.now(timezone.utc).isoformat(), submission_id))
+
+        # Audit log
+        cursor.execute('''
+            INSERT INTO approval_audit_log
+            (timestamp, action, submission_type, submission_id, submission_name,
+             approver_username, approver_type, approver_account_id, approver_discord_tag,
+             submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            'approved',
+            'discovery',
+            submission_id,
+            discovery_name,
+            current_username,
+            current_user_type,
+            current_account_id,
+            session_data.get('discord_tag'),
+            submission.get('submitted_by'),
+            submission.get('submitter_account_id'),
+            submission.get('submitter_account_type'),
+            submission.get('discord_tag'),
+        ))
+
+        conn.commit()
+
+        add_activity_log(
+            'discovery_approved',
+            f"Discovery '{discovery_name}' approved",
+            details=f"Type: {discovery_type}",
+            user_name=current_username
+        )
+
+        logger.info(f"Discovery '{discovery_name}' approved (pending_id: {submission_id}, discovery_id: {discovery_id})")
+        return {'status': 'ok', 'discovery_id': discovery_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving discovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/reject_discovery/{submission_id}')
+async def reject_discovery(submission_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """
+    Reject a pending discovery submission.
+    Self-rejection blocking applies (same rules as systems).
+    """
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    current_user_type = session_data.get('user_type')
+    current_username = session_data.get('username')
+    current_account_id = None
+    if current_user_type == 'partner':
+        current_account_id = session_data.get('partner_id')
+    elif current_user_type == 'sub_admin':
+        current_account_id = session_data.get('sub_admin_id')
+
+    reason = payload.get('reason', 'No reason provided')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        submission = dict(row)
+
+        if submission['status'] != 'pending':
+            raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
+
+        # Self-rejection blocking for non-super-admins
+        if current_user_type != 'super_admin':
+            submitter_account_id = submission.get('submitter_account_id')
+            submitter_account_type = submission.get('submitter_account_type')
+            submitted_by = submission.get('submitted_by')
+
+            normalized_current = normalize_discord_username(current_username)
+            is_self = False
+
+            if submitter_account_id is not None and submitter_account_type:
+                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+                    is_self = True
+            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
+                is_self = True
+
+            if is_self:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You cannot reject your own submission."
+                )
+
+        # Update status
+        cursor.execute('''
+            UPDATE pending_discoveries
+            SET status = 'rejected', reviewed_by = ?, review_date = ?, rejection_reason = ?
+            WHERE id = ?
+        ''', (current_username, datetime.now(timezone.utc).isoformat(), reason, submission_id))
+
+        # Audit log
+        discovery_name = submission.get('discovery_name', 'Unknown')
+        cursor.execute('''
+            INSERT INTO approval_audit_log
+            (timestamp, action, submission_type, submission_id, submission_name,
+             approver_username, approver_type, approver_account_id, approver_discord_tag,
+             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            'rejected',
+            'discovery',
+            submission_id,
+            discovery_name,
+            current_username,
+            current_user_type,
+            current_account_id,
+            session_data.get('discord_tag'),
+            submission.get('submitted_by'),
+            submission.get('submitter_account_id'),
+            submission.get('submitter_account_type'),
+            reason,
+            submission.get('discord_tag'),
+        ))
+
+        conn.commit()
+
+        add_activity_log(
+            'discovery_rejected',
+            f"Discovery '{discovery_name}' rejected",
+            details=f"Reason: {reason}",
+            user_name=current_username
+        )
+
+        logger.info(f"Discovery '{discovery_name}' rejected (ID: {submission_id})")
+        return {'status': 'ok', 'message': 'Discovery submission rejected'}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rejecting discovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()

@@ -55,6 +55,10 @@ export default function DiscoveryCard({
     discovered_by,
     system_name,
     system_galaxy,
+    planet_name,
+    moon_name,
+    system_is_stub,
+    location_type,
     is_featured,
   } = discovery
 
@@ -114,11 +118,18 @@ export default function DiscoveryCard({
         </h3>
 
         {/* Location */}
-        {(system_name || system_galaxy) && (
-          <div className="mt-1 text-gray-400 text-sm truncate">
+        {(system_name || system_galaxy || planet_name || moon_name) && (
+          <div className="mt-1 text-gray-400 text-sm truncate flex items-center gap-1">
             {system_name && <span>{system_name}</span>}
-            {system_name && system_galaxy && <span className="mx-1">•</span>}
-            {system_galaxy && <span>{system_galaxy}</span>}
+            {system_is_stub === 1 && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                Stub
+              </span>
+            )}
+            {planet_name && <><span className="text-gray-600 mx-0.5">&rsaquo;</span><span>{planet_name}</span></>}
+            {moon_name && <><span className="text-gray-600 mx-0.5">&rsaquo;</span><span>{moon_name}</span></>}
+            {location_type === 'space' && !planet_name && !moon_name && <><span className="text-gray-600 mx-0.5">&rsaquo;</span><span className="text-cyan-400">Space</span></>}
+            {system_galaxy && <><span className="mx-1">&bull;</span><span>{system_galaxy}</span></>}
           </div>
         )}
 
