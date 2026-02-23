@@ -443,9 +443,9 @@ export default function Wizard(){
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  className="w-full p-2 border rounded bg-gray-700 border-gray-600 font-mono uppercase"
+                  className="w-full p-2 border rounded bg-gray-700 border-gray-600 font-mono"
                   value={system.stellar_classification || ''}
-                  onChange={e => setField('stellar_classification', e.target.value.toUpperCase().slice(0, 6))}
+                  onChange={e => setField('stellar_classification', e.target.value.slice(0, 6))}
                   placeholder="e.g. G2pf, M7, O3f"
                   style={{
                     color: (() => {

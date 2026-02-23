@@ -19,6 +19,7 @@ Version Scheme: MAJOR.MINOR.PATCH
 import sqlite3
 import logging
 import shutil
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Tuple, Optional
@@ -2477,3 +2478,44 @@ def migrate_1_36_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.36.0")
+
+
+@register_migration("1.37.0", "Backfill NULL contributors from discovered_by")
+def migrate_1_37_0(conn):
+    """Fix systems with NULL contributors by populating from discovered_by field."""
+    cursor = conn.cursor()
+
+    # Find all systems with NULL or empty contributors
+    cursor.execute("""
+        SELECT id, discovered_by FROM systems
+        WHERE contributors IS NULL OR contributors = '' OR contributors = '[]'
+    """)
+    rows = cursor.fetchall()
+
+    updated = 0
+    for sys_id, discovered_by in rows:
+        if discovered_by and discovered_by != 'Unknown':
+            cursor.execute(
+                'UPDATE systems SET contributors = ? WHERE id = ?',
+                (json.dumps([discovered_by]), sys_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE systems SET contributors = '[]' WHERE id = ?",
+                (sys_id,)
+            )
+        updated += 1
+
+    logger.info(f"Backfilled contributors for {updated} systems")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.37.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.37.0")

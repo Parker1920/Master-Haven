@@ -1276,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.34.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.34.2', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -12856,6 +12856,14 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data['glyph_solar_system'] = original_glyph_data.get('glyph_solar_system', 1)
 
                 if is_edit:
+                    # Update contributors list - add submitter if not already present
+                    updater_username = submission.get('personal_discord_username') or system_data.get('discovered_by') or 'Unknown'
+                    cursor.execute('SELECT contributors FROM systems WHERE id = ?', (system_id,))
+                    contrib_row = cursor.fetchone()
+                    existing_contributors = json.loads(contrib_row[0]) if contrib_row and contrib_row[0] else []
+                    if updater_username not in existing_contributors:
+                        existing_contributors.append(updater_username)
+
                     cursor.execute('''
                         UPDATE systems
                         SET name = ?, galaxy = ?, x = ?, y = ?, z = ?,
@@ -12867,7 +12875,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             conflict_level = ?, dominant_lifeform = ?,
                             discovered_by = ?, discovered_at = ?,
                             discord_tag = ?, personal_discord_username = ?,
-                            stellar_classification = ?
+                            stellar_classification = ?,
+                            contributors = ?
                         WHERE id = ?
                     ''', (
                         system_data.get('name'),
@@ -12893,6 +12902,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
                         system_data.get('stellar_classification'),
+                        json.dumps(existing_contributors),
                         system_id
                     ))
 
@@ -12907,12 +12917,16 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     import uuid
                     system_id = str(uuid.uuid4())
 
+                    # Determine the discoverer's username for new system
+                    discoverer_username = system_data.get('discovered_by') or submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+
                     cursor.execute('''
                         INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
-                            discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
+                            contributors)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -12934,11 +12948,12 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('economy_level'),
                         system_data.get('conflict_level'),
                         system_data.get('dominant_lifeform'),
-                        system_data.get('discovered_by'),
+                        discoverer_username,
                         system_data.get('discovered_at'),
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
-                        system_data.get('stellar_classification')
+                        system_data.get('stellar_classification'),
+                        json.dumps([discoverer_username])
                     ))
 
                 # Insert planets
