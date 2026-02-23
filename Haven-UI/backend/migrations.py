@@ -2519,3 +2519,52 @@ def migrate_1_37_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.37.0")
+
+
+@register_migration("1.38.0", "Backfill contributors from pending_systems discord username")
+def migrate_1_38_0(conn):
+    """Fix systems still missing contributors by looking up the original submitter's
+    discord username from pending_systems.personal_discord_username."""
+    cursor = conn.cursor()
+
+    # Find systems still missing real contributors
+    cursor.execute("""
+        SELECT s.id, s.discovered_by, ps.personal_discord_username, ps.submitted_by
+        FROM systems s
+        LEFT JOIN pending_systems ps ON (
+            ps.system_name = s.name OR ps.edit_system_id = s.id
+        )
+        WHERE s.contributors IS NULL OR s.contributors = '' OR s.contributors = '[]'
+        GROUP BY s.id
+    """)
+    rows = cursor.fetchall()
+
+    updated = 0
+    for sys_id, discovered_by, personal_discord, submitted_by in rows:
+        # Priority: personal_discord_username (the actual form field) > submitted_by > discovered_by
+        username = personal_discord or submitted_by or discovered_by
+        if username and username != 'Unknown' and username != 'HavenExtractor':
+            cursor.execute(
+                'UPDATE systems SET contributors = ? WHERE id = ?',
+                (json.dumps([username]), sys_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE systems SET contributors = '[]' WHERE id = ?",
+                (sys_id,)
+            )
+        updated += 1
+
+    logger.info(f"Backfilled contributors from pending_systems for {updated} systems")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.38.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.38.0")
