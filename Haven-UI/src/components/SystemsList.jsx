@@ -116,6 +116,14 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
     'Power Generation': 'bg-yellow-600'
   }
 
+  // Completeness grade config (NMS-style C-B-A-S)
+  const gradeConfig = {
+    'S': { label: 'S', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', tip: 'Archive Quality' },
+    'A': { label: 'A', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', tip: 'Well Documented' },
+    'B': { label: 'B', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', tip: 'Partial Data' },
+    'C': { label: 'C', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', tip: 'Basic Info' },
+  }
+
   // Pre-defined tag colors (memoized)
   const tagColors = useMemo(() => ({
     'Haven': 'bg-cyan-500 text-white',
@@ -334,6 +342,18 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
                         {system.name || 'Unnamed System'}
                       </h3>
                       {getDiscordTagBadge(system.discord_tag)}
+                      {(() => {
+                        const grade = gradeConfig[system.completeness_grade] || gradeConfig['C']
+                        const score = system.completeness_score || 0
+                        return (
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded border font-bold ${grade.color}`}
+                            title={`${grade.tip} (${score}%)`}
+                          >
+                            {grade.label}
+                          </span>
+                        )
+                      })()}
                     </div>
 
                     {/* Glyph code */}

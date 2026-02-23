@@ -1276,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.33.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.34.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -1669,7 +1669,12 @@ async def api_galaxies_summary(
             SELECT
                 COALESCE(s.galaxy, 'Euclid') as galaxy,
                 COUNT(DISTINCT s.region_x || '-' || s.region_y || '-' || s.region_z) as region_count,
-                COUNT(*) as system_count
+                COUNT(*) as system_count,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 85 THEN 1 ELSE 0 END) as grade_s,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 65 AND COALESCE(s.is_complete, 0) < 85 THEN 1 ELSE 0 END) as grade_a,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 40 AND COALESCE(s.is_complete, 0) < 65 THEN 1 ELSE 0 END) as grade_b,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) < 40 THEN 1 ELSE 0 END) as grade_c,
+                ROUND(AVG(COALESCE(s.is_complete, 0)), 1) as avg_score
             FROM systems s
             {where_sql}
             GROUP BY COALESCE(s.galaxy, 'Euclid')
@@ -6306,6 +6311,169 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
             conn.close()
 
 
+def _is_filled(val, allow_none_sentinel=False):
+    """Check if a field value represents real data (not empty/default).
+
+    NMS has legitimate values like 'None' for sentinels (no sentinels present),
+    'Absent' for fauna/flora, and 0 for hazards on peaceful planets.
+    These are REAL data, not missing data.
+    """
+    if val is None:
+        return False
+    s = str(val).strip()
+    if not s:
+        return False
+    # 'N/A' is always a DB default placeholder, never real game data
+    if s == 'N/A':
+        return False
+    # 'None' is valid for sentinel level (means no sentinels) but is a
+    # DB default for other fields - only allow it where specified
+    if s == 'None' and not allow_none_sentinel:
+        return False
+    return True
+
+
+def calculate_completeness_score(cursor, system_id: str) -> dict:
+    """Calculate a data completeness score (0-100) for a system.
+
+    Scoring philosophy: measure how much COLLECTIBLE data we actually have.
+    Legitimate game values (sentinel='None', fauna='Absent', hazards=0) count
+    as filled. Only true nulls/DB defaults count as missing.
+
+    Returns a dict with:
+        score: int (0-100)
+        grade: str ('S', 'A', 'B', 'C')
+        breakdown: dict with category scores
+    """
+    # Fetch system row
+    cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
+    system = cursor.fetchone()
+    if not system:
+        return {'score': 0, 'grade': 'C', 'breakdown': {}}
+    system = dict(system)
+
+    # Fetch planets
+    cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
+    planets = [dict(row) for row in cursor.fetchall()]
+
+    # Fetch space station
+    cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
+    station = cursor.fetchone()
+    station = dict(station) if station else None
+
+    # --- System Core (35 pts) ---
+    # These are the 5 essential system properties everyone should fill in
+    sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
+    sys_core_filled = sum(1 for f in sys_core_fields if _is_filled(system.get(f)))
+    sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
+
+    # --- System Extra (10 pts) ---
+    # Bonus fields: glyph_code is important, stellar_classification is extractor-only, description is optional
+    sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
+    sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
+    sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
+
+    # --- Planet Coverage (10 pts) ---
+    has_planets = len(planets) > 0
+    planet_coverage_score = 10 if has_planets else 0
+
+    # --- Planet Environment avg (25 pts) ---
+    # --- Planet Life avg (15 pts) ---
+    planet_env_score = 0
+    planet_life_score = 0
+
+    if planets:
+        # Environment: biome, weather, sentinel (the 3 core environment fields)
+        # sentinel='None' is a real value (means no sentinels on planet)
+        env_fields = ['biome', 'weather']
+        env_totals = []
+        life_totals = []
+
+        for p in planets:
+            # Environment scoring
+            env_filled = 0
+            for f in env_fields:
+                if _is_filled(p.get(f)):
+                    env_filled += 1
+            # Sentinel gets special treatment: 'None' is valid (no sentinels)
+            if _is_filled(p.get('sentinel'), allow_none_sentinel=True):
+                env_filled += 1
+            # Also check display text fields as fallbacks
+            if not _is_filled(p.get('weather')) and _is_filled(p.get('weather_text')):
+                env_filled += 1  # weather_text counts for weather
+            env_total_fields = 3  # biome, weather, sentinel
+            env_totals.append(min(env_filled / env_total_fields, 1.0))
+
+            # Life scoring: fauna, flora, resources
+            life_filled = 0
+            life_total_fields = 5  # fauna, flora, 3 resources
+
+            # Fauna: check main field and display text. 'Absent'/'Empty'/'Bountiful' etc are valid
+            fauna_val = p.get('fauna')
+            fauna_text = p.get('fauna_text')
+            if _is_filled(fauna_val) or _is_filled(fauna_text):
+                life_filled += 1
+
+            # Flora: same logic
+            flora_val = p.get('flora')
+            flora_text = p.get('flora_text')
+            if _is_filled(flora_val) or _is_filled(flora_text):
+                life_filled += 1
+
+            # Resources
+            for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+                if _is_filled(p.get(f)):
+                    life_filled += 1
+
+            life_totals.append(life_filled / life_total_fields)
+
+        planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
+        planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
+
+    # --- Space Station (5 pts) ---
+    station_score = 0
+    if station:
+        station_score += 3
+        trade_goods = station.get('trade_goods', '[]')
+        if trade_goods and trade_goods != '[]':
+            station_score += 2
+
+    # Total
+    total = sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score
+    total = min(total, 100)
+
+    # Grade thresholds: S (85-100), A (65-84), B (40-64), C (0-39)
+    if total >= 85:
+        grade = 'S'
+    elif total >= 65:
+        grade = 'A'
+    elif total >= 40:
+        grade = 'B'
+    else:
+        grade = 'C'
+
+    return {
+        'score': total,
+        'grade': grade,
+        'breakdown': {
+            'system_core': sys_core_score,
+            'system_extra': sys_extra_score,
+            'planet_coverage': planet_coverage_score,
+            'planet_environment': planet_env_score,
+            'planet_life': planet_life_score,
+            'space_station': station_score,
+            'planet_count': len(planets),
+        }
+    }
+
+
+def update_completeness_score(cursor, system_id: str):
+    """Calculate and store the completeness score for a system."""
+    result = calculate_completeness_score(cursor, system_id)
+    cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (result['score'], system_id))
+    return result
+
+
 def _build_advanced_filter_clauses(params_dict, where_clauses, params):
     """Build SQL WHERE clauses for advanced system filters.
 
@@ -6336,9 +6504,21 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
     if params_dict.get('stellar_classification'):
         where_clauses.append("s.stellar_classification = ?")
         params.append(params_dict['stellar_classification'])
-    if params_dict.get('is_complete') is not None:
-        where_clauses.append("s.is_complete = ?")
-        params.append(1 if params_dict['is_complete'] else 0)
+    # Grade filter: is_complete now stores score 0-100
+    # Support both legacy boolean and new grade-based filtering
+    is_complete_val = params_dict.get('is_complete')
+    if is_complete_val is not None:
+        if isinstance(is_complete_val, str) and is_complete_val in ('S', 'A', 'B', 'C'):
+            grade_thresholds = {'S': (85, 100), 'A': (65, 84), 'B': (40, 64), 'C': (0, 39)}
+            low, high = grade_thresholds[is_complete_val]
+            where_clauses.append("s.is_complete BETWEEN ? AND ?")
+            params.extend([low, high])
+        elif is_complete_val:
+            # Legacy: "complete" = score >= 65 (A or S)
+            where_clauses.append("s.is_complete >= 65")
+        else:
+            # Legacy: "incomplete" = score < 65
+            where_clauses.append("s.is_complete < 65")
 
     # Planet-level filters (use EXISTS subquery)
     if params_dict.get('biome'):
@@ -6507,6 +6687,19 @@ async def api_systems(
         ''', params + [limit, offset])
 
         systems = [dict(row) for row in cursor.fetchall()]
+
+        # Add completeness grade derived from stored score
+        for sys in systems:
+            score = sys.get('is_complete', 0) or 0
+            if score >= 85:
+                sys['completeness_grade'] = 'S'
+            elif score >= 65:
+                sys['completeness_grade'] = 'A'
+            elif score >= 40:
+                sys['completeness_grade'] = 'B'
+            else:
+                sys['completeness_grade'] = 'C'
+            sys['completeness_score'] = score
 
         # Apply data restrictions
         systems = apply_data_restrictions(systems, session_data)
@@ -6682,7 +6875,7 @@ async def api_search(
             SELECT s.id, s.name, s.region_x, s.region_y, s.region_z,
                    s.x, s.y, s.z,
                    s.galaxy, s.glyph_code, s.discord_tag, s.star_type,
-                   s.reality,
+                   s.reality, s.is_complete,
                    r.custom_name as region_name,
                    (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count
             FROM systems s
@@ -6705,6 +6898,19 @@ async def api_search(
 
         rows = cursor.fetchall()
         systems = [dict(row) for row in rows]
+
+        # Add completeness grade
+        for sys in systems:
+            score = sys.get('is_complete', 0) or 0
+            if score >= 85:
+                sys['completeness_grade'] = 'S'
+            elif score >= 65:
+                sys['completeness_grade'] = 'A'
+            elif score >= 40:
+                sys['completeness_grade'] = 'B'
+            else:
+                sys['completeness_grade'] = 'C'
+            sys['completeness_score'] = score
 
         # Apply data restrictions
         systems = apply_data_restrictions(systems, session_data)
@@ -8251,6 +8457,12 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
             station_row = cursor.fetchone()
             system['space_station'] = parse_station_data(station_row)
 
+            # Completeness grade and breakdown
+            completeness = calculate_completeness_score(cursor, sys_id)
+            system['completeness_grade'] = completeness['grade']
+            system['completeness_score'] = completeness['score']
+            system['completeness_breakdown'] = completeness['breakdown']
+
             # Apply field restrictions if applicable
             if restriction and restriction.get('hidden_fields'):
                 system = apply_field_restrictions(system, restriction['hidden_fields'])
@@ -8472,6 +8684,8 @@ async def create_system_stub(payload: dict, request: Request):
             region_x, region_y, region_z,
             discord_tag
         ))
+        # Calculate and store completeness score (will be low for stubs)
+        update_completeness_score(cursor, sys_id)
         conn.commit()
 
         logger.info(f"Created stub system '{name}' (ID: {sys_id})")
@@ -8832,6 +9046,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 trade_goods_json
             ))
 
+        # Calculate and store completeness score
+        update_completeness_score(cursor, sys_id)
         conn.commit()
         logger.info(f"Saved system '{name}' to database (ID: {sys_id})")
 
@@ -12226,6 +12442,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 trade_goods_json
             ))
 
+        # Calculate and store completeness score
+        update_completeness_score(cursor, system_id)
+
         # Mark submission as approved (use actual username instead of generic 'admin')
         cursor.execute('''
             UPDATE pending_systems
@@ -12815,6 +13034,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         station.get('z') or 0,
                         trade_goods_json
                     ))
+
+                # Calculate and store completeness score
+                update_completeness_score(cursor, system_id)
 
                 # Mark submission as approved
                 cursor.execute('''

@@ -2227,3 +2227,253 @@ def migration_1_34_0_discovery_system_linking(conn: sqlite3.Connection):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.34.0")
+
+
+@register_migration("1.35.0", "Backfill completeness scores for all systems")
+def migrate_1_35_0(conn):
+    """Repurpose is_complete from boolean (0/1) to score (0-100) and backfill all systems.
+
+    The is_complete column now stores a completeness percentage (0-100).
+    Grade thresholds: S (85-100), A (65-84), B (40-64), C (0-39).
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Get all system IDs
+    cursor.execute('SELECT id FROM systems')
+    system_ids = [row[0] for row in cursor.fetchall()]
+    logger.info(f"Backfilling completeness scores for {len(system_ids)} systems...")
+
+    # Import the helper from the API module
+    import importlib
+    import sys as _sys
+    api_module_path = Path(__file__).parent / 'control_room_api.py'
+
+    # Inline scoring logic to avoid circular import
+    def _calc_score(cursor, system_id):
+        cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            return 0
+        system = dict(system)
+
+        cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
+        planets = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
+        station_row = cursor.fetchone()
+        station = dict(station_row) if station_row else None
+
+        # System Core (30 pts)
+        sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform', 'stellar_classification']
+        sys_core_filled = sum(1 for f in sys_core_fields if system.get(f))
+        sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 30)
+
+        # System Extra (10 pts)
+        sys_extra_fields = ['glyph_code', 'description']
+        sys_extra_filled = sum(1 for f in sys_extra_fields if system.get(f))
+        sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
+
+        # Planet Coverage (10 pts)
+        planet_coverage_score = 10 if planets else 0
+
+        # Planet scores
+        planet_env_score = 0
+        planet_life_score = 0
+        planet_detail_score = 0
+
+        if planets:
+            env_fields = ['biome', 'weather', 'sentinel', 'storm_frequency', 'building_density']
+            life_fields = ['fauna', 'flora', 'common_resource', 'uncommon_resource', 'rare_resource']
+            detail_fields = ['photo', 'description']
+
+            env_totals = []
+            life_totals = []
+            detail_totals = []
+
+            for p in planets:
+                env_filled = sum(1 for f in env_fields if p.get(f) and str(p.get(f)).strip() and p.get(f) not in ('None', 'N/A'))
+                env_totals.append(env_filled / len(env_fields))
+
+                life_filled = 0
+                for f in life_fields:
+                    val = p.get(f)
+                    if f in ('fauna', 'flora'):
+                        if val and str(val).strip() and val not in ('N/A', 'None'):
+                            life_filled += 1
+                    else:
+                        if val and str(val).strip():
+                            life_filled += 1
+                life_totals.append(life_filled / len(life_fields))
+
+                detail_filled = sum(1 for f in detail_fields if p.get(f) and str(p.get(f)).strip())
+                has_hazard = any(p.get(h, 0) != 0 for h in ['hazard_temperature', 'hazard_radiation', 'hazard_toxicity'])
+                if has_hazard:
+                    detail_filled += 1
+                detail_totals.append(detail_filled / (len(detail_fields) + 1))
+
+            planet_env_score = round((sum(env_totals) / len(env_totals)) * 20)
+            planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
+            planet_detail_score = round((sum(detail_totals) / len(detail_totals)) * 10)
+
+        # Space Station (5 pts)
+        station_score = 0
+        if station:
+            station_score += 3
+            trade_goods = station.get('trade_goods', '[]')
+            if trade_goods and trade_goods != '[]':
+                station_score += 2
+
+        return min(sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + planet_detail_score + station_score, 100)
+
+    updated = 0
+    for sys_id in system_ids:
+        score = _calc_score(cursor, sys_id)
+        cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (score, sys_id))
+        updated += 1
+
+    logger.info(f"Backfilled completeness scores for {updated} systems")
+
+    # Create index for grade-based filtering
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_systems_completeness ON systems(is_complete)')
+    logger.info("Created idx_systems_completeness index")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.35.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.35.0")
+
+
+@register_migration("1.36.0", "Re-score completeness with corrected criteria")
+def migrate_1_36_0(conn):
+    """Re-backfill completeness scores with fairer scoring criteria.
+
+    Changes from v1.35.0 scoring:
+    - System Core now 35pts (5 fields, removed stellar_classification)
+    - stellar_classification moved to System Extra (10pts, 3 fields)
+    - Planet Environment now 25pts (biome, weather, sentinel only)
+    - sentinel='None' now counts as filled (valid game value = no sentinels)
+    - fauna/flora _text display fields used as fallback
+    - Removed Planet Detail category (photo/description/hazards are aspirational)
+    - Hazards all-zero is no longer penalized (peaceful planets are valid)
+    - Removed storm_frequency, building_density from scoring (rarely captured)
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT id FROM systems')
+    system_ids = [row[0] for row in cursor.fetchall()]
+    logger.info(f"Re-scoring completeness for {len(system_ids)} systems with corrected criteria...")
+
+    def _is_filled(val, allow_none=False):
+        if val is None:
+            return False
+        s = str(val).strip()
+        if not s:
+            return False
+        if s == 'N/A':
+            return False
+        if s == 'None' and not allow_none:
+            return False
+        return True
+
+    def _calc_score_v2(cursor, system_id):
+        cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            return 0
+        system = dict(system)
+
+        cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
+        planets = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
+        station_row = cursor.fetchone()
+        station = dict(station_row) if station_row else None
+
+        # System Core (35 pts) - 5 essential fields
+        sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
+        sys_core_filled = sum(1 for f in sys_core_fields if _is_filled(system.get(f)))
+        sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
+
+        # System Extra (10 pts) - bonus fields
+        sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
+        sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
+        sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
+
+        # Planet Coverage (10 pts)
+        planet_coverage_score = 10 if planets else 0
+
+        # Planet Environment avg (25 pts) - biome, weather, sentinel
+        planet_env_score = 0
+        planet_life_score = 0
+
+        if planets:
+            env_totals = []
+            life_totals = []
+
+            for p in planets:
+                env_filled = 0
+                if _is_filled(p.get('biome')):
+                    env_filled += 1
+                # Weather: check main field and display text fallback
+                if _is_filled(p.get('weather')) or _is_filled(p.get('weather_text')):
+                    env_filled += 1
+                # Sentinel: 'None' is valid (means no sentinels on planet)
+                if _is_filled(p.get('sentinel'), allow_none=True) or _is_filled(p.get('sentinels_text')):
+                    env_filled += 1
+                env_totals.append(min(env_filled / 3, 1.0))
+
+                # Life (15 pts) - fauna, flora, resources
+                life_filled = 0
+                # Fauna: check main field and display text
+                if _is_filled(p.get('fauna')) or _is_filled(p.get('fauna_text')):
+                    life_filled += 1
+                # Flora: check main field and display text
+                if _is_filled(p.get('flora')) or _is_filled(p.get('flora_text')):
+                    life_filled += 1
+                # Resources
+                for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+                    if _is_filled(p.get(f)):
+                        life_filled += 1
+                life_totals.append(life_filled / 5)
+
+            planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
+            planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
+
+        # Space Station (5 pts)
+        station_score = 0
+        if station:
+            station_score += 3
+            trade_goods = station.get('trade_goods', '[]')
+            if trade_goods and trade_goods != '[]':
+                station_score += 2
+
+        return min(sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score, 100)
+
+    updated = 0
+    for sys_id in system_ids:
+        score = _calc_score_v2(cursor, sys_id)
+        cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (score, sys_id))
+        updated += 1
+
+    logger.info(f"Re-scored completeness for {updated} systems with corrected criteria")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.36.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.36.0")

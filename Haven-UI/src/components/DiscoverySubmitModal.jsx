@@ -653,7 +653,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
                   </FormField>
                 )
               )}
-              )}
 
               {form.location_type !== 'space' && !isStubSystem && (
                 <FormField label="Specific Location" hint="Optional: coordinates, landmark, etc.">

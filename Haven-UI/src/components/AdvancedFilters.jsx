@@ -230,15 +230,17 @@ export default function AdvancedFilters({ filters, onChange, reality, galaxy }) 
                     placeholder="6"
                   />
                 </FilterField>
-                <FilterField label="Data Complete">
+                <FilterField label="Data Grade">
                   <select
                     className="w-full px-3 py-2 rounded bg-gray-700/50 border border-gray-600 text-white text-sm"
                     value={filters.is_complete}
                     onChange={e => handleChange('is_complete', e.target.value)}
                   >
                     <option value="">Any</option>
-                    <option value="true">Complete only</option>
-                    <option value="false">Incomplete only</option>
+                    <option value="S">S - Archive Quality</option>
+                    <option value="A">A - Well Documented</option>
+                    <option value="B">B - Partial Data</option>
+                    <option value="C">C - Basic Info</option>
                   </select>
                 </FilterField>
               </FilterSection>

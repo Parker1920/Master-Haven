@@ -508,6 +508,24 @@ export default function GalaxyGrid({ reality, onSelect, selectedGalaxy, filters 
                     </div>
                   </div>
                 </div>
+                {/* Grade distribution bar */}
+                {g.system_count > 0 && (
+                  <div className="mt-3 pt-2 border-t border-white/10">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                      {g.grade_s > 0 && <span className="text-amber-400">{g.grade_s}S</span>}
+                      {g.grade_a > 0 && <span className="text-emerald-400">{g.grade_a}A</span>}
+                      {g.grade_b > 0 && <span className="text-blue-400">{g.grade_b}B</span>}
+                      {g.grade_c > 0 && <span className="text-gray-400">{g.grade_c}C</span>}
+                    </div>
+                    {/* Visual bar */}
+                    <div className="flex h-1.5 rounded-full overflow-hidden mt-1 bg-black/20">
+                      {g.grade_s > 0 && <div className="bg-amber-400" style={{ width: `${(g.grade_s / g.system_count) * 100}%` }} />}
+                      {g.grade_a > 0 && <div className="bg-emerald-400" style={{ width: `${(g.grade_a / g.system_count) * 100}%` }} />}
+                      {g.grade_b > 0 && <div className="bg-blue-400" style={{ width: `${(g.grade_b / g.system_count) * 100}%` }} />}
+                      {g.grade_c > 0 && <div className="bg-gray-400" style={{ width: `${(g.grade_c / g.system_count) * 100}%` }} />}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Hover glow effect */}

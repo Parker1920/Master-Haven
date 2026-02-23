@@ -279,6 +279,68 @@ export default function SystemDetail() {
           </div>
         </div>
 
+        {/* Completeness Grade Panel */}
+        {system.completeness_grade && (() => {
+          const gradeStyles = {
+            'S': { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: 'Archive Quality' },
+            'A': { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: 'Well Documented' },
+            'B': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Partial Data' },
+            'C': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Basic Info' },
+          }
+          const g = gradeStyles[system.completeness_grade] || gradeStyles['C']
+          const b = system.completeness_breakdown || {}
+          const score = system.completeness_score || 0
+          const categories = [
+            { label: 'System Core', value: b.system_core || 0, max: 35 },
+            { label: 'System Extra', value: b.system_extra || 0, max: 10 },
+            { label: 'Planet Coverage', value: b.planet_coverage || 0, max: 10 },
+            { label: 'Planet Environment', value: b.planet_environment || 0, max: 25 },
+            { label: 'Planet Life', value: b.planet_life || 0, max: 15 },
+            { label: 'Space Station', value: b.space_station || 0, max: 5 },
+          ]
+          return (
+            <div className={`mb-4 p-4 rounded border ${g.bg} ${g.border}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <span className={`text-3xl font-black ${g.color}`}>{system.completeness_grade}</span>
+                  <div>
+                    <div className={`text-sm font-semibold ${g.color}`}>{g.label}</div>
+                    <div className="text-xs text-gray-400">{score}% complete{b.planet_count != null ? ` \u00B7 ${b.planet_count} planet${b.planet_count !== 1 ? 's' : ''}` : ''}</div>
+                  </div>
+                </div>
+                {/* Overall progress bar */}
+                <div className="w-32 sm:w-48">
+                  <div className="h-2 rounded-full bg-gray-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        score >= 85 ? 'bg-amber-400' : score >= 65 ? 'bg-emerald-400' : score >= 40 ? 'bg-blue-400' : 'bg-gray-400'
+                      }`}
+                      style={{ width: `${score}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {/* Category breakdown */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                {categories.map(cat => (
+                  <div key={cat.label} className="text-center">
+                    <div className="text-[10px] text-gray-400 mb-1 truncate" title={cat.label}>{cat.label}</div>
+                    <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          cat.value >= cat.max ? 'bg-amber-400' : cat.value >= cat.max * 0.65 ? 'bg-emerald-400' : cat.value >= cat.max * 0.4 ? 'bg-blue-400' : 'bg-gray-500'
+                        }`}
+                        style={{ width: `${cat.max > 0 ? (cat.value / cat.max) * 100 : 0}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">{cat.value}/{cat.max}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Coordinates */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 p-4 bg-gray-800 rounded">
           <div>
