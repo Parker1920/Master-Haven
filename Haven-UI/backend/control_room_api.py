@@ -1276,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.34.2', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.35.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -8845,6 +8845,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
 
         # Get the editor's username for contributor tracking
         editor_username = session_data.get('username') or payload.get('personal_discord_username') or 'Unknown'
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         if existing:
             sys_id = existing['id']
@@ -8855,14 +8856,13 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             current_discovered_by = current_row['discovered_by'] if current_row else None
             current_contributors = current_row['contributors'] if current_row else None
 
-            # Parse and update contributors list
+            # Parse and add edit entry
             try:
                 contributors_list = json.loads(current_contributors) if current_contributors else []
             except (json.JSONDecodeError, TypeError):
                 contributors_list = []
 
-            if editor_username and editor_username not in contributors_list:
-                contributors_list.append(editor_username)
+            contributors_list.append({"name": editor_username, "action": "edit", "date": now_iso})
 
             # Update existing system (including contributor tracking, clear stub flag)
             cursor.execute('''
@@ -8922,8 +8922,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag,
-                    stellar_classification, discovered_by, contributors)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stellar_classification, discovered_by, discovered_at, contributors)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
@@ -8950,7 +8950,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 payload.get('discord_tag'),
                 payload.get('stellar_classification'),
                 editor_username,
-                json.dumps([editor_username])
+                now_iso,
+                json.dumps([{"name": editor_username, "action": "upload", "date": now_iso}])
             ))
             logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 
@@ -12140,18 +12141,18 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 logger.info(f"Preserved original glyph for edit: {system_data['glyph_code']}")
 
         if is_edit:
-            # Determine the updater's username for tracking
+            # Determine the updater's username - personal_discord_username is the Discord name from the form
             updater_username = submission.get('personal_discord_username') or submission.get('submitted_by') or current_username or 'Unknown'
+            now_iso = datetime.now(timezone.utc).isoformat()
 
-            # Build updated contributors list (preserve original, add new contributor if not already present)
+            # Build updated contributors list (preserve original, add new edit entry)
             try:
                 contributors_list = json.loads(original_contributors) if original_contributors else []
             except (json.JSONDecodeError, TypeError):
                 contributors_list = []
 
-            # Add updater to contributors if not already present
-            if updater_username and updater_username not in contributors_list:
-                contributors_list.append(updater_username)
+            # Add edit entry (same person can appear multiple times with different edits)
+            contributors_list.append({"name": updater_username, "action": "edit", "date": now_iso})
 
             # UPDATE existing system - PRESERVE discovered_by/discovered_at, UPDATE last_updated_by/last_updated_at
             cursor.execute('''
@@ -12211,8 +12212,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             import uuid
             system_id = str(uuid.uuid4())
 
-            # Determine the discoverer's username for new system
-            discoverer_username = system_data.get('discovered_by') or submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+            # Determine the discoverer's username - personal_discord_username is the Discord name from the form
+            discoverer_username = submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+            now_iso = datetime.now(timezone.utc).isoformat()
 
             # INSERT new system (including new tracking fields)
             cursor.execute('''
@@ -12246,11 +12248,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 system_data.get('conflict_level'),
                 system_data.get('dominant_lifeform'),
                 discoverer_username,
-                system_data.get('discovered_at'),
+                system_data.get('discovered_at') or now_iso,
                 submission.get('discord_tag'),
                 submission.get('personal_discord_username'),
                 system_data.get('stellar_classification'),
-                json.dumps([discoverer_username])  # Initialize contributors with discoverer
+                json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}])
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -12856,13 +12858,13 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data['glyph_solar_system'] = original_glyph_data.get('glyph_solar_system', 1)
 
                 if is_edit:
-                    # Update contributors list - add submitter if not already present
-                    updater_username = submission.get('personal_discord_username') or system_data.get('discovered_by') or 'Unknown'
+                    # Update contributors list - add edit entry
+                    updater_username = submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+                    now_iso = datetime.now(timezone.utc).isoformat()
                     cursor.execute('SELECT contributors FROM systems WHERE id = ?', (system_id,))
                     contrib_row = cursor.fetchone()
                     existing_contributors = json.loads(contrib_row[0]) if contrib_row and contrib_row[0] else []
-                    if updater_username not in existing_contributors:
-                        existing_contributors.append(updater_username)
+                    existing_contributors.append({"name": updater_username, "action": "edit", "date": now_iso})
 
                     cursor.execute('''
                         UPDATE systems
@@ -12873,9 +12875,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             region_x = ?, region_y = ?, region_z = ?,
                             star_type = ?, economy_type = ?, economy_level = ?,
                             conflict_level = ?, dominant_lifeform = ?,
-                            discovered_by = ?, discovered_at = ?,
                             discord_tag = ?, personal_discord_username = ?,
                             stellar_classification = ?,
+                            last_updated_by = ?, last_updated_at = ?,
                             contributors = ?
                         WHERE id = ?
                     ''', (
@@ -12897,11 +12899,11 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('economy_level'),
                         system_data.get('conflict_level'),
                         system_data.get('dominant_lifeform'),
-                        system_data.get('discovered_by'),
-                        system_data.get('discovered_at'),
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
                         system_data.get('stellar_classification'),
+                        updater_username,
+                        now_iso,
                         json.dumps(existing_contributors),
                         system_id
                     ))
@@ -12917,8 +12919,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     import uuid
                     system_id = str(uuid.uuid4())
 
-                    # Determine the discoverer's username for new system
-                    discoverer_username = system_data.get('discovered_by') or submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+                    # Determine the discoverer's username - personal_discord_username is the Discord name from the form
+                    discoverer_username = submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
+                    now_iso = datetime.now(timezone.utc).isoformat()
 
                     cursor.execute('''
                         INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
@@ -12949,11 +12952,11 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('conflict_level'),
                         system_data.get('dominant_lifeform'),
                         discoverer_username,
-                        system_data.get('discovered_at'),
+                        system_data.get('discovered_at') or now_iso,
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
                         system_data.get('stellar_classification'),
-                        json.dumps([discoverer_username])
+                        json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}])
                     ))
 
                 # Insert planets

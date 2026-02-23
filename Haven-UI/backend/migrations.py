@@ -2568,3 +2568,112 @@ def migrate_1_38_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.38.0")
+
+
+@register_migration("1.39.0", "Fix discovered_by and convert contributors to object format")
+def migrate_1_39_0(conn):
+    """Fix discovered_by from pending_systems.personal_discord_username and convert
+    contributors from old string array to new object format with action and date."""
+    cursor = conn.cursor()
+
+    # Step 1: Fix discovered_by for ALL systems using pending_systems.personal_discord_username
+    # This is the Discord name entered on the Create form - the actual uploader
+    cursor.execute("""
+        SELECT s.id, s.discovered_by, s.discovered_at, s.created_at,
+               ps.personal_discord_username, ps.submitted_by, ps.submission_timestamp,
+               ps.edit_system_id
+        FROM systems s
+        LEFT JOIN pending_systems ps ON (
+            (ps.edit_system_id IS NULL AND ps.system_name = s.name)
+            OR ps.edit_system_id = s.id
+        )
+        GROUP BY s.id
+    """)
+    all_systems = cursor.fetchall()
+
+    discovered_fixed = 0
+    for row in all_systems:
+        sys_id = row[0]
+        current_discovered_by = row[1]
+        current_discovered_at = row[2]
+        created_at = row[3]
+        personal_discord = row[4]
+        submitted_by = row[5]
+        submission_ts = row[6]
+        edit_system_id = row[7]
+
+        # Only fix discovered_by if it's missing/Unknown AND this was a first upload (not an edit)
+        if (not current_discovered_by or current_discovered_by in ('Unknown', 'HavenExtractor')) and not edit_system_id:
+            username = personal_discord or submitted_by
+            if username and username not in ('Unknown', 'HavenExtractor'):
+                upload_date = submission_ts or current_discovered_at or created_at or datetime.now().isoformat()
+                cursor.execute(
+                    'UPDATE systems SET discovered_by = ?, discovered_at = COALESCE(discovered_at, ?) WHERE id = ?',
+                    (username, upload_date, sys_id)
+                )
+                discovered_fixed += 1
+
+    logger.info(f"Fixed discovered_by for {discovered_fixed} systems")
+
+    # Step 2: Convert ALL contributors from old string format to new object format
+    cursor.execute("SELECT id, contributors, discovered_by, discovered_at, created_at FROM systems")
+    all_for_contrib = cursor.fetchall()
+
+    contrib_converted = 0
+    for row in all_for_contrib:
+        sys_id = row[0]
+        raw_contributors = row[1]
+        discovered_by = row[2]
+        discovered_at = row[3]
+        created_at = row[4]
+
+        try:
+            parsed = json.loads(raw_contributors) if raw_contributors else []
+        except (json.JSONDecodeError, TypeError):
+            parsed = []
+
+        # Check if already in new format (list of dicts)
+        if parsed and isinstance(parsed[0], dict):
+            continue  # Already converted
+
+        # Convert old format: first entry is uploader, rest are editors
+        new_contributors = []
+        upload_date = discovered_at or created_at or datetime.now().isoformat()
+
+        if parsed:
+            # Old format: ["name1", "name2", ...]
+            for i, name in enumerate(parsed):
+                if isinstance(name, str):
+                    new_contributors.append({
+                        "name": name,
+                        "action": "upload" if i == 0 else "edit",
+                        "date": upload_date if i == 0 else None
+                    })
+        elif discovered_by and discovered_by not in ('Unknown', 'HavenExtractor'):
+            # No contributors but has discovered_by - create upload entry
+            new_contributors.append({
+                "name": discovered_by,
+                "action": "upload",
+                "date": upload_date
+            })
+
+        if new_contributors:
+            cursor.execute(
+                'UPDATE systems SET contributors = ? WHERE id = ?',
+                (json.dumps(new_contributors), sys_id)
+            )
+            contrib_converted += 1
+
+    logger.info(f"Converted contributors format for {contrib_converted} systems")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.39.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.39.0")

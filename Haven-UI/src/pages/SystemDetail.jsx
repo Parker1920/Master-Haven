@@ -33,17 +33,33 @@ function formatDate(dateStr) {
   }
 }
 
+// Format a contributor date nicely
+function formatContribDate(dateStr) {
+  if (!dateStr) return null
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return null
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch { return null }
+}
+
 // Contributors Modal Component
 function ContributorsModal({ system, onClose }) {
   if (!system) return null
 
-  // Parse contributors JSON if it's a string
+  // Parse contributors JSON - supports both old ["name"] and new [{name, action, date}] formats
   let contributors = []
   if (system.contributors) {
     try {
-      contributors = typeof system.contributors === 'string'
+      const raw = typeof system.contributors === 'string'
         ? JSON.parse(system.contributors)
         : system.contributors
+      // Normalize: old format strings become upload entries
+      contributors = (raw || []).map(entry =>
+        typeof entry === 'string'
+          ? { name: entry, action: 'upload', date: null }
+          : entry
+      )
     } catch {
       contributors = []
     }
@@ -65,58 +81,61 @@ function ContributorsModal({ system, onClose }) {
           </button>
         </div>
 
-        {/* Original Discoverer */}
+        {/* Original Uploader */}
         <div className="mb-4 p-3 bg-gray-900 rounded">
-          <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Original Discoverer</div>
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Original Uploader</div>
           <div className="text-lg text-yellow-400 font-medium">
             {system.discovered_by || 'Unknown'}
           </div>
-          {system.discovered_at && (
-            <div className="text-sm text-gray-400 mt-1">
-              {formatDate(system.discovered_at)}
+          {(system.discovered_at || (contributors[0] && contributors[0].date)) && (
+            <div className="text-xs text-gray-500 mt-1">
+              {formatContribDate(system.discovered_at || contributors[0]?.date)}
             </div>
           )}
         </div>
-
-        {/* Last Updated */}
-        {system.last_updated_by && (
-          <div className="mb-4 p-3 bg-gray-900 rounded">
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Last Updated By</div>
-            <div className="text-lg text-blue-400 font-medium">
-              {system.last_updated_by}
-            </div>
-            {system.last_updated_at && (
-              <div className="text-sm text-gray-400 mt-1">
-                {formatDate(system.last_updated_at)}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* All Contributors */}
         {contributors.length > 0 && (
           <div className="p-3 bg-gray-900 rounded">
             <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">All Contributors</div>
-            <div className="flex flex-wrap gap-2">
-              {contributors.map((name, idx) => (
-                <span
-                  key={idx}
-                  className={`px-3 py-1 rounded-full text-sm ${
-                    idx === 0
-                      ? 'bg-yellow-600/30 text-yellow-400 border border-yellow-600/50'
-                      : 'bg-gray-700 text-gray-300'
-                  }`}
-                >
-                  {name}
-                  {idx === 0 && <span className="ml-1 text-xs">(OG)</span>}
-                </span>
-              ))}
+            <div className="space-y-2">
+              {contributors.map((entry, idx) => {
+                const isUpload = entry.action === 'upload'
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg ${
+                      isUpload
+                        ? 'bg-yellow-600/20 border border-yellow-600/40'
+                        : 'bg-gray-700/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={isUpload ? 'text-yellow-400 font-medium' : 'text-gray-300'}>
+                        {entry.name}
+                      </span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        isUpload
+                          ? 'bg-yellow-600/40 text-yellow-300'
+                          : 'bg-blue-600/40 text-blue-300'
+                      }`}>
+                        {isUpload ? 'OG' : 'edit'}
+                      </span>
+                    </div>
+                    {entry.date && (
+                      <span className="text-xs text-gray-500">
+                        {formatContribDate(entry.date)}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* No data message */}
-        {!system.discovered_by && !system.last_updated_by && contributors.length === 0 && (
+        {!system.discovered_by && contributors.length === 0 && (
           <div className="text-center text-gray-500 py-4">
             No contributor information available for this system.
           </div>

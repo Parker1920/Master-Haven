@@ -394,6 +394,22 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
                         </span>
                       )}
                     </div>
+
+                    {/* Uploader info */}
+                    {system.discovered_by && (
+                      <p className="text-xs text-gray-500 mt-1.5">
+                        Uploaded by <span className="text-gray-400">{system.discovered_by}</span>
+                        {system.discovered_at && (() => {
+                          try {
+                            const d = new Date(system.discovered_at)
+                            if (!isNaN(d.getTime())) {
+                              return <span> · {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            }
+                          } catch {}
+                          return null
+                        })()}
+                      </p>
+                    )}
                   </div>
                 </div>
 
