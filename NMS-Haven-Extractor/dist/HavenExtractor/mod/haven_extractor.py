@@ -125,11 +125,12 @@ import ssl
 import threading
 from datetime import datetime
 from pathlib import Path
+from enum import Enum
 from typing import Optional, Set, List, Dict
 
 from pymhf import Mod
 from pymhf.core.memutils import map_struct, get_addressof
-from pymhf.gui.decorators import gui_button, gui_combobox, gui_variable
+from pymhf.gui.decorators import gui_button, gui_variable
 import nmspy.data.types as nms
 import nmspy.data.exported_types as nmse
 from nmspy.decorators import on_state_change
@@ -164,7 +165,7 @@ DEFAULT_USER_CONFIG = {
 }
 
 
-# Note: Config GUI now uses pymhf's native DearPyGUI via gui_variable and gui_combobox decorators
+# Note: Config GUI now uses pymhf's native DearPyGUI via gui_variable.ENUM and gui_variable.STRING decorators
 # in the HavenExtractorMod class. See the class definition for config fields.
 
 
@@ -1024,10 +1025,47 @@ def map_weather_enum_to_adjective(value: str) -> str:
     return value
 
 
+# =========================================================================
+# GUI Enum types for pymhf 0.2.2+ (replaces deprecated gui_combobox)
+# =========================================================================
+
+class CommunityTag(Enum):
+    personal = "personal"
+    Haven = "Haven"
+    AGT = "AGT"
+    ARCH = "ARCH"
+    AA = "AA"
+    AP = "AP"
+    BES = "B.E.S"
+    YGS = "YGS"
+    CR = "CR"
+    EVRN = "EVRN"
+    GHUB = "GHUB"
+    IEA = "IEA"
+    NEO = "NEO"
+    OQ = "O.Q"
+    PhZ0 = "Ph-Z0"
+    QRR = "QRR"
+    RwR = "RwR"
+    SHDW = "SHDW"
+    Veil1 = "Veil1"
+    TBH = "TBH"
+    INDM = "INDM"
+    TMA = "TMA"
+    UFE = "UFE"
+    VCTH = "VCTH"
+    ZBA = "ZBA"
+
+
+class RealityMode(Enum):
+    Normal = "Normal"
+    Permadeath = "Permadeath"
+
+
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.3.8"
-    __description__ = "Batch mode planet data extraction - adjectives match Haven UI adjectives.js"
+    __version__ = "1.4.0"
+    __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
     # VALID ADJECTIVE LISTS FROM adjectives.js (v10.3.0)
@@ -1204,27 +1242,37 @@ class HavenExtractorMod(Mod):
         "ZBA",           # Zabia
     ]
 
-    @gui_combobox("Community Tag", items=COMMUNITY_TAGS)
-    def set_discord_tag(self, sender, app_data, user_data=None):
-        """Called when user selects a community tag from dropdown.
-        DearPyGUI callback signature: (sender, app_data, user_data)
-        app_data contains the selected string value.
-        """
+    @property
+    @gui_variable.ENUM("Community Tag", enum=CommunityTag)
+    def community_tag(self) -> CommunityTag:
+        tag_str = getattr(self, '_discord_tag', 'personal')
+        try:
+            return CommunityTag(tag_str)
+        except ValueError:
+            return CommunityTag.personal
+
+    @community_tag.setter
+    def community_tag(self, value: CommunityTag):
         global USER_DISCORD_TAG
-        tag = app_data  # The selected tag string
+        tag = value.value if isinstance(value, CommunityTag) else str(value)
         self._discord_tag = tag
         USER_DISCORD_TAG = tag
         self._save_config_to_file()
         logger.info(f"[CONFIG] Community tag set to: {tag}")
 
-    @gui_combobox("Reality Mode", items=["Normal", "Permadeath"])
-    def set_reality(self, sender, app_data, user_data=None):
-        """Called when user selects reality mode from dropdown.
-        DearPyGUI callback signature: (sender, app_data, user_data)
-        app_data contains the selected string value.
-        """
+    @property
+    @gui_variable.ENUM("Reality Mode", enum=RealityMode)
+    def reality_mode(self) -> RealityMode:
+        reality_str = getattr(self, '_reality', 'Normal')
+        try:
+            return RealityMode(reality_str)
+        except ValueError:
+            return RealityMode.Normal
+
+    @reality_mode.setter
+    def reality_mode(self, value: RealityMode):
         global USER_REALITY
-        reality = app_data  # The selected reality string
+        reality = value.value if isinstance(value, RealityMode) else str(value)
         self._reality = reality
         USER_REALITY = reality
         self._save_config_to_file()
@@ -1237,7 +1285,7 @@ class HavenExtractorMod(Mod):
     # =========================================================================
 
     @property
-    @gui_variable.STRING(label="Manual System Name")
+    @gui_variable.STRING(label="System Name")
     def manual_system_name(self) -> str:
         return getattr(self, '_manual_system_name', '')
 
@@ -1245,7 +1293,7 @@ class HavenExtractorMod(Mod):
     def manual_system_name(self, value: str):
         self._manual_system_name = value
 
-    @gui_button("Apply System Name")
+    @gui_button("Apply Name")
     def apply_manual_system_name(self):
         """Apply the manually entered system name to the current system."""
         name = getattr(self, '_manual_system_name', '').strip()
@@ -1326,8 +1374,20 @@ class HavenExtractorMod(Mod):
         # =====================================================
         self._system_saved_to_batch = False
 
+        # =====================================================
+        # v1.4.0: Translation cache for adjective resolution
+        # Populated by cTkLanguageManagerBase.Translate hook
+        # =====================================================
+        self._translation_cache = {}   # text_id -> display_text (from game's Translate)
+        self._adjective_file_cache = {}  # text_id -> display_text (from PAK/MBIN parsing)
+        self._translation_cache_hits = 0
+        self._translation_cache_misses = 0
+
+        # Load adjective cache from disk (if exists)
+        self._load_adjective_cache()
+
         logger.info("=" * 60)
-        logger.info("Haven Extractor v10.3.8 - Direct API Integration")
+        logger.info("Haven Extractor v1.4.0 - Game-Data-Driven Adjectives")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
@@ -1344,6 +1404,133 @@ class HavenExtractorMod(Mod):
         logger.info("3. Click 'Export to Haven UI' when ready")
         logger.info("=" * 60)
 
+
+    # =========================================================================
+    # v1.4.0: LANGUAGE TRANSLATION - Game's own text resolution
+    # =========================================================================
+
+    @nms.cTkLanguageManagerBase.Translate.after
+    def on_translate(self, this, lpacText, lpacDefaultReturnValue, _result_):
+        """
+        Passive hook on the game's Translate function.
+        Captures (text_id -> display_text) pairs as the game resolves them.
+        This fires whenever the game renders text (UI, discovery pages, scanner).
+        """
+        try:
+            if not lpacText or not _result_:
+                return
+
+            # Decode the text ID
+            if isinstance(lpacText, bytes):
+                text_id = lpacText.decode('utf-8', errors='ignore')
+            else:
+                text_id = str(ctypes.cast(lpacText, ctypes.c_char_p).value or b'', 'utf-8', errors='ignore')
+
+            if not text_id:
+                return
+
+            # Only capture adjective-related text IDs
+            if text_id.startswith(('RARITY_', 'SENTINEL_', 'WEATHER_', 'UI_BIOME_', 'BIOME_',
+                                   'UI_PLANET_', 'UI_SENTINEL_', 'UI_WEATHER_', 'UI_FLORA_',
+                                   'UI_FAUNA_', 'UI_RARITY_')):
+                # Read the result string from the return value
+                try:
+                    result_ptr = ctypes.cast(_result_, ctypes.c_char_p)
+                    if result_ptr.value:
+                        display_text = result_ptr.value.decode('utf-8', errors='ignore')
+                        # Only store if it looks like valid display text (not another ID)
+                        if (display_text and len(display_text) >= 2 and
+                            not display_text.startswith(('RARITY_', 'SENTINEL_', 'WEATHER_', 'UI_'))):
+                            if text_id not in self._translation_cache:
+                                self._translation_cache[text_id] = display_text
+                                logger.debug(f"    [TRANSLATE] Captured: '{text_id}' -> '{display_text}'")
+                except Exception:
+                    pass
+        except Exception:
+            pass  # Never crash the game from a translation hook
+
+    def _load_adjective_cache(self):
+        """Load adjective cache from disk, or build it from game PAK files in background."""
+        try:
+            from .nms_language import AdjectiveCacheBuilder
+
+            builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
+            if not builder.nms_path:
+                logger.info("[INIT] NMS installation not found - adjective cache unavailable")
+                return
+
+            # Try loading existing cache
+            cached = builder.load_cache()
+            if cached:
+                self._adjective_file_cache = cached
+                logger.info(f"[INIT] Loaded {len(cached)} adjective mappings from cache")
+                return
+
+            # Build cache in background thread (takes a few seconds)
+            logger.info("[INIT] Building adjective cache from game files (background)...")
+            import threading
+
+            def build_async():
+                try:
+                    mappings = builder.build_cache()
+                    self._adjective_file_cache = mappings
+                    logger.info(f"[INIT] Background cache build complete: {len(mappings)} entries")
+                except Exception as e:
+                    logger.warning(f"[INIT] Background cache build failed: {e}")
+
+            threading.Thread(target=build_async, daemon=True).start()
+
+        except Exception as e:
+            logger.debug(f"[INIT] Failed to load adjective cache: {e}")
+
+    def _resolve_adjective(self, text_id: str, field_type: str = 'flora') -> str:
+        """
+        Resolve a text ID to its display adjective using layered lookup:
+        1. In-memory translation cache (from game's Translate hook - most accurate)
+        2. Disk-based PAK/MBIN cache (adjective_cache.json)
+        3. Legacy hardcoded mapping tables (existing functions)
+        4. Original value as last resort
+
+        Args:
+            text_id: The raw text ID (e.g., 'RARITY_HIGH3', 'WEATHER_COLD7')
+            field_type: 'flora', 'fauna', 'sentinel', or 'weather' (for legacy fallback)
+
+        Returns:
+            The resolved display adjective
+        """
+        if not text_id or text_id == "None":
+            return "Unknown"
+
+        # Already a display string? (doesn't match internal ID patterns)
+        if not any(text_id.startswith(p) for p in [
+            'RARITY_', 'SENTINEL_', 'WEATHER_', 'UI_BIOME_', 'BIOME_',
+            'UI_PLANET_', 'UI_SENTINEL_', 'UI_WEATHER_', 'UI_FLORA_',
+            'UI_FAUNA_', 'UI_RARITY_'
+        ]):
+            return text_id
+
+        # Layer 1: In-memory translation cache (from Translate hook)
+        if text_id in self._translation_cache:
+            self._translation_cache_hits += 1
+            return self._translation_cache[text_id]
+
+        # Layer 2: Disk-based PAK/MBIN cache
+        if text_id in self._adjective_file_cache:
+            return self._adjective_file_cache[text_id]
+
+        # Layer 3: Legacy hardcoded mapping tables
+        self._translation_cache_misses += 1
+        if text_id.startswith('WEATHER_'):
+            result = map_weather_enum_to_adjective(text_id)
+            if result != text_id:
+                return result
+        elif text_id.startswith(('RARITY_', 'SENTINEL_')):
+            result = map_display_string_to_adjective(text_id, field_type)
+            if result != text_id:
+                return result
+
+        # Layer 4: Return original value
+        return text_id
 
     # =========================================================================
     # DIRECT MEMORY READ UTILITIES
@@ -2180,6 +2367,9 @@ class HavenExtractorMod(Mod):
             fauna_display = ""
             sentinel_display = ""
             weather_display = ""
+            planet_description = ""       # v1.4.0: Biome adjective text ID
+            planet_type_display = ""      # v1.4.0: Planet type display string
+            is_weather_extreme = False    # v1.4.0: Extreme weather flag
             try:
                 if hasattr(planet_data, 'PlanetInfo'):
                     info = planet_data.PlanetInfo
@@ -2226,6 +2416,34 @@ class HavenExtractorMod(Mod):
                             weather_display = ""
                     else:
                         logger.info(f"    [WEATHER CHECK] info.Weather attribute not found!")
+
+                    # v1.4.0: PlanetDescription - biome adjective text ID (e.g., "Paradise Planet")
+                    if hasattr(info, 'PlanetDescription'):
+                        val = str(info.PlanetDescription) or ""
+                        planet_description = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if planet_description and planet_description != "None" and len(planet_description) >= 2:
+                            logger.info(f"    [DISPLAY] PlanetDescription: '{planet_description}'")
+                        else:
+                            planet_description = ""
+
+                    # v1.4.0: PlanetType - planet type display string
+                    if hasattr(info, 'PlanetType'):
+                        val = str(info.PlanetType) or ""
+                        planet_type_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if planet_type_display and planet_type_display != "None" and len(planet_type_display) >= 2:
+                            logger.info(f"    [DISPLAY] PlanetType: '{planet_type_display}'")
+                        else:
+                            planet_type_display = ""
+
+                    # v1.4.0: IsWeatherExtreme - differentiates normal vs extreme weather
+                    if hasattr(info, 'IsWeatherExtreme'):
+                        try:
+                            is_weather_extreme = bool(info.IsWeatherExtreme)
+                            if is_weather_extreme:
+                                logger.info(f"    [DISPLAY] IsWeatherExtreme: True")
+                        except:
+                            is_weather_extreme = False
+
             except Exception as e:
                 logger.debug(f"PlanetInfo display string extraction failed: {e}")
 
@@ -2256,6 +2474,9 @@ class HavenExtractorMod(Mod):
                 'storm_frequency': storm_frequency,
                 'storm_raw': storm_raw,  # v10.2.0: Raw value for contextual weather lookup
                 'planet_name': planet_name,
+                'planet_description': planet_description,      # v1.4.0: Biome adjective text ID
+                'planet_type_display': planet_type_display,    # v1.4.0: Planet type display string
+                'is_weather_extreme': is_weather_extreme,      # v1.4.0: Extreme weather flag
             }
 
             logger.info("")
@@ -2270,6 +2491,12 @@ class HavenExtractorMod(Mod):
             logger.info(f"    Sentinels: {sentinel_name} ({sentinel_raw})")
             logger.info(f"    Weather: {weather} (raw: {weather_raw}, storms: {storm_frequency})")
             logger.info(f"    Resources: {common_resource}, {uncommon_resource}, {rare_resource}")
+            if planet_description:
+                logger.info(f"    PlanetDescription: '{planet_description}'")
+            if planet_type_display:
+                logger.info(f"    PlanetType: '{planet_type_display}'")
+            if is_weather_extreme:
+                logger.info(f"    IsWeatherExtreme: True")
             logger.info(f"    Total captured: {len(self._captured_planets)} planets")
             logger.info("*" * 60)
             logger.info("")
@@ -2600,7 +2827,7 @@ class HavenExtractorMod(Mod):
         logger.info(">>> Look for values matching: 4009, 2365, 0xFA9, 0x93D <<<")
         logger.info("=" * 70)
 
-    @gui_button("Check System Data")
+    @gui_button("System Data")
     def check_system_data(self):
         """
         Check planet data status - shows both mPlanetData AND captured hook data.
@@ -2777,7 +3004,7 @@ class HavenExtractorMod(Mod):
     # v10.0.0: STREAMLINED GUI BUTTONS
     # =========================================================================
 
-    @gui_button("Refresh Display Strings (After Freighter Scan)")
+    @gui_button("Refresh Adjectives")
     def refresh_display_strings(self):
         """
         v10.3.0: Re-read PlanetInfo display strings after freighter scanner.
@@ -2840,8 +3067,8 @@ class HavenExtractorMod(Mod):
                             flora_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             logger.debug(f"    [DEBUG] Planet {index} Flora raw: '{flora_raw}'")
                             if flora_raw and flora_raw != "None" and len(flora_raw) >= 2:
-                                # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
-                                flora_display = map_display_string_to_adjective(flora_raw, 'flora')
+                                # v1.4.0: Use layered adjective resolution
+                                flora_display = self._resolve_adjective(flora_raw, 'flora')
                                 old_val = captured.get('flora_display', '')
                                 if flora_display != old_val:
                                     captured['flora_display'] = flora_display
@@ -2853,8 +3080,8 @@ class HavenExtractorMod(Mod):
                             fauna_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             logger.debug(f"    [DEBUG] Planet {index} Fauna raw: '{fauna_raw}'")
                             if fauna_raw and fauna_raw != "None" and len(fauna_raw) >= 2:
-                                # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
-                                fauna_display = map_display_string_to_adjective(fauna_raw, 'fauna')
+                                # v1.4.0: Use layered adjective resolution
+                                fauna_display = self._resolve_adjective(fauna_raw, 'fauna')
                                 old_val = captured.get('fauna_display', '')
                                 if fauna_display != old_val:
                                     captured['fauna_display'] = fauna_display
@@ -2875,8 +3102,8 @@ class HavenExtractorMod(Mod):
                                 val = str(sent_arr[0]) or ""
                                 sentinel_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                                 if sentinel_raw and sentinel_raw != "None" and len(sentinel_raw) >= 2:
-                                    # Map internal enum names like 'SENTINEL_RARE7' to actual adjectives
-                                    sentinel_display = map_display_string_to_adjective(sentinel_raw, 'sentinel')
+                                    # v1.4.0: Use layered adjective resolution
+                                    sentinel_display = self._resolve_adjective(sentinel_raw, 'sentinel')
                                     old_val = captured.get('sentinel_display', '')
                                     if sentinel_display != old_val:
                                         captured['sentinel_display'] = sentinel_display
@@ -2888,13 +3115,45 @@ class HavenExtractorMod(Mod):
                             weather_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if weather_raw and weather_raw != "None" and len(weather_raw) >= 2:
                                 logger.info(f"    [WEATHER RAW] Planet {index}: '{weather_raw}'")
-                                # Map weather enum to actual game adjective
-                                weather_display = map_weather_enum_to_adjective(weather_raw)
+                                # v1.4.0: Use layered adjective resolution
+                                weather_display = self._resolve_adjective(weather_raw, 'weather')
                                 old_val = captured.get('weather_display', '')
                                 if weather_display != old_val:
                                     captured['weather_raw_string'] = weather_raw  # Store raw for analysis
                                     captured['weather_display'] = weather_display
                                     fields_updated.append(f"Weather='{weather_display}' (raw: '{weather_raw}')")
+
+                        # v1.4.0: PlanetDescription - biome adjective text ID
+                        if hasattr(info, 'PlanetDescription'):
+                            val = str(info.PlanetDescription) or ""
+                            desc_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if desc_raw and desc_raw != "None" and len(desc_raw) >= 2:
+                                old_val = captured.get('planet_description', '')
+                                if desc_raw != old_val:
+                                    captured['planet_description'] = desc_raw
+                                    fields_updated.append(f"PlanetDescription='{desc_raw}'")
+
+                        # v1.4.0: PlanetType - planet type display string
+                        if hasattr(info, 'PlanetType'):
+                            val = str(info.PlanetType) or ""
+                            type_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if type_raw and type_raw != "None" and len(type_raw) >= 2:
+                                old_val = captured.get('planet_type_display', '')
+                                if type_raw != old_val:
+                                    captured['planet_type_display'] = type_raw
+                                    fields_updated.append(f"PlanetType='{type_raw}'")
+
+                        # v1.4.0: IsWeatherExtreme flag
+                        if hasattr(info, 'IsWeatherExtreme'):
+                            try:
+                                is_extreme = bool(info.IsWeatherExtreme)
+                                old_val = captured.get('is_weather_extreme', False)
+                                if is_extreme != old_val:
+                                    captured['is_weather_extreme'] = is_extreme
+                                    if is_extreme:
+                                        fields_updated.append(f"IsWeatherExtreme=True")
+                            except:
+                                pass
 
                         if fields_updated:
                             planet_name = captured.get('planet_name', f'Planet {index}')
@@ -2923,7 +3182,60 @@ class HavenExtractorMod(Mod):
             logger.error(f"  ERROR: {e}")
             logger.info("=" * 60)
 
-    @gui_button("Check Batch Data")
+    @gui_button("Rebuild Cache")
+    def rebuild_adjective_cache(self):
+        """
+        v1.4.0: Force rebuild of adjective cache from NMS game PAK files.
+        Parses language MBIN files to extract text ID -> display string mappings.
+        """
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(">>> REBUILDING ADJECTIVE CACHE <<<")
+        logger.info("=" * 60)
+
+        try:
+            from .nms_language import AdjectiveCacheBuilder
+
+            builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
+            if not builder.nms_path:
+                logger.error("  NMS installation not found!")
+                logger.error("  Expected at: C:\\Program Files (x86)\\Steam\\steamapps\\common\\No Man's Sky")
+                logger.info("=" * 60)
+                return
+
+            logger.info(f"  NMS path: {builder.nms_path}")
+            logger.info(f"  PCBANKS: {builder.pcbanks_path}")
+            logger.info("  Scanning PAK files...")
+
+            mappings = builder.build_cache()
+            self._adjective_file_cache = mappings
+
+            logger.info("")
+            logger.info(f"  SUCCESS: Built cache with {len(mappings)} adjective entries")
+            logger.info(f"  Saved to: {builder.cache_path}")
+
+            # Show some sample entries
+            if mappings:
+                samples = list(mappings.items())[:10]
+                logger.info("")
+                logger.info("  Sample entries:")
+                for text_id, display in samples:
+                    logger.info(f"    {text_id} -> {display}")
+
+        except Exception as e:
+            logger.error(f"  Cache build failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        logger.info("=" * 60)
+        logger.info("")
+
+        # Also show current translation cache stats
+        logger.info(f"  Translation cache (in-memory): {len(self._translation_cache)} entries")
+        logger.info(f"  Cache hits: {self._translation_cache_hits}, misses: {self._translation_cache_misses}")
+        logger.info("")
+
+    @gui_button("Batch Status")
     def check_batch_data(self):
         """
         Show current batch status - how many systems are stored.
@@ -2965,7 +3277,7 @@ class HavenExtractorMod(Mod):
         logger.info("=" * 60)
         logger.info("")
 
-    @gui_button("Show Config Status")
+    @gui_button("Config Status")
     def show_config_status(self):
         """
         v10.0.0: Display current configuration in log.
@@ -2986,7 +3298,7 @@ class HavenExtractorMod(Mod):
             logger.info("[CONFIG] Configuration is complete. Ready to export!")
         logger.info("")
 
-    @gui_button("Export to Haven UI")
+    @gui_button("Export to Haven")
     def export_to_haven_ui(self):
         """
         v10.0.0: Export systems directly to Haven UI with duplicate checking.
@@ -3652,11 +3964,16 @@ class HavenExtractorMod(Mod):
                 # Fall back to list-based selection only if display strings unavailable
                 # =============================================================
 
+                # =============================================================
+                # v1.4.0: Use _resolve_adjective() for layered text ID resolution
+                # Priority: Translate hook cache > PAK/MBIN cache > hardcoded maps > list fallback
+                # =============================================================
+
                 # Flora - prefer display string from PlanetInfo.Flora
                 flora_display = captured.get('flora_display', '')
                 if flora_display:
-                    # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
-                    result["flora_level"] = map_display_string_to_adjective(flora_display, 'flora')
+                    # v1.4.0: Use layered adjective resolution
+                    result["flora_level"] = self._resolve_adjective(flora_display, 'flora')
                     logger.debug(f"    [DISPLAY] Using Flora: '{result['flora_level']}' (raw: '{flora_display}')")
                 else:
                     # Fallback to list-based selection
@@ -3670,8 +3987,8 @@ class HavenExtractorMod(Mod):
                 # Fauna - prefer display string from PlanetInfo.Fauna
                 fauna_display = captured.get('fauna_display', '')
                 if fauna_display:
-                    # Map internal enum names like 'RARITY_HIGH3' to actual adjectives
-                    result["fauna_level"] = map_display_string_to_adjective(fauna_display, 'fauna')
+                    # v1.4.0: Use layered adjective resolution
+                    result["fauna_level"] = self._resolve_adjective(fauna_display, 'fauna')
                     logger.debug(f"    [DISPLAY] Using Fauna: '{result['fauna_level']}' (raw: '{fauna_display}')")
                 else:
                     # Fallback to list-based selection
@@ -3685,8 +4002,8 @@ class HavenExtractorMod(Mod):
                 # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[0]
                 sentinel_display = captured.get('sentinel_display', '')
                 if sentinel_display:
-                    # Map internal enum names like 'SENTINEL_RARE7' to actual adjectives
-                    result["sentinel_level"] = map_display_string_to_adjective(sentinel_display, 'sentinel')
+                    # v1.4.0: Use layered adjective resolution
+                    result["sentinel_level"] = self._resolve_adjective(sentinel_display, 'sentinel')
                     logger.debug(f"    [DISPLAY] Using Sentinel: '{result['sentinel_level']}' (raw: '{sentinel_display}')")
                 else:
                     # Fallback to list-based selection
@@ -3696,6 +4013,18 @@ class HavenExtractorMod(Mod):
                         result["sentinel_level"] = sentinel_list[index % len(sentinel_list)]
                     else:
                         result["sentinel_level"] = self.SENTINEL_LEVELS.get(sentinel_raw, captured.get('sentinel', 'Unknown'))
+
+                # v1.4.0: Biome adjective from PlanetDescription
+                planet_desc = captured.get('planet_description', '')
+                if planet_desc:
+                    biome_adjective = self._resolve_adjective(planet_desc)
+                    if biome_adjective and biome_adjective != planet_desc:
+                        result["biome"] = biome_adjective
+                        logger.debug(f"    [BIOME ADJ] {biome_adjective} (from PlanetDescription: '{planet_desc}')")
+                    elif planet_desc and not planet_desc.startswith(('RARITY_', 'SENTINEL_', 'WEATHER_', 'UI_', 'BIOME_')):
+                        # PlanetDescription might already be a display string
+                        result["biome"] = planet_desc
+                        logger.debug(f"    [BIOME ADJ] {planet_desc} (direct from PlanetDescription)")
 
                 # Apply captured resources if not already set from direct read (translate to readable names)
                 if result["common_resource"] == "Unknown" and captured.get('common_resource'):
@@ -3711,10 +4040,13 @@ class HavenExtractorMod(Mod):
                 # Fall back to list-based selection only if display string unavailable
                 # =============================================================
                 weather_display = captured.get('weather_display', '')
+                is_extreme = captured.get('is_weather_extreme', False)
                 if weather_display:
-                    # Use the actual game display string - clean it if needed
-                    result["weather"] = clean_weather_string(weather_display)
-                    logger.debug(f"    [DISPLAY] Using Weather display string: '{result['weather']}' (raw: '{weather_display}')")
+                    # v1.4.0: Use layered adjective resolution for weather
+                    resolved = self._resolve_adjective(weather_display, 'weather')
+                    # Post-process: clean_weather_string handles "Extreme" prefix stripping, etc.
+                    result["weather"] = clean_weather_string(resolved)
+                    logger.debug(f"    [DISPLAY] Using Weather: '{result['weather']}' (raw: '{weather_display}', extreme={is_extreme})")
                 elif captured.get('weather') and captured.get('weather_raw', -1) >= 0:
                     # Fallback to list-based selection
                     # v10.3.6: Use deterministic hash based on glyph code + planet index
