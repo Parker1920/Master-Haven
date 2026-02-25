@@ -6388,6 +6388,16 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
     station = cursor.fetchone()
     station = dict(station) if station else None
 
+    # Field name labels for audit display
+    FIELD_LABELS = {
+        'star_type': 'Star Type', 'economy_type': 'Economy Type', 'economy_level': 'Economy Tier',
+        'conflict_level': 'Conflict Level', 'dominant_lifeform': 'Dominant Lifeform',
+        'glyph_code': 'Glyph Code', 'stellar_classification': 'Stellar Class', 'description': 'Description',
+        'biome': 'Biome', 'weather': 'Weather', 'sentinel': 'Sentinels',
+        'fauna': 'Fauna', 'flora': 'Flora',
+        'common_resource': 'Common Resource', 'uncommon_resource': 'Uncommon Resource', 'rare_resource': 'Rare Resource',
+    }
+
     # --- System Core (35 pts) ---
     # These are the 5 essential system properties everyone should fill in.
     # Abandoned/empty systems (economy_type='None'/'Abandoned') legitimately have
@@ -6395,19 +6405,32 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
     is_abandoned = system.get('economy_type') in ('None', 'Abandoned')
     sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
     sys_core_filled = 0
+    sys_core_details = []
     for f in sys_core_fields:
         val = system.get(f)
         if f in ('economy_type', 'economy_level', 'conflict_level') and is_abandoned:
-            # 'None'/'Abandoned' is a real answer for these fields
             sys_core_filled += 1
+            sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val) if val else 'N/A (Abandoned)', 'status': 'filled'})
         elif _is_filled(val):
             sys_core_filled += 1
+            sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})
+        else:
+            sys_core_details.append({'name': FIELD_LABELS[f], 'value': None, 'status': 'missing'})
     sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
 
     # --- System Extra (10 pts) ---
     # Bonus fields: glyph_code is important, stellar_classification is extractor-only, description is optional
     sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
-    sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
+    sys_extra_details = []
+    sys_extra_filled = 0
+    for f in sys_extra_fields:
+        val = system.get(f)
+        if _is_filled(val):
+            sys_extra_filled += 1
+            display = str(val)[:40] + ('...' if val and len(str(val)) > 40 else '')
+            sys_extra_details.append({'name': FIELD_LABELS[f], 'value': display, 'status': 'filled'})
+        else:
+            sys_extra_details.append({'name': FIELD_LABELS[f], 'value': None, 'status': 'missing'})
     sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
 
     # --- Planet Coverage (10 pts) ---
@@ -6418,58 +6441,90 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
     # --- Planet Life avg (15 pts) ---
     planet_env_score = 0
     planet_life_score = 0
+    planet_env_details = []
+    planet_life_details = []
 
     if planets:
-        # Environment: biome, weather, sentinel (the 3 core environment fields)
-        # sentinel='None' is a real value (means no sentinels on planet)
-        env_fields = ['biome', 'weather']
         env_totals = []
         life_totals = []
 
         for p in planets:
+            p_name = p.get('name', 'Unknown')
+            p_env_fields = []
+            p_life_fields = []
+
             # Environment scoring
             env_filled = 0
-            for f in env_fields:
-                if _is_filled(p.get(f)):
-                    env_filled += 1
-            # Sentinel gets special treatment: 'None' is valid (no sentinels)
+            # Biome
+            if _is_filled(p.get('biome')):
+                env_filled += 1
+                p_env_fields.append({'name': 'Biome', 'value': p.get('biome'), 'status': 'filled'})
+            else:
+                p_env_fields.append({'name': 'Biome', 'value': None, 'status': 'missing'})
+            # Weather (with text fallback)
+            weather_filled = _is_filled(p.get('weather'))
+            weather_text_filled = _is_filled(p.get('weather_text'))
+            if weather_filled:
+                env_filled += 1
+                p_env_fields.append({'name': 'Weather', 'value': p.get('weather'), 'status': 'filled'})
+            elif weather_text_filled:
+                env_filled += 1
+                p_env_fields.append({'name': 'Weather', 'value': p.get('weather_text'), 'status': 'filled'})
+            else:
+                p_env_fields.append({'name': 'Weather', 'value': None, 'status': 'missing'})
+            # Sentinel
             if _is_filled(p.get('sentinel'), allow_none_sentinel=True):
                 env_filled += 1
-            # Also check display text fields as fallbacks
-            if not _is_filled(p.get('weather')) and _is_filled(p.get('weather_text')):
-                env_filled += 1  # weather_text counts for weather
-            env_total_fields = 3  # biome, weather, sentinel
-            env_totals.append(min(env_filled / env_total_fields, 1.0))
+                p_env_fields.append({'name': 'Sentinels', 'value': p.get('sentinel'), 'status': 'filled'})
+            elif _is_filled(p.get('sentinels_text')):
+                env_filled += 1
+                p_env_fields.append({'name': 'Sentinels', 'value': p.get('sentinels_text'), 'status': 'filled'})
+            else:
+                p_env_fields.append({'name': 'Sentinels', 'value': None, 'status': 'missing'})
 
-            # Life scoring: fauna, flora, resources (dynamic denominator)
-            # Biome-aware: Dead/Airless/Gas Giant planets don't have fauna/flora,
-            # so those fields are excluded from scoring when not filled.
+            env_total_fields = 3
+            env_totals.append(min(env_filled / env_total_fields, 1.0))
+            planet_env_details.append({'name': p_name, 'filled': env_filled, 'total': env_total_fields, 'fields': p_env_fields})
+
+            # Life scoring: dynamic denominator based on biome
             life_filled = 0
             life_applicable = 0
             biome_val = (p.get('biome') or '').strip()
             is_dead_biome = biome_val in NO_LIFE_BIOMES
 
-            # Fauna: any non-empty value counts (including 'N/A', 'None', 'Absent')
+            # Fauna
             if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
                 life_filled += 1
                 life_applicable += 1
+                p_life_fields.append({'name': 'Fauna', 'value': p.get('fauna') or p.get('fauna_text'), 'status': 'filled'})
             elif not is_dead_biome:
-                life_applicable += 1  # Missing on a planet that should have fauna
+                life_applicable += 1
+                p_life_fields.append({'name': 'Fauna', 'value': None, 'status': 'missing'})
+            else:
+                p_life_fields.append({'name': 'Fauna', 'value': None, 'status': 'skipped'})
 
-            # Flora: same logic
+            # Flora
             if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
                 life_filled += 1
                 life_applicable += 1
+                p_life_fields.append({'name': 'Flora', 'value': p.get('flora') or p.get('flora_text'), 'status': 'filled'})
             elif not is_dead_biome:
-                life_applicable += 1  # Missing on a planet that should have flora
+                life_applicable += 1
+                p_life_fields.append({'name': 'Flora', 'value': None, 'status': 'missing'})
+            else:
+                p_life_fields.append({'name': 'Flora', 'value': None, 'status': 'skipped'})
 
-            # Resources: always applicable (every planet has minable resources)
+            # Resources
             for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
                 life_applicable += 1
                 if _is_filled(p.get(f)):
                     life_filled += 1
+                    p_life_fields.append({'name': FIELD_LABELS[f], 'value': p.get(f), 'status': 'filled'})
+                else:
+                    p_life_fields.append({'name': FIELD_LABELS[f], 'value': None, 'status': 'missing'})
 
             life_totals.append(life_filled / max(life_applicable, 1))
+            planet_life_details.append({'name': p_name, 'filled': life_filled, 'total': life_applicable, 'fields': p_life_fields})
 
         planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
         planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
@@ -6477,13 +6532,23 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
     # --- Space Station (5 pts) ---
     # Abandoned/empty systems have no station - give full credit (not applicable)
     station_score = 0
+    station_details = []
     if is_abandoned:
         station_score = 5
+        station_details.append({'name': 'Station', 'value': 'N/A (Abandoned)', 'status': 'filled'})
+        station_details.append({'name': 'Trade Goods', 'value': 'N/A (Abandoned)', 'status': 'filled'})
     elif station:
         station_score += 3
+        station_details.append({'name': 'Station', 'value': 'Present', 'status': 'filled'})
         trade_goods = station.get('trade_goods', '[]')
         if trade_goods and trade_goods != '[]':
             station_score += 2
+            station_details.append({'name': 'Trade Goods', 'value': 'Recorded', 'status': 'filled'})
+        else:
+            station_details.append({'name': 'Trade Goods', 'value': None, 'status': 'missing'})
+    else:
+        station_details.append({'name': 'Station', 'value': None, 'status': 'missing'})
+        station_details.append({'name': 'Trade Goods', 'value': None, 'status': 'missing'})
 
     # Total
     total = sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score
@@ -6510,6 +6575,14 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
             'planet_life': planet_life_score,
             'space_station': station_score,
             'planet_count': len(planets),
+            'details': {
+                'system_core': sys_core_details,
+                'system_extra': sys_extra_details,
+                'planet_coverage': [{'name': 'Has Planets', 'value': f'{len(planets)} planet(s)' if planets else None, 'status': 'filled' if planets else 'missing'}],
+                'planet_environment': planet_env_details,
+                'planet_life': planet_life_details,
+                'space_station': station_details,
+            }
         }
     }
 

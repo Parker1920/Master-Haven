@@ -163,6 +163,7 @@ export default function SystemDetail() {
   const [error, setError] = useState(null)
   const [expandedPlanets, setExpandedPlanets] = useState({})
   const [showContributors, setShowContributors] = useState(false)
+  const [expandedGradeCategory, setExpandedGradeCategory] = useState(null)
 
   useEffect(() => {
     loadSystem()
@@ -308,15 +309,17 @@ export default function SystemDetail() {
           }
           const g = gradeStyles[system.completeness_grade] || gradeStyles['C']
           const b = system.completeness_breakdown || {}
+          const details = b.details || {}
           const score = system.completeness_score || 0
           const categories = [
-            { label: 'System Core', value: b.system_core || 0, max: 35 },
-            { label: 'System Extra', value: b.system_extra || 0, max: 10 },
-            { label: 'Planet Coverage', value: b.planet_coverage || 0, max: 10 },
-            { label: 'Planet Environment', value: b.planet_environment || 0, max: 25 },
-            { label: 'Planet Life', value: b.planet_life || 0, max: 15 },
-            { label: 'Space Station', value: b.space_station || 0, max: 5 },
+            { key: 'system_core', label: 'System Core', value: b.system_core || 0, max: 35 },
+            { key: 'system_extra', label: 'System Extra', value: b.system_extra || 0, max: 10 },
+            { key: 'planet_coverage', label: 'Planet Coverage', value: b.planet_coverage || 0, max: 10 },
+            { key: 'planet_environment', label: 'Planet Environment', value: b.planet_environment || 0, max: 25 },
+            { key: 'planet_life', label: 'Planet Life', value: b.planet_life || 0, max: 15 },
+            { key: 'space_station', label: 'Space Station', value: b.space_station || 0, max: 5 },
           ]
+          const isPlanetCategory = (key) => key === 'planet_environment' || key === 'planet_life'
           return (
             <div className={`mb-4 p-4 rounded border ${g.bg} ${g.border}`}>
               <div className="flex items-center justify-between mb-3">
@@ -339,23 +342,80 @@ export default function SystemDetail() {
                   </div>
                 </div>
               </div>
-              {/* Category breakdown */}
+              {/* Category breakdown - clickable */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                {categories.map(cat => (
-                  <div key={cat.label} className="text-center">
-                    <div className="text-[10px] text-gray-400 mb-1 truncate" title={cat.label}>{cat.label}</div>
-                    <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          cat.value >= cat.max ? 'bg-amber-400' : cat.value >= cat.max * 0.65 ? 'bg-emerald-400' : cat.value >= cat.max * 0.4 ? 'bg-blue-400' : 'bg-gray-500'
-                        }`}
-                        style={{ width: `${cat.max > 0 ? (cat.value / cat.max) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">{cat.value}/{cat.max}</div>
-                  </div>
-                ))}
+                {categories.map(cat => {
+                  const catDetails = details[cat.key]
+                  const hasDetails = catDetails && (Array.isArray(catDetails) ? catDetails.length > 0 : true)
+                  return (
+                    <button
+                      key={cat.key}
+                      type="button"
+                      className={`text-center rounded p-1.5 transition-colors ${
+                        hasDetails ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'
+                      } ${expandedGradeCategory === cat.key ? 'bg-white/5 ring-1 ring-white/10' : ''}`}
+                      onClick={() => hasDetails && setExpandedGradeCategory(expandedGradeCategory === cat.key ? null : cat.key)}
+                    >
+                      <div className="text-[10px] text-gray-400 mb-1 truncate" title={cat.label}>{cat.label}</div>
+                      <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            cat.value >= cat.max ? 'bg-amber-400' : cat.value >= cat.max * 0.65 ? 'bg-emerald-400' : cat.value >= cat.max * 0.4 ? 'bg-blue-400' : 'bg-gray-500'
+                          }`}
+                          style={{ width: `${cat.max > 0 ? (cat.value / cat.max) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{cat.value}/{cat.max}</div>
+                    </button>
+                  )
+                })}
               </div>
+              {/* Expanded detail panel */}
+              {expandedGradeCategory && details[expandedGradeCategory] && (
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  {isPlanetCategory(expandedGradeCategory) ? (
+                    /* Planet-level breakdown: show each planet with its fields */
+                    <div className="space-y-2">
+                      {details[expandedGradeCategory].map((planet, pi) => (
+                        <div key={pi} className="bg-black/20 rounded p-2">
+                          <div className="text-xs font-medium text-gray-300 mb-1.5">
+                            {planet.name}
+                            <span className="ml-2 text-gray-500">{planet.filled}/{planet.total}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            {planet.fields.map((f, fi) => (
+                              <div key={fi} className="flex items-center gap-1.5 text-xs">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                  f.status === 'filled' ? 'bg-emerald-400' : f.status === 'skipped' ? 'bg-gray-600' : 'bg-red-400'
+                                }`} />
+                                <span className="text-gray-400">{f.name}:</span>
+                                <span className={f.status === 'filled' ? 'text-gray-200' : f.status === 'skipped' ? 'text-gray-600 italic' : 'text-red-400 italic'}>
+                                  {f.status === 'filled' ? f.value : f.status === 'skipped' ? 'N/A' : 'Missing'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    /* System-level breakdown: flat field list */
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {details[expandedGradeCategory].map((f, fi) => (
+                        <div key={fi} className="flex items-center gap-1.5 text-xs">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                            f.status === 'filled' ? 'bg-emerald-400' : 'bg-red-400'
+                          }`} />
+                          <span className="text-gray-400">{f.name}:</span>
+                          <span className={f.status === 'filled' ? 'text-gray-200' : 'text-red-400 italic'}>
+                            {f.status === 'filled' ? f.value : 'Missing'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })()}
