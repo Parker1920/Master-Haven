@@ -1276,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.35.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.35.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -6362,9 +6362,19 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
     station = dict(station) if station else None
 
     # --- System Core (35 pts) ---
-    # These are the 5 essential system properties everyone should fill in
+    # These are the 5 essential system properties everyone should fill in.
+    # Abandoned/empty systems (economy_type='None'/'Abandoned') legitimately have
+    # no economy tier, conflict level, or space station - treat those as filled.
+    is_abandoned = system.get('economy_type') in ('None', 'Abandoned')
     sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
-    sys_core_filled = sum(1 for f in sys_core_fields if _is_filled(system.get(f)))
+    sys_core_filled = 0
+    for f in sys_core_fields:
+        val = system.get(f)
+        if f in ('economy_type', 'economy_level', 'conflict_level') and is_abandoned:
+            # 'None'/'Abandoned' is a real answer for these fields
+            sys_core_filled += 1
+        elif _is_filled(val):
+            sys_core_filled += 1
     sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
 
     # --- System Extra (10 pts) ---
@@ -6431,8 +6441,11 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
         planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
 
     # --- Space Station (5 pts) ---
+    # Abandoned/empty systems have no station - give full credit (not applicable)
     station_score = 0
-    if station:
+    if is_abandoned:
+        station_score = 5
+    elif station:
         station_score += 3
         trade_goods = station.get('trade_goods', '[]')
         if trade_goods and trade_goods != '[]':

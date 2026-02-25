@@ -153,7 +153,7 @@ logger = logging.getLogger(__name__)
 # Direct API integration with Haven UI
 # API key is embedded for the official Haven Extractor distribution
 # =============================================================================
-DEFAULT_API_URL = "https://voyagers-haven-3dmap.ngrok.io"
+DEFAULT_API_URL = "https://havenmap.online"
 HAVEN_EXTRACTOR_API_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"
 
 # Default user config (populated by config GUI)
@@ -1064,7 +1064,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.0"
+    __version__ = "1.4.2"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1452,7 +1452,10 @@ class HavenExtractorMod(Mod):
     def _load_adjective_cache(self):
         """Load adjective cache from disk, or build it from game PAK files in background."""
         try:
-            from .nms_language import AdjectiveCacheBuilder
+            try:
+                from .nms_language import AdjectiveCacheBuilder
+            except ImportError:
+                from nms_language import AdjectiveCacheBuilder
 
             builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
             if not builder.nms_path:
@@ -1481,7 +1484,9 @@ class HavenExtractorMod(Mod):
             threading.Thread(target=build_async, daemon=True).start()
 
         except Exception as e:
-            logger.debug(f"[INIT] Failed to load adjective cache: {e}")
+            logger.warning(f"[INIT] Failed to load adjective cache: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
 
     def _resolve_adjective(self, text_id: str, field_type: str = 'flora') -> str:
         """
@@ -1719,10 +1724,11 @@ class HavenExtractorMod(Mod):
     # v8.2.0: BATCH MODE - Save current system to batch storage
     # =========================================================================
 
-    def _save_current_system_to_batch(self):
+    def _save_current_system_to_batch(self, force_update=False):
         """
         Save the current system's captured data to batch storage.
         Called automatically when warping to a new system.
+        If force_update=True, updates the existing batch entry instead of skipping duplicates.
         """
         # Skip if batch mode disabled or no captured data
         if not self._batch_mode_enabled:
@@ -1743,9 +1749,26 @@ class HavenExtractorMod(Mod):
 
             # Check if this system is already in batch (by glyph code)
             glyph_code = coords.get('glyph_code', '')
+            existing_entry = None
             for existing in self._batch_systems:
                 if existing.get('glyph_code') == glyph_code:
+                    existing_entry = existing
+                    break
+
+            if existing_entry is not None:
+                if not force_update:
                     logger.info(f"[BATCH] System {glyph_code} already in batch, skipping duplicate")
+                    return
+                else:
+                    # Force-update: refresh planets and system name in existing batch entry
+                    existing_entry['planets'] = self._extract_planets(self._cached_solar_system)
+                    existing_entry['planet_count'] = len(existing_entry['planets'])
+                    # Update system name if manually changed
+                    manual_name = coords.get('system_name', '')
+                    if manual_name and not manual_name.startswith('System_'):
+                        existing_entry['system_name'] = manual_name
+                        logger.info(f"[BATCH] Updated system name to: '{manual_name}'")
+                    logger.info(f"[BATCH] Updated {glyph_code} with refreshed adjectives and name")
                     return
 
             # Get system data
@@ -3194,7 +3217,10 @@ class HavenExtractorMod(Mod):
         logger.info("=" * 60)
 
         try:
-            from .nms_language import AdjectiveCacheBuilder
+            try:
+                from .nms_language import AdjectiveCacheBuilder
+            except ImportError:
+                from nms_language import AdjectiveCacheBuilder
 
             builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
             if not builder.nms_path:
@@ -3298,6 +3324,83 @@ class HavenExtractorMod(Mod):
             logger.info("[CONFIG] Configuration is complete. Ready to export!")
         logger.info("")
 
+    def _auto_refresh_for_export(self):
+        """
+        v1.4.1: Silently refresh adjectives from PlanetInfo before export.
+        Same core logic as refresh_display_strings() but without verbose logging.
+        Ensures _captured_planets has the latest text IDs resolved through _resolve_adjective().
+        """
+        if not self._captured_planets or not self._cached_solar_system:
+            return
+
+        try:
+            planets = self._cached_solar_system.maPlanets
+            if planets is None:
+                return
+
+            refreshed = 0
+            for index in range(min(6, len(planets))):
+                if index not in self._captured_planets:
+                    continue
+
+                try:
+                    planet = planets[index]
+                    if planet is None:
+                        continue
+
+                    planet_data = None
+                    if hasattr(planet, 'mPlanetData'):
+                        planet_data = planet.mPlanetData
+                    if planet_data is None:
+                        continue
+
+                    if not hasattr(planet_data, 'PlanetInfo'):
+                        continue
+
+                    info = planet_data.PlanetInfo
+                    captured = self._captured_planets[index]
+
+                    # Flora
+                    if hasattr(info, 'Flora'):
+                        val = str(info.Flora) or ""
+                        raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if raw and raw != "None" and len(raw) >= 2:
+                            captured['flora_display'] = self._resolve_adjective(raw, 'flora')
+
+                    # Fauna
+                    if hasattr(info, 'Fauna'):
+                        val = str(info.Fauna) or ""
+                        raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if raw and raw != "None" and len(raw) >= 2:
+                            captured['fauna_display'] = self._resolve_adjective(raw, 'fauna')
+
+                    # Sentinel
+                    if hasattr(info, 'SentinelsPerDifficulty'):
+                        sent_arr = info.SentinelsPerDifficulty
+                        if hasattr(sent_arr, '__getitem__'):
+                            val = str(sent_arr[0]) or ""
+                            raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                            if raw and raw != "None" and len(raw) >= 2:
+                                captured['sentinel_display'] = self._resolve_adjective(raw, 'sentinel')
+
+                    # Weather
+                    if hasattr(info, 'Weather'):
+                        val = str(info.Weather) or ""
+                        raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
+                        if raw and raw != "None" and len(raw) >= 2:
+                            captured['weather_raw_string'] = raw
+                            captured['weather_display'] = self._resolve_adjective(raw, 'weather')
+
+                    refreshed += 1
+                except Exception:
+                    pass
+
+            if refreshed > 0:
+                logger.info(f"[EXPORT] Auto-refreshed adjectives for {refreshed} planet(s)")
+
+        except Exception as e:
+            logger.warning(f"[EXPORT] Auto-refresh failed (non-fatal): {e}")
+
     @gui_button("Export to Haven")
     def export_to_haven_ui(self):
         """
@@ -3316,10 +3419,12 @@ class HavenExtractorMod(Mod):
             logger.info("[EXPORT] Use the 'Show Config Status' button to verify your settings.")
             return
 
-        # First, save current system to batch if there's data
+        # First, auto-refresh adjectives from game memory and force-update batch
         if self._captured_planets:
-            logger.info("[EXPORT] Saving current system to batch...")
-            self._save_current_system_to_batch()
+            logger.info("[EXPORT] Auto-refreshing adjectives from game memory...")
+            self._auto_refresh_for_export()
+            logger.info("[EXPORT] Updating batch with latest data...")
+            self._save_current_system_to_batch(force_update=True)
 
         if not self._batch_systems:
             logger.warning("[EXPORT] No systems to export!")
@@ -4014,17 +4119,20 @@ class HavenExtractorMod(Mod):
                     else:
                         result["sentinel_level"] = self.SENTINEL_LEVELS.get(sentinel_raw, captured.get('sentinel', 'Unknown'))
 
-                # v1.4.0: Biome adjective from PlanetDescription
+                # v1.4.2: Store PlanetDescription as informational field (do NOT override biome)
+                # PlanetDescription text IDs (DEAD6, TOXIC2, LUSH8, WIRECELLSBIOME1, etc.)
+                # are not resolvable and were incorrectly replacing good biome names
                 planet_desc = captured.get('planet_description', '')
                 if planet_desc:
-                    biome_adjective = self._resolve_adjective(planet_desc)
-                    if biome_adjective and biome_adjective != planet_desc:
-                        result["biome"] = biome_adjective
-                        logger.debug(f"    [BIOME ADJ] {biome_adjective} (from PlanetDescription: '{planet_desc}')")
-                    elif planet_desc and not planet_desc.startswith(('RARITY_', 'SENTINEL_', 'WEATHER_', 'UI_', 'BIOME_')):
-                        # PlanetDescription might already be a display string
-                        result["biome"] = planet_desc
-                        logger.debug(f"    [BIOME ADJ] {planet_desc} (direct from PlanetDescription)")
+                    result["planet_description"] = planet_desc
+                    logger.debug(f"    [PLANET_DESC] {planet_desc}")
+
+                # v1.4.2: Include planet type classification and extreme weather flag
+                planet_type = captured.get('planet_type_display', '')
+                if planet_type:
+                    result["planet_type"] = planet_type
+                if captured.get('is_weather_extreme', False):
+                    result["is_weather_extreme"] = True
 
                 # Apply captured resources if not already set from direct read (translate to readable names)
                 if result["common_resource"] == "Unknown" and captured.get('common_resource'):

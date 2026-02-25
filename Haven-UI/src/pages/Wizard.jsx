@@ -67,8 +67,9 @@ export default function Wizard(){
     if(!system.name || !system.name.trim()) { alert('System name is required'); return; }
     if(!system.star_type) { alert('Star Color is required'); return; }
     if(!system.economy_type) { alert('Economy Type is required'); return; }
-    if(!system.economy_level) { alert('Economy Tier is required'); return; }
-    if(!system.conflict_level) { alert('Conflict Level is required'); return; }
+    const isAbandoned = system.economy_type === 'None' || system.economy_type === 'Abandoned';
+    if(!isAbandoned && !system.economy_level) { alert('Economy Tier is required'); return; }
+    if(!isAbandoned && !system.conflict_level) { alert('Conflict Level is required'); return; }
     if(!system.dominant_lifeform) { alert('Dominant Lifeform is required'); return; }
     if(system.planets){
       for(const p of system.planets){
@@ -361,7 +362,18 @@ export default function Wizard(){
               <select
                 className={`w-full p-2 border rounded bg-gray-700 ${!system.economy_type ? 'border-red-500' : 'border-gray-600'}`}
                 value={system.economy_type || ''}
-                onChange={e => setField('economy_type', e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val === 'None' || val === 'Abandoned') {
+                    setSystem(s => ({...s, economy_type: val, economy_level: 'None', conflict_level: 'None'}));
+                  } else {
+                    // Clear auto-set values if switching back from None/Abandoned
+                    setSystem(s => ({...s, economy_type: val,
+                      economy_level: s.economy_level === 'None' ? '' : s.economy_level,
+                      conflict_level: s.conflict_level === 'None' ? '' : s.conflict_level
+                    }));
+                  }
+                }}
                 required
               >
                 <option value="">-- Select --</option>
@@ -382,37 +394,41 @@ export default function Wizard(){
             {/* Economy Tier */}
             <div>
               <label className="block text-sm font-medium mb-1">
-                Economy Tier <span className="text-red-400">*</span>
+                Economy Tier {!(system.economy_type === 'None' || system.economy_type === 'Abandoned') && <span className="text-red-400">*</span>}
               </label>
               <select
-                className={`w-full p-2 border rounded bg-gray-700 ${!system.economy_level ? 'border-red-500' : 'border-gray-600'}`}
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.economy_level ? 'border-red-500' : 'border-gray-600'} ${(system.economy_type === 'None' || system.economy_type === 'Abandoned') ? 'opacity-50 cursor-not-allowed' : ''}`}
                 value={system.economy_level || ''}
                 onChange={e => setField('economy_level', e.target.value)}
-                required
+                required={!(system.economy_type === 'None' || system.economy_type === 'Abandoned')}
+                disabled={system.economy_type === 'None' || system.economy_type === 'Abandoned'}
               >
                 <option value="">-- Select --</option>
                 <option value="T1">★ (Low)</option>
                 <option value="T2">★★ (Medium)</option>
                 <option value="T3">★★★ (High)</option>
                 <option value="T4">☠ (Pirate)</option>
+                <option value="None">⭕ None</option>
               </select>
             </div>
 
             {/* Conflict Level */}
             <div>
               <label className="block text-sm font-medium mb-1">
-                Conflict Level <span className="text-red-400">*</span>
+                Conflict Level {!(system.economy_type === 'None' || system.economy_type === 'Abandoned') && <span className="text-red-400">*</span>}
               </label>
               <select
-                className={`w-full p-2 border rounded bg-gray-700 ${!system.conflict_level ? 'border-red-500' : 'border-gray-600'}`}
+                className={`w-full p-2 border rounded bg-gray-700 ${!system.conflict_level ? 'border-red-500' : 'border-gray-600'} ${(system.economy_type === 'None' || system.economy_type === 'Abandoned') ? 'opacity-50 cursor-not-allowed' : ''}`}
                 value={system.conflict_level || ''}
                 onChange={e => setField('conflict_level', e.target.value)}
-                required
+                required={!(system.economy_type === 'None' || system.economy_type === 'Abandoned')}
+                disabled={system.economy_type === 'None' || system.economy_type === 'Abandoned'}
               >
                 <option value="">-- Select --</option>
                 <option value="Low">🔥 Low</option>
                 <option value="Medium">🔥🔥 Medium</option>
                 <option value="High">🔥🔥🔥 High</option>
+                <option value="None">⭕ None</option>
               </select>
             </div>
 
