@@ -1276,7 +1276,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.35.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.36.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -6333,12 +6333,39 @@ def _is_filled(val, allow_none_sentinel=False):
     return True
 
 
+# Biomes where fauna/flora are not expected (Dead, Gas Giant categories)
+NO_LIFE_BIOMES = frozenset({
+    'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere',
+    'Gas Giant', 'Empty',
+})
+
+
+def _life_descriptor_filled(val, val_text):
+    """Check if a fauna/flora field has ANY value (including 'N/A', 'None', 'Absent').
+
+    For fauna/flora, ANY non-empty string is real data - even 'N/A' or 'None'
+    means the user reported that life is absent. Only NULL/empty means not answered.
+    """
+    for v in [val, val_text]:
+        if v is not None:
+            s = str(v).strip()
+            if s:
+                return True
+    return False
+
+
 def calculate_completeness_score(cursor, system_id: str) -> dict:
     """Calculate a data completeness score (0-100) for a system.
 
     Scoring philosophy: measure how much COLLECTIBLE data we actually have.
     Legitimate game values (sentinel='None', fauna='Absent', hazards=0) count
     as filled. Only true nulls/DB defaults count as missing.
+
+    Planet Life uses a biome-aware dynamic denominator:
+    - Fauna/flora are excluded from scoring on Dead/Airless/Gas Giant biomes
+      where life is not expected (NULL = correctly not applicable)
+    - Any non-empty fauna/flora value counts as filled (including 'N/A', 'Absent')
+    - Resources always count (every planet has minable resources)
 
     Returns a dict with:
         score: int (0-100)
@@ -6414,28 +6441,35 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
             env_total_fields = 3  # biome, weather, sentinel
             env_totals.append(min(env_filled / env_total_fields, 1.0))
 
-            # Life scoring: fauna, flora, resources
+            # Life scoring: fauna, flora, resources (dynamic denominator)
+            # Biome-aware: Dead/Airless/Gas Giant planets don't have fauna/flora,
+            # so those fields are excluded from scoring when not filled.
             life_filled = 0
-            life_total_fields = 5  # fauna, flora, 3 resources
+            life_applicable = 0
+            biome_val = (p.get('biome') or '').strip()
+            is_dead_biome = biome_val in NO_LIFE_BIOMES
 
-            # Fauna: check main field and display text. 'Absent'/'Empty'/'Bountiful' etc are valid
-            fauna_val = p.get('fauna')
-            fauna_text = p.get('fauna_text')
-            if _is_filled(fauna_val) or _is_filled(fauna_text):
+            # Fauna: any non-empty value counts (including 'N/A', 'None', 'Absent')
+            if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
                 life_filled += 1
+                life_applicable += 1
+            elif not is_dead_biome:
+                life_applicable += 1  # Missing on a planet that should have fauna
 
             # Flora: same logic
-            flora_val = p.get('flora')
-            flora_text = p.get('flora_text')
-            if _is_filled(flora_val) or _is_filled(flora_text):
+            if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
                 life_filled += 1
+                life_applicable += 1
+            elif not is_dead_biome:
+                life_applicable += 1  # Missing on a planet that should have flora
 
-            # Resources
+            # Resources: always applicable (every planet has minable resources)
             for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+                life_applicable += 1
                 if _is_filled(p.get(f)):
                     life_filled += 1
 
-            life_totals.append(life_filled / life_total_fields)
+            life_totals.append(life_filled / max(life_applicable, 1))
 
         planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
         planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
@@ -8978,9 +9012,11 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     storm_frequency, weather_intensity, building_density,
                     hazard_temperature, hazard_radiation, hazard_toxicity,
                     common_resource, uncommon_resource, rare_resource,
-                    weather_text, sentinels_text, flora_text, fauna_text
+                    weather_text, sentinels_text, flora_text, fauna_text,
+                    vile_brood, dissonance, ancient_bones, salvageable_scrap,
+                    storm_crystals, gravitino_balls, infested, exotic_trophy
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 planet.get('name', 'Unknown'),
@@ -9018,7 +9054,16 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('weather_text'),
                 planet.get('sentinels_text'),
                 planet.get('flora_text'),
-                planet.get('fauna_text')
+                planet.get('fauna_text'),
+                # Special planet features
+                1 if planet.get('vile_brood') else 0,
+                1 if planet.get('dissonance') else 0,
+                1 if planet.get('ancient_bones') else 0,
+                1 if planet.get('salvageable_scrap') else 0,
+                1 if planet.get('storm_crystals') else 0,
+                1 if planet.get('gravitino_balls') else 0,
+                1 if planet.get('infested') else 0,
+                planet.get('exotic_trophy')
             ))
             planet_id = cursor.lastrowid
 
@@ -12297,7 +12342,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         storm_frequency = ?, weather_intensity = ?, building_density = ?,
                         hazard_temperature = ?, hazard_radiation = ?, hazard_toxicity = ?,
                         common_resource = ?, uncommon_resource = ?, rare_resource = ?,
-                        weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?
+                        weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?,
+                        vile_brood = ?, dissonance = ?, ancient_bones = ?, salvageable_scrap = ?,
+                        storm_crystals = ?, gravitino_balls = ?, infested = ?, exotic_trophy = ?
                     WHERE id = ?
                 ''', (
                     planet.get('x', 0),
@@ -12334,6 +12381,14 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     planet.get('sentinels_text'),
                     planet.get('flora_text'),
                     planet.get('fauna_text'),
+                    1 if planet.get('vile_brood') else 0,
+                    1 if planet.get('dissonance') else 0,
+                    1 if planet.get('ancient_bones') else 0,
+                    1 if planet.get('salvageable_scrap') else 0,
+                    1 if planet.get('storm_crystals') else 0,
+                    1 if planet.get('gravitino_balls') else 0,
+                    1 if planet.get('infested') else 0,
+                    planet.get('exotic_trophy'),
                     existing_planet_id
                 ))
                 planet_id = existing_planet_id
@@ -12348,9 +12403,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         storm_frequency, weather_intensity, building_density,
                         hazard_temperature, hazard_radiation, hazard_toxicity,
                         common_resource, uncommon_resource, rare_resource,
-                        weather_text, sentinels_text, flora_text, fauna_text
+                        weather_text, sentinels_text, flora_text, fauna_text,
+                        vile_brood, dissonance, ancient_bones, salvageable_scrap,
+                        storm_crystals, gravitino_balls, infested, exotic_trophy
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     system_id,
                     planet_name,
@@ -12387,7 +12444,15 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     planet.get('weather_text'),
                     planet.get('sentinels_text'),
                     planet.get('flora_text'),
-                    planet.get('fauna_text')
+                    planet.get('fauna_text'),
+                    1 if planet.get('vile_brood') else 0,
+                    1 if planet.get('dissonance') else 0,
+                    1 if planet.get('ancient_bones') else 0,
+                    1 if planet.get('salvageable_scrap') else 0,
+                    1 if planet.get('storm_crystals') else 0,
+                    1 if planet.get('gravitino_balls') else 0,
+                    1 if planet.get('infested') else 0,
+                    planet.get('exotic_trophy')
                 ))
                 planet_id = cursor.lastrowid
                 if is_edit:
@@ -12986,9 +13051,11 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             storm_frequency, weather_intensity, building_density,
                             hazard_temperature, hazard_radiation, hazard_toxicity,
                             common_resource, uncommon_resource, rare_resource,
-                            weather_text, sentinels_text, flora_text, fauna_text
+                            weather_text, sentinels_text, flora_text, fauna_text,
+                            vile_brood, dissonance, ancient_bones, salvageable_scrap,
+                            storm_crystals, gravitino_balls, infested, exotic_trophy
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         planet.get('name'),
@@ -13025,7 +13092,15 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         planet.get('weather_text'),
                         planet.get('sentinels_text'),
                         planet.get('flora_text'),
-                        planet.get('fauna_text')
+                        planet.get('fauna_text'),
+                        1 if planet.get('vile_brood') else 0,
+                        1 if planet.get('dissonance') else 0,
+                        1 if planet.get('ancient_bones') else 0,
+                        1 if planet.get('salvageable_scrap') else 0,
+                        1 if planet.get('storm_crystals') else 0,
+                        1 if planet.get('gravitino_balls') else 0,
+                        1 if planet.get('infested') else 0,
+                        planet.get('exotic_trophy')
                     ))
                     planet_id = cursor.lastrowid
 

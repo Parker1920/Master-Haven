@@ -201,6 +201,40 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           <input placeholder="Notes" className="mt-1 p-1 rounded w-full" value={planet.notes || ''} onChange={e => setField('notes', e.target.value)} />
         </div>
       </div>
+      {/* Special Features row */}
+      <div className="mt-3">
+        <label className="block text-sm text-gray-300 mb-2">Special Features</label>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {[
+            { key: 'vile_brood', label: 'Vile Brood' },
+            { key: 'dissonance', label: 'Dissonance' },
+            { key: 'ancient_bones', label: 'Ancient Bones' },
+            { key: 'salvageable_scrap', label: 'Salvageable Scrap' },
+            { key: 'storm_crystals', label: 'Storm Crystals' },
+            { key: 'gravitino_balls', label: 'Gravitino Balls' },
+            { key: 'infested', label: 'Infested' },
+          ].map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!planet[key]}
+                onChange={e => setField(key, e.target.checked ? 1 : 0)}
+                className="rounded"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="mt-2 max-w-xs">
+          <label className="block text-sm">Exotic Trophy</label>
+          <input
+            placeholder="e.g. Bubble Cluster, Light Fissure..."
+            className="mt-1 p-1 rounded w-full text-sm"
+            value={planet.exotic_trophy || ''}
+            onChange={e => setField('exotic_trophy', e.target.value)}
+          />
+        </div>
+      </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={openAddMoonModal} className="px-3 py-1.5 bg-green-600 rounded text-sm">➕ Add Moon</button>
         <button type="button" onClick={() => onRemove(index)} className="px-3 py-1.5 bg-red-600 rounded text-sm">Remove Planet</button>

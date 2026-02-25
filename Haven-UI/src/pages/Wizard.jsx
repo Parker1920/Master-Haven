@@ -190,7 +190,15 @@ export default function Wizard(){
       base_location: '',
       photo: '',
       notes: '',
-      moons: []
+      moons: [],
+      vile_brood: 0,
+      dissonance: 0,
+      ancient_bones: 0,
+      salvageable_scrap: 0,
+      storm_crystals: 0,
+      gravitino_balls: 0,
+      infested: 0,
+      exotic_trophy: ''
     })
     setPlanetModalOpen(true)
   }

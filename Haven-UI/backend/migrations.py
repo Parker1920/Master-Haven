@@ -2677,3 +2677,184 @@ def migrate_1_39_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.39.0")
+
+
+@register_migration("1.40.0", "Special planet features, dynamic life scoring, abandoned system support")
+def migrate_1_40_0(conn):
+    """Add special planet feature columns and re-score with improved logic.
+
+    Schema changes:
+    - Add 7 boolean columns for special planet features (vile_brood, dissonance,
+      ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
+    - Add exotic_trophy TEXT column for exotic biome collectible name
+
+    Scoring improvements (v3):
+    - Abandoned systems get full credit for economy/conflict/station fields
+    - Planet Life uses biome-aware dynamic denominator: Dead/Airless/Gas Giant
+      planets skip fauna/flora from scoring when not filled (not applicable)
+    - Any non-empty fauna/flora value counts as filled (including 'N/A', 'None')
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # --- Schema: Add special feature columns to planets ---
+    special_columns = [
+        ('vile_brood', 'INTEGER DEFAULT 0'),
+        ('dissonance', 'INTEGER DEFAULT 0'),
+        ('ancient_bones', 'INTEGER DEFAULT 0'),
+        ('salvageable_scrap', 'INTEGER DEFAULT 0'),
+        ('storm_crystals', 'INTEGER DEFAULT 0'),
+        ('gravitino_balls', 'INTEGER DEFAULT 0'),
+        ('infested', 'INTEGER DEFAULT 0'),
+        ('exotic_trophy', 'TEXT'),
+    ]
+    for col_name, col_type in special_columns:
+        try:
+            cursor.execute(f'ALTER TABLE planets ADD COLUMN {col_name} {col_type}')
+            logger.info(f"Added column planets.{col_name}")
+        except sqlite3.OperationalError:
+            logger.info(f"Column planets.{col_name} already exists")
+
+    # --- Re-score completeness for all systems ---
+    cursor.execute('SELECT id FROM systems')
+    system_ids = [row[0] for row in cursor.fetchall()]
+    logger.info(f"Re-scoring completeness for {len(system_ids)} systems (v3: abandoned + dynamic life)...")
+
+    NO_LIFE_BIOMES = {'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere', 'Gas Giant', 'Empty'}
+
+    def _is_filled(val, allow_none=False):
+        if val is None:
+            return False
+        s = str(val).strip()
+        if not s:
+            return False
+        if s == 'N/A':
+            return False
+        if s == 'None' and not allow_none:
+            return False
+        return True
+
+    def _life_descriptor_filled(val, val_text):
+        """Any non-empty string counts as filled for fauna/flora."""
+        for v in [val, val_text]:
+            if v is not None:
+                s = str(v).strip()
+                if s:
+                    return True
+        return False
+
+    def _calc_score_v3(cursor, system_id):
+        cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            return 0
+        system = dict(system)
+
+        cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
+        planets = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
+        station_row = cursor.fetchone()
+        station = dict(station_row) if station_row else None
+
+        is_abandoned = system.get('economy_type') in ('None', 'Abandoned')
+
+        # System Core (35 pts) - 5 essential fields
+        sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
+        sys_core_filled = 0
+        for f in sys_core_fields:
+            val = system.get(f)
+            if f in ('economy_type', 'economy_level', 'conflict_level') and is_abandoned:
+                sys_core_filled += 1
+            elif _is_filled(val):
+                sys_core_filled += 1
+        sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
+
+        # System Extra (10 pts) - bonus fields
+        sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
+        sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
+        sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
+
+        # Planet Coverage (10 pts)
+        planet_coverage_score = 10 if planets else 0
+
+        # Planet Environment avg (25 pts) - biome, weather, sentinel
+        planet_env_score = 0
+        planet_life_score = 0
+
+        if planets:
+            env_totals = []
+            life_totals = []
+
+            for p in planets:
+                env_filled = 0
+                if _is_filled(p.get('biome')):
+                    env_filled += 1
+                if _is_filled(p.get('weather')) or _is_filled(p.get('weather_text')):
+                    env_filled += 1
+                if _is_filled(p.get('sentinel'), allow_none=True) or _is_filled(p.get('sentinels_text')):
+                    env_filled += 1
+                env_totals.append(min(env_filled / 3, 1.0))
+
+                # Life (15 pts) - dynamic denominator based on biome
+                life_filled = 0
+                life_applicable = 0
+                biome_val = (p.get('biome') or '').strip()
+                is_dead_biome = biome_val in NO_LIFE_BIOMES
+
+                # Fauna: any non-empty value counts (including N/A, None, Absent)
+                if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
+                    life_filled += 1
+                    life_applicable += 1
+                elif not is_dead_biome:
+                    life_applicable += 1  # Missing on planet that should have fauna
+
+                # Flora: same logic
+                if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
+                    life_filled += 1
+                    life_applicable += 1
+                elif not is_dead_biome:
+                    life_applicable += 1  # Missing on planet that should have flora
+
+                # Resources: always applicable
+                for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+                    life_applicable += 1
+                    if _is_filled(p.get(f)):
+                        life_filled += 1
+
+                life_totals.append(life_filled / max(life_applicable, 1))
+
+            planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
+            planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
+
+        # Space Station (5 pts) - abandoned systems get full credit
+        station_score = 0
+        if is_abandoned:
+            station_score = 5
+        elif station:
+            station_score += 3
+            trade_goods = station.get('trade_goods', '[]')
+            if trade_goods and trade_goods != '[]':
+                station_score += 2
+
+        return min(sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score, 100)
+
+    updated = 0
+    for sys_id in system_ids:
+        score = _calc_score_v3(cursor, sys_id)
+        cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (score, sys_id))
+        updated += 1
+
+    logger.info(f"Re-scored completeness for {updated} systems (v3)")
+
+    # Update _metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.40.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.40.0")
