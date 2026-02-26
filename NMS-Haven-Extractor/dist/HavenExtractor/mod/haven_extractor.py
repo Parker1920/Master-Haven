@@ -433,7 +433,6 @@ RESOURCE_NAMES = {
     "ASTEROID2": "Gold",
     "ASTEROID3": "Platinum",
     # Plant/Flora resources
-    "PLANT_POOP": "Mordite",
     "PLANT_TOXIC": "Fungal Mould",
     "PLANT_SNOW": "Frost Crystal",
     "PLANT_HOT": "Solanium",
@@ -478,6 +477,12 @@ RESOURCE_NAMES = {
     # Storm crystals
     "STORM1": "Storm Crystals",
     "STORM_CRYSTAL": "Storm Crystals",
+    # v1.4.6: ExtraResourceHints UI hint IDs (actual game hint text IDs)
+    "UI_BONES_HINT": "Ancient Bones",
+    "UI_SCRAP_HINT": "Salvageable Scrap",
+    "UI_BUGS_HINT": "Vile Brood Detected",
+    "UI_STORM_HINT": "Storm Crystals",
+    "UI_GRAV_HINT": "Gravitino Balls",
 }
 
 # v1.4.5: Biome -> plant resource mapping (what the game discovery screen shows)
@@ -1078,7 +1083,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.5"
+    __version__ = "1.4.6"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -2588,15 +2593,15 @@ class HavenExtractorMod(Mod):
                 hint_upper = hint_id.upper()
                 translated = translate_resource(hint_upper)
                 translated_lower = translated.lower() if translated else ""
-                if "ancient bones" in translated_lower or hint_upper in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
+                if "ancient bones" in translated_lower or hint_upper in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT", "UI_BONES_HINT"):
                     self._captured_planets[planet_index]['ancient_bones'] = 1
-                if "salvageable scrap" in translated_lower or hint_upper in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
+                if "salvageable scrap" in translated_lower or hint_upper in ("SALVAGE", "SALVAGE1", "TECHFRAG", "UI_SCRAP_HINT"):
                     self._captured_planets[planet_index]['salvageable_scrap'] = 1
-                if "storm crystal" in translated_lower or hint_upper in ("STORM1", "STORM_CRYSTAL"):
+                if "storm crystal" in translated_lower or hint_upper in ("STORM1", "STORM_CRYSTAL", "UI_STORM_HINT"):
                     self._captured_planets[planet_index]['storm_crystals'] = 1
-                if "gravitino" in translated_lower or hint_upper in ("GRAVITINO", "GRAV_BALL"):
+                if "gravitino" in translated_lower or hint_upper in ("GRAVITINO", "GRAV_BALL", "UI_GRAV_HINT"):
                     self._captured_planets[planet_index]['gravitino_balls'] = 1
-                if "vile brood" in translated_lower or "whispering egg" in translated_lower or hint_upper in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
+                if "vile brood" in translated_lower or "whispering egg" in translated_lower or hint_upper in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL", "UI_BUGS_HINT"):
                     self._captured_planets[planet_index]['vile_brood'] = 1
             # v1.4.6: HasScrap from hook time is unreliable (struct offset may have shifted
             # in Worlds Part 1 update, causing false positives). Scrap detection is now
@@ -3865,11 +3870,12 @@ class HavenExtractorMod(Mod):
                     result["is_weather_extreme"] = True
 
                 # Apply captured resources if not already set from direct read (translate to readable names)
-                if result["common_resource"] == "Unknown" and captured.get('common_resource'):
+                # v1.4.6: Also trigger when direct read returned empty string (not just "Unknown")
+                if result["common_resource"] in ("Unknown", "") and captured.get('common_resource'):
                     result["common_resource"] = translate_resource(captured['common_resource'])
                 if captured.get('uncommon_resource'):
                     result["uncommon_resource"] = translate_resource(captured['uncommon_resource'])
-                if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
+                if result["rare_resource"] in ("Unknown", "") and captured.get('rare_resource'):
                     result["rare_resource"] = translate_resource(captured['rare_resource'])
 
                 # v1.4.5: Apply special resource flags from captured hook data
@@ -4064,8 +4070,9 @@ class HavenExtractorMod(Mod):
                     pass
 
                 # Resources from PlanetData if not already set - clean and translate to readable names
+                # v1.4.6: Also trigger when resource is empty string (not just "Unknown")
                 try:
-                    if result["common_resource"] == "Unknown" and hasattr(planet_data, 'CommonSubstanceID'):
+                    if result["common_resource"] in ("Unknown", "") and hasattr(planet_data, 'CommonSubstanceID'):
                         val = self._clean_resource_string(str(planet_data.CommonSubstanceID))
                         if val:
                             result["common_resource"] = translate_resource(val)
@@ -4075,7 +4082,7 @@ class HavenExtractorMod(Mod):
                         if val:
                             result["uncommon_resource"] = translate_resource(val)
 
-                    if result["rare_resource"] == "Unknown" and hasattr(planet_data, 'RareSubstanceID'):
+                    if result["rare_resource"] in ("Unknown", "") and hasattr(planet_data, 'RareSubstanceID'):
                         val = self._clean_resource_string(str(planet_data.RareSubstanceID))
                         if val:
                             result["rare_resource"] = translate_resource(val)
@@ -4130,15 +4137,15 @@ class HavenExtractorMod(Mod):
                     for hint_id in extraction_hints:
                         translated = translate_resource(hint_id)
                         tl = translated.lower() if translated else ""
-                        if "ancient bones" in tl or hint_id in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
+                        if "ancient bones" in tl or hint_id in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT", "UI_BONES_HINT"):
                             result["ancient_bones"] = 1
-                        if "salvageable scrap" in tl or hint_id in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
+                        if "salvageable scrap" in tl or hint_id in ("SALVAGE", "SALVAGE1", "TECHFRAG", "UI_SCRAP_HINT"):
                             result["salvageable_scrap"] = 1
-                        if "storm crystal" in tl or hint_id in ("STORM1", "STORM_CRYSTAL"):
+                        if "storm crystal" in tl or hint_id in ("STORM1", "STORM_CRYSTAL", "UI_STORM_HINT"):
                             result["storm_crystals"] = 1
-                        if "gravitino" in tl or hint_id in ("GRAVITINO", "GRAV_BALL"):
+                        if "gravitino" in tl or hint_id in ("GRAVITINO", "GRAV_BALL", "UI_GRAV_HINT"):
                             result["gravitino_balls"] = 1
-                        if "vile brood" in tl or "whispering egg" in tl or hint_id in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
+                        if "vile brood" in tl or "whispering egg" in tl or hint_id in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL", "UI_BUGS_HINT"):
                             result["vile_brood"] = 1
 
                     # HasScrap boolean - read at extraction time (more reliable than hook time)

@@ -829,6 +829,10 @@ export default function SystemDetail() {
                         { key: 'extreme_weather', label: 'Extreme Weather', icon: '\u{26A1}' },
                         { key: 'water_world', label: 'Water World', icon: '\u{1F30A}' },
                         { key: 'vile_brood', label: 'Vile Brood', icon: '\u{1F480}' },
+                        { key: 'ancient_bones', label: 'Ancient Bones', icon: '\u{1F9B4}' },
+                        { key: 'salvageable_scrap', label: 'Salvageable Scrap', icon: '\u{2699}' },
+                        { key: 'storm_crystals', label: 'Storm Crystals', icon: '\u{1F48E}' },
+                        { key: 'gravitino_balls', label: 'Gravitino Balls', icon: '\u{1F7E3}' },
                       ].filter(a => planet[a.key])
                       const hasExoticTrophy = planet.exotic_trophy && planet.exotic_trophy.trim()
                       if (attrs.length === 0 && !hasExoticTrophy) return null

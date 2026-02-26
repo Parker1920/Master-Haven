@@ -1322,6 +1322,17 @@ export default function PendingApprovals() {
                             <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
                           </div>
                         )}
+                        {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant) && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {moon.ancient_bones ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-800/60 text-amber-200 border border-amber-700/50">Ancient Bones</span> : null}
+                            {moon.vile_brood ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Vile Brood</span> : null}
+                            {moon.salvageable_scrap ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-800/60 text-orange-200 border border-orange-700/50">Salvageable Scrap</span> : null}
+                            {moon.storm_crystals ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-cyan-800/60 text-cyan-200 border border-cyan-700/50">Storm Crystals</span> : null}
+                            {moon.gravitino_balls ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-purple-800/60 text-purple-200 border border-purple-700/50">Gravitino Balls</span> : null}
+                            {moon.is_infested ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-200 border border-red-800/50">Infested</span> : null}
+                            {moon.is_dissonant ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-violet-800/60 text-violet-200 border border-violet-700/50">Dissonant</span> : null}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
