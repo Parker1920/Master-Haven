@@ -1225,6 +1225,18 @@ export default function PendingApprovals() {
                             <span className="text-gray-400">Resources:</span> {planet.materials || planet.resources?.join(', ')}
                           </div>
                         )}
+                        {/* Special Resource Flags */}
+                        {(planet.ancient_bones || planet.vile_brood || planet.salvageable_scrap || planet.storm_crystals || planet.gravitino_balls || planet.is_infested || planet.is_dissonant) && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {planet.ancient_bones ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-300">Ancient Bones</span> : null}
+                            {planet.vile_brood ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Vile Brood</span> : null}
+                            {planet.salvageable_scrap ? <span className="text-xs px-1.5 py-0.5 rounded bg-orange-800/60 text-orange-300">Salvageable Scrap</span> : null}
+                            {planet.storm_crystals ? <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-800/60 text-cyan-300">Storm Crystals</span> : null}
+                            {planet.gravitino_balls ? <span className="text-xs px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300">Gravitino Balls</span> : null}
+                            {planet.is_infested ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-400">Infested</span> : null}
+                            {planet.is_dissonant ? <span className="text-xs px-1.5 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
+                          </div>
+                        )}
                         {planet.base_location && (
                           <div className="mt-1 text-gray-300">
                             <span className="text-gray-400">Base Location:</span> {planet.base_location}
