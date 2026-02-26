@@ -148,13 +148,16 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# API CONFIGURATION - HARDCODED FOR DIST VERSION
+# API CONFIGURATION
 # =============================================================================
-# Direct API integration with Haven UI
-# API key is embedded for the official Haven Extractor distribution
+# Per-user API keys: each extractor registers with the Haven backend and
+# receives a personal API key tied to their Discord username.
+# The old shared key is kept as a fallback for transition but tags submissions
+# as "unregistered" on the server side.
 # =============================================================================
 DEFAULT_API_URL = "https://havenmap.online"
-HAVEN_EXTRACTOR_API_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"
+_OLD_SHARED_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"  # Legacy, triggers re-registration
+HAVEN_EXTRACTOR_API_KEY = ""  # Per-user key loaded from config; empty = needs registration
 
 # Default user config (populated by config GUI)
 DEFAULT_USER_CONFIG = {
@@ -1083,7 +1086,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.7"
+    __version__ = "1.5.0"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1349,7 +1352,7 @@ class HavenExtractorMod(Mod):
         try:
             config = {
                 "api_url": DEFAULT_API_URL,
-                "api_key": HAVEN_EXTRACTOR_API_KEY,
+                "api_key": API_KEY,  # Saves per-user key (not the old shared key)
                 "discord_username": self._discord_username,
                 "personal_id": self._personal_id,
                 "discord_tag": self._discord_tag,
@@ -1358,6 +1361,70 @@ class HavenExtractorMod(Mod):
             save_config(config)
         except Exception as e:
             logger.debug(f"Could not save config: {e}")
+
+    def _register_api_key(self) -> bool:
+        """Register this extractor instance and get a per-user API key."""
+        if not self._discord_username:
+            logger.error("[REGISTER] Discord username is required. Set it in the field above first.")
+            return False
+
+        logger.info(f"[REGISTER] Registering API key for '{self._discord_username}'...")
+
+        try:
+            url = f"{API_BASE_URL}/api/extractor/register"
+            payload = json.dumps({"discord_username": self._discord_username}).encode('utf-8')
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'User-Agent': f'HavenExtractor/{self.__version__}',
+            })
+
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+
+            if result.get('status') == 'registered' and result.get('key'):
+                global API_KEY
+                API_KEY = result['key']
+                self._save_config_to_file()
+                logger.info("")
+                logger.info("=" * 60)
+                logger.info(">>> REGISTRATION SUCCESSFUL <<<")
+                logger.info(f"    Your personal API key has been saved.")
+                logger.info(f"    Key prefix: {result.get('key_prefix', 'unknown')}...")
+                logger.info(f"    Rate limit: {result.get('rate_limit', 100)} requests/hour")
+                logger.info("=" * 60)
+                logger.info("")
+                return True
+            elif result.get('status') == 'already_registered':
+                logger.warning("")
+                logger.warning("=" * 60)
+                logger.warning(">>> ALREADY REGISTERED <<<")
+                logger.warning(f"    An API key already exists for '{self._discord_username}'.")
+                logger.warning(f"    Key prefix: {result.get('key_prefix', 'unknown')}...")
+                logger.warning("    If you lost your key, contact a Haven admin.")
+                logger.warning("=" * 60)
+                logger.warning("")
+                return False
+            else:
+                msg = result.get('message') or result.get('detail') or 'Unknown error'
+                logger.error(f"[REGISTER] Registration failed: {msg}")
+                return False
+
+        except urllib.error.HTTPError as e:
+            try:
+                error_body = json.loads(e.read().decode('utf-8'))
+                detail = error_body.get('detail', str(e))
+            except Exception:
+                detail = str(e)
+            logger.error(f"[REGISTER] Registration failed: {detail}")
+            return False
+        except Exception as e:
+            logger.error(f"[REGISTER] Failed to connect to Haven API: {e}")
+            return False
 
     def __init__(self):
         super().__init__()
@@ -3166,6 +3233,14 @@ class HavenExtractorMod(Mod):
             logger.info("[EXPORT] Use the 'Show Config Status' button to verify your settings.")
             return
 
+        # Auto-register if no personal API key or still using the old shared key
+        if not API_KEY or API_KEY == _OLD_SHARED_KEY:
+            logger.info("[EXPORT] No personal API key found. Registering with Haven...")
+            if not self._register_api_key():
+                logger.error("[EXPORT] Registration failed — cannot export without a personal API key.")
+                logger.info("[EXPORT] Check your internet connection or contact a Haven admin.")
+                return
+
         # First, auto-refresh adjectives from game memory and force-update batch
         if self._captured_planets:
             logger.info("[EXPORT] Auto-refreshing adjectives from game memory...")
@@ -3277,7 +3352,7 @@ class HavenExtractorMod(Mod):
 
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
-                'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
+                'X-API-Key': API_KEY,
                 'User-Agent': 'HavenExtractor/10.3.8',
             })
 
@@ -3358,7 +3433,7 @@ class HavenExtractorMod(Mod):
 
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
-                'X-API-Key': HAVEN_EXTRACTOR_API_KEY,
+                'X-API-Key': API_KEY,
                 'User-Agent': 'HavenExtractor/10.3.8',
             })
 

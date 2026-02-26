@@ -27,6 +27,7 @@ const PartnerAnalytics = lazy(() => import('./pages/PartnerAnalytics'))
 const Events = lazy(() => import('./pages/Events'))
 const CsvImport = lazy(() => import('./pages/CsvImport'))
 const DataRestrictions = lazy(() => import('./pages/DataRestrictions'))
+const ExtractorUsers = lazy(() => import('./pages/ExtractorUsers'))
 
 // Heavy components with Three.js - load separately for better code splitting
 const WarRoom = lazy(() => import('./pages/WarRoom'))
@@ -119,6 +120,9 @@ export default function App() {
               <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
               <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
               <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
+
+              {/* Extractor user management (admin or partner) */}
+              <Route path="/admin/extractors" element={<RequireAdmin><ExtractorUsers /></RequireAdmin>} />
 
               {/* Analytics (admin or partner) */}
               <Route path="/analytics" element={<RequireAdmin><Analytics /></RequireAdmin>} />

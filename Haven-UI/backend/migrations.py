@@ -3154,3 +3154,86 @@ def migrate_1_42_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.42.0")
+
+
+@register_migration("1.43.0", "Per-user extractor API keys with self-service registration")
+def migrate_1_43_0(conn):
+    """Per-user API keys for Haven Extractor.
+
+    Adds columns to api_keys table for user tracking and classification:
+    - key_type: 'extractor' (per-user), 'admin' (manual), 'system' (shared legacy)
+    - discord_username: tied to extractor key owner
+    - total_submissions: cached count for quick display
+    - last_submission_at: timestamp of most recent submission
+
+    Backfills stats from pending_systems and marks existing keys.
+    """
+    cursor = conn.cursor()
+
+    # Get existing columns
+    cursor.execute("PRAGMA table_info(api_keys)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    # Add key_type column
+    if 'key_type' not in columns:
+        cursor.execute("ALTER TABLE api_keys ADD COLUMN key_type TEXT DEFAULT 'admin'")
+        logger.info("Added key_type column to api_keys")
+
+    # Add discord_username column
+    if 'discord_username' not in columns:
+        cursor.execute("ALTER TABLE api_keys ADD COLUMN discord_username TEXT")
+        logger.info("Added discord_username column to api_keys")
+
+    # Add total_submissions cached count
+    if 'total_submissions' not in columns:
+        cursor.execute("ALTER TABLE api_keys ADD COLUMN total_submissions INTEGER DEFAULT 0")
+        logger.info("Added total_submissions column to api_keys")
+
+    # Add last_submission_at timestamp
+    if 'last_submission_at' not in columns:
+        cursor.execute("ALTER TABLE api_keys ADD COLUMN last_submission_at TEXT")
+        logger.info("Added last_submission_at column to api_keys")
+
+    # Mark the existing shared "Haven Extractor" key as system type
+    cursor.execute("UPDATE api_keys SET key_type = 'system' WHERE name = 'Haven Extractor'")
+    logger.info("Marked 'Haven Extractor' shared key as key_type='system'")
+
+    # Mark any other keys without a type as admin
+    cursor.execute("UPDATE api_keys SET key_type = 'admin' WHERE key_type IS NULL OR key_type = ''")
+
+    # Create indexes for fast lookups
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_discord_username ON api_keys(discord_username)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_type ON api_keys(key_type)")
+    logger.info("Created indexes on api_keys(discord_username, key_type)")
+
+    # Backfill total_submissions from pending_systems
+    cursor.execute("""
+        UPDATE api_keys SET total_submissions = (
+            SELECT COUNT(*) FROM pending_systems ps
+            WHERE ps.api_key_name = api_keys.name
+        )
+    """)
+    logger.info("Backfilled total_submissions from pending_systems")
+
+    # Backfill last_submission_at from pending_systems
+    cursor.execute("""
+        UPDATE api_keys SET last_submission_at = (
+            SELECT MAX(submission_date) FROM pending_systems ps
+            WHERE ps.api_key_name = api_keys.name
+        )
+    """)
+    logger.info("Backfilled last_submission_at from pending_systems")
+
+    conn.commit()
+
+    # Update metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.43.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.43.0")

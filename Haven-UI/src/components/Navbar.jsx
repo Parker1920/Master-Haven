@@ -142,6 +142,7 @@ export default function Navbar() {
               </Link>
             )}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/api-keys">API Keys</Link>}
+            {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/admin/extractors">Extractors</Link>}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/partners">Partners</Link>}
             {isSuperAdmin && <Link className="px-3 py-1 hover:underline" to="/admin/audit">Audit Log</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-1 hover:underline" to="/analytics">Analytics</Link>}
@@ -198,6 +199,7 @@ export default function Navbar() {
               </Link>
             )}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/api-keys" onClick={closeMenu}>API Keys</Link>}
+            {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/extractors" onClick={closeMenu}>Extractors</Link>}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/partners" onClick={closeMenu}>Partners</Link>}
             {isSuperAdmin && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/admin/audit" onClick={closeMenu}>Audit Log</Link>}
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/analytics" onClick={closeMenu}>Analytics</Link>}

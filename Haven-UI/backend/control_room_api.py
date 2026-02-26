@@ -1289,7 +1289,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.37.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -5901,7 +5901,8 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, name, permissions, rate_limit, is_active, created_by, discord_tag
+            SELECT id, name, permissions, rate_limit, is_active, created_by, discord_tag,
+                   key_type, discord_username
             FROM api_keys WHERE key_hash = ?
         ''', (key_hash,))
         row = cursor.fetchone()
@@ -5920,7 +5921,9 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
                 'permissions': json.loads(row['permissions'] or '["submit"]'),
                 'rate_limit': row['rate_limit'],
                 'created_by': row['created_by'],
-                'discord_tag': row['discord_tag']
+                'discord_tag': row['discord_tag'],
+                'key_type': row['key_type'],
+                'discord_username': row['discord_username']
             }
         return None
     except Exception as e:
@@ -6049,7 +6052,8 @@ async def list_api_keys(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, key_prefix, name, created_at, last_used_at, permissions, rate_limit, is_active, discord_tag
+            SELECT id, key_prefix, name, created_at, last_used_at, permissions, rate_limit, is_active, discord_tag,
+                   key_type, discord_username, total_submissions, last_submission_at
             FROM api_keys
             ORDER BY created_at DESC
         ''')
@@ -6066,7 +6070,11 @@ async def list_api_keys(session: Optional[str] = Cookie(None)):
                 'permissions': json.loads(row['permissions'] or '[]'),
                 'rate_limit': row['rate_limit'],
                 'is_active': bool(row['is_active']),
-                'discord_tag': row['discord_tag']
+                'discord_tag': row['discord_tag'],
+                'key_type': row['key_type'],
+                'discord_username': row['discord_username'],
+                'total_submissions': row['total_submissions'] or 0,
+                'last_submission_at': row['last_submission_at']
             })
 
         return {'keys': keys}
@@ -6168,6 +6176,287 @@ async def update_api_key(key_id: int, payload: dict, session: Optional[str] = Co
     except Exception as e:
         logger.error(f"Failed to update API key: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update API key: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Per-User Extractor Registration & Management
+# ============================================================================
+
+def _normalize_discord_username(username: str) -> str:
+    """Normalize Discord username for duplicate detection.
+    Strips whitespace, removes #, strips trailing 4-digit discriminator, lowercases.
+    """
+    normalized = username.strip().replace('#', '')
+    # Strip trailing 4-digit discriminator (e.g. "User1234" -> "User")
+    if len(normalized) > 4 and normalized[-4:].isdigit():
+        prefix = normalized[:-4]
+        if prefix and not prefix[-1].isdigit():
+            normalized = prefix
+    return normalized.lower()
+
+
+@app.post('/api/extractor/register')
+async def register_extractor(request: Request):
+    """
+    Self-service registration for Haven Extractor users.
+    Creates a personal API key tied to a Discord username.
+    Returns the key ONCE — it cannot be retrieved later.
+    No authentication required (public endpoint).
+    """
+    # Rate limit: max 5 registrations per IP per hour
+    client_ip = request.client.host if request.client else 'unknown'
+    is_allowed, remaining = check_rate_limit(client_ip, limit=5, window_hours=1)
+    if not is_allowed:
+        raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
+
+    body = await request.json()
+    discord_username = (body.get('discord_username') or '').strip()
+
+    if not discord_username:
+        raise HTTPException(status_code=400, detail="Discord username is required")
+    if len(discord_username) < 2 or len(discord_username) > 32:
+        raise HTTPException(status_code=400, detail="Discord username must be 2-32 characters")
+
+    normalized = _normalize_discord_username(discord_username)
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if an extractor key already exists for this normalized username
+        cursor.execute("""
+            SELECT id, key_prefix, is_active, discord_username
+            FROM api_keys
+            WHERE key_type = 'extractor' AND LOWER(TRIM(REPLACE(discord_username, '#', ''))) = ?
+        """, (normalized,))
+        existing = cursor.fetchone()
+
+        if existing:
+            if existing['is_active']:
+                return {
+                    'status': 'already_registered',
+                    'key_prefix': existing['key_prefix'],
+                    'discord_username': existing['discord_username'],
+                    'message': 'An API key already exists for this username. If you lost your key, contact an admin.'
+                }
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your extractor account has been suspended. Contact an admin for assistance."
+                )
+
+        # Generate new personal API key
+        api_key = generate_api_key()
+        key_hash = hash_api_key(api_key)
+        key_prefix = api_key[:16]
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute('''
+            INSERT INTO api_keys (key_hash, key_prefix, name, created_at, permissions, rate_limit,
+                                  is_active, created_by, discord_tag, key_type, discord_username)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 'self_registration', NULL, 'extractor', ?)
+        ''', (
+            key_hash,
+            key_prefix,
+            f"Extractor - {discord_username}",
+            now,
+            json.dumps(["submit", "check_duplicate"]),
+            100,  # Lower rate limit than shared key (1000) or admin keys (200)
+            discord_username
+        ))
+        conn.commit()
+
+        key_id = cursor.lastrowid
+        logger.info(f"Registered extractor key for '{discord_username}' (ID: {key_id})")
+
+        return {
+            'status': 'registered',
+            'key': api_key,
+            'key_prefix': key_prefix,
+            'discord_username': discord_username,
+            'rate_limit': 100,
+            'message': 'Save this key now — it cannot be retrieved later!'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Extractor registration failed: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed. Please try again.")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/communities')
+async def list_communities():
+    """
+    Public endpoint: list available communities for Haven Extractor dropdown.
+    Returns partner communities + 'personal' option.
+    """
+    result = await list_discord_tags()
+    # Reformat for extractor consumption
+    tags = result.get('tags', [])
+    return {'communities': [{'tag': t['tag'], 'name': t['name']} for t in tags]}
+
+
+@app.get('/api/extractor/users')
+async def list_extractor_users(session: Optional[str] = Cookie(None)):
+    """
+    List registered extractor users with submission stats.
+    Super admin: sees all extractor users.
+    Partners: sees users who have submitted to their community (read-only).
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if is_super:
+            cursor.execute("""
+                SELECT id, key_prefix, name, discord_username, created_at, last_used_at,
+                       last_submission_at, rate_limit, is_active, total_submissions
+                FROM api_keys
+                WHERE key_type = 'extractor'
+                ORDER BY last_submission_at DESC NULLS LAST, created_at DESC
+            """)
+        else:
+            # Partner: users who have submitted to their community
+            cursor.execute("""
+                SELECT DISTINCT ak.id, ak.key_prefix, ak.name, ak.discord_username,
+                       ak.created_at, ak.last_used_at, ak.last_submission_at,
+                       ak.rate_limit, ak.is_active, ak.total_submissions
+                FROM api_keys ak
+                INNER JOIN pending_systems ps ON ps.api_key_name = ak.name
+                WHERE ak.key_type = 'extractor'
+                  AND ps.discord_tag = ?
+                ORDER BY ak.last_submission_at DESC NULLS LAST, ak.created_at DESC
+            """, (user_discord_tag,))
+
+        rows = cursor.fetchall()
+        users = []
+        for row in rows:
+            # Get per-community submission breakdown
+            cursor.execute("""
+                SELECT discord_tag, COUNT(*) as count,
+                       SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                       SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+                FROM pending_systems
+                WHERE api_key_name = ?
+                GROUP BY discord_tag
+            """, (row['name'],))
+            communities = [
+                {
+                    'tag': c['discord_tag'] or 'personal',
+                    'count': c['count'],
+                    'approved': c['approved'],
+                    'rejected': c['rejected'],
+                    'pending': c['pending']
+                }
+                for c in cursor.fetchall()
+            ]
+
+            users.append({
+                'id': row['id'],
+                'key_prefix': row['key_prefix'],
+                'name': row['name'],
+                'discord_username': row['discord_username'],
+                'created_at': row['created_at'],
+                'last_used_at': row['last_used_at'],
+                'last_submission_at': row['last_submission_at'],
+                'rate_limit': row['rate_limit'],
+                'is_active': bool(row['is_active']),
+                'total_submissions': row['total_submissions'] or 0,
+                'communities_used': communities
+            })
+
+        return {'users': users, 'total': len(users)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list extractor users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load extractor users")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/extractor/users/{key_id}')
+async def update_extractor_user(key_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Update an extractor user's settings (super admin only).
+    Can update: rate_limit, is_active (suspend/reactivate).
+    """
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    body = await request.json()
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Verify this is an extractor key
+        cursor.execute("SELECT id, name, key_type, discord_username FROM api_keys WHERE id = ?", (key_id,))
+        key_row = cursor.fetchone()
+        if not key_row:
+            raise HTTPException(status_code=404, detail="Extractor user not found")
+        if key_row['key_type'] != 'extractor':
+            raise HTTPException(status_code=400, detail="This is not an extractor user key")
+
+        updates = []
+        params = []
+
+        if 'rate_limit' in body:
+            rate_limit = int(body['rate_limit'])
+            if rate_limit < 1 or rate_limit > 10000:
+                raise HTTPException(status_code=400, detail="Rate limit must be between 1 and 10000")
+            updates.append('rate_limit = ?')
+            params.append(rate_limit)
+
+        if 'is_active' in body:
+            updates.append('is_active = ?')
+            params.append(1 if body['is_active'] else 0)
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+
+        params.append(key_id)
+        cursor.execute(f"UPDATE api_keys SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+
+        action = 'updated'
+        if 'is_active' in body:
+            action = 'reactivated' if body['is_active'] else 'suspended'
+
+        logger.info(f"Extractor user '{key_row['discord_username']}' {action} by super admin")
+
+        return {
+            'status': 'ok',
+            'message': f"Extractor user {action} successfully",
+            'discord_username': key_row['discord_username']
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update extractor user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update extractor user")
     finally:
         if conn:
             conn.close()
@@ -14045,6 +14334,9 @@ async def receive_extraction(
 
         # Get API key name for tracking (if authenticated)
         api_key_name = api_key_info.get('name') if api_key_info else None
+        # Tag submissions from the old shared key as "unregistered"
+        if api_key_info and api_key_info.get('key_type') == 'system':
+            api_key_name = f"{api_key_info['name']} (unregistered)"
 
         cursor.execute('''
             INSERT INTO pending_systems (
@@ -14079,6 +14371,19 @@ async def receive_extraction(
         ))
         conn.commit()
         submission_id = cursor.lastrowid
+
+        # Update per-key submission stats
+        if api_key_info:
+            try:
+                cursor.execute("""
+                    UPDATE api_keys
+                    SET total_submissions = COALESCE(total_submissions, 0) + 1,
+                        last_submission_at = ?
+                    WHERE id = ?
+                """, (now, api_key_info['id']))
+                conn.commit()
+            except Exception:
+                pass  # Non-critical, don't fail the submission
 
         logger.info(f"Received extraction from Haven Extractor: {glyph_code} with {len(planets)} planets, {len(moons)} moons (discord_tag={discord_tag}, user={discord_username})")
 
