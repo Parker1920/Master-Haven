@@ -2291,17 +2291,15 @@ class HavenExtractorMod(Mod):
             except Exception as e:
                 logger.debug(f"Fauna extraction failed: {e}")
 
-            # Extract Sentinels (from GroundCombatDataPerDifficulty[0].SentinelLevel)
-            # GroundCombatDataPerDifficulty is an array with 4 entries (one per difficulty)
-            # We use index 0 for normal difficulty
+            # Extract Sentinels from GroundCombatDataPerDifficulty
+            # Array index matches reality mode: Normal=[2], Permadeath=[3]
             sentinel_raw = 0
             sentinel_name = "Unknown"
             try:
                 if hasattr(planet_data, 'GroundCombatDataPerDifficulty'):
                     combat_data_array = planet_data.GroundCombatDataPerDifficulty
-                    # Access the first element (normal difficulty)
                     if hasattr(combat_data_array, '__getitem__'):
-                        combat_data = combat_data_array[0]
+                        combat_data = combat_data_array[self._get_difficulty_index()]
                         if hasattr(combat_data, 'SentinelLevel'):
                             sentinel_val = combat_data.SentinelLevel
                             if hasattr(sentinel_val, 'value'):
@@ -2510,7 +2508,7 @@ class HavenExtractorMod(Mod):
             # =============================================================
             # Extract actual display strings from PlanetInfo
             # These are the EXACT strings the game shows on discovery pages
-            # PlanetInfo.Flora (0x280), Fauna (0x200), SentinelsPerDifficulty[0] (0x0)
+            # PlanetInfo.Flora (0x280), Fauna (0x200), SentinelsPerDifficulty (0x0)
             # =============================================================
             flora_display = ""
             fauna_display = ""
@@ -2546,13 +2544,12 @@ class HavenExtractorMod(Mod):
                         else:
                             fauna_display = ""
 
-                    # Sentinel display string - SentinelsPerDifficulty[2] (Normal difficulty)
-                    # Index: 0=Casual/Creative, 1=Relaxed, 2=Normal, 3=Survival/Permadeath
-                    # v1.4.5: Worlds Part 1 update added Relaxed between Casual and Normal
+                    # Sentinel display string from SentinelsPerDifficulty
+                    # Index based on reality mode: Normal=[2], Permadeath=[3]
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[2]) or ""
+                            val = str(sent_arr[self._get_difficulty_index()]) or ""
                             sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
                                 sentinel_display = self._resolve_adjective(sentinel_display, 'sentinel')
@@ -3130,11 +3127,11 @@ class HavenExtractorMod(Mod):
                         if raw and raw != "None" and len(raw) >= 2:
                             captured['fauna_display'] = self._resolve_adjective(raw, 'fauna')
 
-                    # Sentinel - index 2 = Normal difficulty (post-Worlds update)
+                    # Sentinel - index based on reality mode
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[2]) or ""
+                            val = str(sent_arr[self._get_difficulty_index()]) or ""
                             raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if raw and raw != "None" and len(raw) >= 2:
                                 captured['sentinel_display'] = self._resolve_adjective(raw, 'sentinel')
@@ -3859,7 +3856,7 @@ class HavenExtractorMod(Mod):
                     else:
                         result["fauna_level"] = self.FAUNA_LEVELS.get(fauna_raw, captured.get('fauna', 'Unknown'))
 
-                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[1] (Normal)
+                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty
                 sentinel_display = captured.get('sentinel_display', '')
                 if sentinel_display:
                     # v1.4.0: Use layered adjective resolution
@@ -4237,6 +4234,21 @@ class HavenExtractorMod(Mod):
             return name.rstrip('_') if name else default
         except Exception:
             return default
+
+    def _get_difficulty_index(self) -> int:
+        """Get the per-difficulty array index for the current reality mode.
+
+        Post-Worlds Part 1 index mapping:
+          [0] = Casual/Creative
+          [1] = Relaxed
+          [2] = Normal
+          [3] = Survival/Permadeath
+
+        Used for SentinelsPerDifficulty and GroundCombatDataPerDifficulty arrays.
+        """
+        if self._reality == "Permadeath":
+            return 3
+        return 2  # Normal (default)
 
     def _safe_int(self, val, default: int = 0) -> int:
         """Safely convert value to int."""
