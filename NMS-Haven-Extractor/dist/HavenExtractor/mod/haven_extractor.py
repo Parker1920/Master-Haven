@@ -1942,9 +1942,9 @@ class HavenExtractorMod(Mod):
                     logger.info(f"    VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
                     logger.info(f"    SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
                     # Calculate what portal/region values these produce
-                    dbg_px = (voxel_x + 2047) & 0xFFF
-                    dbg_py = (voxel_y + 127) & 0xFF
-                    dbg_pz = (voxel_z + 2047) & 0xFFF
+                    dbg_px = voxel_x & 0xFFF
+                    dbg_py = voxel_y & 0xFF
+                    dbg_pz = voxel_z & 0xFFF
                     logger.info(f"    -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
 
                     if galaxy_idx < 0 or galaxy_idx > 255:
@@ -2347,20 +2347,51 @@ class HavenExtractorMod(Mod):
                 if hasattr(planet_data, 'ExtraResourceHints'):
                     hints_arr = planet_data.ExtraResourceHints
                     if hints_arr is not None and hasattr(hints_arr, '__len__'):
-                        for hi in range(len(hints_arr)):
-                            try:
-                                hint = hints_arr[hi]
-                                if hasattr(hint, 'Hint'):
-                                    hint_id = str(hint.Hint) or ""
-                                    hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip()
-                                    if hint_id and len(hint_id) >= 2:
-                                        extra_resource_hints.append(hint_id)
-                            except Exception:
-                                pass
+                        arr_len = len(hints_arr)
+                        if arr_len > 0:
+                            logger.info(f"    [HINTS] ExtraResourceHints: {arr_len} entries")
+                            for hi in range(arr_len):
+                                try:
+                                    hint = hints_arr[hi]
+                                    if hasattr(hint, 'Hint'):
+                                        raw_hint = hint.Hint
+                                        hint_id = str(raw_hint) or ""
+                                        hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip()
+                                        logger.info(f"    [HINTS] [{hi}] Hint='{hint_id}'")
+                                        if hint_id and len(hint_id) >= 2:
+                                            extra_resource_hints.append(hint_id)
+                                except Exception as he:
+                                    logger.info(f"    [HINTS] [{hi}] exception: {he}")
+                        else:
+                            logger.info(f"    [HINTS] ExtraResourceHints: empty (no special resources)")
                 if hasattr(planet_data, 'HasScrap'):
                     has_scrap = bool(planet_data.HasScrap)
+                    if has_scrap:
+                        logger.info(f"    [HINTS] HasScrap=True")
             except Exception as e:
-                logger.debug(f"Extra resource hints extraction failed: {e}")
+                logger.info(f"    [HINTS] ExtraResourceHints read failed: {e}")
+
+            # v1.4.6: Direct memory read fallback for ExtraResourceHints
+            # ExtraResourceHints is at offset 0x3310 in cGcPlanetData
+            # cTkDynamicArray layout: pointer(8) + count(4) + capacity(4) = 16 bytes
+            # cGcPlanetDataResourceHint: Hint TkID(16) + Icon TkID(16) = 32 bytes per element
+            if not extra_resource_hints and planet_data_addr:
+                try:
+                    hints_offset = 0x3310  # Confirmed offset from nmspy exported_types
+                    arr_ptr = self._read_uint64(planet_data_addr, hints_offset)
+                    arr_count = self._read_uint32(planet_data_addr, hints_offset + 8)
+                    if arr_ptr and arr_ptr > 0x10000 and 0 < arr_count <= 10:
+                        logger.info(f"    [HINTS-DIRECT] Found {arr_count} hints at 0x3310")
+                        for hi in range(arr_count):
+                            elem_addr = arr_ptr + (hi * 32)  # 32 bytes per element
+                            hint_str = self._read_string(elem_addr, 0, max_len=16)
+                            if hint_str:
+                                logger.info(f"    [HINTS-DIRECT] [{hi}] Hint='{hint_str}'")
+                                extra_resource_hints.append(hint_str)
+                        if extra_resource_hints:
+                            logger.info(f"    [HINTS-DIRECT] Read {len(extra_resource_hints)} hints via direct memory")
+                except Exception as e:
+                    logger.info(f"    [HINTS-DIRECT] Direct memory fallback failed: {e}")
 
             # CRITICAL v8.1.8: Extract weather from cGcPlanetData.Weather.WeatherType
             # This uses the actual Weather structure (offset 0x1C00) with enum values
@@ -2567,8 +2598,11 @@ class HavenExtractorMod(Mod):
                     self._captured_planets[planet_index]['gravitino_balls'] = 1
                 if "vile brood" in translated_lower or "whispering egg" in translated_lower or hint_upper in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
                     self._captured_planets[planet_index]['vile_brood'] = 1
+            # v1.4.6: HasScrap from hook time is unreliable (struct offset may have shifted
+            # in Worlds Part 1 update, causing false positives). Scrap detection is now
+            # handled at extraction time in _extract_single_planet instead.
             if has_scrap:
-                self._captured_planets[planet_index]['salvageable_scrap'] = 1
+                logger.info(f"    [HINTS] HasScrap=True (hook time, deferred to extraction)")
             # Infested biome subtype
             if biome_subtype_name and biome_subtype_name.lower() == "infested":
                 self._captured_planets[planet_index]['infested'] = 1
@@ -2631,9 +2665,9 @@ class HavenExtractorMod(Mod):
                         logger.debug(f"    [DEBUG] GalacticAddress struct (planet capture fallback):")
                         logger.info(f"      VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
                         logger.info(f"      SolarSystemIndex={system_idx}, PlanetIndex={planet_idx_coord}, Galaxy={galaxy_idx}")
-                        dbg_px = (voxel_x + 2047) & 0xFFF
-                        dbg_py = (voxel_y + 127) & 0xFF
-                        dbg_pz = (voxel_z + 2047) & 0xFFF
+                        dbg_px = voxel_x & 0xFFF
+                        dbg_py = voxel_y & 0xFF
+                        dbg_pz = voxel_z & 0xFFF
                         logger.info(f"      -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
 
                         # Sanity check galaxy index
@@ -2722,9 +2756,9 @@ class HavenExtractorMod(Mod):
                     logger.info(f"[APPVIEW] GalacticAddress fields:")
                     logger.info(f"  VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
                     logger.info(f"  SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
-                    dbg_px = (voxel_x + 2047) & 0xFFF
-                    dbg_py = (voxel_y + 127) & 0xFF
-                    dbg_pz = (voxel_z + 2047) & 0xFFF
+                    dbg_px = voxel_x & 0xFFF
+                    dbg_py = voxel_y & 0xFF
+                    dbg_pz = voxel_z & 0xFFF
                     logger.info(f"  -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
 
                     # Sanity check galaxy index
@@ -3845,37 +3879,6 @@ class HavenExtractorMod(Mod):
                     if captured.get(flag_key):
                         result[flag_key] = 1
 
-                # v1.4.5: Also read ExtraResourceHints directly from PlanetData (backup)
-                try:
-                    if hasattr(planet_data, 'ExtraResourceHints'):
-                        hints_arr = planet_data.ExtraResourceHints
-                        if hints_arr is not None and hasattr(hints_arr, '__len__'):
-                            for hi in range(len(hints_arr)):
-                                try:
-                                    hint = hints_arr[hi]
-                                    if hasattr(hint, 'Hint'):
-                                        hint_id = str(hint.Hint) or ""
-                                        hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip().upper()
-                                        if hint_id:
-                                            translated = translate_resource(hint_id)
-                                            tl = translated.lower() if translated else ""
-                                            if "ancient bones" in tl or hint_id in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
-                                                result["ancient_bones"] = 1
-                                            if "salvageable scrap" in tl or hint_id in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
-                                                result["salvageable_scrap"] = 1
-                                            if "storm crystal" in tl or hint_id in ("STORM1", "STORM_CRYSTAL"):
-                                                result["storm_crystals"] = 1
-                                            if "gravitino" in tl or hint_id in ("GRAVITINO", "GRAV_BALL"):
-                                                result["gravitino_balls"] = 1
-                                            if "vile brood" in tl or "whispering egg" in tl or hint_id in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
-                                                result["vile_brood"] = 1
-                                except Exception:
-                                    pass
-                    if hasattr(planet_data, 'HasScrap') and bool(planet_data.HasScrap):
-                        result["salvageable_scrap"] = 1
-                except Exception:
-                    pass
-
                 # Infested biome subtype
                 if result.get("biome_subtype", "").lower() == "infested":
                     result["infested"] = 1
@@ -4079,6 +4082,87 @@ class HavenExtractorMod(Mod):
                 except Exception:
                     pass
 
+                # v1.4.6: Read ExtraResourceHints + HasScrap from mPlanetData at EXTRACTION time
+                # The hook-based read (applied above via captured flags) fires too early —
+                # ExtraResourceHints isn't populated yet during GenerateCreatureRoles.
+                # At APPVIEW/extraction time, the data IS fully populated.
+                extraction_hints = []
+                try:
+                    # Method 1: nmspy struct wrapper
+                    if hasattr(planet_data, 'ExtraResourceHints'):
+                        hints_arr = planet_data.ExtraResourceHints
+                        if hints_arr is not None and hasattr(hints_arr, '__len__') and len(hints_arr) > 0:
+                            logger.info(f"    [HINTS-EXTRACT] Struct read: {len(hints_arr)} hints")
+                            for hi in range(len(hints_arr)):
+                                try:
+                                    hint = hints_arr[hi]
+                                    if hasattr(hint, 'Hint'):
+                                        hint_id = str(hint.Hint) or ""
+                                        hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip().upper()
+                                        if hint_id and len(hint_id) >= 2:
+                                            extraction_hints.append(hint_id)
+                                            logger.info(f"    [HINTS-EXTRACT] [{hi}] Hint='{hint_id}'")
+                                except Exception:
+                                    pass
+
+                    # Method 2: Direct memory read at confirmed offset 0x3310
+                    if not extraction_hints:
+                        try:
+                            pd_addr = get_addressof(planet_data)
+                            if pd_addr and pd_addr > 0x10000:
+                                arr_ptr = self._read_uint64(pd_addr, 0x3310)
+                                arr_count = self._read_uint32(pd_addr, 0x3310 + 8)
+                                if arr_ptr and arr_ptr > 0x10000 and 0 < arr_count <= 10:
+                                    logger.info(f"    [HINTS-EXTRACT] Direct read: {arr_count} hints at 0x3310")
+                                    for hi in range(arr_count):
+                                        elem_addr = arr_ptr + (hi * 32)
+                                        hint_str = self._read_string(elem_addr, 0, max_len=16)
+                                        if hint_str:
+                                            hint_str = hint_str.upper().strip()
+                                            extraction_hints.append(hint_str)
+                                            logger.info(f"    [HINTS-EXTRACT] [{hi}] Direct Hint='{hint_str}'")
+                                else:
+                                    logger.info(f"    [HINTS-EXTRACT] Direct read at 0x3310: ptr=0x{arr_ptr:X if arr_ptr else 0}, count={arr_count if arr_count else 0} (empty)")
+                        except Exception as e:
+                            logger.debug(f"    [HINTS-EXTRACT] Direct read failed: {e}")
+
+                    # Apply detected hints to result flags
+                    for hint_id in extraction_hints:
+                        translated = translate_resource(hint_id)
+                        tl = translated.lower() if translated else ""
+                        if "ancient bones" in tl or hint_id in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
+                            result["ancient_bones"] = 1
+                        if "salvageable scrap" in tl or hint_id in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
+                            result["salvageable_scrap"] = 1
+                        if "storm crystal" in tl or hint_id in ("STORM1", "STORM_CRYSTAL"):
+                            result["storm_crystals"] = 1
+                        if "gravitino" in tl or hint_id in ("GRAVITINO", "GRAV_BALL"):
+                            result["gravitino_balls"] = 1
+                        if "vile brood" in tl or "whispering egg" in tl or hint_id in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
+                            result["vile_brood"] = 1
+
+                    # HasScrap boolean - read at extraction time (more reliable than hook time)
+                    # Also log nearby booleans to verify struct alignment
+                    try:
+                        pd_addr2 = get_addressof(planet_data)
+                        if pd_addr2 and pd_addr2 > 0x10000:
+                            has_scrap_byte = self._read_bytes(pd_addr2, 0x39EE, 1)
+                            in_abandoned = self._read_bytes(pd_addr2, 0x39EF, 1)
+                            in_empty = self._read_bytes(pd_addr2, 0x39F0, 1)
+                            in_gas_giant = self._read_bytes(pd_addr2, 0x39F1, 1)
+                            hs = bool(has_scrap_byte[0]) if has_scrap_byte else False
+                            ab = bool(in_abandoned[0]) if in_abandoned else False
+                            em = bool(in_empty[0]) if in_empty else False
+                            gg = bool(in_gas_giant[0]) if in_gas_giant else False
+                            if hs or ab or em or gg:
+                                logger.info(f"    [HINTS-EXTRACT] Bools@0x39EE: HasScrap={hs}, Abandoned={ab}, Empty={em}, GasGiant={gg}")
+                            if hs:
+                                result["salvageable_scrap"] = 1
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.debug(f"    [HINTS-EXTRACT] Failed: {e}")
+
             # v1.4.5: Derive plant resource from biome type
             biome = result.get("biome", "Unknown")
             plant_resource = BIOME_PLANT_RESOURCE.get(biome, "")
@@ -4100,6 +4184,13 @@ class HavenExtractorMod(Mod):
                          f"uncommon={result.get('uncommon_resource')}, "
                          f"rare={result.get('rare_resource')}, "
                          f"plant={result.get('plant_resource', 'N/A')}")
+
+            # Log final special flags (includes both hook-captured AND extraction-time flags)
+            all_flags = [k for k in ["ancient_bones", "salvageable_scrap", "storm_crystals",
+                                     "vile_brood", "gravitino_balls", "infested", "dissonance"]
+                         if result.get(k)]
+            if all_flags:
+                logger.info(f"    [SPECIAL-FINAL] {', '.join(all_flags)}")
 
             return result
 
@@ -4157,11 +4248,18 @@ class HavenExtractorMod(Mod):
         return biome_name
 
     def _coords_to_glyphs(self, planet: int, system: int, x: int, y: int, z: int) -> str:
-        """Convert coordinates to portal glyph code."""
+        """Convert signed voxel coordinates to portal glyph code.
+
+        Uses two's complement masking to match NMS portal address encoding:
+        - X/Z: signed 12-bit (-2048..+2047) → unsigned 12-bit via & 0xFFF
+        - Y: signed 8-bit (-128..+127) → unsigned 8-bit via & 0xFF
+        - Positive values (0..+2047) → 0x000..0x7FF
+        - Negative values (-1..-2047) → 0xFFF..0x801
+        """
         try:
-            portal_x = (x + 2047) & 0xFFF
-            portal_y = (y + 127) & 0xFF
-            portal_z = (z + 2047) & 0xFFF
+            portal_x = x & 0xFFF
+            portal_y = y & 0xFF
+            portal_z = z & 0xFFF
             portal_sys = system & 0x1FF
             portal_planet = planet & 0xF
             glyph = f"{portal_planet:01X}{portal_sys:03X}{portal_y:02X}{portal_z:03X}{portal_x:03X}"
@@ -4183,9 +4281,9 @@ class HavenExtractorMod(Mod):
         Standard portal glyphs only encode 9 bits (max 511), but NMS uses
         full 12-bit system indices (max 4095) for name generation.
         """
-        portal_x = (x + 2047) & 0xFFF      # 12 bits
-        portal_y = (y + 127) & 0xFF        # 8 bits
-        portal_z = (z + 2047) & 0xFFF      # 12 bits
+        portal_x = x & 0xFFF      # 12 bits (two's complement)
+        portal_y = y & 0xFF       # 8 bits (two's complement)
+        portal_z = z & 0xFFF      # 12 bits (two's complement)
         portal_sys = system_idx & 0xFFF    # 12 bits (FULL, not 9-bit truncated!)
         portal_planet = planet & 0xF       # 4 bits
 
