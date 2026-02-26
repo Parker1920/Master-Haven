@@ -1325,10 +1325,20 @@ class HavenExtractorMod(Mod):
             old_name = self._current_system_coords.get('system_name', 'Unknown')
             self._current_system_coords['system_name'] = name
             logger.info(f"[MANUAL] System name updated: '{old_name}' -> '{name}'")
-            logger.info(f"[MANUAL] This name will be used when the system is saved to batch.")
         else:
             logger.warning("[MANUAL] No current system data. Warp to a system first.")
             return
+
+        # v1.4.6: If the system was already auto-saved to batch (APPVIEW fires before
+        # user can type a name), update the batch entry with the manual name now
+        if self._system_saved_to_batch and self._current_system_coords:
+            glyph = self._current_system_coords.get('glyph_code', '')
+            if glyph:
+                for batch_sys in self._batch_systems:
+                    if batch_sys.get('glyph_code') == glyph:
+                        batch_sys['system_name'] = name
+                        logger.info(f"[MANUAL] Updated batch entry {glyph} with name: '{name}'")
+                        break
 
         # Clear the input field
         self._manual_system_name = ''

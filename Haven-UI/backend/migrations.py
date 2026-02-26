@@ -3076,3 +3076,81 @@ def migrate_1_41_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.41.0")
+
+
+@register_migration("1.42.0", "Backfill star_type from extractor pending_systems JSON")
+def migrate_1_42_0(conn):
+    """Backfill star_type for approved systems where it was lost due to field name mismatch.
+
+    The extractor sends 'star_color' but the approval code was reading 'star_type'.
+    This reads the original JSON from pending_systems and fills in the missing values.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Find approved systems with NULL/empty star_type
+    cursor.execute("""
+        SELECT s.id, s.name, s.glyph_code
+        FROM systems s
+        WHERE (s.star_type IS NULL OR s.star_type = '' OR s.star_type = 'Unknown')
+    """)
+    missing_systems = cursor.fetchall()
+
+    if not missing_systems:
+        logger.info("No systems with missing star_type found")
+        return
+
+    logger.info(f"Found {len(missing_systems)} systems with missing star_type")
+    updated = 0
+
+    for system in missing_systems:
+        system_id = system['id']
+        glyph_code = system['glyph_code']
+
+        if not glyph_code:
+            continue
+
+        # Try to find the original submission in pending_systems
+        cursor.execute("""
+            SELECT system_data, raw_json FROM pending_systems
+            WHERE glyph_code = ?
+            ORDER BY id DESC LIMIT 1
+        """, (glyph_code,))
+        pending = cursor.fetchone()
+
+        if not pending:
+            continue
+
+        # Try system_data first, then raw_json
+        star_color = None
+        for json_field in ['system_data', 'raw_json']:
+            json_str = pending[json_field]
+            if not json_str:
+                continue
+            try:
+                data = json.loads(json_str)
+                star_color = data.get('star_color') or data.get('star_type')
+                if star_color and star_color != 'Unknown':
+                    break
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        if star_color and star_color != 'Unknown':
+            cursor.execute("UPDATE systems SET star_type = ? WHERE id = ?", (star_color, system_id))
+            updated += 1
+            logger.info(f"  Backfilled star_type='{star_color}' for system '{system['name']}' ({glyph_code})")
+
+    conn.commit()
+    logger.info(f"Backfilled star_type for {updated}/{len(missing_systems)} systems")
+
+    # Update metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.42.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.42.0")
