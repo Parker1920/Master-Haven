@@ -5,112 +5,27 @@
 # start_exe = true
 # ///
 """
-Haven Extractor v10.3.8 - Fixed all flora/fauna/sentinel/weather mappings
+Haven Extractor - No Man's Sky Data Extraction Mod
 
-Extracts planet data from NMS and sends directly to Haven UI via API.
-Features session configuration for user identification and community routing.
+Hooks into NMS via PyMHF to extract solar system and planet data in real-time,
+then uploads to the Haven API for community cataloging and mapping.
 
-CHANGELOG v10.3.8:
-- FIXED SENTINEL_RARE mappings based on Jedexoi-Ikom system screenshots:
-  * Index 1: "Require Orthodoxy" → "Enforcing" (Obushart)
-  * Index 3: "Unwavering" → "Inescapable" (Ilva VI)
-  * Index 4: "Answer To None" → "Regular Patrols" (Roin V)
-  * Index 8: "Regular Patrols" → "Unwavering" (Xumin)
-  * Index 12: "Low" → "Infrequent" (Toya 23/L2)
-- FIXED RARITY_HIGH mapping:
-  * Index 4: "Bountiful" → "Frequent" (Ilva VI Flora)
-- ADDED RARITY_MID mappings for medium flora/fauna levels:
-  * Index 4: "Typical" (Roin V Fauna: RARITY_MID4 → "Typical")
-- ADDED weather enum-to-adjective mapping function:
-  * WEATHER_COLD7 → "Ice Storms" (Toya 23/L2)
-  * WEATHER_TOXIC_CLEAR3 → "Poison Rain" (Roin V)
-  * WEATHER_HEAT10 → "Burning Air" (Xumin)
-  * WEATHER_TOXIC7 → "Caustic Winds" (Ilva VI)
-  * WEATHER_HEAT3 → "Superheated Gas Pockets" (Yalosalci)
-  * WEATHER_HEAT7 → "Heated Atmosphere" (Obushart)
+Features:
+- Automatic data capture on system warp (batch mode)
+- Per-user API key registration and management
+- Three-layer adjective resolution (runtime hooks, PAK/MBIN cache, legacy fallback)
+- Community tag routing for multi-community support
+- Pre-flight duplicate checking before export
+- Special resource detection (Ancient Bones, Storm Crystals, etc.)
 
-CHANGELOG v10.3.7:
-- CRITICAL FIX: Fixed "Failed to extract data" bug in batch save/export
-  * _save_current_system_to_batch was not caching sys_data address before extraction
-  * _extract_single_planet needs _cached_sys_data_addr for direct memory reads
-  * Also caches coordinates for deterministic weather hash selection
-  * This caused 0 planets to be extracted even when data was captured correctly
+Workflow:
+1. Launch the extractor - NMS starts with the mod loaded
+2. Enter your Discord username and select a community tag
+3. Warp to systems - planet data is captured automatically
+4. Apply system names via the GUI before warping to the next system
+5. Click "Export to Haven" to upload all collected systems
 
-CHANGELOG v10.3.6:
-- FIXED RARITY_HIGH mappings based on actual game screenshots:
-  * Index 1: "Generous" → "Abundant" (verified on Sozop III Flora)
-  * Index 6: "Lush" → "Generous" (verified on Tinanta J15 Flora)
-  * Index 9: "Frequent" → "Rich" (verified on Nokak 62/S5 Fauna)
-- FIXED RARITY_NONE mappings:
-  * Index 3: "Empty" → "Undetected" (verified on Fotesburs Delta Fauna)
-- FIXED SENTINEL_RARE mappings (ALL were wrong!):
-  * Index 3: "Ever-present" → "Unwavering" (verified on Fotesburs Delta)
-  * Index 8: "De-Harmonised" → "Regular Patrols" (verified on Abet)
-  * Index 9: "Rebellious" → "Ever-present" (verified on Sozop III)
-  * Index 10: "Missing" → "Few" (verified on Nokak 62/S5)
-  * Index 11: "Isolated" → "Sparse" (verified on Tinanta J15)
-- FIXED Weather selection: Now uses deterministic hash based on glyph code + planet index
-  (still picks from category list, but consistently - may not match game exactly)
-- FIXED Resource mappings:
-  * YELLOW2/RED2/GREEN2/BLUE2 now map to base metals (Copper/Cadmium/Emeril/Indium)
-    instead of Chromatic Metal to match game display
-  * Added missing special resources: Ancient Bones, Salvageable Scrap, Buried Technology,
-    Vile Brood Detected, Whispering Eggs, Storm Crystals
-- TODO: Biome, economy, conflict also use random picker - need same fix treatment
-
-CHANGELOG v10.3.5:
-- Added DEBUG logging to Refresh Display Strings to diagnose adjective mismatches
-- Logs raw values for Flora, Fauna, Sentinel (all difficulty levels), Weather
-- Shows which Sentinel array index each value comes from
-- Includes raw value in output when adjectives are updated
-
-CHANGELOG v10.3.4:
-- Fixed adjective mappings to use EXACT index-to-adjective lookups based on NMS game data
-- RARITY_HIGH3 now correctly maps to "Ample", RARITY_HIGH8 to "Copious", etc.
-- SENTINEL_RARE7 now correctly maps to "Low Security", SENTINEL_RARE3 to "Ever-present", etc.
-
-CHANGELOG v10.3.3:
-- Fixed duplicate "Moon Moon" badge: planet_size now shows "Small" for moons instead of "Moon"
-  (is_moon: true already indicates it's a moon, so planet_size was redundant)
-- Applied adjective mapping during extraction (not just Refresh button)
-
-CHANGELOG v10.3.2:
-- Added mapping for internal enum names (RARITY_HIGH3, SENTINEL_RARE7, etc.) to proper adjectives
-- Refresh Display Strings button now converts raw game values to human-readable adjectives
-
-CHANGELOG v10.3.1:
-- Fixed weather mapping: no longer overwrites good adjectives with raw lookup keys
-- Fixed "Refresh Display Strings" button (was using invalid nmse.GcSolarSystemData)
-- Cleaned up terminal output: detailed debug messages now hidden by default
-- Added validation to prevent storing bad weather values from PlanetInfo
-
-WORKFLOW:
-1. Run the extractor - Config GUI appears on first launch
-2. Enter Discord Username, Discord ID, Community Tag, Reality
-3. Start the game and warp to systems - data captured automatically
-4. Click "Export to Haven UI" to upload systems
-
-GUI BUTTONS:
-- Check System Data: Shows current system info in log
-- Check Batch Data: Shows batch collection status in log
-- Export to Haven UI: Opens export dialog with duplicate check
-
-FEATURES:
-- Direct API integration (no watcher needed)
-- Pre-flight duplicate checking
-- User identification (Discord username + ID)
-- Community tag routing (Haven, IEA, personal, etc.)
-- Reality mode support (Normal/Permadeath)
-
-Data extracted per system:
-- star_type, economy_type, economy_strength, conflict_level
-- dominant_lifeform, planet count
-
-Data extracted per planet:
-- biome, biome_subtype, weather
-- flora_level, fauna_level, sentinel_level
-- common_resource, uncommon_resource, rare_resource
-- is_moon, planet_size, planet_name
+For more information, see README.txt or visit https://havenmap.online
 """
 
 
@@ -458,7 +373,7 @@ RESOURCE_NAMES = {
     "GAS1": "Nitrogen",
     "GAS2": "Sulphurine",
     "GAS3": "Radon",
-    # Buried/excavation resources (v10.3.6)
+    # Buried/excavation resources
     "FOSSIL1": "Ancient Bones",
     "FOSSIL2": "Ancient Bones",
     "CREATURE1": "Ancient Bones",
@@ -705,13 +620,13 @@ def map_display_string_to_adjective(value: str, field_type: str) -> str:
     # =============================================================================
 
     # RARITY_HIGH: High flora/fauna - indexed list (0-10+)
-    # CORRECTED v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+    # Based on actual game screenshots (Jedexoi-Ikom system)
     RARITY_HIGH_MAP = {
         0: "Rich",
         1: "Abundant",      # Verified (Toya 23/L2 Fauna: RARITY_HIGH1 → "Abundant")
         2: "High",          # Verified (Obushart Fauna: RARITY_HIGH2 → "High")
         3: "Ample",
-        4: "Frequent",      # Was "Bountiful" - FIXED (Ilva VI Flora: RARITY_HIGH4 → "Frequent")
+        4: "Frequent",      # Verified (Ilva VI Flora)
         5: "Full",          # Verified (Roin V Flora: RARITY_HIGH5 → "Full")
         6: "Generous",
         7: "Numerous",
@@ -723,16 +638,16 @@ def map_display_string_to_adjective(value: str, field_type: str) -> str:
     }
 
     # RARITY_NONE: None/absent flora/fauna - indexed list
-    # CORRECTED v10.3.6 based on actual game screenshots
+    # Based on actual game screenshots
     RARITY_NONE_MAP = {
         0: "Absent",
         1: "None",
         2: "Devoid",
-        3: "Undetected",    # Was "Empty" - FIXED (Fotesburs Delta Fauna: RARITY_NONE3 → "Undetected")
+        3: "Undetected",    # Verified (Fotesburs Delta Fauna)
         4: "Lacking",
         5: "Barren",
         6: "Nonexistent",
-        7: "Empty",         # Swapped with index 3
+        7: "Empty",
         8: "Not Present",
         9: "Sparse",
         10: "Barren",       # Confirmed correct (Fotesburs Delta Flora)
@@ -758,8 +673,7 @@ def map_display_string_to_adjective(value: str, field_type: str) -> str:
     }
 
     # RARITY_MID: Medium/typical flora/fauna - indexed list
-    # Added v10.3.7 (Roin V Fauna: RARITY_MID4 → "Typical")
-    # Updated v10.3.8 (Pellarni Fauna: RARITY_MID10 → "Medium")
+    # Verified: Roin V Fauna RARITY_MID4 → "Typical", Pellarni Fauna RARITY_MID10 → "Medium"
     RARITY_MID_MAP = {
         0: "Average",
         1: "Regular",
@@ -863,7 +777,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
     Map weather enum strings like 'WEATHER_COLD7' to actual game adjectives.
 
     The pattern is: WEATHER_{TYPE}{INDEX} or WEATHER_{TYPE}_CLEAR{INDEX}
-    Added v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+    Mappings verified against actual in-game screenshots.
 
     Args:
         value: The raw weather string from PlanetInfo.Weather
@@ -960,8 +874,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_LUSH9": "Tropical Storm",
         "WEATHER_LUSH10": "Boiling Superstorms",
 
-        # Lush Clear (calm lush) - v10.3.8 Iksana system
-        "WEATHER_LUSH_CLEAR1": "Temperate",
+        # Lush Clear (calm lush)        "WEATHER_LUSH_CLEAR1": "Temperate",
         "WEATHER_LUSH_CLEAR2": "Mild",
         "WEATHER_LUSH_CLEAR3": "Pleasant",
         "WEATHER_LUSH_CLEAR4": "Light Showers",
@@ -972,8 +885,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_LUSH_CLEAR9": "Usually Mild",
         "WEATHER_LUSH_CLEAR10": "Mellow",
 
-        # Cold Clear (calm cold) - v10.3.8 Iksana system
-        "WEATHER_COLD_CLEAR1": "Chilly",
+        # Cold Clear (calm cold)        "WEATHER_COLD_CLEAR1": "Chilly",
         "WEATHER_COLD_CLEAR2": "Crisp",
         "WEATHER_COLD_CLEAR3": "Cool",
         "WEATHER_COLD_CLEAR4": "Frosty",
@@ -984,8 +896,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_COLD_CLEAR9": "Frozen",
         "WEATHER_COLD_CLEAR10": "Sub-Zero",
 
-        # Cold Extreme (stormy cold) - v10.3.8 Iksana system
-        "WEATHER_COLDEXTREME1": "Howling Blizzards",  # Verified (Markelic)
+        # Cold Extreme (stormy cold)        "WEATHER_COLDEXTREME1": "Howling Blizzards",  # Verified (Markelic)
         "WEATHER_COLDEXTREME2": "Frozen Storms",
         "WEATHER_COLDEXTREME3": "Icebound Tempests",
         "WEATHER_COLDEXTREME4": "Whiteout Blizzards",
@@ -996,8 +907,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_COLDEXTREME9": "Brutal Blizzards",
         "WEATHER_COLDEXTREME10": "Deadly Cold Fronts",
 
-        # Lush Extreme (stormy lush) - v10.3.8 Iksana system
-        "WEATHER_LUSHEXTREME1": "Severe Storms",
+        # Lush Extreme (stormy lush)        "WEATHER_LUSHEXTREME1": "Severe Storms",
         "WEATHER_LUSHEXTREME2": "Torrential Downpours",
         "WEATHER_LUSHEXTREME3": "Violent Thunderstorms",
         "WEATHER_LUSHEXTREME4": "Catastrophic Storms",
@@ -1008,8 +918,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_LUSHEXTREME9": "Scalding Rainstorms",  # Verified (Vapuscurna)
         "WEATHER_LUSHEXTREME10": "Boiling Superstorms",
 
-        # Dead planet weather - v10.3.8 Iksana system
-        "WEATHER_DEAD1": "Airless",
+        # Dead planet weather        "WEATHER_DEAD1": "Airless",
         "WEATHER_DEAD2": "Airless",
         "WEATHER_DEAD3": "Airless",
         "WEATHER_DEAD4": "Airless",
@@ -1020,8 +929,7 @@ def map_weather_enum_to_adjective(value: str) -> str:
         "WEATHER_DEAD9": "Airless",
         "WEATHER_DEAD10": "Airless",
 
-        # Lava planet weather - v10.3.8 Iksana system
-        "WEATHER_LAVA1": "Volcanic",
+        # Lava planet weather        "WEATHER_LAVA1": "Volcanic",
         "WEATHER_LAVA2": "Lava Flows",
         "WEATHER_LAVA3": "Molten",
         "WEATHER_LAVA4": "Fiery",
@@ -1090,7 +998,7 @@ class HavenExtractorMod(Mod):
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
-    # VALID ADJECTIVE LISTS FROM adjectives.js (v10.3.0)
+    # VALID ADJECTIVE LISTS FROM adjectives.js
     # ALL values MUST come from Haven UI's adjectives.js - curated from in-game
     # Uses lists per level for variety, selected by planet_index % len(list)
     # ==========================================================================
@@ -1448,7 +1356,7 @@ class HavenExtractorMod(Mod):
         self._extraction_debounce_seconds = 3
 
         # =====================================================
-        # CRITICAL v8.1.0: Captured planet data from GenerateCreatureRoles hook
+        # Captured planet data from GenerateCreatureRoles hook
         # This dictionary stores Flora, Fauna, Sentinels captured by the hook
         # Key: planet_index, Value: dict with captured data
         # =====================================================
@@ -1456,7 +1364,7 @@ class HavenExtractorMod(Mod):
         self._capture_enabled = False  # Only capture after system generates
 
         # =====================================================
-        # v8.2.0: BATCH MODE - Store multiple star systems
+        # BATCH MODE - Store multiple star systems
         # Allows collecting data from many systems before export
         # =====================================================
         self._batch_systems = []  # List of completed system extractions
@@ -1817,7 +1725,7 @@ class HavenExtractorMod(Mod):
         return str(val)
 
     # =========================================================================
-    # v8.2.0: BATCH MODE - Save current system to batch storage
+    # BATCH MODE - Save current system to batch storage
     # =========================================================================
 
     def _save_current_system_to_batch(self, force_update=False):
@@ -1879,7 +1787,7 @@ class HavenExtractorMod(Mod):
             sys_data = self._cached_solar_system.mSolarSystemData
 
             # CRITICAL: Cache sys_data address for direct memory reads in _extract_single_planet
-            # v10.3.7: Fixed bug where _cached_sys_data_addr was never set in batch save path
+            # Cache sys_data address for direct memory reads during planet extraction
             try:
                 self._cached_sys_data_addr = get_addressof(sys_data)
                 logger.debug(f"[BATCH] Cached sys_data address: 0x{self._cached_sys_data_addr:X}")
@@ -1902,7 +1810,7 @@ class HavenExtractorMod(Mod):
 
             system_data = {
                 "extraction_time": datetime.now().isoformat(),
-                "extractor_version": "10.3.8",
+                "extractor_version": self.__version__,
                 "trigger": "batch_auto_save",
                 "source": "live_extraction",
                 "data_source": data_source,
@@ -1969,10 +1877,7 @@ class HavenExtractorMod(Mod):
         logger.info("")
         logger.info("=== NEW SYSTEM DETECTED ===")
 
-        # =====================================================
-        # v8.2.0: BATCH MODE - Save previous system BEFORE clearing!
-        # This preserves the data from the system we just left
-        # =====================================================
+        # Save previous system to batch BEFORE clearing (preserves data from system we just left)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
             logger.info("  Saving previous system to batch...")
             self._save_current_system_to_batch()
@@ -1985,18 +1890,13 @@ class HavenExtractorMod(Mod):
             self._cached_solar_system = map_struct(addr, nms.cGcSolarSystem)
             self._pending_extraction = True
 
-            # =====================================================
-            # v10.0.7: Try multiple sources for coordinates
+            # Try multiple sources for coordinates:
             # 1. gameData.player_state.mLocation (if available)
             # 2. mUniverseAddress from planet discovery data (packed uint64)
-            # =====================================================
             self._current_system_coords = None
-            self._current_system_name = None  # v10.0.7: Store system name separately
-
-            # v10.0.12: System name is procedurally generated from seed, not stored in Name field
-            # The Name field is only populated for user-renamed systems
-            # We'll use the glyph code as the system identifier
-            self._current_system_name = None  # Will be set from glyph code later
+            # System name is procedurally generated from seed, not stored in Name field.
+            # The Name field is only populated for user-renamed systems.
+            self._current_system_name = None
 
             galaxy_names = {
                 0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
@@ -2019,15 +1919,7 @@ class HavenExtractorMod(Mod):
                     planet_idx = self._safe_int(galactic_addr.PlanetIndex)
                     galaxy_idx = self._safe_int(location.RealityIndex)
 
-                    # DEBUG: Log raw values from GalacticAddress struct
-                    logger.debug(f"  [DEBUG] GalacticAddress struct fields:")
-                    logger.info(f"    VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
-                    logger.info(f"    SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
-                    # Calculate what portal/region values these produce
-                    dbg_px = voxel_x & 0xFFF
-                    dbg_py = voxel_y & 0xFF
-                    dbg_pz = voxel_z & 0xFFF
-                    logger.info(f"    -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+                    logger.debug(f"  GalacticAddress: VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}, System={system_idx}, Planet={planet_idx}, Galaxy={galaxy_idx}")
 
                     if galaxy_idx < 0 or galaxy_idx > 255:
                         galaxy_idx = 0
@@ -2053,7 +1945,7 @@ class HavenExtractorMod(Mod):
                     }
                     logger.info(f"  [SUCCESS via Method 1] Cached coords: '{system_name}' in '{region_name}' @ {glyph_code} ({galaxy_name})")
             except Exception as e:
-                logger.debug(f"  [v10.0.5] player_state method failed: {e}")
+                logger.debug(f"  player_state method failed: {e}")
 
             # Method 2: Try mUniverseAddress from planet discovery data (packed uint64)
             # Note: Planets may not be fully initialized at this point - that's OK, we'll try again later
@@ -2071,7 +1963,7 @@ class HavenExtractorMod(Mod):
                     if universe_addr == 0 or universe_addr == 0xFFFFFFFFFFFFFFFF:
                         raise ValueError("Uninitialized mUniverseAddress")
 
-                    # v10.1.0: CORRECT bit layout for mUniverseAddress (verified via diagnostic)
+                    # Bit layout for mUniverseAddress (verified)
                     # mUniverseAddress stores REGION coordinates DIRECTLY, not signed voxel offsets!
                     # Diagnostic proved: 0x001126000193DFA9 contains Sea of Gidzenuf [4009, 1, 2365]
                     #
@@ -2091,11 +1983,7 @@ class HavenExtractorMod(Mod):
                     planet_idx = max(0, planet_idx_raw - 1)  # Stored as planet+1
                     galaxy_idx = (universe_addr >> 56) & 0xFF
 
-                    # DEBUG: Log raw packed address decode
-                    logger.debug(f"  [DEBUG] mUniverseAddress packed decode (Method 2) - v10.1.0 CORRECT layout:")
-                    logger.info(f"    Raw addr: 0x{universe_addr:016X}")
-                    logger.info(f"    x_region={x_region} (0x{x_region:03X}), y_region={y_region} (0x{y_region:02X}), z_region={z_region} (0x{z_region:03X})")
-                    logger.info(f"    system_idx={system_idx} (0x{system_idx:03X}), planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
+                    logger.debug(f"  mUniverseAddress (Method 2): 0x{universe_addr:016X} -> x={x_region}, y={y_region}, z={z_region}, sys={system_idx}, planet={planet_idx}, galaxy={galaxy_idx}")
 
                     # Sanity check - region coords must be in valid range
                     if (0 <= x_region <= 4095 and 0 <= y_region <= 255 and 0 <= z_region <= 4095 and
@@ -2147,13 +2035,13 @@ class HavenExtractorMod(Mod):
                 logger.info("  [DEBUG] No coordinates yet - will try again during planet capture")
 
             # =====================================================
-            # v8.1.0: Clear captured planets for new system
+            # Clear captured planets for new system
             # =====================================================
             self._captured_planets.clear()
             self._capture_enabled = True
-            self._system_saved_to_batch = False  # v8.2.2: Reset save flag for new system
-            logger.info("  [v8.1.0] Captured planet data cleared for new system")
-            logger.info("  [v8.1.0] Capture ENABLED - GenerateCreatureRoles hook active")
+            self._system_saved_to_batch = False
+            logger.info("  Captured planet data cleared for new system")
+            logger.info("  Capture ENABLED - GenerateCreatureRoles hook active")
 
             logger.info("")
             logger.info("=" * 60)
@@ -2167,7 +2055,7 @@ class HavenExtractorMod(Mod):
             logger.error(traceback.format_exc())
 
     # =========================================================================
-    # CRITICAL v8.1.0: GenerateCreatureRoles HOOK - Captures Flora/Fauna/Sentinels
+    # GenerateCreatureRoles HOOK - Captures Flora/Fauna/Sentinels
     # This hook fires for EVERY planet as the game generates creature roles.
     # The lPlanetData parameter contains the actual planet data we need!
     # =========================================================================
@@ -2180,20 +2068,16 @@ class HavenExtractorMod(Mod):
         This hook fires for EACH planet in the system, receiving the full
         cGcPlanetData structure with Flora, Fauna, Sentinels, Weather, etc.
 
-        This is the CRITICAL hook that was working in v7.9.6!
-
         IMPORTANT: We limit capture to 6 planets max because the hook also
         fires for nearby systems during galaxy discovery. Only the first 6
         belong to the current system.
         """
-        # v10.0.3: lUA parameter is unreliable - gives garbage values when dereferenced
-        # v10.1.0: Use mUniverseAddress from planet discovery data instead (PROVEN CORRECT)
+        # Note: lUA parameter is unreliable. Use mUniverseAddress from planet discovery data instead.
 
         if not self._capture_enabled:
             return
 
-        # v10.1.0: Extract coordinates from planet discovery data mUniverseAddress
-        # This is the ONLY reliable source - diagnostic proved it contains correct region coords
+        # Extract coordinates from planet discovery data mUniverseAddress (most reliable source)
         if self._current_system_coords is None and len(self._captured_planets) == 0:
             try:
                 if self._cached_solar_system is not None:
@@ -2205,7 +2089,7 @@ class HavenExtractorMod(Mod):
 
                     # Skip if uninitialized
                     if universe_addr != 0 and universe_addr != 0xFFFFFFFFFFFFFFFF:
-                        # v10.1.0: CORRECT bit layout for mUniverseAddress
+                        # Bit layout for mUniverseAddress
                         # Bits 0-11:  X region (direct, 0-4095)
                         # Bits 12-23: Z region (direct, 0-4095)
                         # Bits 24-31: Y region (direct, 0-255)
@@ -2221,7 +2105,7 @@ class HavenExtractorMod(Mod):
                         planet_idx = max(0, planet_idx_raw - 1)
                         galaxy_idx = (universe_addr >> 56) & 0xFF
 
-                        logger.debug(f"  [DEBUG] GenerateCreatureRoles mUniverseAddress decode (v10.1.0):")
+                        logger.debug(f"  GenerateCreatureRoles mUniverseAddress decode:")
                         logger.info(f"    Raw addr: 0x{universe_addr:016X}")
                         logger.info(f"    x_region={x_region}, y_region={y_region}, z_region={z_region}")
                         logger.info(f"    system_idx={system_idx}, planet_idx={planet_idx}, galaxy_idx={galaxy_idx}")
@@ -2351,7 +2235,7 @@ class HavenExtractorMod(Mod):
             except Exception as e:
                 logger.debug(f"Sentinel extraction failed: {e}")
 
-            # CRITICAL v8.1.6: Extract Biome, BiomeSubType, and Size from GenerationData
+            # Extract Biome, BiomeSubType, and Size from GenerationData
             # cGcPlanetData.GenerationData contains cGcPlanetGenerationIntermediateData
             # which has Biome at offset 0x138, BiomeSubType at 0x13C, and Size at 0x144
             biome_raw = -1
@@ -2380,7 +2264,7 @@ class HavenExtractorMod(Mod):
                         else:
                             biome_subtype_raw = int(subtype_val) if subtype_val is not None else -1
                         biome_subtype_name = BIOME_SUBTYPES.get(biome_subtype_raw, f"Unknown({biome_subtype_raw})")
-                    # CRITICAL v8.1.9: Extract Size from GenerationData (offset 0x144)
+                    # Extract Size from GenerationData (offset 0x144)
                     # This is the RELIABLE source for planet_size - direct memory read gives garbage
                     if hasattr(gen_data, 'Size'):
                         size_val = gen_data.Size
@@ -2475,13 +2359,13 @@ class HavenExtractorMod(Mod):
                 except Exception as e:
                     logger.info(f"    [HINTS-DIRECT] Direct memory fallback failed: {e}")
 
-            # CRITICAL v8.1.8: Extract weather from cGcPlanetData.Weather.WeatherType
+            # Extract weather from cGcPlanetData.Weather.WeatherType
             # This uses the actual Weather structure (offset 0x1C00) with enum values
             # Works for ALL planets, not just visited ones like PlanetInfo.Weather
             weather = ""
             weather_raw = -1
             storm_frequency = ""
-            storm_raw = -1  # v10.2.0: Store raw value for contextual weather lookup
+            storm_raw = -1  # Raw value for contextual weather lookup
             try:
                 if hasattr(planet_data, 'Weather'):
                     weather_data = planet_data.Weather
@@ -2520,7 +2404,7 @@ class HavenExtractorMod(Mod):
                 except Exception as e:
                     logger.debug(f"Weather fallback extraction failed: {e}")
 
-            # CRITICAL v8.1.7: Extract planet Name from cGcPlanetData.Name (offset 0x396E)
+            # Extract planet Name from cGcPlanetData.Name (offset 0x396E)
             # This is a cTkFixedString0x80 (128 char fixed string)
             planet_name = ""
             try:
@@ -2539,7 +2423,7 @@ class HavenExtractorMod(Mod):
                 logger.debug(f"Planet name extraction failed: {e}")
 
             # =============================================================
-            # v10.3.0: Extract ACTUAL DISPLAY STRINGS from PlanetInfo
+            # Extract actual display strings from PlanetInfo
             # These are the EXACT strings the game shows on discovery pages
             # PlanetInfo.Flora (0x280), Fauna (0x200), SentinelsPerDifficulty[0] (0x0)
             # =============================================================
@@ -2635,14 +2519,14 @@ class HavenExtractorMod(Mod):
             self._captured_planets[planet_index] = {
                 'flora_raw': flora_raw,
                 'flora': flora_name,
-                'flora_display': flora_display,  # v10.3.0: Actual game display string
+                'flora_display': flora_display,  # Actual game display string
                 'fauna_raw': fauna_raw,
                 'fauna': fauna_name,
-                'fauna_display': fauna_display,  # v10.3.0: Actual game display string
+                'fauna_display': fauna_display,  # Actual game display string
                 'sentinel_raw': sentinel_raw,
                 'sentinel': sentinel_name,
-                'sentinel_display': sentinel_display,  # v10.3.0: Actual game display string
-                'weather_display': weather_display,  # v10.3.0: Actual game display string
+                'sentinel_display': sentinel_display,  # Actual game display string
+                'weather_display': weather_display,  # Actual game display string
                 'biome_raw': biome_raw,
                 'biome': biome_name,
                 'biome_subtype_raw': biome_subtype_raw,
@@ -2656,7 +2540,7 @@ class HavenExtractorMod(Mod):
                 'weather': weather,
                 'weather_raw': weather_raw,
                 'storm_frequency': storm_frequency,
-                'storm_raw': storm_raw,  # v10.2.0: Raw value for contextual weather lookup
+                'storm_raw': storm_raw,  # Raw value for contextual weather lookup
                 'planet_name': planet_name,
                 'planet_description': planet_description,      # v1.4.0: Biome adjective text ID
                 'planet_type_display': planet_type_display,    # v1.4.0: Planet type display string
@@ -2722,8 +2606,7 @@ class HavenExtractorMod(Mod):
             logger.info("*" * 60)
             logger.info("")
 
-            # =====================================================
-            # v10.0.2: Cache coordinates after first planet capture
+            # Cache coordinates after first planet capture
             # player_state is often None during on_system_generate but
             # should be available by the time planets are generating
             # =====================================================
@@ -2743,18 +2626,11 @@ class HavenExtractorMod(Mod):
                         planet_idx_coord = self._safe_int(galactic_addr.PlanetIndex)
                         galaxy_idx = self._safe_int(location.RealityIndex)
 
-                        # DEBUG: Log raw values from GalacticAddress struct (planet capture fallback)
-                        logger.debug(f"    [DEBUG] GalacticAddress struct (planet capture fallback):")
-                        logger.info(f"      VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
-                        logger.info(f"      SolarSystemIndex={system_idx}, PlanetIndex={planet_idx_coord}, Galaxy={galaxy_idx}")
-                        dbg_px = voxel_x & 0xFFF
-                        dbg_py = voxel_y & 0xFF
-                        dbg_pz = voxel_z & 0xFFF
-                        logger.info(f"      -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+                        logger.debug(f"    GalacticAddress (planet fallback): VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}, System={system_idx}, Planet={planet_idx_coord}, Galaxy={galaxy_idx}")
 
                         # Sanity check galaxy index
                         if galaxy_idx < 0 or galaxy_idx > 255:
-                            logger.warning(f"    [v10.0.2] Invalid galaxy_idx {galaxy_idx}, defaulting to 0 (Euclid)")
+                            logger.warning(f"    Invalid galaxy_idx {galaxy_idx}, defaulting to 0 (Euclid)")
                             galaxy_idx = 0
 
                         galaxy_names = {
@@ -2817,7 +2693,7 @@ class HavenExtractorMod(Mod):
         logger.info("=== APPVIEW STATE - SYSTEM READY ===")
         logger.info("=" * 40)
 
-        # v10.0.13: Extract coordinates from player_state NOW since it's available
+        # Extract coordinates from player_state while it's available
         if self._current_system_coords is None:
             logger.info("[APPVIEW] Getting coordinates from player_state...")
             try:
@@ -2834,14 +2710,7 @@ class HavenExtractorMod(Mod):
                     planet_idx = self._safe_int(galactic_addr.PlanetIndex)
                     galaxy_idx = self._safe_int(location.RealityIndex)
 
-                    # DEBUG: Log values
-                    logger.info(f"[APPVIEW] GalacticAddress fields:")
-                    logger.info(f"  VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}")
-                    logger.info(f"  SolarSystemIndex={system_idx}, PlanetIndex={planet_idx}, Galaxy={galaxy_idx}")
-                    dbg_px = voxel_x & 0xFFF
-                    dbg_py = voxel_y & 0xFF
-                    dbg_pz = voxel_z & 0xFFF
-                    logger.info(f"  -> Region coords: [{dbg_px}, {dbg_py}, {dbg_pz}]")
+                    logger.debug(f"[APPVIEW] GalacticAddress: VoxelX={voxel_x}, VoxelY={voxel_y}, VoxelZ={voxel_z}, System={system_idx}, Planet={planet_idx}, Galaxy={galaxy_idx}")
 
                     # Sanity check galaxy index
                     if galaxy_idx < 0 or galaxy_idx > 255:
@@ -2956,7 +2825,7 @@ class HavenExtractorMod(Mod):
                 if planet_addr == 0:
                     continue
 
-                # v8.1.9: Use CAPTURED data from hook (reliable) instead of direct memory (garbage)
+                # Use CAPTURED data from hook (reliable) instead of direct memory (garbage)
                 biome = "NOT_READ"
                 biome_subtype = "NOT_READ"
                 planet_size = "NOT_READ"
@@ -2983,7 +2852,7 @@ class HavenExtractorMod(Mod):
                     except Exception as e:
                         logger.debug(f"Direct read failed for {i}: {e}")
 
-                # v8.1.9: Use captured data from hook for name/flora/fauna/sentinel if available
+                # Use captured data from hook for name/flora/fauna/sentinel if available
                 name = f"Planet_{i+1}"
                 sentinels = "NOT_READ"
                 flora = "NOT_READ"
@@ -3017,7 +2886,7 @@ class HavenExtractorMod(Mod):
                     except Exception as e:
                         logger.debug(f"Error checking planet {i}: {e}")
 
-                # Log status - v8.1.9: Shows captured data from hook (reliable)
+                # Log captured data status
                 has_captured = i in self._captured_planets
                 status = "CAPTURED" if has_captured else "NO_HOOK_DATA"
                 moon_str = " [MOON]" if is_moon else ""
@@ -3120,7 +2989,7 @@ class HavenExtractorMod(Mod):
     @gui_button("Config Status")
     def show_config_status(self):
         """
-        v10.0.0: Display current configuration in log.
+        Display current configuration in log.
         Config fields are editable in the GUI above (Discord Username, Discord ID, dropdowns).
         """
         logger.info("")
@@ -3218,7 +3087,7 @@ class HavenExtractorMod(Mod):
     @gui_button("Export to Haven")
     def export_to_haven_ui(self):
         """
-        v10.0.0: Export systems directly to Haven UI with duplicate checking.
+        Export systems directly to Haven UI with duplicate checking.
         Uploads all collected systems in batch with progress logging.
         """
         logger.info("")
@@ -3353,7 +3222,7 @@ class HavenExtractorMod(Mod):
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
                 'X-API-Key': API_KEY,
-                'User-Agent': 'HavenExtractor/10.3.8',
+                'User-Agent': f'HavenExtractor/{self.__version__}',
             })
 
             with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
@@ -3434,7 +3303,7 @@ class HavenExtractorMod(Mod):
             req = urllib.request.Request(url, data=payload, headers={
                 'Content-Type': 'application/json',
                 'X-API-Key': API_KEY,
-                'User-Agent': 'HavenExtractor/10.3.8',
+                'User-Agent': f'HavenExtractor/{self.__version__}',
             })
 
             with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
@@ -3528,7 +3397,7 @@ class HavenExtractorMod(Mod):
 
         extraction = {
             "extraction_time": datetime.now().isoformat(),
-            "extractor_version": "10.3.8",
+            "extractor_version": self.__version__,
             "trigger": trigger,
             "source": "live_extraction",
             "data_source": data_source,
@@ -3613,7 +3482,7 @@ class HavenExtractorMod(Mod):
             logger.info(f"  [player_state] EXCEPTION: {e}")
 
         # Method 2: Check if we have cached coordinates from on_system_generate
-        # v10.0.1: This is the primary fallback - coords are cached when system generates
+        # Primary fallback - coords are cached when system generates
         logger.info(f"  Method 2 - cached coords: {self._current_system_coords}")
         if self._current_system_coords:
             cached_glyph = self._current_system_coords.get('glyph_code', 'Unknown')
@@ -3825,7 +3694,7 @@ class HavenExtractorMod(Mod):
             }
 
             # =====================================================
-            # CRITICAL v8.1.1: DIRECT MEMORY READ as PRIMARY SOURCE
+            # DIRECT MEMORY READ as PRIMARY SOURCE
             # Read from SolarSystemData + 0x1EA0 (planet gen input array)
             # Each planet entry is 0x53 bytes (83 bytes)
             # This is the CORRECT memory location - struct mapping was unreliable!
@@ -3863,13 +3732,13 @@ class HavenExtractorMod(Mod):
 
             # =====================================================
             # CAPTURED DATA: Use GenerateCreatureRoles hook data
-            # v8.1.6: NOW INCLUDES BIOME from GenerationData - this is RELIABLE!
+            # NOW INCLUDES BIOME from GenerationData - this is RELIABLE!
             # =====================================================
             if index in self._captured_planets:
                 captured = self._captured_planets[index]
                 logger.debug(f"    [CAPTURED] Using captured data for planet {index}")
 
-                # CRITICAL v8.1.6: Apply captured BIOME data (from GenerationData - reliable!)
+                # Apply captured BIOME data (from GenerationData - reliable!)
                 # This overrides the unreliable direct memory read
                 if captured.get('biome_raw', -1) >= 0:
                     result["biome"] = captured.get('biome', result["biome"])
@@ -3878,18 +3747,15 @@ class HavenExtractorMod(Mod):
                     result["biome_subtype"] = captured.get('biome_subtype', result["biome_subtype"])
                     logger.debug(f"    [CAPTURED] BiomeSubType = {result['biome_subtype']} (raw: {captured.get('biome_subtype_raw')})")
 
-                # CRITICAL v8.1.9: Apply captured PLANET SIZE data (from GenerationData.Size - reliable!)
+                # Apply captured PLANET SIZE data (from GenerationData.Size - reliable!)
                 # This overrides the GARBAGE values from direct memory read (was showing 256, 33554432, etc)
                 if captured.get('planet_size_raw', -1) >= 0:
                     result["planet_size"] = captured.get('planet_size', result["planet_size"])
                     result["is_moon"] = captured.get('is_moon', False)
                     logger.debug(f"    [CAPTURED] PlanetSize = {result['planet_size']} (raw: {captured.get('planet_size_raw')}, is_moon: {result['is_moon']})")
 
-                # =============================================================
-                # v10.3.0: Apply flora/fauna/sentinel - PREFER DISPLAY STRINGS
-                # Display strings from PlanetInfo are the EXACT game text
-                # Fall back to list-based selection only if display strings unavailable
-                # =============================================================
+                # Apply flora/fauna/sentinel - prefer display strings from PlanetInfo
+                # (exact game text). Fall back to list-based selection if unavailable.
 
                 # =============================================================
                 # v1.4.0: Use _resolve_adjective() for layered text ID resolution
@@ -3991,11 +3857,8 @@ class HavenExtractorMod(Mod):
                              if result.get(k)]
                     logger.info(f"    [SPECIAL] Detected flags: {', '.join(flags)}")
 
-                # =============================================================
-                # v10.3.0: Apply weather - PREFER DISPLAY STRING from PlanetInfo.Weather
-                # Display string is the EXACT text the game shows
-                # Fall back to list-based selection only if display string unavailable
-                # =============================================================
+                # Apply weather - prefer display string from PlanetInfo.Weather
+                # (exact game text). Fall back to list-based selection if unavailable.
                 weather_display = captured.get('weather_display', '')
                 is_extreme = captured.get('is_weather_extreme', False)
                 if weather_display:
@@ -4006,8 +3869,8 @@ class HavenExtractorMod(Mod):
                     logger.debug(f"    [DISPLAY] Using Weather: '{result['weather']}' (raw: '{weather_display}', extreme={is_extreme})")
                 elif captured.get('weather') and captured.get('weather_raw', -1) >= 0:
                     # Fallback to list-based selection
-                    # v10.3.6: Use deterministic hash based on glyph code + planet index
-                    # This should produce consistent results for the same planet
+                    # Use deterministic hash based on glyph code + planet index
+                    # for consistent results on the same planet
                     weather_raw = captured.get('weather_raw', -1)
                     storm_raw = captured.get('storm_raw', 0)
                     storm_info = captured.get('storm_frequency', '')
@@ -4042,7 +3905,7 @@ class HavenExtractorMod(Mod):
                     result["weather"] = captured['weather']
                     logger.debug(f"    [RAW] Weather = {result['weather']} (no raw value)")
 
-                # v8.1.7: Apply captured planet name from cGcPlanetData.Name
+                # Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires
                 if captured.get('planet_name'):
                     result["planet_name"] = captured['planet_name']
@@ -4143,7 +4006,7 @@ class HavenExtractorMod(Mod):
                             if pt and pt != "None" and len(pt) > 0:
                                 result["biome"] = pt
 
-                        # CRITICAL v10.3.1: Only use fallback weather if not already set
+                        # Only use fallback weather if not already set
                         # The captured data has CORRECT adjectives; PlanetInfo.Weather has raw lookup keys
                         if result["weather"] == "Unknown" and hasattr(info, 'Weather'):
                             val = str(info.Weather)
@@ -4448,10 +4311,10 @@ class HavenExtractorMod(Mod):
                 return f"System_{glyph_code}"
 
             name = nms_system_name(portal_code, galaxy_idx)
-            logger.debug(f"  [v10.1.1] Generated system name: '{name}' (sys_idx={system_idx})")
+            logger.debug(f"  Generated system name: '{name}' (sys_idx={system_idx})")
             return name
         except Exception as e:
-            logger.debug(f"  [v10.1.1] System name generation failed: {e}")
+            logger.debug(f"  System name generation failed: {e}")
             return f"System_{glyph_code}"
 
     def _generate_region_name(self, glyph_code: str, galaxy_idx: int = 0,
@@ -4482,10 +4345,10 @@ class HavenExtractorMod(Mod):
                 return f"Region_{glyph_code[:8]}"
 
             name = nms_region_name(portal_code, galaxy_idx)
-            logger.debug(f"  [v10.1.1] Generated region name: '{name}' (sys_idx={system_idx})")
+            logger.debug(f"  Generated region name: '{name}' (sys_idx={system_idx})")
             return name
         except Exception as e:
-            logger.debug(f"  [v10.1.1] Region name generation failed: {e}")
+            logger.debug(f"  Region name generation failed: {e}")
             return f"Region_{glyph_code[:8]}"
 
     def _write_extraction(self, data: dict):
@@ -4514,8 +4377,7 @@ class HavenExtractorMod(Mod):
 
     def _write_batch_extraction(self, data: dict):
         """
-        Save BATCH extraction data locally.
-        v8.2.0: Saves all systems in batch to separate files.
+        Save batch extraction data locally. Each system is written to a separate file.
         """
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
