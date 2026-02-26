@@ -1289,7 +1289,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.36.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.37.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -12042,6 +12042,96 @@ async def get_pending_system_details(submission_id: int, session: Optional[str] 
     except Exception as e:
         logger.error(f"Error fetching submission details: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch submission: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/pending_systems/{submission_id}')
+async def edit_pending_system(submission_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Edit a pending system submission before approval (super admin only).
+    Updates the system_data JSON and syncs top-level columns.
+    """
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    body = await request.json()
+    updated_system_data = body.get('system_data')
+    if not updated_system_data or not isinstance(updated_system_data, dict):
+        raise HTTPException(status_code=400, detail="system_data object is required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM pending_systems WHERE id = ?', (submission_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        submission = dict(row)
+        if submission.get('status') != 'pending':
+            raise HTTPException(status_code=400, detail="Only pending submissions can be edited")
+
+        old_system_data = json.loads(submission.get('system_data', '{}'))
+        old_name = old_system_data.get('name', '')
+        new_name = updated_system_data.get('name', old_name)
+
+        # Update the system_data JSON column and sync top-level system_name
+        cursor.execute('''
+            UPDATE pending_systems
+            SET system_data = ?, system_name = ?
+            WHERE id = ?
+        ''', (json.dumps(updated_system_data), new_name, submission_id))
+
+        # Audit log
+        current_username = session_data.get('username', 'unknown')
+        current_account_id = session_data.get('account_id')
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'edit_pending',
+                'system',
+                submission_id,
+                new_name,
+                current_username,
+                'super_admin',
+                current_account_id,
+                session_data.get('discord_tag'),
+                submission.get('submitted_by'),
+                submission.get('submitter_account_id'),
+                submission.get('submitter_account_type'),
+                f"Edited pending submission (old name: '{old_name}', new name: '{new_name}')",
+                submission.get('discord_tag')
+            ))
+        except Exception as audit_err:
+            logger.warning(f"Failed to add audit log for edit: {audit_err}")
+
+        conn.commit()
+        logger.info(f"Super admin '{current_username}' edited pending submission {submission_id} ('{old_name}' -> '{new_name}')")
+
+        # Return the updated submission
+        cursor.execute('SELECT * FROM pending_systems WHERE id = ?', (submission_id,))
+        updated_row = cursor.fetchone()
+        result = dict(updated_row)
+        if result.get('system_data'):
+            result['system_data'] = json.loads(result['system_data'])
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error editing pending submission: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to edit submission: {str(e)}")
     finally:
         if conn:
             conn.close()

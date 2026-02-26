@@ -45,6 +45,10 @@ export default function PendingApprovals() {
   const [discoveryModalOpen, setDiscoveryModalOpen] = useState(false)
   const [discoveryRejectModalOpen, setDiscoveryRejectModalOpen] = useState(false)
   const [discoveryRejectionReason, setDiscoveryRejectionReason] = useState('')
+  // Edit mode state (super admin only)
+  const [editMode, setEditMode] = useState(false)
+  const [editData, setEditData] = useState(null)
+  const [editSaving, setEditSaving] = useState(false)
 
   // Get personal submission color from settings
   const { personalColor } = usePersonalColor()
@@ -207,6 +211,53 @@ export default function PendingApprovals() {
       alert('Rejection failed: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
+    }
+  }
+
+  // Edit pending submission functions (super admin only)
+  function enterEditMode() {
+    if (!selectedSubmission?.system_data) return
+    setEditData(JSON.parse(JSON.stringify(selectedSubmission.system_data)))
+    setEditMode(true)
+  }
+
+  function cancelEdit() {
+    setEditMode(false)
+    setEditData(null)
+  }
+
+  function updateEditField(path, value) {
+    setEditData(prev => {
+      const copy = JSON.parse(JSON.stringify(prev))
+      const keys = path.split('.')
+      let obj = copy
+      for (let i = 0; i < keys.length - 1; i++) {
+        const k = isNaN(keys[i]) ? keys[i] : parseInt(keys[i])
+        obj = obj[k]
+      }
+      const lastKey = isNaN(keys[keys.length - 1]) ? keys[keys.length - 1] : parseInt(keys[keys.length - 1])
+      obj[lastKey] = value
+      return copy
+    })
+  }
+
+  async function saveEdits() {
+    if (!editData || !selectedSubmission) return
+    setEditSaving(true)
+    try {
+      await axios.put(`/api/pending_systems/${selectedSubmission.id}`, {
+        system_data: editData
+      })
+      // Refresh the submission detail
+      const res = await axios.get(`/api/pending_systems/${selectedSubmission.id}`)
+      setSelectedSubmission(res.data)
+      setEditMode(false)
+      setEditData(null)
+      loadSubmissions()
+    } catch (err) {
+      alert('Save failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -1093,251 +1144,461 @@ export default function PendingApprovals() {
         {/* View/Review Modal */}
         {viewModalOpen && selectedSubmission && (
           <Modal
-            title={`Review: ${selectedSubmission.system_name}`}
+            title={editMode ? `Editing: ${selectedSubmission.system_name}` : `Review: ${selectedSubmission.system_name}`}
             onClose={() => {
               setViewModalOpen(false)
               setSelectedSubmission(null)
+              setEditMode(false)
+              setEditData(null)
             }}
           >
             <div className="space-y-4">
               {/* System Details */}
               <div className="border-b pb-3">
-                <h4 className="font-semibold mb-2">System Information</h4>
-                <div className="text-sm space-y-1">
-                  <p><strong>Name:</strong> {selectedSubmission.system_data?.name}</p>
-                  <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
-                  <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>
-                  {selectedSubmission.glyph_code && (
-                    <div className="mb-2">
-                      <strong>Glyph Code:</strong>
-                      <div className="mt-1 flex items-center gap-2">
-                        <GlyphDisplay glyphCode={selectedSubmission.glyph_code} size="medium" />
-                        <span className="font-mono text-xs text-gray-400">({selectedSubmission.glyph_code})</span>
-                      </div>
+                <h4 className="font-semibold mb-2">System Information {editMode && <span className="text-yellow-400 text-xs ml-2">(Editing)</span>}</h4>
+                {editMode && editData ? (
+                  <div className="text-sm space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <label className="block"><span className="text-gray-400">Name:</span>
+                        <input type="text" value={editData.name || ''} onChange={e => updateEditField('name', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm" />
+                      </label>
+                      <label className="block"><span className="text-gray-400">Galaxy:</span>
+                        <select value={editData.galaxy || 'Euclid'} onChange={e => updateEditField('galaxy', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          {['Euclid','Hilbert Dimension','Calypso','Hesperius Dimension','Hyades','Ickjamatew','Budullangr','Kikolgallr','Eltiensleen','Eissentam'].map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Reality:</span>
+                        <select value={editData.reality || 'Normal'} onChange={e => updateEditField('reality', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="Normal">Normal</option>
+                          <option value="Permadeath">Permadeath</option>
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Star Color:</span>
+                        <select value={editData.star_color || editData.star_type || ''} onChange={e => { updateEditField('star_color', e.target.value); updateEditField('star_type', e.target.value); }} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="">Unknown</option>
+                          <option value="Yellow">Yellow</option>
+                          <option value="Red">Red</option>
+                          <option value="Green">Green</option>
+                          <option value="Blue">Blue</option>
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Economy Type:</span>
+                        <select value={editData.economy_type || ''} onChange={e => updateEditField('economy_type', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="">Unknown</option>
+                          {['Trading','Scientific','Industrial','Technology','Mining','Power Generation','Manufacturing','None'].map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Economy Level:</span>
+                        <select value={editData.economy_level || ''} onChange={e => updateEditField('economy_level', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="">Unknown</option>
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                          <option value="None">None</option>
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Conflict Level:</span>
+                        <select value={editData.conflict_level || ''} onChange={e => updateEditField('conflict_level', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="">Unknown</option>
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                          <option value="None">None</option>
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Dominant Lifeform:</span>
+                        <select value={editData.dominant_lifeform || ''} onChange={e => updateEditField('dominant_lifeform', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
+                          <option value="">Unknown</option>
+                          <option value="Gek">Gek</option>
+                          <option value="Vy'keen">Vy'keen</option>
+                          <option value="Korvax">Korvax</option>
+                          <option value="None">None</option>
+                        </select>
+                      </label>
+                      <label className="block"><span className="text-gray-400">Spectral Class:</span>
+                        <input type="text" value={editData.stellar_classification || ''} onChange={e => updateEditField('stellar_classification', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm" />
+                      </label>
+                      <label className="block"><span className="text-gray-400">Description:</span>
+                        <input type="text" value={editData.description || ''} onChange={e => updateEditField('description', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm" />
+                      </label>
                     </div>
-                  )}
-                  {(selectedSubmission.system_data?.region_x !== undefined && selectedSubmission.system_data?.region_x !== null) && (
-                    <p><strong>Region:</strong> [{selectedSubmission.system_data.region_x}, {selectedSubmission.system_data.region_y}, {selectedSubmission.system_data.region_z}]</p>
-                  )}
-                  <p><strong>Coordinates:</strong> ({selectedSubmission.system_data?.x || 0}, {selectedSubmission.system_data?.y || 0}, {selectedSubmission.system_data?.z || 0})</p>
-                  {/* Extractor-specific system properties - star_color (v10+) or star_type (legacy) */}
-                  {(() => {
-                    const starColor = selectedSubmission.system_data?.star_color || selectedSubmission.system_data?.star_type;
-                    if (starColor && starColor !== 'Unknown') {
-                      return (
-                        <p><strong>Star Color:</strong> <span className={
-                          starColor === 'Yellow' ? 'text-yellow-400' :
-                          starColor === 'Red' ? 'text-red-400' :
-                          starColor === 'Green' ? 'text-green-400' :
-                          starColor === 'Blue' ? 'text-blue-400' : ''
-                        }>{starColor}</span></p>
-                      );
-                    }
-                    return null;
-                  })()}
-                  {selectedSubmission.system_data?.economy_type && selectedSubmission.system_data.economy_type !== 'Unknown' && (
-                    <p><strong>Economy:</strong> {selectedSubmission.system_data.economy_type} {selectedSubmission.system_data.economy_level && selectedSubmission.system_data.economy_level !== 'Unknown' && `(${selectedSubmission.system_data.economy_level})`}</p>
-                  )}
-                  {selectedSubmission.system_data?.conflict_level && selectedSubmission.system_data.conflict_level !== 'Unknown' && (
-                    <p><strong>Conflict:</strong> <span className={
-                      selectedSubmission.system_data.conflict_level === 'High' ? 'text-red-400' :
-                      selectedSubmission.system_data.conflict_level === 'Low' ? 'text-green-400' : 'text-yellow-400'
-                    }>{selectedSubmission.system_data.conflict_level}</span></p>
-                  )}
-                  {selectedSubmission.system_data?.dominant_lifeform && selectedSubmission.system_data.dominant_lifeform !== 'Unknown' && (
-                    <p><strong>Dominant Lifeform:</strong> {selectedSubmission.system_data.dominant_lifeform}</p>
-                  )}
-                  {selectedSubmission.system_data?.stellar_classification && (
-                    <p><strong>Spectral Class:</strong> <span className={`font-mono ${
-                      (() => {
-                        const firstChar = selectedSubmission.system_data.stellar_classification[0]?.toUpperCase();
-                        switch(firstChar) {
-                          case 'O': case 'B': return 'text-blue-300';
-                          case 'F': case 'G': return 'text-yellow-300';
-                          case 'K': case 'M': return 'text-red-400';
-                          case 'E': return 'text-green-400';
-                          case 'X': case 'Y': return 'text-purple-400';
-                          default: return 'text-gray-300';
-                        }
-                      })()
-                    }`}>{selectedSubmission.system_data.stellar_classification}</span></p>
-                  )}
-                  <p><strong>Description:</strong> {selectedSubmission.system_data?.description || 'None'}</p>
-                </div>
+                    {selectedSubmission.glyph_code && (
+                      <div className="mt-2">
+                        <strong className="text-gray-400">Glyph Code:</strong>
+                        <div className="mt-1 flex items-center gap-2">
+                          <GlyphDisplay glyphCode={selectedSubmission.glyph_code} size="medium" />
+                          <span className="font-mono text-xs text-gray-400">({selectedSubmission.glyph_code})</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm space-y-1">
+                    <p><strong>Name:</strong> {selectedSubmission.system_data?.name}</p>
+                    <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
+                    <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>
+                    {selectedSubmission.glyph_code && (
+                      <div className="mb-2">
+                        <strong>Glyph Code:</strong>
+                        <div className="mt-1 flex items-center gap-2">
+                          <GlyphDisplay glyphCode={selectedSubmission.glyph_code} size="medium" />
+                          <span className="font-mono text-xs text-gray-400">({selectedSubmission.glyph_code})</span>
+                        </div>
+                      </div>
+                    )}
+                    {(selectedSubmission.system_data?.region_x !== undefined && selectedSubmission.system_data?.region_x !== null) && (
+                      <p><strong>Region:</strong> [{selectedSubmission.system_data.region_x}, {selectedSubmission.system_data.region_y}, {selectedSubmission.system_data.region_z}]</p>
+                    )}
+                    <p><strong>Coordinates:</strong> ({selectedSubmission.system_data?.x || 0}, {selectedSubmission.system_data?.y || 0}, {selectedSubmission.system_data?.z || 0})</p>
+                    {(() => {
+                      const starColor = selectedSubmission.system_data?.star_color || selectedSubmission.system_data?.star_type;
+                      if (starColor && starColor !== 'Unknown') {
+                        return (
+                          <p><strong>Star Color:</strong> <span className={
+                            starColor === 'Yellow' ? 'text-yellow-400' :
+                            starColor === 'Red' ? 'text-red-400' :
+                            starColor === 'Green' ? 'text-green-400' :
+                            starColor === 'Blue' ? 'text-blue-400' : ''
+                          }>{starColor}</span></p>
+                        );
+                      }
+                      return null;
+                    })()}
+                    {selectedSubmission.system_data?.economy_type && selectedSubmission.system_data.economy_type !== 'Unknown' && (
+                      <p><strong>Economy:</strong> {selectedSubmission.system_data.economy_type} {selectedSubmission.system_data.economy_level && selectedSubmission.system_data.economy_level !== 'Unknown' && `(${selectedSubmission.system_data.economy_level})`}</p>
+                    )}
+                    {selectedSubmission.system_data?.conflict_level && selectedSubmission.system_data.conflict_level !== 'Unknown' && (
+                      <p><strong>Conflict:</strong> <span className={
+                        selectedSubmission.system_data.conflict_level === 'High' ? 'text-red-400' :
+                        selectedSubmission.system_data.conflict_level === 'Low' ? 'text-green-400' : 'text-yellow-400'
+                      }>{selectedSubmission.system_data.conflict_level}</span></p>
+                    )}
+                    {selectedSubmission.system_data?.dominant_lifeform && selectedSubmission.system_data.dominant_lifeform !== 'Unknown' && (
+                      <p><strong>Dominant Lifeform:</strong> {selectedSubmission.system_data.dominant_lifeform}</p>
+                    )}
+                    {selectedSubmission.system_data?.stellar_classification && (
+                      <p><strong>Spectral Class:</strong> <span className={`font-mono ${
+                        (() => {
+                          const firstChar = selectedSubmission.system_data.stellar_classification[0]?.toUpperCase();
+                          switch(firstChar) {
+                            case 'O': case 'B': return 'text-blue-300';
+                            case 'F': case 'G': return 'text-yellow-300';
+                            case 'K': case 'M': return 'text-red-400';
+                            case 'E': return 'text-green-400';
+                            case 'X': case 'Y': return 'text-purple-400';
+                            default: return 'text-gray-300';
+                          }
+                        })()
+                      }`}>{selectedSubmission.system_data.stellar_classification}</span></p>
+                    )}
+                    <p><strong>Description:</strong> {selectedSubmission.system_data?.description || 'None'}</p>
+                  </div>
+                )}
               </div>
 
               {/* Planets */}
-              {selectedSubmission.system_data?.planets && selectedSubmission.system_data.planets.length > 0 && (
-                <div className="border-b pb-3">
-                  <h4 className="font-semibold mb-2">Planets ({selectedSubmission.system_data.planets.length})</h4>
-                  <div className="space-y-3">
-                    {selectedSubmission.system_data.planets.map((planet, i) => (
-                      <div key={i} className="text-sm bg-cyan-700 p-3 rounded">
-                        <div className="flex items-start gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <p className="font-semibold text-base">{planet.name}</p>
-                              {/* Planet size badge */}
-                              {planet.planet_size && planet.planet_size !== 'Unknown' && (
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  planet.planet_size === 'Large' ? 'bg-purple-600 text-white' :
-                                  planet.planet_size === 'Medium' ? 'bg-blue-600 text-white' :
-                                  planet.planet_size === 'Small' ? 'bg-green-600 text-white' :
-                                  'bg-gray-600 text-white'
-                                }`}>{planet.planet_size}</span>
+              {(() => {
+                const planetsData = editMode && editData ? editData.planets : selectedSubmission.system_data?.planets;
+                if (!planetsData || planetsData.length === 0) return null;
+                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava'];
+                const sizeOptions = ['Large','Medium','Small'];
+                const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
+                const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
+                const checkCls = "mr-1 accent-yellow-500";
+
+                const renderBodyFields = (body, prefix, isMoon) => {
+                  if (editMode && editData) {
+                    return (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          <label className="block"><span className="text-gray-400 text-xs">Name:</span>
+                            <input type="text" value={body.name || ''} onChange={e => updateEditField(`${prefix}.name`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Size:</span>
+                            <select value={body.planet_size || ''} onChange={e => updateEditField(`${prefix}.planet_size`, e.target.value)} className={`w-full ${selectCls}`}>
+                              <option value="">Unknown</option>
+                              {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Biome:</span>
+                            <select value={body.biome || ''} onChange={e => updateEditField(`${prefix}.biome`, e.target.value)} className={`w-full ${selectCls}`}>
+                              <option value="">Unknown</option>
+                              {biomeOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Biome Subtype:</span>
+                            <input type="text" value={body.biome_subtype || ''} onChange={e => updateEditField(`${prefix}.biome_subtype`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Weather:</span>
+                            <input type="text" value={body.weather || body.climate || ''} onChange={e => updateEditField(`${prefix}.weather`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Sentinel:</span>
+                            <input type="text" value={body.sentinel || body.sentinels || ''} onChange={e => updateEditField(`${prefix}.sentinel`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Fauna:</span>
+                            <input type="text" value={body.fauna || ''} onChange={e => updateEditField(`${prefix}.fauna`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Flora:</span>
+                            <input type="text" value={body.flora || ''} onChange={e => updateEditField(`${prefix}.flora`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Resources:</span>
+                            <input type="text" value={body.materials || (body.resources && Array.isArray(body.resources) ? body.resources.join(', ') : body.resources) || ''} onChange={e => updateEditField(`${prefix}.materials`, e.target.value)} className={inputCls} />
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap gap-3 text-xs">
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.has_water} onChange={e => updateEditField(`${prefix}.has_water`, e.target.checked ? 1 : 0)} className={checkCls} />Water</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.ancient_bones} onChange={e => updateEditField(`${prefix}.ancient_bones`, e.target.checked ? 1 : 0)} className={checkCls} />Ancient Bones</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.vile_brood} onChange={e => updateEditField(`${prefix}.vile_brood`, e.target.checked ? 1 : 0)} className={checkCls} />Vile Brood</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.salvageable_scrap} onChange={e => updateEditField(`${prefix}.salvageable_scrap`, e.target.checked ? 1 : 0)} className={checkCls} />Salvageable Scrap</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.storm_crystals} onChange={e => updateEditField(`${prefix}.storm_crystals`, e.target.checked ? 1 : 0)} className={checkCls} />Storm Crystals</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.gravitino_balls} onChange={e => updateEditField(`${prefix}.gravitino_balls`, e.target.checked ? 1 : 0)} className={checkCls} />Gravitino Balls</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.is_infested} onChange={e => updateEditField(`${prefix}.is_infested`, e.target.checked ? 1 : 0)} className={checkCls} />Infested</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.is_dissonant} onChange={e => updateEditField(`${prefix}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <label className="block"><span className="text-gray-400 text-xs">Base Location:</span>
+                            <input type="text" value={body.base_location || ''} onChange={e => updateEditField(`${prefix}.base_location`, e.target.value)} className={inputCls} />
+                          </label>
+                          <label className="block"><span className="text-gray-400 text-xs">Notes:</span>
+                            <input type="text" value={body.notes || ''} onChange={e => updateEditField(`${prefix}.notes`, e.target.value)} className={inputCls} />
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  }
+                  // View mode
+                  return (
+                    <>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="font-semibold text-base">{body.name}</p>
+                            {body.planet_size && body.planet_size !== 'Unknown' && (
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                body.planet_size === 'Large' ? 'bg-purple-600 text-white' :
+                                body.planet_size === 'Medium' ? 'bg-blue-600 text-white' :
+                                body.planet_size === 'Small' ? 'bg-green-600 text-white' :
+                                'bg-gray-600 text-white'
+                              }`}>{body.planet_size}</span>
+                            )}
+                          </div>
+                          {(body.biome || body.biome_subtype) && (
+                            <div className="mb-2 text-gray-300">
+                              {body.biome && body.biome !== 'Unknown' && (
+                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${
+                                  body.biome === 'Lush' ? 'bg-green-700' :
+                                  body.biome === 'Toxic' ? 'bg-yellow-700' :
+                                  body.biome === 'Scorched' ? 'bg-orange-700' :
+                                  body.biome === 'Radioactive' ? 'bg-lime-700' :
+                                  body.biome === 'Frozen' ? 'bg-cyan-700' :
+                                  body.biome === 'Barren' ? 'bg-stone-700' :
+                                  body.biome === 'Dead' ? 'bg-gray-700' :
+                                  body.biome === 'Weird' ? 'bg-purple-700' :
+                                  body.biome === 'Swamp' ? 'bg-emerald-800' :
+                                  body.biome === 'Lava' ? 'bg-red-700' :
+                                  'bg-gray-600'
+                                }`}>{body.biome}</span>
+                              )}
+                              {body.biome_subtype && body.biome_subtype !== 'Unknown' && body.biome_subtype !== 'None' && (
+                                <span className="text-xs text-gray-400">({body.biome_subtype})</span>
                               )}
                             </div>
-                            {/* Biome info (from extractor) */}
-                            {(planet.biome || planet.biome_subtype) && (
-                              <div className="mb-2 text-gray-300">
-                                {planet.biome && planet.biome !== 'Unknown' && (
-                                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${
-                                    planet.biome === 'Lush' ? 'bg-green-700' :
-                                    planet.biome === 'Toxic' ? 'bg-yellow-700' :
-                                    planet.biome === 'Scorched' ? 'bg-orange-700' :
-                                    planet.biome === 'Radioactive' ? 'bg-lime-700' :
-                                    planet.biome === 'Frozen' ? 'bg-cyan-700' :
-                                    planet.biome === 'Barren' ? 'bg-stone-700' :
-                                    planet.biome === 'Dead' ? 'bg-gray-700' :
-                                    planet.biome === 'Weird' ? 'bg-purple-700' :
-                                    planet.biome === 'Swamp' ? 'bg-emerald-800' :
-                                    planet.biome === 'Lava' ? 'bg-red-700' :
-                                    'bg-gray-600'
-                                  }`}>{planet.biome}</span>
-                                )}
-                                {planet.biome_subtype && planet.biome_subtype !== 'Unknown' && planet.biome_subtype !== 'None' && (
-                                  <span className="text-xs text-gray-400">({planet.biome_subtype})</span>
-                                )}
-                              </div>
-                            )}
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
-                              <div><span className="text-gray-400">Sentinel:</span> {planet.sentinel || planet.sentinels || 'None'}</div>
-                              <div><span className="text-gray-400">Fauna:</span> {planet.fauna || 'N/A'}{planet.fauna_count > 0 && ` (${planet.fauna_count})`}</div>
-                              <div><span className="text-gray-400">Flora:</span> {planet.flora || 'N/A'}{planet.flora_count > 0 && ` (${planet.flora_count})`}</div>
-                              {(planet.climate || planet.weather) && <div><span className="text-gray-400">Weather:</span> {planet.climate || planet.weather}</div>}
-                              {planet.has_water === 1 && <div><span className="text-cyan-300">Has Water</span></div>}
-                            </div>
+                          )}
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
+                            <div><span className="text-gray-400">Sentinel:</span> {body.sentinel || body.sentinels || 'None'}</div>
+                            <div><span className="text-gray-400">Fauna:</span> {body.fauna || 'N/A'}{body.fauna_count > 0 && ` (${body.fauna_count})`}</div>
+                            <div><span className="text-gray-400">Flora:</span> {body.flora || 'N/A'}{body.flora_count > 0 && ` (${body.flora_count})`}</div>
+                            {(body.climate || body.weather) && <div><span className="text-gray-400">Weather:</span> {body.climate || body.weather}</div>}
+                            {body.has_water === 1 && <div><span className="text-cyan-300">Has Water</span></div>}
                           </div>
                         </div>
-                        {/* Resources/Materials */}
-                        {(planet.materials || (planet.resources && planet.resources.length > 0)) && (
-                          <div className="mt-2 text-gray-300">
-                            <span className="text-gray-400">Resources:</span> {planet.materials || planet.resources?.join(', ')}
-                          </div>
-                        )}
-                        {/* Special Resource Flags */}
-                        {(planet.ancient_bones || planet.vile_brood || planet.salvageable_scrap || planet.storm_crystals || planet.gravitino_balls || planet.is_infested || planet.is_dissonant) && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {planet.ancient_bones ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-300">Ancient Bones</span> : null}
-                            {planet.vile_brood ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Vile Brood</span> : null}
-                            {planet.salvageable_scrap ? <span className="text-xs px-1.5 py-0.5 rounded bg-orange-800/60 text-orange-300">Salvageable Scrap</span> : null}
-                            {planet.storm_crystals ? <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-800/60 text-cyan-300">Storm Crystals</span> : null}
-                            {planet.gravitino_balls ? <span className="text-xs px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300">Gravitino Balls</span> : null}
-                            {planet.is_infested ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-400">Infested</span> : null}
-                            {planet.is_dissonant ? <span className="text-xs px-1.5 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
-                          </div>
-                        )}
-                        {planet.base_location && (
-                          <div className="mt-1 text-gray-300">
-                            <span className="text-gray-400">Base Location:</span> {planet.base_location}
-                          </div>
-                        )}
-                        {planet.description && (
-                          <div className="mt-1 text-gray-300">
-                            <span className="text-gray-400">Description:</span> {planet.description}
-                          </div>
-                        )}
-                        {planet.notes && (
-                          <div className="mt-1 text-gray-300">
-                            <span className="text-gray-400">Notes:</span> {planet.notes}
-                          </div>
-                        )}
-                        {planet.photo && (
-                          <div className="mt-2">
-                            <span className="text-gray-400">Photo:</span> <span className="text-cyan-300">{planet.photo}</span>
-                          </div>
-                        )}
-                        {planet.moons && planet.moons.length > 0 && (
-                          <div className="mt-2 ml-3 border-l-2 border-cyan-500 pl-3">
-                            <p className="text-gray-400 text-xs mb-1">Moons ({planet.moons.length}):</p>
-                            {planet.moons.map((moon, j) => (
-                              <div key={j} className="mb-2 text-xs">
-                                <p className="font-medium">{moon.name}</p>
-                                <div className="grid grid-cols-2 gap-1 mt-1 text-gray-300">
-                                  {moon.biome && moon.biome !== 'Unknown' && <div>Biome: {moon.biome}</div>}
-                                  <div>Sentinel: {moon.sentinel || moon.sentinels || 'None'}</div>
-                                  <div>Fauna: {moon.fauna || 'N/A'}</div>
-                                  <div>Flora: {moon.flora || 'N/A'}</div>
-                                  {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
-                                    <div className="col-span-2">Resources: {moon.materials || moon.resources?.join(', ')}</div>
+                      </div>
+                      {(body.materials || (body.resources && body.resources.length > 0)) && (
+                        <div className="mt-2 text-gray-300">
+                          <span className="text-gray-400">Resources:</span> {body.materials || body.resources?.join(', ')}
+                        </div>
+                      )}
+                      {(body.ancient_bones || body.vile_brood || body.salvageable_scrap || body.storm_crystals || body.gravitino_balls || body.is_infested || body.is_dissonant) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {body.ancient_bones ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-300">Ancient Bones</span> : null}
+                          {body.vile_brood ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Vile Brood</span> : null}
+                          {body.salvageable_scrap ? <span className="text-xs px-1.5 py-0.5 rounded bg-orange-800/60 text-orange-300">Salvageable Scrap</span> : null}
+                          {body.storm_crystals ? <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-800/60 text-cyan-300">Storm Crystals</span> : null}
+                          {body.gravitino_balls ? <span className="text-xs px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300">Gravitino Balls</span> : null}
+                          {body.is_infested ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-400">Infested</span> : null}
+                          {body.is_dissonant ? <span className="text-xs px-1.5 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
+                        </div>
+                      )}
+                      {body.base_location && (
+                        <div className="mt-1 text-gray-300"><span className="text-gray-400">Base Location:</span> {body.base_location}</div>
+                      )}
+                      {body.description && (
+                        <div className="mt-1 text-gray-300"><span className="text-gray-400">Description:</span> {body.description}</div>
+                      )}
+                      {body.notes && (
+                        <div className="mt-1 text-gray-300"><span className="text-gray-400">Notes:</span> {body.notes}</div>
+                      )}
+                      {body.photo && (
+                        <div className="mt-2"><span className="text-gray-400">Photo:</span> <span className="text-cyan-300">{body.photo}</span></div>
+                      )}
+                    </>
+                  );
+                };
+
+                return (
+                  <div className="border-b pb-3">
+                    <h4 className="font-semibold mb-2">Planets ({planetsData.length})</h4>
+                    <div className="space-y-3">
+                      {planetsData.map((planet, i) => (
+                        <div key={i} className="text-sm bg-cyan-700 p-3 rounded">
+                          {renderBodyFields(planet, `planets.${i}`, false)}
+                          {/* Moons nested under planet */}
+                          {planet.moons && planet.moons.length > 0 && (
+                            <div className="mt-2 ml-3 border-l-2 border-cyan-500 pl-3">
+                              <p className="text-gray-400 text-xs mb-1">Moons ({planet.moons.length}):</p>
+                              {planet.moons.map((moon, j) => (
+                                <div key={j} className={`mb-2 ${editMode ? 'text-sm bg-gray-700/50 p-2 rounded' : 'text-xs'}`}>
+                                  {editMode && editData ? (
+                                    renderBodyFields(moon, `planets.${i}.moons.${j}`, true)
+                                  ) : (
+                                    <>
+                                      <p className="font-medium">{moon.name}</p>
+                                      <div className="grid grid-cols-2 gap-1 mt-1 text-gray-300">
+                                        {moon.biome && moon.biome !== 'Unknown' && <div>Biome: {moon.biome}</div>}
+                                        <div>Sentinel: {moon.sentinel || moon.sentinels || 'None'}</div>
+                                        <div>Fauna: {moon.fauna || 'N/A'}</div>
+                                        <div>Flora: {moon.flora || 'N/A'}</div>
+                                        {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
+                                          <div className="col-span-2">Resources: {moon.materials || moon.resources?.join(', ')}</div>
+                                        )}
+                                      </div>
+                                    </>
                                   )}
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Moons (top-level from extractor - shown indented under planets) */}
-              {selectedSubmission.system_data?.moons && selectedSubmission.system_data.moons.length > 0 && (
-                <div className="border-b pb-3 ml-4 border-l-2 border-gray-600 pl-4">
-                  <h4 className="font-semibold mb-2 text-gray-300">
-                    <span className="text-gray-500">↳</span> System Moons ({selectedSubmission.system_data.moons.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedSubmission.system_data.moons.map((moon, i) => (
-                      <div key={i} className="text-sm bg-gray-700/70 p-3 rounded">
-                        <div className="flex items-center gap-2 mb-2">
-                          <p className="font-semibold">{moon.name}</p>
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-500 text-white">Moon</span>
-                          {moon.planet_size && moon.planet_size !== 'Unknown' && (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600">{moon.planet_size}</span>
-                          )}
-                          {moon.biome && moon.biome !== 'Unknown' && (
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              moon.biome === 'Lush' ? 'bg-green-700' :
-                              moon.biome === 'Toxic' ? 'bg-yellow-700' :
-                              moon.biome === 'Scorched' ? 'bg-orange-700' :
-                              moon.biome === 'Radioactive' ? 'bg-lime-700' :
-                              moon.biome === 'Frozen' ? 'bg-cyan-700' :
-                              moon.biome === 'Barren' ? 'bg-stone-700' :
-                              moon.biome === 'Dead' ? 'bg-gray-700' :
-                              moon.biome === 'Weird' ? 'bg-purple-700' :
-                              'bg-gray-600'
-                            }`}>{moon.biome}</span>
+              {(() => {
+                const moonsData = editMode && editData ? editData.moons : selectedSubmission.system_data?.moons;
+                if (!moonsData || moonsData.length === 0) return null;
+                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava'];
+                const sizeOptions = ['Large','Medium','Small'];
+                const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
+                const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
+                const checkCls = "mr-1 accent-yellow-500";
+                return (
+                  <div className="border-b pb-3 ml-4 border-l-2 border-gray-600 pl-4">
+                    <h4 className="font-semibold mb-2 text-gray-300">
+                      <span className="text-gray-500">↳</span> System Moons ({moonsData.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {moonsData.map((moon, i) => (
+                        <div key={i} className="text-sm bg-gray-700/70 p-3 rounded">
+                          {editMode && editData ? (
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                <label className="block"><span className="text-gray-400 text-xs">Name:</span>
+                                  <input type="text" value={moon.name || ''} onChange={e => updateEditField(`moons.${i}.name`, e.target.value)} className={inputCls} />
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Size:</span>
+                                  <select value={moon.planet_size || ''} onChange={e => updateEditField(`moons.${i}.planet_size`, e.target.value)} className={`w-full ${selectCls}`}>
+                                    <option value="">Unknown</option>
+                                    {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Biome:</span>
+                                  <select value={moon.biome || ''} onChange={e => updateEditField(`moons.${i}.biome`, e.target.value)} className={`w-full ${selectCls}`}>
+                                    <option value="">Unknown</option>
+                                    {biomeOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                                  </select>
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Weather:</span>
+                                  <input type="text" value={moon.weather || moon.climate || ''} onChange={e => updateEditField(`moons.${i}.weather`, e.target.value)} className={inputCls} />
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Sentinel:</span>
+                                  <input type="text" value={moon.sentinel || moon.sentinels || ''} onChange={e => updateEditField(`moons.${i}.sentinel`, e.target.value)} className={inputCls} />
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Fauna:</span>
+                                  <input type="text" value={moon.fauna || ''} onChange={e => updateEditField(`moons.${i}.fauna`, e.target.value)} className={inputCls} />
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Flora:</span>
+                                  <input type="text" value={moon.flora || ''} onChange={e => updateEditField(`moons.${i}.flora`, e.target.value)} className={inputCls} />
+                                </label>
+                                <label className="block"><span className="text-gray-400 text-xs">Resources:</span>
+                                  <input type="text" value={moon.materials || (moon.resources && Array.isArray(moon.resources) ? moon.resources.join(', ') : moon.resources) || ''} onChange={e => updateEditField(`moons.${i}.materials`, e.target.value)} className={inputCls} />
+                                </label>
+                              </div>
+                              <div className="flex flex-wrap gap-3 text-xs">
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.has_water} onChange={e => updateEditField(`moons.${i}.has_water`, e.target.checked ? 1 : 0)} className={checkCls} />Water</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.ancient_bones} onChange={e => updateEditField(`moons.${i}.ancient_bones`, e.target.checked ? 1 : 0)} className={checkCls} />Ancient Bones</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.vile_brood} onChange={e => updateEditField(`moons.${i}.vile_brood`, e.target.checked ? 1 : 0)} className={checkCls} />Vile Brood</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.salvageable_scrap} onChange={e => updateEditField(`moons.${i}.salvageable_scrap`, e.target.checked ? 1 : 0)} className={checkCls} />Salvageable Scrap</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.storm_crystals} onChange={e => updateEditField(`moons.${i}.storm_crystals`, e.target.checked ? 1 : 0)} className={checkCls} />Storm Crystals</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.gravitino_balls} onChange={e => updateEditField(`moons.${i}.gravitino_balls`, e.target.checked ? 1 : 0)} className={checkCls} />Gravitino Balls</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.is_infested} onChange={e => updateEditField(`moons.${i}.is_infested`, e.target.checked ? 1 : 0)} className={checkCls} />Infested</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.is_dissonant} onChange={e => updateEditField(`moons.${i}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2 mb-2">
+                                <p className="font-semibold">{moon.name}</p>
+                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-500 text-white">Moon</span>
+                                {moon.planet_size && moon.planet_size !== 'Unknown' && (
+                                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-600">{moon.planet_size}</span>
+                                )}
+                                {moon.biome && moon.biome !== 'Unknown' && (
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    moon.biome === 'Lush' ? 'bg-green-700' :
+                                    moon.biome === 'Toxic' ? 'bg-yellow-700' :
+                                    moon.biome === 'Scorched' ? 'bg-orange-700' :
+                                    moon.biome === 'Radioactive' ? 'bg-lime-700' :
+                                    moon.biome === 'Frozen' ? 'bg-cyan-700' :
+                                    moon.biome === 'Barren' ? 'bg-stone-700' :
+                                    moon.biome === 'Dead' ? 'bg-gray-700' :
+                                    moon.biome === 'Weird' ? 'bg-purple-700' :
+                                    'bg-gray-600'
+                                  }`}>{moon.biome}</span>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
+                                <div><span className="text-gray-400">Sentinel:</span> {moon.sentinel || moon.sentinels || 'None'}</div>
+                                <div><span className="text-gray-400">Fauna:</span> {moon.fauna || 'N/A'}</div>
+                                <div><span className="text-gray-400">Flora:</span> {moon.flora || 'N/A'}</div>
+                                {(moon.climate || moon.weather) && <div><span className="text-gray-400">Weather:</span> {moon.climate || moon.weather}</div>}
+                              </div>
+                              {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
+                                <div className="mt-2 text-gray-300">
+                                  <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
+                                </div>
+                              )}
+                              {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant) && (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {moon.ancient_bones ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-800/60 text-amber-200 border border-amber-700/50">Ancient Bones</span> : null}
+                                  {moon.vile_brood ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Vile Brood</span> : null}
+                                  {moon.salvageable_scrap ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-800/60 text-orange-200 border border-orange-700/50">Salvageable Scrap</span> : null}
+                                  {moon.storm_crystals ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-cyan-800/60 text-cyan-200 border border-cyan-700/50">Storm Crystals</span> : null}
+                                  {moon.gravitino_balls ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-purple-800/60 text-purple-200 border border-purple-700/50">Gravitino Balls</span> : null}
+                                  {moon.is_infested ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-200 border border-red-800/50">Infested</span> : null}
+                                  {moon.is_dissonant ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-violet-800/60 text-violet-200 border border-violet-700/50">Dissonant</span> : null}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-gray-300">
-                          <div><span className="text-gray-400">Sentinel:</span> {moon.sentinel || moon.sentinels || 'None'}</div>
-                          <div><span className="text-gray-400">Fauna:</span> {moon.fauna || 'N/A'}</div>
-                          <div><span className="text-gray-400">Flora:</span> {moon.flora || 'N/A'}</div>
-                          {(moon.climate || moon.weather) && <div><span className="text-gray-400">Weather:</span> {moon.climate || moon.weather}</div>}
-                        </div>
-                        {(moon.materials || (moon.resources && moon.resources.length > 0)) && (
-                          <div className="mt-2 text-gray-300">
-                            <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
-                          </div>
-                        )}
-                        {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant) && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {moon.ancient_bones ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-800/60 text-amber-200 border border-amber-700/50">Ancient Bones</span> : null}
-                            {moon.vile_brood ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Vile Brood</span> : null}
-                            {moon.salvageable_scrap ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-800/60 text-orange-200 border border-orange-700/50">Salvageable Scrap</span> : null}
-                            {moon.storm_crystals ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-cyan-800/60 text-cyan-200 border border-cyan-700/50">Storm Crystals</span> : null}
-                            {moon.gravitino_balls ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-purple-800/60 text-purple-200 border border-purple-700/50">Gravitino Balls</span> : null}
-                            {moon.is_infested ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-200 border border-red-800/50">Infested</span> : null}
-                            {moon.is_dissonant ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-violet-800/60 text-violet-200 border border-violet-700/50">Dissonant</span> : null}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Space Station */}
               {selectedSubmission.system_data?.space_station && (
@@ -1388,44 +1649,72 @@ export default function PendingApprovals() {
               {selectedSubmission.status === 'pending' && (
                 <div className="pt-3 border-t">
                   {/* Self-submission warning */}
-                  {isSelfSubmission(selectedSubmission) && (
+                  {!editMode && isSelfSubmission(selectedSubmission) && (
                     <div className="mb-3 p-3 bg-amber-900/50 border border-amber-500 rounded">
                       <p className="text-amber-300 text-sm">
                         <strong>You submitted this system.</strong> Another admin must review and approve it to prevent conflicts of interest.
                       </p>
                     </div>
                   )}
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Button
-                      className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
-                      onClick={() => approveSubmission(selectedSubmission.id, selectedSubmission.system_name)}
-                      disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
-                      title={isSelfSubmission(selectedSubmission) ? 'You cannot approve your own submission' : ''}
-                    >
-                      {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Approve' : (actionInProgress ? 'Approving...' : 'Approve')}
-                    </Button>
-                    <Button
-                      className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
-                      onClick={() => {
-                        setViewModalOpen(false)
-                        openRejectModal(selectedSubmission)
-                      }}
-                      disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
-                      title={isSelfSubmission(selectedSubmission) ? 'You cannot reject your own submission' : ''}
-                    >
-                      {isSelfSubmission(selectedSubmission) ? 'Cannot Reject' : 'Reject'}
-                    </Button>
-                    <Button
-                      className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
-                      onClick={() => {
-                        setViewModalOpen(false)
-                        setSelectedSubmission(null)
-                      }}
-                      disabled={actionInProgress}
-                    >
-                      Close
-                    </Button>
-                  </div>
+                  {editMode ? (
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Button
+                        className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
+                        onClick={saveEdits}
+                        disabled={editSaving}
+                      >
+                        {editSaving ? 'Saving...' : 'Save Changes'}
+                      </Button>
+                      <Button
+                        className="bg-gray-500 text-white hover:bg-gray-600 text-sm w-full sm:w-auto"
+                        onClick={cancelEdit}
+                        disabled={editSaving}
+                      >
+                        Cancel Edit
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      {isSuperAdmin && (
+                        <Button
+                          className="bg-yellow-600 text-white hover:bg-yellow-700 text-sm w-full sm:w-auto"
+                          onClick={enterEditMode}
+                          disabled={actionInProgress}
+                        >
+                          Edit
+                        </Button>
+                      )}
+                      <Button
+                        className="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
+                        onClick={() => approveSubmission(selectedSubmission.id, selectedSubmission.system_name)}
+                        disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
+                        title={isSelfSubmission(selectedSubmission) ? 'You cannot approve your own submission' : ''}
+                      >
+                        {isSelfSubmission(selectedSubmission) ? 'Cannot Self-Approve' : (actionInProgress ? 'Approving...' : 'Approve')}
+                      </Button>
+                      <Button
+                        className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm w-full sm:w-auto"
+                        onClick={() => {
+                          setViewModalOpen(false)
+                          openRejectModal(selectedSubmission)
+                        }}
+                        disabled={actionInProgress || isSelfSubmission(selectedSubmission)}
+                        title={isSelfSubmission(selectedSubmission) ? 'You cannot reject your own submission' : ''}
+                      >
+                        {isSelfSubmission(selectedSubmission) ? 'Cannot Reject' : 'Reject'}
+                      </Button>
+                      <Button
+                        className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
+                        onClick={() => {
+                          setViewModalOpen(false)
+                          setSelectedSubmission(null)
+                        }}
+                        disabled={actionInProgress}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
