@@ -633,6 +633,19 @@ def init_database():
     add_column_if_missing('moons', 'materials', 'TEXT')
     add_column_if_missing('moons', 'notes', 'TEXT')
     add_column_if_missing('moons', 'photo', 'TEXT')
+    # v1.4.6: Special attributes for moons (matching planets table)
+    add_column_if_missing('moons', 'has_rings', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'is_dissonant', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'is_infested', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'extreme_weather', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'water_world', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'vile_brood', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'exotic_trophy', 'TEXT')
+    add_column_if_missing('moons', 'ancient_bones', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'salvageable_scrap', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'storm_crystals', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'gravitino_balls', 'INTEGER DEFAULT 0')
+    add_column_if_missing('moons', 'infested', 'INTEGER DEFAULT 0')
 
     # Systems table migrations (for NMS Save Watcher companion app)
     add_column_if_missing('systems', 'star_type', 'TEXT')  # Yellow, Red, Green, Blue, Purple
@@ -9165,8 +9178,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             for moon in planet.get('moons', []):
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
-                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name', 'Unknown'),
@@ -9186,7 +9200,12 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     1 if moon.get('extreme_weather') else 0,
                     1 if moon.get('water_world') else 0,
                     1 if moon.get('vile_brood') else 0,
-                    moon.get('exotic_trophy')
+                    moon.get('exotic_trophy'),
+                    1 if moon.get('ancient_bones') else 0,
+                    1 if moon.get('salvageable_scrap') else 0,
+                    1 if moon.get('storm_crystals') else 0,
+                    1 if moon.get('gravitino_balls') else 0,
+                    1 if moon.get('infested') else 0
                 ))
 
         # Insert space station if present
@@ -12570,8 +12589,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             for moon in planet.get('moons', []):
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
-                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -12591,7 +12611,12 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if moon.get('extreme_weather') else 0,
                     1 if moon.get('water_world') else 0,
                     1 if moon.get('vile_brood') else 0,
-                    moon.get('exotic_trophy')
+                    moon.get('exotic_trophy'),
+                    1 if moon.get('ancient_bones') else 0,
+                    1 if moon.get('salvageable_scrap') else 0,
+                    1 if moon.get('storm_crystals') else 0,
+                    1 if moon.get('gravitino_balls') else 0,
+                    1 if moon.get('infested') else 0
                 ))
 
         # Handle root-level moons (from Haven Extractor which sends moons as flat list)
@@ -12604,8 +12629,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             for moon in root_moons:
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
-                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,  # Attach to last planet
                     moon.get('name'),
@@ -12625,7 +12651,12 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if moon.get('extreme_weather') else 0,
                     1 if moon.get('water_world') else 0,
                     1 if moon.get('vile_brood') else 0,
-                    moon.get('exotic_trophy')
+                    moon.get('exotic_trophy'),
+                    1 if moon.get('ancient_bones') else 0,
+                    1 if moon.get('salvageable_scrap') else 0,
+                    1 if moon.get('storm_crystals') else 0,
+                    1 if moon.get('gravitino_balls') else 0,
+                    1 if moon.get('infested') else 0
                 ))
 
         # Insert space station if present
@@ -13234,8 +13265,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     for moon in planet.get('moons', []):
                         cursor.execute('''
                             INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
-                                has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
+                                ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             planet_id,
                             moon.get('name'),
@@ -13255,7 +13287,12 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             1 if moon.get('extreme_weather') else 0,
                             1 if moon.get('water_world') else 0,
                             1 if moon.get('vile_brood') else 0,
-                            moon.get('exotic_trophy')
+                            moon.get('exotic_trophy'),
+                            1 if moon.get('ancient_bones') else 0,
+                            1 if moon.get('salvageable_scrap') else 0,
+                            1 if moon.get('storm_crystals') else 0,
+                            1 if moon.get('gravitino_balls') else 0,
+                            1 if moon.get('infested') else 0
                         ))
 
                 # Insert space station if present
