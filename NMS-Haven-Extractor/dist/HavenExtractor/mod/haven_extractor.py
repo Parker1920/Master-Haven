@@ -2397,11 +2397,15 @@ class HavenExtractorMod(Mod):
                 if hasattr(planet_data, 'PlanetInfo'):
                     info = planet_data.PlanetInfo
 
+                    # v1.4.5: Resolve adjectives immediately at capture time
+                    # Previously stored raw text IDs and relied on manual button/auto-refresh
+
                     # Flora display string - cTkFixedString0x80 at offset 0x280
                     if hasattr(info, 'Flora'):
                         val = str(info.Flora) or ""
                         flora_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                         if flora_display and flora_display != "None" and len(flora_display) >= 2:
+                            flora_display = self._resolve_adjective(flora_display, 'flora')
                             logger.info(f"    [DISPLAY] Flora: '{flora_display}'")
                         else:
                             flora_display = ""
@@ -2411,35 +2415,34 @@ class HavenExtractorMod(Mod):
                         val = str(info.Fauna) or ""
                         fauna_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                         if fauna_display and fauna_display != "None" and len(fauna_display) >= 2:
+                            fauna_display = self._resolve_adjective(fauna_display, 'fauna')
                             logger.info(f"    [DISPLAY] Fauna: '{fauna_display}'")
                         else:
                             fauna_display = ""
 
-                    # Sentinel display string - SentinelsPerDifficulty[1] (Normal difficulty)
-                    # Index: 0=Casual/Creative, 1=Normal, 2=Survival, 3=Permadeath
+                    # Sentinel display string - SentinelsPerDifficulty[2] (Normal difficulty)
+                    # Index: 0=Casual/Creative, 1=Relaxed, 2=Normal, 3=Survival/Permadeath
+                    # v1.4.5: Worlds Part 1 update added Relaxed between Casual and Normal
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[1]) or ""
+                            val = str(sent_arr[2]) or ""
                             sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
+                                sentinel_display = self._resolve_adjective(sentinel_display, 'sentinel')
                                 logger.info(f"    [DISPLAY] Sentinel: '{sentinel_display}'")
                             else:
                                 sentinel_display = ""
 
                     # Weather display string - cTkFixedString0x80 at offset 0x480
-                    # v10.3.6: Log ALL values (even empty) to diagnose why weather isn't working
                     if hasattr(info, 'Weather'):
                         val = str(info.Weather) or ""
                         weather_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                        # ALWAYS log what we get so we can see the pattern
-                        logger.info(f"    [WEATHER CHECK] Raw value: '{val[:50]}...' -> Cleaned: '{weather_display}'")
                         if weather_display and weather_display != "None" and len(weather_display) >= 2:
+                            weather_display = self._resolve_adjective(weather_display, 'weather')
                             logger.info(f"    [DISPLAY] Weather: '{weather_display}'")
                         else:
                             weather_display = ""
-                    else:
-                        logger.info(f"    [WEATHER CHECK] info.Weather attribute not found!")
 
                     # v1.4.0: PlanetDescription - biome adjective text ID (e.g., "Paradise Planet")
                     if hasattr(info, 'PlanetDescription'):
@@ -2701,12 +2704,8 @@ class HavenExtractorMod(Mod):
     # GUI BUTTONS
     # =========================================================================
 
-    @gui_button("Get Coordinates")
-    def get_coordinates_button(self):
-        """
-        Diagnostic: Dump ALL possible coordinate sources.
-        For Sea of Gidzenuf: region [4009, 1, 2365] = [0xFA9, 0x01, 0x93D]
-        """
+    @gui_button("_PLACEHOLDER_DELETE_ME_")
+    def _placeholder_delete_me_(self):
         import ctypes
 
         logger.info("")
@@ -3024,244 +3023,6 @@ class HavenExtractorMod(Mod):
         except Exception:
             return ""
 
-    # =========================================================================
-    # v10.0.0: STREAMLINED GUI BUTTONS
-    # =========================================================================
-
-    @gui_button("Refresh Adjectives")
-    def refresh_display_strings(self):
-        """
-        v10.3.0: Re-read PlanetInfo display strings after freighter scanner.
-
-        The freighter scanner populates PlanetInfo.Flora, Fauna, SentinelsPerDifficulty,
-        and Weather fields for all planets in the system. Call this AFTER using the
-        freighter scanner to get the EXACT display strings the game shows.
-        """
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> REFRESHING DISPLAY STRINGS (v10.3.0) <<<")
-        logger.info(">>> Use this AFTER freighter scanner! <<<")
-        logger.info("=" * 60)
-
-        if not self._captured_planets:
-            logger.warning("  No captured planets - warp to a system first!")
-            logger.info("=" * 60)
-            return
-
-        # Get solar system data from cached hook data
-        try:
-            if not self._cached_solar_system:
-                logger.error("  ERROR: No cached solar system data - warp to a system first!")
-                logger.info("=" * 60)
-                return
-
-            planets = self._cached_solar_system.maPlanets
-            if planets is None:
-                logger.error("  ERROR: Cannot access planet data array")
-                logger.info("=" * 60)
-                return
-
-            updated_count = 0
-            for index in range(min(6, len(planets))):
-                if index not in self._captured_planets:
-                    continue
-
-                try:
-                    planet = planets[index]
-                    if planet is None:
-                        continue
-
-                    # Access mPlanetData first (cGcPlanet -> mPlanetData -> PlanetInfo)
-                    planet_data = None
-                    if hasattr(planet, 'mPlanetData'):
-                        planet_data = planet.mPlanetData
-
-                    if planet_data is None:
-                        continue
-
-                    # Try to read PlanetInfo display strings
-                    if hasattr(planet_data, 'PlanetInfo'):
-                        info = planet_data.PlanetInfo
-                        captured = self._captured_planets[index]
-                        fields_updated = []
-
-                        # Flora display string
-                        if hasattr(info, 'Flora'):
-                            val = str(info.Flora) or ""
-                            flora_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            logger.debug(f"    [DEBUG] Planet {index} Flora raw: '{flora_raw}'")
-                            if flora_raw and flora_raw != "None" and len(flora_raw) >= 2:
-                                # v1.4.0: Use layered adjective resolution
-                                flora_display = self._resolve_adjective(flora_raw, 'flora')
-                                old_val = captured.get('flora_display', '')
-                                if flora_display != old_val:
-                                    captured['flora_display'] = flora_display
-                                    fields_updated.append(f"Flora='{flora_display}' (raw: '{flora_raw}')")
-
-                        # Fauna display string
-                        if hasattr(info, 'Fauna'):
-                            val = str(info.Fauna) or ""
-                            fauna_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            logger.debug(f"    [DEBUG] Planet {index} Fauna raw: '{fauna_raw}'")
-                            if fauna_raw and fauna_raw != "None" and len(fauna_raw) >= 2:
-                                # v1.4.0: Use layered adjective resolution
-                                fauna_display = self._resolve_adjective(fauna_raw, 'fauna')
-                                old_val = captured.get('fauna_display', '')
-                                if fauna_display != old_val:
-                                    captured['fauna_display'] = fauna_display
-                                    fields_updated.append(f"Fauna='{fauna_display}' (raw: '{fauna_raw}')")
-
-                        # Sentinel display string
-                        if hasattr(info, 'SentinelsPerDifficulty'):
-                            sent_arr = info.SentinelsPerDifficulty
-                            if hasattr(sent_arr, '__getitem__'):
-                                # Log ALL difficulty levels to see what's in the array
-                                for diff_idx in range(min(4, len(sent_arr) if hasattr(sent_arr, '__len__') else 4)):
-                                    try:
-                                        diff_val = str(sent_arr[diff_idx]) or ""
-                                        diff_clean = ''.join(c for c in diff_val if c.isprintable() and ord(c) < 128).strip()
-                                        logger.debug(f"    [DEBUG] Planet {index} Sentinel[{diff_idx}] raw: '{diff_clean}'")
-                                    except:
-                                        pass
-                                val = str(sent_arr[1]) or ""
-                                sentinel_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                                if sentinel_raw and sentinel_raw != "None" and len(sentinel_raw) >= 2:
-                                    # v1.4.0: Use layered adjective resolution
-                                    sentinel_display = self._resolve_adjective(sentinel_raw, 'sentinel')
-                                    old_val = captured.get('sentinel_display', '')
-                                    if sentinel_display != old_val:
-                                        captured['sentinel_display'] = sentinel_display
-                                        fields_updated.append(f"Sentinel='{sentinel_display}' (raw: '{sentinel_raw}')")
-
-                        # Weather display string - v10.3.7: Map weather enum to actual adjective
-                        if hasattr(info, 'Weather'):
-                            val = str(info.Weather) or ""
-                            weather_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if weather_raw and weather_raw != "None" and len(weather_raw) >= 2:
-                                logger.info(f"    [WEATHER RAW] Planet {index}: '{weather_raw}'")
-                                # v1.4.0: Use layered adjective resolution
-                                weather_display = self._resolve_adjective(weather_raw, 'weather')
-                                old_val = captured.get('weather_display', '')
-                                if weather_display != old_val:
-                                    captured['weather_raw_string'] = weather_raw  # Store raw for analysis
-                                    captured['weather_display'] = weather_display
-                                    fields_updated.append(f"Weather='{weather_display}' (raw: '{weather_raw}')")
-
-                        # v1.4.0: PlanetDescription - biome adjective text ID
-                        if hasattr(info, 'PlanetDescription'):
-                            val = str(info.PlanetDescription) or ""
-                            desc_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if desc_raw and desc_raw != "None" and len(desc_raw) >= 2:
-                                old_val = captured.get('planet_description', '')
-                                if desc_raw != old_val:
-                                    captured['planet_description'] = desc_raw
-                                    fields_updated.append(f"PlanetDescription='{desc_raw}'")
-
-                        # v1.4.0: PlanetType - planet type display string
-                        if hasattr(info, 'PlanetType'):
-                            val = str(info.PlanetType) or ""
-                            type_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
-                            if type_raw and type_raw != "None" and len(type_raw) >= 2:
-                                old_val = captured.get('planet_type_display', '')
-                                if type_raw != old_val:
-                                    captured['planet_type_display'] = type_raw
-                                    fields_updated.append(f"PlanetType='{type_raw}'")
-
-                        # v1.4.0: IsWeatherExtreme flag
-                        if hasattr(info, 'IsWeatherExtreme'):
-                            try:
-                                is_extreme = bool(info.IsWeatherExtreme)
-                                old_val = captured.get('is_weather_extreme', False)
-                                if is_extreme != old_val:
-                                    captured['is_weather_extreme'] = is_extreme
-                                    if is_extreme:
-                                        fields_updated.append(f"IsWeatherExtreme=True")
-                            except:
-                                pass
-
-                        if fields_updated:
-                            planet_name = captured.get('planet_name', f'Planet {index}')
-                            logger.info(f"  Planet {index} ({planet_name}):")
-                            for field in fields_updated:
-                                logger.info(f"    + {field}")
-                            updated_count += 1
-                        else:
-                            planet_name = captured.get('planet_name', f'Planet {index}')
-                            logger.info(f"  Planet {index} ({planet_name}): No new display strings found")
-
-                except Exception as e:
-                    logger.debug(f"  Error reading planet {index}: {e}")
-
-            logger.info("")
-            if updated_count > 0:
-                logger.info(f"  SUCCESS: Updated display strings for {updated_count} planet(s)")
-                logger.info("  These EXACT values will be used in the next export!")
-            else:
-                logger.info("  No new display strings found.")
-                logger.info("  Make sure you've used the freighter scanner first!")
-            logger.info("=" * 60)
-            logger.info("")
-
-        except Exception as e:
-            logger.error(f"  ERROR: {e}")
-            logger.info("=" * 60)
-
-    @gui_button("Rebuild Cache")
-    def rebuild_adjective_cache(self):
-        """
-        v1.4.0: Force rebuild of adjective cache from NMS game PAK files.
-        Parses language MBIN files to extract text ID -> display string mappings.
-        """
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> REBUILDING ADJECTIVE CACHE <<<")
-        logger.info("=" * 60)
-
-        try:
-            try:
-                from .nms_language import AdjectiveCacheBuilder
-            except ImportError:
-                from nms_language import AdjectiveCacheBuilder
-
-            builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
-            if not builder.nms_path:
-                logger.error("  NMS installation not found!")
-                logger.error("  Expected at: C:\\Program Files (x86)\\Steam\\steamapps\\common\\No Man's Sky")
-                logger.info("=" * 60)
-                return
-
-            logger.info(f"  NMS path: {builder.nms_path}")
-            logger.info(f"  PCBANKS: {builder.pcbanks_path}")
-            logger.info("  Scanning PAK files...")
-
-            mappings = builder.build_cache()
-            self._adjective_file_cache = mappings
-
-            logger.info("")
-            logger.info(f"  SUCCESS: Built cache with {len(mappings)} adjective entries")
-            logger.info(f"  Saved to: {builder.cache_path}")
-
-            # Show some sample entries
-            if mappings:
-                samples = list(mappings.items())[:10]
-                logger.info("")
-                logger.info("  Sample entries:")
-                for text_id, display in samples:
-                    logger.info(f"    {text_id} -> {display}")
-
-        except Exception as e:
-            logger.error(f"  Cache build failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-        logger.info("=" * 60)
-        logger.info("")
-
-        # Also show current translation cache stats
-        logger.info(f"  Translation cache (in-memory): {len(self._translation_cache)} entries")
-        logger.info(f"  Cache hits: {self._translation_cache_hits}, misses: {self._translation_cache_misses}")
-        logger.info("")
-
     @gui_button("Batch Status")
     def check_batch_data(self):
         """
@@ -3375,11 +3136,11 @@ class HavenExtractorMod(Mod):
                         if raw and raw != "None" and len(raw) >= 2:
                             captured['fauna_display'] = self._resolve_adjective(raw, 'fauna')
 
-                    # Sentinel - index 1 = Normal difficulty
+                    # Sentinel - index 2 = Normal difficulty (post-Worlds update)
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[1]) or ""
+                            val = str(sent_arr[2]) or ""
                             raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if raw and raw != "None" and len(raw) >= 2:
                                 captured['sentinel_display'] = self._resolve_adjective(raw, 'sentinel')
