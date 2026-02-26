@@ -208,8 +208,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           {(() => {
             const c = [
               planet.has_rings, planet.is_dissonant, planet.is_infested,
-              planet.extreme_weather, planet.water_world, planet.vile_brood,
-              planet.ancient_bones, planet.salvageable_scrap, planet.storm_crystals, planet.gravitino_balls
+              planet.extreme_weather, planet.water_world, planet.vile_brood
             ].filter(Boolean).length + (planet.exotic_trophy ? 1 : 0)
             return c > 0 ? <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">{c}</span> : null
           })()}
@@ -237,60 +236,52 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       )}
       {attrsModalOpen && (
         <Modal title="Planet Attributes" onClose={() => setAttrsModalOpen(false)}>
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Planet Specials</h3>
-              <div className="space-y-2">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Planet Specials</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {[
-                  { key: 'has_rings', label: 'Has Rings' },
-                  { key: 'is_dissonant', label: 'Dissonant' },
-                  { key: 'is_infested', label: 'Infested' },
-                  { key: 'extreme_weather', label: 'Extreme Weather' },
-                  { key: 'water_world', label: 'Water World' },
-                  { key: 'vile_brood', label: 'Vile Brood' },
-                ].map(({ key, label }) => (
-                  <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!planet[key]}
-                      onChange={e => setField(key, e.target.checked ? 1 : 0)}
-                      className="rounded"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <div className="mt-3">
-                <label className="block text-sm">Exotic Trophy</label>
-                <input
-                  placeholder="e.g. Bubble Cluster, Light Fissure..."
-                  className="mt-1 p-1 rounded w-full text-sm"
-                  value={planet.exotic_trophy || ''}
-                  onChange={e => setField('exotic_trophy', e.target.value)}
-                />
+                  { key: 'has_rings', label: 'Has Rings', icon: 'ring' },
+                  { key: 'is_dissonant', label: 'Dissonant', icon: 'wave' },
+                  { key: 'is_infested', label: 'Infested', icon: 'bug' },
+                  { key: 'extreme_weather', label: 'Extreme Weather', icon: 'bolt' },
+                  { key: 'water_world', label: 'Water World', icon: 'water' },
+                  { key: 'vile_brood', label: 'Vile Brood', icon: 'skull' },
+                ].map(({ key, label, icon }) => {
+                  const active = !!planet[key]
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setField(key, active ? 0 : 1)}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                        active
+                          ? 'border-purple-500 bg-purple-500/20 text-purple-200'
+                          : 'border-gray-600 bg-white/5 text-gray-400 hover:border-gray-500 hover:bg-white/10'
+                      }`}
+                    >
+                      <span className="text-base">
+                        {icon === 'ring' && '\u{1FA90}'}
+                        {icon === 'wave' && '\u{1F50A}'}
+                        {icon === 'bug' && '\u{1F9A0}'}
+                        {icon === 'bolt' && '\u{26A1}'}
+                        {icon === 'water' && '\u{1F30A}'}
+                        {icon === 'skull' && '\u{1F480}'}
+                      </span>
+                      {label}
+                    </button>
+                  )
+                })}
               </div>
             </div>
-            <hr className="border-gray-600" />
             <div>
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Valuable Resources</h3>
-              <div className="space-y-2">
-                {[
-                  { key: 'ancient_bones', label: 'Ancient Bones' },
-                  { key: 'salvageable_scrap', label: 'Salvageable Scrap' },
-                  { key: 'storm_crystals', label: 'Storm Crystals' },
-                  { key: 'gravitino_balls', label: 'Gravitino Balls' },
-                ].map(({ key, label }) => (
-                  <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!planet[key]}
-                      onChange={e => setField(key, e.target.checked ? 1 : 0)}
-                      className="rounded"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Exotic Trophy</h3>
+              <input
+                placeholder="e.g. Bubble Cluster, Light Fissure, Calcishroom..."
+                className="p-2 rounded-lg w-full text-sm border border-gray-600 bg-white/5 focus:border-purple-500 focus:outline-none transition-colors"
+                value={planet.exotic_trophy || ''}
+                onChange={e => setField('exotic_trophy', e.target.value)}
+              />
             </div>
           </div>
         </Modal>
