@@ -13,6 +13,7 @@ import asyncio
 import logging
 import sys
 import hashlib
+import time
 import csv
 import io
 from fastapi.staticfiles import StaticFiles
@@ -6198,6 +6199,9 @@ def _normalize_discord_username(username: str) -> str:
     return normalized.lower()
 
 
+# In-memory rate limiter for extractor registration (separate from submission rate limits)
+_registration_attempts = {}  # {ip: [timestamp, ...]}
+
 @app.post('/api/extractor/register')
 async def register_extractor(request: Request):
     """
@@ -6206,11 +6210,22 @@ async def register_extractor(request: Request):
     Returns the key ONCE — it cannot be retrieved later.
     No authentication required (public endpoint).
     """
-    # Rate limit: max 5 registrations per IP per hour
-    client_ip = request.client.host if request.client else 'unknown'
-    is_allowed, remaining = check_rate_limit(client_ip, limit=5, window_hours=1)
-    if not is_allowed:
+    # Get real client IP (handles reverse proxy / Docker)
+    client_ip = (
+        request.headers.get('x-forwarded-for', '').split(',')[0].strip()
+        or request.headers.get('x-real-ip', '')
+        or (request.client.host if request.client else 'unknown')
+    )
+
+    # Rate limit: max 10 registrations per IP per hour (in-memory, not DB-based)
+    now = time.time()
+    window = 3600  # 1 hour
+    attempts = _registration_attempts.get(client_ip, [])
+    attempts = [t for t in attempts if now - t < window]  # Prune old entries
+    if len(attempts) >= 10:
         raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
+    attempts.append(now)
+    _registration_attempts[client_ip] = attempts
 
     body = await request.json()
     discord_username = (body.get('discord_username') or '').strip()
