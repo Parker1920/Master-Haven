@@ -191,13 +191,16 @@ export default function Wizard(){
       photo: '',
       notes: '',
       moons: [],
+      has_rings: 0,
+      is_dissonant: 0,
+      is_infested: 0,
+      extreme_weather: 0,
+      water_world: 0,
       vile_brood: 0,
-      dissonance: 0,
       ancient_bones: 0,
       salvageable_scrap: 0,
       storm_crystals: 0,
       gravitino_balls: 0,
-      infested: 0,
       exotic_trophy: ''
     })
     setPlanetModalOpen(true)

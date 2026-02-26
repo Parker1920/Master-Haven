@@ -2679,46 +2679,56 @@ def migrate_1_39_0(conn):
         logger.info("Updated _metadata version to 1.39.0")
 
 
-@register_migration("1.40.0", "Special planet features, dynamic life scoring, abandoned system support")
+@register_migration("1.40.0", "Planet attributes, valuable resources, dynamic scoring with materials fix")
 def migrate_1_40_0(conn):
-    """Add special planet feature columns and re-score with improved logic.
+    """Add planet attribute and valuable resource columns, re-score with fixed logic.
 
     Schema changes:
-    - Add 7 boolean columns for special planet features (vile_brood, dissonance,
-      ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested)
-    - Add exotic_trophy TEXT column for exotic biome collectible name
+    - Planet specials: has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood
+    - Valuable resources: ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls
+    - Exotic trophy text field
+    - (Also adds old column names as no-ops if they exist from a partial run)
 
     Scoring improvements (v3):
     - Abandoned systems get full credit for economy/conflict/station fields
-    - Planet Life uses biome-aware dynamic denominator: Dead/Airless/Gas Giant
-      planets skip fauna/flora from scoring when not filled (not applicable)
-    - Any non-empty fauna/flora value counts as filled (including 'N/A', 'None')
+    - Planet Life uses biome-aware dynamic denominator for fauna/flora
+    - Resources checked via `materials` field first (where Wizard saves),
+      falls back to common/uncommon/rare columns (Extractor data)
     """
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # --- Schema: Add special feature columns to planets ---
-    special_columns = [
+    # --- Schema: Add planet attribute and resource columns ---
+    new_columns = [
+        # Planet specials (attributes of the planet itself)
+        ('has_rings', 'INTEGER DEFAULT 0'),
+        ('is_dissonant', 'INTEGER DEFAULT 0'),
+        ('is_infested', 'INTEGER DEFAULT 0'),
+        ('extreme_weather', 'INTEGER DEFAULT 0'),
+        ('water_world', 'INTEGER DEFAULT 0'),
         ('vile_brood', 'INTEGER DEFAULT 0'),
-        ('dissonance', 'INTEGER DEFAULT 0'),
+        # Valuable resources (surface harvestables)
         ('ancient_bones', 'INTEGER DEFAULT 0'),
         ('salvageable_scrap', 'INTEGER DEFAULT 0'),
         ('storm_crystals', 'INTEGER DEFAULT 0'),
         ('gravitino_balls', 'INTEGER DEFAULT 0'),
-        ('infested', 'INTEGER DEFAULT 0'),
+        # Exotic trophy
         ('exotic_trophy', 'TEXT'),
+        # Legacy column names (no-op if already exist from partial run)
+        ('dissonance', 'INTEGER DEFAULT 0'),
+        ('infested', 'INTEGER DEFAULT 0'),
     ]
-    for col_name, col_type in special_columns:
+    for col_name, col_type in new_columns:
         try:
             cursor.execute(f'ALTER TABLE planets ADD COLUMN {col_name} {col_type}')
             logger.info(f"Added column planets.{col_name}")
         except sqlite3.OperationalError:
-            logger.info(f"Column planets.{col_name} already exists")
+            pass  # Column already exists
 
     # --- Re-score completeness for all systems ---
     cursor.execute('SELECT id FROM systems')
     system_ids = [row[0] for row in cursor.fetchall()]
-    logger.info(f"Re-scoring completeness for {len(system_ids)} systems (v3: abandoned + dynamic life)...")
+    logger.info(f"Re-scoring completeness for {len(system_ids)} systems (v3: materials fix + dynamic life)...")
 
     NO_LIFE_BIOMES = {'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere', 'Gas Giant', 'Empty'}
 
@@ -2735,7 +2745,6 @@ def migrate_1_40_0(conn):
         return True
 
     def _life_descriptor_filled(val, val_text):
-        """Any non-empty string counts as filled for fauna/flora."""
         for v in [val, val_text]:
             if v is not None:
                 s = str(v).strip()
@@ -2759,7 +2768,7 @@ def migrate_1_40_0(conn):
 
         is_abandoned = system.get('economy_type') in ('None', 'Abandoned')
 
-        # System Core (35 pts) - 5 essential fields
+        # System Core (35 pts)
         sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
         sys_core_filled = 0
         for f in sys_core_fields:
@@ -2770,7 +2779,7 @@ def migrate_1_40_0(conn):
                 sys_core_filled += 1
         sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
 
-        # System Extra (10 pts) - bonus fields
+        # System Extra (10 pts)
         sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
         sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
         sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
@@ -2778,7 +2787,7 @@ def migrate_1_40_0(conn):
         # Planet Coverage (10 pts)
         planet_coverage_score = 10 if planets else 0
 
-        # Planet Environment avg (25 pts) - biome, weather, sentinel
+        # Planet Environment (25 pts) + Planet Life (15 pts)
         planet_env_score = 0
         planet_life_score = 0
 
@@ -2796,30 +2805,34 @@ def migrate_1_40_0(conn):
                     env_filled += 1
                 env_totals.append(min(env_filled / 3, 1.0))
 
-                # Life (15 pts) - dynamic denominator based on biome
+                # Life - dynamic denominator, materials-based resource check
                 life_filled = 0
                 life_applicable = 0
                 biome_val = (p.get('biome') or '').strip()
                 is_dead_biome = biome_val in NO_LIFE_BIOMES
 
-                # Fauna: any non-empty value counts (including N/A, None, Absent)
                 if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
                     life_filled += 1
                     life_applicable += 1
                 elif not is_dead_biome:
-                    life_applicable += 1  # Missing on planet that should have fauna
+                    life_applicable += 1
 
-                # Flora: same logic
                 if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
                     life_filled += 1
                     life_applicable += 1
                 elif not is_dead_biome:
-                    life_applicable += 1  # Missing on planet that should have flora
-
-                # Resources: always applicable
-                for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
                     life_applicable += 1
-                    if _is_filled(p.get(f)):
+
+                # Resources: check materials first, fall back to individual columns
+                materials_val = (p.get('materials') or '').strip()
+                has_materials = bool(materials_val) and materials_val not in ('N/A', 'None')
+                if has_materials:
+                    life_applicable += 1
+                    life_filled += 1
+                else:
+                    res_filled = sum(1 for f in ['common_resource', 'uncommon_resource', 'rare_resource'] if _is_filled(p.get(f)))
+                    life_applicable += 1
+                    if res_filled > 0:
                         life_filled += 1
 
                 life_totals.append(life_filled / max(life_applicable, 1))
@@ -2827,7 +2840,7 @@ def migrate_1_40_0(conn):
             planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
             planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
 
-        # Space Station (5 pts) - abandoned systems get full credit
+        # Space Station (5 pts)
         station_score = 0
         if is_abandoned:
             station_score = 5

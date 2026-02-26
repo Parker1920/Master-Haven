@@ -769,49 +769,37 @@ def map_display_string_to_adjective(value: str, field_type: str) -> str:
     # SENTINEL_RARE = rare to encounter sentinels (low security)
     # =============================================================================
 
-    # SENTINEL_RARE: Sentinel levels - indexed list
-    # CORRECTED v10.3.7 based on actual game screenshots (Jedexoi-Ikom system)
+    # v1.4.4: Sentinel maps corrected from PAK/MBIN adjective cache (authoritative game data)
+    # Previous maps were contaminated by reading SentinelsPerDifficulty[0] (Casual mode)
+    # which returned SENTINEL_RARE for ALL planets regardless of actual level
+
+    SENTINEL_NONE_MAP = {
+        1: "None", 2: "Absent", 3: "Not Present", 4: "None Present",
+        5: "None", 6: "Not Present", 7: "None", 8: "None",
+        9: "None", 10: "None", 11: "None", 12: "Missing",
+    }
+
     SENTINEL_RARE_MAP = {
-        0: "None Present",
-        1: "Enforcing",       # Was "Require Orthodoxy" - FIXED (Obushart: SENTINEL_RARE1 → "Enforcing")
-        2: "Forsaken",
-        3: "Inescapable",     # Was "Unwavering" - FIXED (Ilva VI: SENTINEL_RARE3 → "Inescapable")
-        4: "Regular Patrols", # Was "Answer To None" - FIXED (Roin V: SENTINEL_RARE4 → "Regular Patrols")
-        5: "Spread Thin",
-        6: "Intermittent",
-        7: "Low Security",    # Verified (Yalosalci: SENTINEL_RARE7 → "Low Security")
-        8: "Unwavering",      # Was "Regular Patrols" - FIXED (Xumin: SENTINEL_RARE8 → "Unwavering")
-        9: "Ever-present",
-        10: "Few",
-        11: "Sparse",
-        12: "Infrequent",     # Was "Low" - FIXED (Toya 23/L2: SENTINEL_RARE12 → "Infrequent")
-        13: "Minimal",
-        14: "Missing",
+        1: "Low", 2: "Minimal", 3: "Low Security", 4: "Limited",
+        5: "Infrequent", 6: "Sparse", 7: "Isolated", 8: "Remote",
+        9: "Irregular Patrols", 10: "Spread Thin", 11: "Intermittent", 12: "Few",
     }
 
-    SENTINEL_HIGH_MAP = {
-        0: "High Security",
-        1: "Aggressive",
-        2: "Hostile Patrols",
-        3: "Frenzied",
-        4: "Threatening",
-        5: "Inescapable",
-        6: "Hateful",
-        7: "Corrupted",
-        8: "Enforcing",
-        9: "Zealous",
-        10: "Unwavering",
-        11: "Malicious",
+    SENTINEL_DEFAULT_MAP = {
+        1: "Attentive", 2: "Enforcing", 3: "Frequent", 4: "Require Orthodoxy",
+        5: "Require Obedience", 6: "Regular Patrols", 7: "Frequent",
+        8: "Unwavering", 9: "Observant", 10: "Ever-present",
     }
 
-    SENTINEL_NORMAL_MAP = {
-        0: "Normal",
-        1: "Regular Patrols",
-        2: "Observant",
-        3: "Attentive",
-        4: "Frequent",
-        5: "Require Obedience",
-        6: "Require Orthodoxy",
+    SENTINEL_AGGRESSIVE_MAP = {
+        1: "Aggressive", 2: "Frenzied", 3: "High Security", 4: "Hostile Patrols",
+        5: "Threatening", 6: "Hateful", 7: "Zealous", 8: "Malicious",
+        9: "Inescapable",
+    }
+
+    SENTINEL_CORRUPT_MAP = {
+        1: "Corrupted", 2: "Forsaken", 3: "Rebellious", 4: "Answer To None",
+        5: "Sharded from the Atlas", 6: "Dissonant", 7: "De-Harmonised",
     }
 
     # Map based on prefix pattern
@@ -825,12 +813,16 @@ def map_display_string_to_adjective(value: str, field_type: str) -> str:
         return RARITY_LOW_MAP.get(idx, f"Low ({idx})")
     elif value.startswith("RARITY_WEIRD") or value.startswith("RARITY_EXOTIC"):
         return RARITY_WEIRD_MAP.get(idx, f"Unusual ({idx})")
-    elif value.startswith("SENTINEL_RARE") or value.startswith("SENTINEL_NONE"):
+    elif value.startswith("SENTINEL_NONE"):
+        return SENTINEL_NONE_MAP.get(idx, f"None ({idx})")
+    elif value.startswith("SENTINEL_RARE") or value.startswith("SENTINEL_LOW"):
         return SENTINEL_RARE_MAP.get(idx, f"Low ({idx})")
-    elif value.startswith("SENTINEL_HIGH") or value.startswith("SENTINEL_AGGRESSIVE"):
-        return SENTINEL_HIGH_MAP.get(idx, f"Aggressive ({idx})")
-    elif value.startswith("SENTINEL_MED") or value.startswith("SENTINEL_NORMAL"):
-        return SENTINEL_NORMAL_MAP.get(idx, f"Normal ({idx})")
+    elif value.startswith("SENTINEL_DEFAULT") or value.startswith("SENTINEL_MED") or value.startswith("SENTINEL_NORMAL"):
+        return SENTINEL_DEFAULT_MAP.get(idx, f"Regular ({idx})")
+    elif value.startswith("SENTINEL_AGGRESSIVE") or value.startswith("SENTINEL_HIGH"):
+        return SENTINEL_AGGRESSIVE_MAP.get(idx, f"Aggressive ({idx})")
+    elif value.startswith("SENTINEL_CORRUPT"):
+        return SENTINEL_CORRUPT_MAP.get(idx, f"Corrupted ({idx})")
 
     # Unknown pattern, return original value
     return value
@@ -1064,7 +1056,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.2"
+    __version__ = "1.4.4"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1747,6 +1739,14 @@ class HavenExtractorMod(Mod):
                 logger.warning("[BATCH] Could not get coordinates for batch save")
                 return
 
+            # v1.4.4: Preserve manual system name from _current_system_coords
+            # _get_current_coordinates() builds a fresh dict from memory and loses the manual name
+            if self._current_system_coords:
+                manual = self._current_system_coords.get('system_name', '')
+                if manual and not manual.startswith('System_'):
+                    coords['system_name'] = manual
+                    logger.info(f"[BATCH] Preserving manual system name: '{manual}'")
+
             # Check if this system is already in batch (by glyph code)
             glyph_code = coords.get('glyph_code', '')
             existing_entry = None
@@ -1763,11 +1763,11 @@ class HavenExtractorMod(Mod):
                     # Force-update: refresh planets and system name in existing batch entry
                     existing_entry['planets'] = self._extract_planets(self._cached_solar_system)
                     existing_entry['planet_count'] = len(existing_entry['planets'])
-                    # Update system name if manually changed
-                    manual_name = coords.get('system_name', '')
-                    if manual_name and not manual_name.startswith('System_'):
-                        existing_entry['system_name'] = manual_name
-                        logger.info(f"[BATCH] Updated system name to: '{manual_name}'")
+                    # Update system name from coords (includes manual name if set)
+                    name = coords.get('system_name', '')
+                    if name and not name.startswith('System_'):
+                        existing_entry['system_name'] = name
+                        logger.info(f"[BATCH] Updated system name to: '{name}'")
                     logger.info(f"[BATCH] Updated {glyph_code} with refreshed adjectives and name")
                     return
 
@@ -2415,11 +2415,12 @@ class HavenExtractorMod(Mod):
                         else:
                             fauna_display = ""
 
-                    # Sentinel display string - SentinelsPerDifficulty[0] at offset 0x0
+                    # Sentinel display string - SentinelsPerDifficulty[1] (Normal difficulty)
+                    # Index: 0=Casual/Creative, 1=Normal, 2=Survival, 3=Permadeath
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[0]) or ""
+                            val = str(sent_arr[1]) or ""
                             sentinel_display = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if sentinel_display and sentinel_display != "None" and len(sentinel_display) >= 2:
                                 logger.info(f"    [DISPLAY] Sentinel: '{sentinel_display}'")
@@ -3122,7 +3123,7 @@ class HavenExtractorMod(Mod):
                                         logger.debug(f"    [DEBUG] Planet {index} Sentinel[{diff_idx}] raw: '{diff_clean}'")
                                     except:
                                         pass
-                                val = str(sent_arr[0]) or ""
+                                val = str(sent_arr[1]) or ""
                                 sentinel_raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                                 if sentinel_raw and sentinel_raw != "None" and len(sentinel_raw) >= 2:
                                     # v1.4.0: Use layered adjective resolution
@@ -3374,11 +3375,11 @@ class HavenExtractorMod(Mod):
                         if raw and raw != "None" and len(raw) >= 2:
                             captured['fauna_display'] = self._resolve_adjective(raw, 'fauna')
 
-                    # Sentinel
+                    # Sentinel - index 1 = Normal difficulty
                     if hasattr(info, 'SentinelsPerDifficulty'):
                         sent_arr = info.SentinelsPerDifficulty
                         if hasattr(sent_arr, '__getitem__'):
-                            val = str(sent_arr[0]) or ""
+                            val = str(sent_arr[1]) or ""
                             raw = ''.join(c for c in val if c.isprintable() and ord(c) < 128).strip()
                             if raw and raw != "None" and len(raw) >= 2:
                                 captured['sentinel_display'] = self._resolve_adjective(raw, 'sentinel')
@@ -4104,7 +4105,7 @@ class HavenExtractorMod(Mod):
                     else:
                         result["fauna_level"] = self.FAUNA_LEVELS.get(fauna_raw, captured.get('fauna', 'Unknown'))
 
-                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[0]
+                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty[1] (Normal)
                 sentinel_display = captured.get('sentinel_display', '')
                 if sentinel_display:
                     # v1.4.0: Use layered adjective resolution
@@ -4141,6 +4142,45 @@ class HavenExtractorMod(Mod):
                     result["uncommon_resource"] = translate_resource(captured['uncommon_resource'])
                 if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
                     result["rare_resource"] = translate_resource(captured['rare_resource'])
+
+                # v1.4.3: Detect special resource flags from translated resource names
+                all_resources = [
+                    result.get("common_resource", ""),
+                    result.get("uncommon_resource", ""),
+                    result.get("rare_resource", ""),
+                ]
+                all_resources_lower = [r.lower() for r in all_resources if r and r != "Unknown"]
+
+                for res in all_resources_lower:
+                    if "ancient bones" in res:
+                        result["ancient_bones"] = 1
+                    if "salvageable scrap" in res:
+                        result["salvageable_scrap"] = 1
+                    if "storm crystal" in res:
+                        result["storm_crystals"] = 1
+                    if "vile brood" in res or "whispering egg" in res:
+                        result["vile_brood"] = 1
+                    if "gravitino" in res:
+                        result["gravitino_balls"] = 1
+
+                # Infested biome subtype
+                if result.get("biome_subtype", "").lower() == "infested":
+                    result["infested"] = 1
+                    result["vile_brood"] = 1
+
+                # Dissonant/Corrupt sentinels
+                sentinel_val = result.get("sentinel_level", "")
+                if sentinel_val:
+                    sentinel_lower = sentinel_val.lower()
+                    if any(w in sentinel_lower for w in ["corrupt", "dissonant", "de-harmonis"]):
+                        result["dissonance"] = 1
+
+                if any(result.get(k) for k in ["ancient_bones", "salvageable_scrap", "storm_crystals",
+                                                 "vile_brood", "gravitino_balls", "infested", "dissonance"]):
+                    flags = [k for k in ["ancient_bones", "salvageable_scrap", "storm_crystals",
+                                         "vile_brood", "gravitino_balls", "infested", "dissonance"]
+                             if result.get(k)]
+                    logger.info(f"    [SPECIAL] Detected flags: {', '.join(flags)}")
 
                 # =============================================================
                 # v10.3.0: Apply weather - PREFER DISPLAY STRING from PlanetInfo.Weather

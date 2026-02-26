@@ -6514,14 +6514,31 @@ def calculate_completeness_score(cursor, system_id: str) -> dict:
             else:
                 p_life_fields.append({'name': 'Flora', 'value': None, 'status': 'skipped'})
 
-            # Resources
-            for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+            # Resources: check materials field first (Wizard saves here),
+            # fall back to individual common/uncommon/rare columns (Extractor)
+            materials_val = (p.get('materials') or '').strip()
+            has_materials = bool(materials_val) and materials_val not in ('N/A', 'None')
+            if has_materials:
                 life_applicable += 1
-                if _is_filled(p.get(f)):
+                life_filled += 1
+                # Truncate for display
+                display = materials_val[:50] + ('...' if len(materials_val) > 50 else '')
+                p_life_fields.append({'name': 'Resources', 'value': display, 'status': 'filled'})
+            else:
+                # Fall back to individual resource columns (Haven Extractor data)
+                res_filled = 0
+                res_total = 0
+                for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+                    res_total += 1
+                    if _is_filled(p.get(f)):
+                        res_filled += 1
+                if res_filled > 0:
+                    life_applicable += 1
                     life_filled += 1
-                    p_life_fields.append({'name': FIELD_LABELS[f], 'value': p.get(f), 'status': 'filled'})
+                    p_life_fields.append({'name': 'Resources', 'value': f'{res_filled}/{res_total} types', 'status': 'filled'})
                 else:
-                    p_life_fields.append({'name': FIELD_LABELS[f], 'value': None, 'status': 'missing'})
+                    life_applicable += 1
+                    p_life_fields.append({'name': 'Resources', 'value': None, 'status': 'missing'})
 
             life_totals.append(life_filled / max(life_applicable, 1))
             planet_life_details.append({'name': p_name, 'filled': life_filled, 'total': life_applicable, 'fields': p_life_fields})
@@ -9086,10 +9103,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     hazard_temperature, hazard_radiation, hazard_toxicity,
                     common_resource, uncommon_resource, rare_resource,
                     weather_text, sentinels_text, flora_text, fauna_text,
-                    vile_brood, dissonance, ancient_bones, salvageable_scrap,
-                    storm_crystals, gravitino_balls, infested, exotic_trophy
+                    has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
+                    ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, exotic_trophy
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 planet.get('name', 'Unknown'),
@@ -9128,14 +9145,17 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('sentinels_text'),
                 planet.get('flora_text'),
                 planet.get('fauna_text'),
-                # Special planet features
+                # Planet specials + valuable resources
+                1 if planet.get('has_rings') else 0,
+                1 if planet.get('is_dissonant') else 0,
+                1 if planet.get('is_infested') else 0,
+                1 if planet.get('extreme_weather') else 0,
+                1 if planet.get('water_world') else 0,
                 1 if planet.get('vile_brood') else 0,
-                1 if planet.get('dissonance') else 0,
                 1 if planet.get('ancient_bones') else 0,
                 1 if planet.get('salvageable_scrap') else 0,
                 1 if planet.get('storm_crystals') else 0,
                 1 if planet.get('gravitino_balls') else 0,
-                1 if planet.get('infested') else 0,
                 planet.get('exotic_trophy')
             ))
             planet_id = cursor.lastrowid
@@ -12416,8 +12436,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         hazard_temperature = ?, hazard_radiation = ?, hazard_toxicity = ?,
                         common_resource = ?, uncommon_resource = ?, rare_resource = ?,
                         weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?,
-                        vile_brood = ?, dissonance = ?, ancient_bones = ?, salvageable_scrap = ?,
-                        storm_crystals = ?, gravitino_balls = ?, infested = ?, exotic_trophy = ?
+                        has_rings = ?, is_dissonant = ?, is_infested = ?, extreme_weather = ?, water_world = ?, vile_brood = ?,
+                        ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, exotic_trophy = ?
                     WHERE id = ?
                 ''', (
                     planet.get('x', 0),
@@ -12454,13 +12474,16 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     planet.get('sentinels_text'),
                     planet.get('flora_text'),
                     planet.get('fauna_text'),
+                    1 if planet.get('has_rings') else 0,
+                    1 if planet.get('is_dissonant') else 0,
+                    1 if planet.get('is_infested') else 0,
+                    1 if planet.get('extreme_weather') else 0,
+                    1 if planet.get('water_world') else 0,
                     1 if planet.get('vile_brood') else 0,
-                    1 if planet.get('dissonance') else 0,
                     1 if planet.get('ancient_bones') else 0,
                     1 if planet.get('salvageable_scrap') else 0,
                     1 if planet.get('storm_crystals') else 0,
                     1 if planet.get('gravitino_balls') else 0,
-                    1 if planet.get('infested') else 0,
                     planet.get('exotic_trophy'),
                     existing_planet_id
                 ))
@@ -12477,10 +12500,10 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         hazard_temperature, hazard_radiation, hazard_toxicity,
                         common_resource, uncommon_resource, rare_resource,
                         weather_text, sentinels_text, flora_text, fauna_text,
-                        vile_brood, dissonance, ancient_bones, salvageable_scrap,
-                        storm_crystals, gravitino_balls, infested, exotic_trophy
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, exotic_trophy
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     system_id,
                     planet_name,
@@ -12518,13 +12541,16 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     planet.get('sentinels_text'),
                     planet.get('flora_text'),
                     planet.get('fauna_text'),
+                    1 if planet.get('has_rings') else 0,
+                    1 if planet.get('is_dissonant') else 0,
+                    1 if planet.get('is_infested') else 0,
+                    1 if planet.get('extreme_weather') else 0,
+                    1 if planet.get('water_world') else 0,
                     1 if planet.get('vile_brood') else 0,
-                    1 if planet.get('dissonance') else 0,
                     1 if planet.get('ancient_bones') else 0,
                     1 if planet.get('salvageable_scrap') else 0,
                     1 if planet.get('storm_crystals') else 0,
                     1 if planet.get('gravitino_balls') else 0,
-                    1 if planet.get('infested') else 0,
                     planet.get('exotic_trophy')
                 ))
                 planet_id = cursor.lastrowid
@@ -13125,10 +13151,10 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             hazard_temperature, hazard_radiation, hazard_toxicity,
                             common_resource, uncommon_resource, rare_resource,
                             weather_text, sentinels_text, flora_text, fauna_text,
-                            vile_brood, dissonance, ancient_bones, salvageable_scrap,
-                            storm_crystals, gravitino_balls, infested, exotic_trophy
+                            has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
+                            ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, exotic_trophy
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         planet.get('name'),
@@ -13166,13 +13192,16 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         planet.get('sentinels_text'),
                         planet.get('flora_text'),
                         planet.get('fauna_text'),
+                        1 if planet.get('has_rings') else 0,
+                        1 if planet.get('is_dissonant') else 0,
+                        1 if planet.get('is_infested') else 0,
+                        1 if planet.get('extreme_weather') else 0,
+                        1 if planet.get('water_world') else 0,
                         1 if planet.get('vile_brood') else 0,
-                        1 if planet.get('dissonance') else 0,
                         1 if planet.get('ancient_bones') else 0,
                         1 if planet.get('salvageable_scrap') else 0,
                         1 if planet.get('storm_crystals') else 0,
                         1 if planet.get('gravitino_balls') else 0,
-                        1 if planet.get('infested') else 0,
                         planet.get('exotic_trophy')
                     ))
                     planet_id = cursor.lastrowid
@@ -13760,6 +13789,18 @@ async def receive_extraction(
                     planet_data.get('rare_resource')
                 ] if r and r != 'Unknown'
             ]),  # Comma-separated for Haven UI display
+            # Planet specials + valuable resources
+            'has_rings': planet_data.get('has_rings'),
+            'is_dissonant': planet_data.get('is_dissonant'),
+            'is_infested': planet_data.get('is_infested'),
+            'extreme_weather': planet_data.get('extreme_weather'),
+            'water_world': planet_data.get('water_world'),
+            'vile_brood': planet_data.get('vile_brood'),
+            'ancient_bones': planet_data.get('ancient_bones'),
+            'salvageable_scrap': planet_data.get('salvageable_scrap'),
+            'storm_crystals': planet_data.get('storm_crystals'),
+            'gravitino_balls': planet_data.get('gravitino_balls'),
+            'exotic_trophy': planet_data.get('exotic_trophy'),
         }
 
         if planet_data.get('is_moon', False):
