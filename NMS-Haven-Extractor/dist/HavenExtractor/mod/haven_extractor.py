@@ -83,6 +83,83 @@ DEFAULT_USER_CONFIG = {
 }
 
 
+# =============================================================================
+# GALAXY NAME LOOKUP - All 256 NMS galaxies (0-indexed, matching game memory)
+# Fallback for unmapped indices uses 1-indexed numbering (community convention)
+# Source: NMS-Save-Watcher/data/galaxies.json (authoritative)
+# =============================================================================
+GALAXY_NAMES = {
+    0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso", 3: "Hesperius Dimension",
+    4: "Hyades", 5: "Ickjamatew", 6: "Budullangr", 7: "Kikolgallr",
+    8: "Eltiensleen", 9: "Eissentam", 10: "Elkupalos", 11: "Aptarkaba",
+    12: "Ontiniangp", 13: "Odiwagiri", 14: "Ogtialabi", 15: "Muhacksonto",
+    16: "Hitonskyer", 17: "Rerasmutul", 18: "Isdoraijung", 19: "Doctinawyra",
+    20: "Loychazinq", 21: "Zukasizawa", 22: "Ekwathore", 23: "Yeberhahne",
+    24: "Twerbetek", 25: "Sivarates", 26: "Eajerandal", 27: "Aldukesci",
+    28: "Wotyarogii", 29: "Sudzerbal", 30: "Maupenzhay", 31: "Sugueziume",
+    32: "Brogoweldian", 33: "Ehbogdenbu", 34: "Ijsenufryos", 35: "Nipikulha",
+    36: "Autsurabin", 37: "Lusontrygiamh", 38: "Rewmanawa", 39: "Ethiophodhe",
+    40: "Urastrykle", 41: "Xobeurindj", 42: "Oniijialdu", 43: "Wucetosucc",
+    44: "Ebyeloof", 45: "Odyavanta", 46: "Milekistri", 47: "Waferganh",
+    48: "Agnusopwit", 49: "Teyaypilny", 50: "Zalienkosm", 51: "Ladgudiraf",
+    52: "Mushonponte", 53: "Amsentisz", 54: "Fladiselm", 55: "Laanawemb",
+    56: "Ilkerloor", 57: "Davanossi", 58: "Ploehrliou", 59: "Corpinyaya",
+    60: "Leckandmeram", 61: "Quulngais", 62: "Nokokipsechl", 63: "Rinblodesa",
+    64: "Loydporpen", 65: "Ibtrevskip", 66: "Elkowaldb", 67: "Heholhofsko",
+    68: "Yebrilowisod", 69: "Husalvangewi", 70: "Ovna'uesed", 71: "Bahibusey",
+    72: "Nuybeliaure", 73: "Doshawchuc", 74: "Ruckinarkh", 75: "Thorettac",
+    76: "Nuponoparau", 77: "Moglaschil", 78: "Uiweupose", 79: "Nasmilete",
+    80: "Ekdaluskin", 81: "Hakapanasy", 82: "Dimonimba", 83: "Cajaccari",
+    84: "Olonerovo", 85: "Umlanswick", 86: "Henayliszm", 87: "Utzenmate",
+    88: "Umirpaiya", 89: "Paholiang", 90: "Iaereznika", 91: "Yudukagath",
+    92: "Boealalosnj", 93: "Yaevarcko", 94: "Coellosipp", 95: "Wayndohalou",
+    96: "Smoduraykl", 97: "Apmaneessu", 98: "Hicanpaav", 99: "Akvasanta",
+    100: "Tuychelisaor", 101: "Rivskimbe", 102: "Daksanquix", 103: "Kissonlin",
+    104: "Aediabiel", 105: "Ulosaginyik", 106: "Roclaytonycar", 107: "Kichiaroa",
+    108: "Irceauffey", 109: "Nudquathsenfe", 110: "Getaizakaal", 111: "Hansolmien",
+    112: "Bloytisagra", 113: "Ladsenlay", 114: "Luyugoslasr", 115: "Ubredhatk",
+    116: "Cidoniana", 117: "Jasinessa", 118: "Torweierf", 119: "Saffneckm",
+    120: "Thnistner", 121: "Dotusingg", 122: "Luleukous", 123: "Jelmandan",
+    124: "Otimanaso", 125: "Enjaxusanto", 126: "Sezviktorew", 127: "Zikehpm",
+    128: "Bephembah", 129: "Broomerrai", 130: "Meximicka", 131: "Venessika",
+    132: "Gaiteseling", 133: "Zosakasiro", 134: "Drajayanes", 135: "Ooibekuar",
+    136: "Urckiansi", 137: "Dozivadido", 138: "Emiekereks", 139: "Meykinunukur",
+    140: "Kimycuristh", 141: "Roansfien", 142: "Isgarmeso", 143: "Daitibeli",
+    144: "Gucuttarik", 145: "Enlaythie", 146: "Drewweste", 147: "Akbulkabi",
+    148: "Homskiw", 149: "Zavainlani", 150: "Jewijkmas", 151: "Itlhotagra",
+    152: "Podalicess", 153: "Hiviusauer", 154: "Halsebenk", 155: "Puikitoac",
+    156: "Gaybakuaria", 157: "Grbodubhe", 158: "Rycempler", 159: "Indjalala",
+    160: "Fontenikk", 161: "Pasycihelwhee", 162: "Ikbaksmit", 163: "Telicianses",
+    164: "Oyleyzhan", 165: "Uagerosat", 166: "Impoxectin", 167: "Twoodmand",
+    168: "Hilfsesorbs", 169: "Ezdaranit", 170: "Wiensanshe", 171: "Ewheelonc",
+    172: "Litzmantufa", 173: "Emarmatosi", 174: "Mufimbomacvi", 175: "Wongquarum",
+    176: "Hapirajua", 177: "Igbinduina", 178: "Wepaitvas", 179: "Sthatigudi",
+    180: "Yekathsebehn", 181: "Ebedeagurst", 182: "Nolisonia", 183: "Ulexovitab",
+    184: "Iodhinxois", 185: "Irroswitzs", 186: "Bifredait", 187: "Beiraghedwe",
+    188: "Yeonatlak", 189: "Cugnatachh", 190: "Nozoryenki", 191: "Ebralduri",
+    192: "Evcickcandj", 193: "Ziybosswin", 194: "Heperclait", 195: "Sugiuniam",
+    196: "Aaseertush", 197: "Uglyestemaa", 198: "Horeroedsh", 199: "Drundemiso",
+    200: "Ityanianat", 201: "Purneyrine", 202: "Dokiessmat", 203: "Nupiacheh",
+    204: "Dihewsonj", 205: "Rudrailhik", 206: "Tweretnort", 207: "Snatreetze",
+    208: "Iwundaracos", 209: "Digarlewena", 210: "Erquagsta", 211: "Logovoloin",
+    212: "Boyaghosganh", 213: "Kuolungau", 214: "Pehneldept", 215: "Yevettiiqidcon",
+    216: "Sahliacabru", 217: "Noggalterpor", 218: "Chmageaki", 219: "Veticueca",
+    220: "Vittesbursul", 221: "Nootanore", 222: "Innebdjerah", 223: "Kisvarcini",
+    224: "Cuzcogipper", 225: "Pamanhermonsu", 226: "Brotoghek", 227: "Mibittara",
+    228: "Huruahili", 229: "Raldwicarn", 230: "Ezdartlic", 231: "Badesclema",
+    232: "Isenkeyan", 233: "Iadoitesu", 234: "Yagrovoisi", 235: "Ewcomechio",
+    236: "Inunnunnoda", 237: "Dischiutun", 238: "Yuwarugha", 239: "Ialmendra",
+    240: "Reponudrle", 241: "Rinjanagrbo", 242: "Zeziceloh", 243: "Oeileutasc",
+    244: "Zicniijinis", 245: "Dugnowarilda", 246: "Neuxoisan", 247: "Ilmenhorn",
+    248: "Rukwatsuku", 249: "Nepitzaspru", 250: "Chcehoemig", 251: "Haffneyrin",
+    252: "Uliciawai", 253: "Tuhgrespod", 254: "Iousongola", 255: "Odyalutai",
+}
+
+def get_galaxy_name(galaxy_idx: int) -> str:
+    """Get galaxy name from 0-indexed game ID. Fallback uses 1-indexed numbering."""
+    return GALAXY_NAMES.get(galaxy_idx, f"Galaxy_{galaxy_idx + 1}")
+
+
 # Note: Config GUI now uses pymhf's native DearPyGUI via gui_variable.ENUM and gui_variable.STRING decorators
 # in the HavenExtractorMod class. See the class definition for config fields.
 
@@ -994,7 +1071,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.5.0"
+    __version__ = "1.5.1"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1454,7 +1531,13 @@ class HavenExtractorMod(Mod):
             pass  # Never crash the game from a translation hook
 
     def _load_adjective_cache(self):
-        """Load adjective cache from disk, or build it from game PAK files in background."""
+        """Load adjective cache from disk, or build it from game PAK files in background.
+
+        Priority:
+        1. User's existing cache in ~/Documents/Haven-Extractor/
+        2. Bundled cache shipped with the mod (copied to user dir on first use)
+        3. Background build from game PAK files
+        """
         try:
             try:
                 from .nms_language import AdjectiveCacheBuilder
@@ -1462,18 +1545,33 @@ class HavenExtractorMod(Mod):
                 from nms_language import AdjectiveCacheBuilder
 
             builder = AdjectiveCacheBuilder(cache_dir=self._output_dir)
-            if not builder.nms_path:
-                logger.info("[INIT] NMS installation not found - adjective cache unavailable")
-                return
 
-            # Try loading existing cache
+            # Try loading user's existing cache
             cached = builder.load_cache()
             if cached:
                 self._adjective_file_cache = cached
                 logger.info(f"[INIT] Loaded {len(cached)} adjective mappings from cache")
                 return
 
-            # Build cache in background thread (takes a few seconds)
+            # No user cache — check for bundled cache shipped with the mod
+            bundled_cache = Path(__file__).parent / "adjective_cache.json"
+            if bundled_cache.exists():
+                try:
+                    import shutil
+                    shutil.copy2(str(bundled_cache), str(builder.cache_path))
+                    cached = builder.load_cache()
+                    if cached:
+                        self._adjective_file_cache = cached
+                        logger.info(f"[INIT] Loaded {len(cached)} adjective mappings from bundled cache")
+                        return
+                except Exception as e:
+                    logger.warning(f"[INIT] Failed to copy bundled cache: {e}")
+
+            # No cache available — try building from game PAK files in background
+            if not builder.nms_path:
+                logger.info("[INIT] NMS installation not found - using legacy adjective tables")
+                return
+
             logger.info("[INIT] Building adjective cache from game files (background)...")
             import threading
 
@@ -1734,10 +1832,10 @@ class HavenExtractorMod(Mod):
         Called automatically when warping to a new system.
         If force_update=True, updates the existing batch entry instead of skipping duplicates.
         """
-        # Skip if batch mode disabled or no captured data
+        # Skip if batch mode disabled
         if not self._batch_mode_enabled:
             return
-        if not self._captured_planets:
+        if not self._captured_planets and not force_update:
             logger.debug("[BATCH] No captured planets to save")
             return
         if not self._cached_solar_system:
@@ -1898,13 +1996,6 @@ class HavenExtractorMod(Mod):
             # The Name field is only populated for user-renamed systems.
             self._current_system_name = None
 
-            galaxy_names = {
-                0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-                3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-                6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-                9: "Eissentam", 10: "Elkupalos",
-            }
-
             # Method 1: Try player_state (usually None during warp)
             try:
                 player_state = gameData.player_state
@@ -1924,7 +2015,7 @@ class HavenExtractorMod(Mod):
                     if galaxy_idx < 0 or galaxy_idx > 255:
                         galaxy_idx = 0
 
-                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                    galaxy_name = get_galaxy_name(galaxy_idx)
                     glyph_code = self._coords_to_glyphs(planet_idx, system_idx, voxel_x, voxel_y, voxel_z)
 
                     # Get actual system name from mGameState
@@ -1989,7 +2080,7 @@ class HavenExtractorMod(Mod):
                     if (0 <= x_region <= 4095 and 0 <= y_region <= 255 and 0 <= z_region <= 4095 and
                         0 <= system_idx <= 4095 and 0 <= galaxy_idx <= 255):
 
-                        galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                        galaxy_name = get_galaxy_name(galaxy_idx)
 
                         # Construct glyph DIRECTLY from region coords (no conversion needed!)
                         # Format: P-SSS-YY-ZZZ-XXX
@@ -2114,13 +2205,7 @@ class HavenExtractorMod(Mod):
                         if (0 <= x_region <= 4095 and 0 <= y_region <= 255 and 0 <= z_region <= 4095 and
                             0 <= system_idx <= 4095 and 0 <= galaxy_idx <= 255):
 
-                            galaxy_names = {
-                                0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-                                3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-                                6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-                                9: "Eissentam", 10: "Elkupalos",
-                            }
-                            galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                            galaxy_name = get_galaxy_name(galaxy_idx)
 
                             # Construct glyph DIRECTLY from region coords
                             glyph_code = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
@@ -2633,13 +2718,7 @@ class HavenExtractorMod(Mod):
                             logger.warning(f"    Invalid galaxy_idx {galaxy_idx}, defaulting to 0 (Euclid)")
                             galaxy_idx = 0
 
-                        galaxy_names = {
-                            0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-                            3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-                            6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-                            9: "Eissentam", 10: "Elkupalos",
-                        }
-                        galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                        galaxy_name = get_galaxy_name(galaxy_idx)
 
                         glyph_code = self._coords_to_glyphs(planet_idx_coord, system_idx, voxel_x, voxel_y, voxel_z)
 
@@ -2717,13 +2796,7 @@ class HavenExtractorMod(Mod):
                         logger.warning(f"[APPVIEW] Invalid galaxy_idx {galaxy_idx}, defaulting to 0")
                         galaxy_idx = 0
 
-                    galaxy_names = {
-                        0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-                        3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-                        6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-                        9: "Eissentam", 10: "Elkupalos",
-                    }
-                    galaxy_name = galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}")
+                    galaxy_name = get_galaxy_name(galaxy_idx)
 
                     glyph_code = self._coords_to_glyphs(planet_idx, system_idx, voxel_x, voxel_y, voxel_z)
 
@@ -3110,10 +3183,14 @@ class HavenExtractorMod(Mod):
                 logger.info("[EXPORT] Check your internet connection or contact a Haven admin.")
                 return
 
-        # First, auto-refresh adjectives from game memory and force-update batch
+        # Auto-refresh adjectives from game memory if planets are captured
         if self._captured_planets:
             logger.info("[EXPORT] Auto-refreshing adjectives from game memory...")
             self._auto_refresh_for_export()
+
+        # Always force-update the current system's batch entry (applies manual name even if
+        # _captured_planets was cleared by a game event like on_system_generate re-firing)
+        if self._cached_solar_system:
             logger.info("[EXPORT] Updating batch with latest data...")
             self._save_current_system_to_batch(force_update=True)
 
@@ -3419,16 +3496,6 @@ class HavenExtractorMod(Mod):
 
     def _get_current_coordinates(self) -> Optional[dict]:
         """Get current galactic coordinates from player state or solar system."""
-        # All 256 NMS galaxies (first 10 are well-known, rest are procedural)
-        galaxy_names = {
-            0: "Euclid", 1: "Hilbert Dimension", 2: "Calypso",
-            3: "Hesperius Dimension", 4: "Hyades", 5: "Ickjamatew",
-            6: "Budullangr", 7: "Kikolgallr", 8: "Eltiensleen",
-            9: "Eissentam", 10: "Elkupalos", 11: "Aptarkaba",
-            12: "Ontiniangp", 13: "Odiwagiri", 14: "Ogtialabi",
-            15: "Muhacksonto", 16: "Hitonskyer", 17: "Reaboranxu",
-            18: "Isdoraijung", 19: "Doctilusda", 20: "Loychazinq",
-        }
 
         # Method 1: Try player_state (most reliable when available)
         logger.info("  Checking coordinate sources...")
@@ -3471,7 +3538,7 @@ class HavenExtractorMod(Mod):
                     "system_name": system_name,
                     "region_name": region_name,
                     "glyph_code": glyph_code,
-                    "galaxy_name": galaxy_names.get(galaxy_idx, f"Galaxy_{galaxy_idx}"),
+                    "galaxy_name": get_galaxy_name(galaxy_idx),
                     "galaxy_index": galaxy_idx,
                     "voxel_x": voxel_x,
                     "voxel_y": voxel_y,
@@ -4217,7 +4284,7 @@ class HavenExtractorMod(Mod):
             portal_x = x & 0xFFF
             portal_y = y & 0xFF
             portal_z = z & 0xFFF
-            portal_sys = system & 0x1FF
+            portal_sys = system & 0xFFF
             portal_planet = planet & 0xF
             glyph = f"{portal_planet:01X}{portal_sys:03X}{portal_y:02X}{portal_z:03X}{portal_x:03X}"
             return glyph.upper()

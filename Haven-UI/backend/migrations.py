@@ -3237,3 +3237,115 @@ def migrate_1_43_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.43.0")
+
+
+@register_migration("1.44.0", "Fix Galaxy_N naming - merge into proper galaxy names")
+def migrate_1_44_0(conn):
+    """Fix galaxy names from extractor off-by-one bug.
+
+    The extractor sent 0-indexed galaxy IDs as fallback names (Galaxy_255, Galaxy_149)
+    instead of 1-indexed (Galaxy_256, Galaxy_150) or proper names (Odyalutai, Zavainlani).
+    This migration:
+    1. Finds all Galaxy_N entries in systems and pending_systems tables
+    2. Looks up the correct name from galaxies.json (N is 0-indexed game ID)
+    3. Updates the galaxy column and system_data JSON where applicable
+    """
+    import re
+
+    cursor = conn.cursor()
+
+    # Load galaxies reference data
+    galaxies_json_path = Path(__file__).parent.parent / 'NMS-Save-Watcher' / 'data' / 'galaxies.json'
+    galaxies_data = {}
+    try:
+        if galaxies_json_path.exists():
+            with open(galaxies_json_path, 'r', encoding='utf-8') as f:
+                galaxies_data = json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not load galaxies.json: {e}")
+
+    if not galaxies_data:
+        logger.warning("No galaxies data available, skipping galaxy name fix")
+        conn.commit()
+        return
+
+    # Find all Galaxy_N entries in systems table
+    cursor.execute("SELECT DISTINCT galaxy FROM systems WHERE galaxy LIKE 'Galaxy_%'")
+    bad_system_galaxies = [row[0] for row in cursor.fetchall()]
+
+    total_fixed = 0
+    for bad_name in bad_system_galaxies:
+        match = re.match(r'^Galaxy_(\d+)$', bad_name)
+        if not match:
+            continue
+        idx = match.group(1)
+        correct_name = galaxies_data.get(idx)
+        if not correct_name:
+            logger.warning(f"No galaxy name found for index {idx}, skipping {bad_name}")
+            continue
+
+        cursor.execute("UPDATE systems SET galaxy = ? WHERE galaxy = ?", (correct_name, bad_name))
+        count = cursor.rowcount
+        total_fixed += count
+        logger.info(f"Systems: {bad_name} -> {correct_name} ({count} rows)")
+
+    if total_fixed:
+        logger.info(f"Fixed {total_fixed} systems with incorrect galaxy names")
+
+    # Find all Galaxy_N entries in pending_systems table
+    cursor.execute("SELECT DISTINCT galaxy FROM pending_systems WHERE galaxy LIKE 'Galaxy_%'")
+    bad_pending_galaxies = [row[0] for row in cursor.fetchall()]
+
+    pending_fixed = 0
+    for bad_name in bad_pending_galaxies:
+        match = re.match(r'^Galaxy_(\d+)$', bad_name)
+        if not match:
+            continue
+        idx = match.group(1)
+        correct_name = galaxies_data.get(idx)
+        if not correct_name:
+            logger.warning(f"No galaxy name found for index {idx}, skipping {bad_name}")
+            continue
+
+        # Update galaxy column
+        cursor.execute("UPDATE pending_systems SET galaxy = ? WHERE galaxy = ?", (correct_name, bad_name))
+        count = cursor.rowcount
+        pending_fixed += count
+        logger.info(f"Pending: {bad_name} -> {correct_name} ({count} rows)")
+
+        # Also fix system_data JSON where galaxy is stored
+        cursor.execute(
+            "SELECT id, system_data FROM pending_systems WHERE galaxy = ? AND system_data IS NOT NULL",
+            (correct_name,)
+        )
+        for row in cursor.fetchall():
+            try:
+                data = json.loads(row[1])
+                if data.get('galaxy') == bad_name:
+                    data['galaxy'] = correct_name
+                    cursor.execute(
+                        "UPDATE pending_systems SET system_data = ? WHERE id = ?",
+                        (json.dumps(data), row[0])
+                    )
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    if pending_fixed:
+        logger.info(f"Fixed {pending_fixed} pending_systems with incorrect galaxy names")
+
+    if not total_fixed and not pending_fixed:
+        logger.info("No Galaxy_N entries found - no fixes needed")
+
+    conn.commit()
+
+    # Update metadata version
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.44.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.44.0")
