@@ -2871,3 +2871,187 @@ def migrate_1_40_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.40.0")
+
+
+@register_migration("1.41.0", "Ensure planet attribute columns exist and re-score")
+def migrate_1_41_0(conn):
+    """Fix for v1.40.0 rewrite: ensure all planet attribute columns exist.
+
+    v1.40.0 was rewritten after initial deploy to rename columns. If v1.40.0
+    already ran with the old schema, the new columns (has_rings, is_dissonant,
+    extreme_weather, water_world) were never created. This migration ensures
+    they all exist and re-scores completeness with the materials fix.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Ensure ALL planet attribute columns exist (safe to re-add, silently skips existing)
+    columns = [
+        ('has_rings', 'INTEGER DEFAULT 0'),
+        ('is_dissonant', 'INTEGER DEFAULT 0'),
+        ('is_infested', 'INTEGER DEFAULT 0'),
+        ('extreme_weather', 'INTEGER DEFAULT 0'),
+        ('water_world', 'INTEGER DEFAULT 0'),
+        ('vile_brood', 'INTEGER DEFAULT 0'),
+        ('ancient_bones', 'INTEGER DEFAULT 0'),
+        ('salvageable_scrap', 'INTEGER DEFAULT 0'),
+        ('storm_crystals', 'INTEGER DEFAULT 0'),
+        ('gravitino_balls', 'INTEGER DEFAULT 0'),
+        ('exotic_trophy', 'TEXT'),
+        # Legacy names from original v1.40.0
+        ('dissonance', 'INTEGER DEFAULT 0'),
+        ('infested', 'INTEGER DEFAULT 0'),
+    ]
+    added = 0
+    for col_name, col_type in columns:
+        try:
+            cursor.execute(f'ALTER TABLE planets ADD COLUMN {col_name} {col_type}')
+            logger.info(f"Added missing column planets.{col_name}")
+            added += 1
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
+    if added > 0:
+        logger.info(f"Added {added} missing planet attribute columns")
+    else:
+        logger.info("All planet attribute columns already present")
+
+    # Re-score completeness with materials fix
+    NO_LIFE_BIOMES = {'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere', 'Gas Giant', 'Empty'}
+
+    def _is_filled(val, allow_none=False):
+        if val is None:
+            return False
+        s = str(val).strip()
+        if not s:
+            return False
+        if s == 'N/A':
+            return False
+        if s == 'None' and not allow_none:
+            return False
+        return True
+
+    def _life_descriptor_filled(val, val_text):
+        for v in [val, val_text]:
+            if v is not None:
+                s = str(v).strip()
+                if s:
+                    return True
+        return False
+
+    def _calc_score(cursor, system_id):
+        cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
+        system = cursor.fetchone()
+        if not system:
+            return 0
+        system = dict(system)
+
+        cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
+        planets = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
+        station_row = cursor.fetchone()
+        station = dict(station_row) if station_row else None
+
+        is_abandoned = system.get('economy_type') in ('None', 'Abandoned')
+
+        # System Core (35 pts)
+        sys_core_fields = ['star_type', 'economy_type', 'economy_level', 'conflict_level', 'dominant_lifeform']
+        sys_core_filled = 0
+        for f in sys_core_fields:
+            val = system.get(f)
+            if f in ('economy_type', 'economy_level', 'conflict_level') and is_abandoned:
+                sys_core_filled += 1
+            elif _is_filled(val):
+                sys_core_filled += 1
+        sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
+
+        # System Extra (10 pts)
+        sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
+        sys_extra_filled = sum(1 for f in sys_extra_fields if _is_filled(system.get(f)))
+        sys_extra_score = round((sys_extra_filled / len(sys_extra_fields)) * 10)
+
+        # Planet Coverage (10 pts)
+        planet_coverage_score = 10 if planets else 0
+
+        # Planet Environment (25 pts) + Planet Life (15 pts)
+        planet_env_score = 0
+        planet_life_score = 0
+        if planets:
+            env_totals = []
+            life_totals = []
+            for p in planets:
+                env_filled = 0
+                if _is_filled(p.get('biome')):
+                    env_filled += 1
+                if _is_filled(p.get('weather')) or _is_filled(p.get('weather_text')):
+                    env_filled += 1
+                if _is_filled(p.get('sentinel'), allow_none=True) or _is_filled(p.get('sentinels_text')):
+                    env_filled += 1
+                env_totals.append(min(env_filled / 3, 1.0))
+
+                life_filled = 0
+                life_applicable = 0
+                biome_val = (p.get('biome') or '').strip()
+                is_dead_biome = biome_val in NO_LIFE_BIOMES
+
+                if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
+                    life_filled += 1
+                    life_applicable += 1
+                elif not is_dead_biome:
+                    life_applicable += 1
+
+                if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
+                    life_filled += 1
+                    life_applicable += 1
+                elif not is_dead_biome:
+                    life_applicable += 1
+
+                materials_val = (p.get('materials') or '').strip()
+                has_materials = bool(materials_val) and materials_val not in ('N/A', 'None')
+                if has_materials:
+                    life_applicable += 1
+                    life_filled += 1
+                else:
+                    res_filled = sum(1 for f in ['common_resource', 'uncommon_resource', 'rare_resource'] if _is_filled(p.get(f)))
+                    life_applicable += 1
+                    if res_filled > 0:
+                        life_filled += 1
+
+                life_totals.append(life_filled / max(life_applicable, 1))
+
+            planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
+            planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
+
+        # Space Station (5 pts)
+        station_score = 0
+        if is_abandoned:
+            station_score = 5
+        elif station:
+            station_score += 3
+            trade_goods = station.get('trade_goods', '[]')
+            if trade_goods and trade_goods != '[]':
+                station_score += 2
+
+        return min(sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score, 100)
+
+    cursor.execute('SELECT id FROM systems')
+    system_ids = [row[0] for row in cursor.fetchall()]
+    logger.info(f"Re-scoring completeness for {len(system_ids)} systems...")
+
+    for sys_id in system_ids:
+        score = _calc_score(cursor, sys_id)
+        cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (score, sys_id))
+
+    logger.info(f"Re-scored {len(system_ids)} systems")
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.41.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.41.0")

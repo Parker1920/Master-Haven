@@ -10,6 +10,7 @@ import {
   floraAdjectives,
   faunaAdjectives,
   resourcesList,
+  exoticTrophyList,
   toSelectOptions
 } from '../data/adjectives'
 
@@ -20,6 +21,7 @@ const sentinelOptions = toSelectOptions(sentinelAdjectives)
 const floraOptions = toSelectOptions(floraAdjectives)
 const faunaOptions = toSelectOptions(faunaAdjectives)
 const resourcesOptions = toSelectOptions(resourcesList)
+const exoticTrophyOptions = toSelectOptions(exoticTrophyList)
 
 export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }){
   const [uploading, setUploading] = useState(false)
@@ -276,11 +278,11 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
             </div>
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Exotic Trophy</h3>
-              <input
-                placeholder="e.g. Bubble Cluster, Light Fissure, Calcishroom..."
-                className="p-2 rounded-lg w-full text-sm border border-gray-600 bg-white/5 focus:border-purple-500 focus:outline-none transition-colors"
+              <SearchableSelect
+                options={exoticTrophyOptions}
                 value={planet.exotic_trophy || ''}
-                onChange={e => setField('exotic_trophy', e.target.value)}
+                onChange={(val) => setField('exotic_trophy', val)}
+                placeholder="Search exotic trophy..."
               />
             </div>
           </div>

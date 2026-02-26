@@ -877,5 +877,19 @@ export const resourcesList = [
   "Tritium Hypercluster"
 ].sort((a, b) => a.localeCompare(b));
 
+export const exoticTrophyList = [
+  "Bubble Cluster",
+  "Cable Pod",
+  "Calcishroom",
+  "Capillary Shell",
+  "Electric Cube",
+  "Glitching Separator",
+  "Hexplate Bush",
+  "Light Fissure",
+  "Ossified Star",
+  "Rattle Spine",
+  "Terbium Growth",
+];
+
 // Helper function to convert arrays to react-select format
 export const toSelectOptions = (arr) => arr.map(value => ({ value, label: value }));
