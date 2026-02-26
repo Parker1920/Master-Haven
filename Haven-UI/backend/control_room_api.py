@@ -1289,7 +1289,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.37.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.37.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():

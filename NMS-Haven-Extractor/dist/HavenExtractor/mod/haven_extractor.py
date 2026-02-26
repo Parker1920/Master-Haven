@@ -1083,7 +1083,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.6"
+    __version__ = "1.4.7"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -2816,6 +2816,8 @@ class HavenExtractorMod(Mod):
 
         # Auto-save to batch when APPVIEW fires (if not already saved)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
+            logger.info("[BATCH] Refreshing adjectives before batch save...")
+            self._auto_refresh_for_export()
             logger.info("[BATCH] Auto-saving system to batch...")
             self._save_current_system_to_batch()
             self._system_saved_to_batch = True

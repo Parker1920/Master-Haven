@@ -6,6 +6,7 @@ import Button from '../components/Button'
 import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext } from '../utils/AuthContext'
 import { getTradeGoodById } from '../utils/economyTradeGoods'
+import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjectiveColors'
 
 // Helper to normalize photo paths - handles "photos\file.jpg", "photos/file.jpg", or just "file.jpg"
 function getPhotoUrl(photo) {
@@ -598,15 +599,14 @@ export default function SystemDetail() {
                         {planet.moons && planet.moons.length > 0 && (
                           <span>{planet.moons.length} moon{planet.moons.length !== 1 ? 's' : ''}</span>
                         )}
-                        <span className={
-                          (planet.sentinel || planet.sentinel_level) === 'Aggressive' ? 'text-red-400' :
-                          (planet.sentinel || planet.sentinel_level) === 'Low' ? 'text-green-400' : ''
-                        }>Sentinel: {planet.sentinel || planet.sentinel_level || 'Unknown'}</span>
-                        {planet.fauna && planet.fauna !== 'N/A' && planet.fauna !== 'None' && (
-                          <span className={planet.fauna === 'Rich' ? 'text-yellow-400' : ''}>Fauna: {planet.fauna}</span>
+                        <span className={getSentinelColor(planet.sentinel || planet.sentinel_level)}>
+                          Sentinel: {planet.sentinel || planet.sentinel_level || 'Unknown'}
+                        </span>
+                        {planet.fauna && (
+                          <span className={getFaunaColor(planet.fauna)}>Fauna: {planet.fauna}</span>
                         )}
-                        {planet.flora && planet.flora !== 'N/A' && planet.flora !== 'None' && (
-                          <span className={planet.flora === 'Rich' ? 'text-green-400' : ''}>Flora: {planet.flora}</span>
+                        {planet.flora && (
+                          <span className={getFloraColor(planet.flora)}>Flora: {planet.flora}</span>
                         )}
                       </div>
                     </div>
@@ -706,33 +706,20 @@ export default function SystemDetail() {
                       <div className="grid grid-cols-3 gap-3">
                         <div className="text-center p-2 bg-white/5 rounded-lg">
                           <div className="text-xs text-gray-500 mb-0.5">Sentinels</div>
-                          <div className={`font-medium ${
-                            (planet.sentinel || planet.sentinel_level) === 'Aggressive' ? 'text-red-400' :
-                            (planet.sentinel || planet.sentinel_level) === 'High' ? 'text-orange-400' :
-                            (planet.sentinel || planet.sentinel_level) === 'Low' ? 'text-green-400' :
-                            (planet.sentinel || planet.sentinel_level) === 'None' ? 'text-green-400' : 'text-gray-300'
-                          }`}>{planet.sentinel || planet.sentinel_level || 'Unknown'}</div>
+                          <div className={`font-medium ${getSentinelColor(planet.sentinel || planet.sentinel_level)}`}>
+                            {planet.sentinel || planet.sentinel_level || 'Unknown'}
+                          </div>
                         </div>
                         <div className="text-center p-2 bg-white/5 rounded-lg">
                           <div className="text-xs text-gray-500 mb-0.5">Fauna</div>
-                          <div className={`font-medium ${
-                            planet.fauna === 'Rich' ? 'text-yellow-400' :
-                            planet.fauna === 'Generous' ? 'text-yellow-300' :
-                            planet.fauna === 'Average' ? 'text-blue-300' :
-                            planet.fauna === 'Full' ? 'text-green-400' : 'text-gray-300'
-                          }`}>
+                          <div className={`font-medium ${getFaunaColor(planet.fauna)}`}>
                             {planet.fauna || 'N/A'}
                             {planet.fauna_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.fauna_count})</span>}
                           </div>
                         </div>
                         <div className="text-center p-2 bg-white/5 rounded-lg">
                           <div className="text-xs text-gray-500 mb-0.5">Flora</div>
-                          <div className={`font-medium ${
-                            planet.flora === 'Rich' ? 'text-green-400' :
-                            planet.flora === 'Generous' ? 'text-green-300' :
-                            planet.flora === 'Average' ? 'text-blue-300' :
-                            planet.flora === 'Full' ? 'text-green-400' : 'text-gray-300'
-                          }`}>
+                          <div className={`font-medium ${getFloraColor(planet.flora)}`}>
                             {planet.flora || 'N/A'}
                             {planet.flora_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.flora_count})</span>}
                           </div>
@@ -908,24 +895,21 @@ export default function SystemDetail() {
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
                                   <div className="text-center p-1.5 bg-white/5 rounded">
                                     <div className="text-[10px] text-gray-500">Sentinels</div>
-                                    <div className={`text-sm ${
-                                      moon.sentinel === 'Aggressive' ? 'text-red-400' :
-                                      moon.sentinel === 'High' ? 'text-orange-400' :
-                                      moon.sentinel === 'Low' ? 'text-green-400' :
-                                      moon.sentinel === 'None' ? 'text-green-400' : ''
-                                    }`}>{moon.sentinel || 'Unknown'}</div>
+                                    <div className={`text-sm ${getSentinelColor(moon.sentinel)}`}>
+                                      {moon.sentinel || 'Unknown'}
+                                    </div>
                                   </div>
                                   <div className="text-center p-1.5 bg-white/5 rounded">
                                     <div className="text-[10px] text-gray-500">Fauna</div>
-                                    <div className={`text-sm ${
-                                      moon.fauna === 'Rich' ? 'text-yellow-400' : ''
-                                    }`}>{moon.fauna || 'N/A'}</div>
+                                    <div className={`text-sm ${getFaunaColor(moon.fauna)}`}>
+                                      {moon.fauna || 'N/A'}
+                                    </div>
                                   </div>
                                   <div className="text-center p-1.5 bg-white/5 rounded">
                                     <div className="text-[10px] text-gray-500">Flora</div>
-                                    <div className={`text-sm ${
-                                      moon.flora === 'Rich' ? 'text-green-400' : ''
-                                    }`}>{moon.flora || 'N/A'}</div>
+                                    <div className={`text-sm ${getFloraColor(moon.flora)}`}>
+                                      {moon.flora || 'N/A'}
+                                    </div>
                                   </div>
                                   {(moon.climate || moon.weather) && (
                                     <div className="text-center p-1.5 bg-white/5 rounded">
