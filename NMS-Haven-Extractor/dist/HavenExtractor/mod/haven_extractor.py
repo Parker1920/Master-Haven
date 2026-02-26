@@ -480,6 +480,28 @@ RESOURCE_NAMES = {
     "STORM_CRYSTAL": "Storm Crystals",
 }
 
+# v1.4.5: Biome -> plant resource mapping (what the game discovery screen shows)
+# Dead, Airless, Exotic, and Weird biomes have no plant resource
+BIOME_PLANT_RESOURCE = {
+    "Frozen": "Frost Crystal",
+    "Barren": "Cactus Flesh",
+    "Scorched": "Solanium",
+    "Toxic": "Fungal Mould",
+    "Radioactive": "Gamma Root",
+    "Lush": "Star Bulb",
+    "Swamp": "Faecium",
+    "Lava": "Solanium",
+}
+
+# v1.4.5: Internal substance IDs that don't appear on the discovery screen
+# Dead/Airless moons have SPACEGUNK internally but show Rusted Metal to the player
+HIDDEN_SUBSTANCE_IDS = {
+    "SPACEGUNK1", "SPACEGUNK2", "SPACEGUNK3", "SPACEGUNK4", "SPACEGUNK5",
+}
+HIDDEN_SUBSTANCE_NAMES = {
+    "Residual Goop", "Runaway Mould", "Living Slime", "Viscous Fluids", "Tainted Metal",
+}
+
 
 def translate_resource(resource_id: str) -> str:
     """Translate a resource ID to human-readable name."""
@@ -1056,7 +1078,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.4.4"
+    __version__ = "1.4.5"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1379,7 +1401,7 @@ class HavenExtractorMod(Mod):
         self._load_adjective_cache()
 
         logger.info("=" * 60)
-        logger.info("Haven Extractor v1.4.0 - Game-Data-Driven Adjectives")
+        logger.info(f"Haven Extractor v{self.__version__}")
         logger.info(f"Local backup: {self._output_dir}")
         logger.info("=" * 60)
         logger.info("")
@@ -2318,6 +2340,28 @@ class HavenExtractorMod(Mod):
             except Exception as e:
                 logger.debug(f"Resource extraction failed: {e}")
 
+            # v1.4.5: Extract special resource flags from ExtraResourceHints + HasScrap
+            extra_resource_hints = []
+            has_scrap = False
+            try:
+                if hasattr(planet_data, 'ExtraResourceHints'):
+                    hints_arr = planet_data.ExtraResourceHints
+                    if hints_arr is not None and hasattr(hints_arr, '__len__'):
+                        for hi in range(len(hints_arr)):
+                            try:
+                                hint = hints_arr[hi]
+                                if hasattr(hint, 'Hint'):
+                                    hint_id = str(hint.Hint) or ""
+                                    hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip()
+                                    if hint_id and len(hint_id) >= 2:
+                                        extra_resource_hints.append(hint_id)
+                            except Exception:
+                                pass
+                if hasattr(planet_data, 'HasScrap'):
+                    has_scrap = bool(planet_data.HasScrap)
+            except Exception as e:
+                logger.debug(f"Extra resource hints extraction failed: {e}")
+
             # CRITICAL v8.1.8: Extract weather from cGcPlanetData.Weather.WeatherType
             # This uses the actual Weather structure (offset 0x1C00) with enum values
             # Works for ALL planets, not just visited ones like PlanetInfo.Weather
@@ -2504,7 +2548,31 @@ class HavenExtractorMod(Mod):
                 'planet_description': planet_description,      # v1.4.0: Biome adjective text ID
                 'planet_type_display': planet_type_display,    # v1.4.0: Planet type display string
                 'is_weather_extreme': is_weather_extreme,      # v1.4.0: Extreme weather flag
+                'extra_resource_hints': extra_resource_hints,  # v1.4.5: Special resource hint IDs
+                'has_scrap': has_scrap,                        # v1.4.5: HasScrap boolean
             }
+
+            # v1.4.5: Set special resource flags from ExtraResourceHints + HasScrap
+            for hint_id in extra_resource_hints:
+                hint_upper = hint_id.upper()
+                translated = translate_resource(hint_upper)
+                translated_lower = translated.lower() if translated else ""
+                if "ancient bones" in translated_lower or hint_upper in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
+                    self._captured_planets[planet_index]['ancient_bones'] = 1
+                if "salvageable scrap" in translated_lower or hint_upper in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
+                    self._captured_planets[planet_index]['salvageable_scrap'] = 1
+                if "storm crystal" in translated_lower or hint_upper in ("STORM1", "STORM_CRYSTAL"):
+                    self._captured_planets[planet_index]['storm_crystals'] = 1
+                if "gravitino" in translated_lower or hint_upper in ("GRAVITINO", "GRAV_BALL"):
+                    self._captured_planets[planet_index]['gravitino_balls'] = 1
+                if "vile brood" in translated_lower or "whispering egg" in translated_lower or hint_upper in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
+                    self._captured_planets[planet_index]['vile_brood'] = 1
+            if has_scrap:
+                self._captured_planets[planet_index]['salvageable_scrap'] = 1
+            # Infested biome subtype
+            if biome_subtype_name and biome_subtype_name.lower() == "infested":
+                self._captured_planets[planet_index]['infested'] = 1
+                self._captured_planets[planet_index]['vile_brood'] = 1
 
             logger.info("")
             logger.info("*" * 60)
@@ -2524,6 +2592,16 @@ class HavenExtractorMod(Mod):
                 logger.info(f"    PlanetType: '{planet_type_display}'")
             if is_weather_extreme:
                 logger.info(f"    IsWeatherExtreme: True")
+            if extra_resource_hints:
+                logger.info(f"    ExtraResourceHints: {extra_resource_hints}")
+            if has_scrap:
+                logger.info(f"    HasScrap: True")
+            # Log detected special flags
+            special_flags = [k for k in ["ancient_bones", "salvageable_scrap", "storm_crystals",
+                                         "gravitino_balls", "vile_brood", "infested"]
+                             if self._captured_planets[planet_index].get(k)]
+            if special_flags:
+                logger.info(f"    Special: {', '.join(special_flags)}")
             logger.info(f"    Total captured: {len(self._captured_planets)} planets")
             logger.info("*" * 60)
             logger.info("")
@@ -2692,7 +2770,9 @@ class HavenExtractorMod(Mod):
             logger.info("[BATCH] Auto-saving system to batch...")
             self._save_current_system_to_batch()
             self._system_saved_to_batch = True
+            self._capture_enabled = False  # v1.4.5: Lock out further captures until next warp
             logger.info(f"[BATCH] Systems in batch: {len(self._batch_systems)}")
+            logger.info("[BATCH] Capture locked - will re-enable on next warp")
         elif self._system_saved_to_batch:
             logger.info("[BATCH] System already saved")
             logger.info(f"[BATCH] Systems in batch: {len(self._batch_systems)}")
@@ -2703,152 +2783,6 @@ class HavenExtractorMod(Mod):
     # =========================================================================
     # GUI BUTTONS
     # =========================================================================
-
-    @gui_button("_PLACEHOLDER_DELETE_ME_")
-    def _placeholder_delete_me_(self):
-        import ctypes
-
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info(">>> COORDINATE SOURCE DIAGNOSTIC <<<")
-        logger.info(">>> Sea of Gidzenuf target: [4009, 1, 2365] = [0xFA9, 0x01, 0x93D] <<<")
-        logger.info("=" * 70)
-
-        planet_count = len(self._captured_planets)
-        logger.info(f"Captured planet count: {planet_count}")
-
-        # =====================================================
-        # SOURCE 1: player_state.mLocation.GalacticAddress
-        # =====================================================
-        logger.info("")
-        logger.info("--- SOURCE 1: player_state.mLocation.GalacticAddress ---")
-        try:
-            player_state = gameData.player_state
-            if player_state:
-                location = player_state.mLocation
-                galactic_addr = location.GalacticAddress
-                logger.info(f"  VoxelX = {self._safe_int(galactic_addr.VoxelX)}")
-                logger.info(f"  VoxelY = {self._safe_int(galactic_addr.VoxelY)}")
-                logger.info(f"  VoxelZ = {self._safe_int(galactic_addr.VoxelZ)}")
-                logger.info(f"  SolarSystemIndex = {self._safe_int(galactic_addr.SolarSystemIndex)}")
-                logger.info(f"  PlanetIndex = {self._safe_int(galactic_addr.PlanetIndex)}")
-                logger.info(f"  RealityIndex = {self._safe_int(location.RealityIndex)}")
-            else:
-                logger.info("  player_state is None")
-        except Exception as e:
-            logger.info(f"  Failed: {e}")
-
-        # =====================================================
-        # SOURCE 2: Solar System mSolarSystemData.Seed
-        # =====================================================
-        logger.info("")
-        logger.info("--- SOURCE 2: Solar System Seed ---")
-        try:
-            solar_system = self._cached_solar_system
-            if solar_system:
-                solar_data = solar_system.mSolarSystemData
-                if hasattr(solar_data, 'Seed'):
-                    seed = self._safe_int(solar_data.Seed)
-                    logger.info(f"  Seed = {seed} (0x{seed:016X})")
-                    # Try decoding seed as coordinates
-                    logger.info(f"    Low 12 bits (X?): {seed & 0xFFF}")
-                    logger.info(f"    Bits 12-19 (Y?): {(seed >> 12) & 0xFF}")
-                    logger.info(f"    Bits 20-31 (Z?): {(seed >> 20) & 0xFFF}")
-                    logger.info(f"    Bits 32-43 (Sys?): {(seed >> 32) & 0xFFF}")
-        except Exception as e:
-            logger.info(f"  Failed: {e}")
-
-        # =====================================================
-        # SOURCE 3: Planet mUniverseAddress raw values
-        # v10.1.0: Using CORRECT bit layout (verified working!)
-        # =====================================================
-        logger.info("")
-        logger.info("--- SOURCE 3: Planet Discovery mUniverseAddress (v10.1.0 CORRECT decode) ---")
-        try:
-            if self._cached_solar_system:
-                planets = self._cached_solar_system.maPlanets
-                for i in range(min(2, 6)):  # Just check first 2
-                    try:
-                        planet = planets[i]
-                        if planet:
-                            discovery = planet.mPlanetDiscoveryData
-                            addr = self._safe_int(discovery.mUniverseAddress)
-                            if addr != 0:
-                                logger.info(f"  Planet {i} mUniverseAddress = 0x{addr:016X}")
-                                # v10.1.0: CORRECT bit layout
-                                x_region = addr & 0xFFF
-                                z_region = (addr >> 12) & 0xFFF
-                                y_region = (addr >> 24) & 0xFF
-                                system_idx = (addr >> 40) & 0xFFF
-                                planet_idx_raw = (addr >> 52) & 0xF
-                                planet_idx = max(0, planet_idx_raw - 1)
-                                galaxy_idx = (addr >> 56) & 0xFF
-                                glyph = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
-                                logger.info(f"    X region: {x_region} (0x{x_region:03X})")
-                                logger.info(f"    Y region: {y_region} (0x{y_region:02X})")
-                                logger.info(f"    Z region: {z_region} (0x{z_region:03X})")
-                                logger.info(f"    System index: {system_idx} (0x{system_idx:03X})")
-                                logger.info(f"    Planet index: {planet_idx}")
-                                logger.info(f"    Galaxy: {galaxy_idx}")
-                                logger.info(f"    => GLYPH: {glyph}")
-                                logger.info(f"    => Region coords: [{x_region}, {y_region}, {z_region}]")
-                    except:
-                        pass
-        except Exception as e:
-            logger.info(f"  Failed: {e}")
-
-        # =====================================================
-        # SOURCE 4: Raw memory scan of solar system struct
-        # =====================================================
-        logger.info("")
-        logger.info("--- SOURCE 4: Raw Memory Scan (looking for 0xFA9, 0x93D) ---")
-        try:
-            if self._cached_solar_system:
-                base = get_addressof(self._cached_solar_system)
-                logger.info(f"  Solar system base: 0x{base:X}")
-
-                # Scan for values that might be our coords
-                # Looking for 4009 (0xFA9), 1 (0x01), 2365 (0x93D)
-                for offset in range(0, 0x100, 4):
-                    try:
-                        val32 = ctypes.c_uint32.from_address(base + offset).value
-                        val16 = ctypes.c_uint16.from_address(base + offset).value
-
-                        # Check if this looks like our target coords
-                        if val16 == 4009 or val16 == 2365 or val32 == 4009 or val32 == 2365:
-                            logger.info(f"    Offset 0x{offset:04X}: u32={val32}, u16={val16} ** POTENTIAL MATCH **")
-                        elif val16 in range(4000, 4020) or val16 in range(2360, 2370):
-                            logger.info(f"    Offset 0x{offset:04X}: u32={val32}, u16={val16} (close)")
-                    except:
-                        pass
-
-                # Also check specific known offsets in cGcSolarSystemData
-                logger.info("  Checking specific offsets:")
-                for offset, name in [(0x0, "start"), (0x8, "+8"), (0x10, "+16"),
-                                      (0x2270, "Name area"), (0x2280, "+2280")]:
-                    try:
-                        val64 = ctypes.c_uint64.from_address(base + offset).value
-                        logger.info(f"    0x{offset:04X} ({name}): 0x{val64:016X}")
-                    except:
-                        pass
-        except Exception as e:
-            logger.info(f"  Failed: {e}")
-
-        # =====================================================
-        # SOURCE 5: Check if there's a region name string
-        # =====================================================
-        logger.info("")
-        logger.info("--- SOURCE 5: Region/System Name from memory ---")
-        try:
-            system_name = self._get_actual_system_name()
-            logger.info(f"  System name: {system_name or '(not found)'}")
-        except Exception as e:
-            logger.info(f"  Failed: {e}")
-
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info(">>> Look for values matching: 4009, 2365, 0xFA9, 0x93D <<<")
-        logger.info("=" * 70)
 
     @gui_button("System Data")
     def check_system_data(self):
@@ -3089,7 +3023,7 @@ class HavenExtractorMod(Mod):
     def _auto_refresh_for_export(self):
         """
         v1.4.1: Silently refresh adjectives from PlanetInfo before export.
-        Same core logic as refresh_display_strings() but without verbose logging.
+        Reads PlanetInfo display strings and resolves adjectives without verbose logging.
         Ensures _captured_planets has the latest text IDs resolved through _resolve_adjective().
         """
         if not self._captured_planets or not self._cached_solar_system:
@@ -3904,25 +3838,43 @@ class HavenExtractorMod(Mod):
                 if result["rare_resource"] == "Unknown" and captured.get('rare_resource'):
                     result["rare_resource"] = translate_resource(captured['rare_resource'])
 
-                # v1.4.3: Detect special resource flags from translated resource names
-                all_resources = [
-                    result.get("common_resource", ""),
-                    result.get("uncommon_resource", ""),
-                    result.get("rare_resource", ""),
-                ]
-                all_resources_lower = [r.lower() for r in all_resources if r and r != "Unknown"]
+                # v1.4.5: Apply special resource flags from captured hook data
+                # These were detected from ExtraResourceHints + HasScrap at capture time
+                for flag_key in ["ancient_bones", "salvageable_scrap", "storm_crystals",
+                                 "gravitino_balls", "vile_brood", "infested"]:
+                    if captured.get(flag_key):
+                        result[flag_key] = 1
 
-                for res in all_resources_lower:
-                    if "ancient bones" in res:
-                        result["ancient_bones"] = 1
-                    if "salvageable scrap" in res:
+                # v1.4.5: Also read ExtraResourceHints directly from PlanetData (backup)
+                try:
+                    if hasattr(planet_data, 'ExtraResourceHints'):
+                        hints_arr = planet_data.ExtraResourceHints
+                        if hints_arr is not None and hasattr(hints_arr, '__len__'):
+                            for hi in range(len(hints_arr)):
+                                try:
+                                    hint = hints_arr[hi]
+                                    if hasattr(hint, 'Hint'):
+                                        hint_id = str(hint.Hint) or ""
+                                        hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip().upper()
+                                        if hint_id:
+                                            translated = translate_resource(hint_id)
+                                            tl = translated.lower() if translated else ""
+                                            if "ancient bones" in tl or hint_id in ("FOSSIL1", "FOSSIL2", "CREATURE1", "BONES", "ANCIENT"):
+                                                result["ancient_bones"] = 1
+                                            if "salvageable scrap" in tl or hint_id in ("SALVAGE", "SALVAGE1", "TECHFRAG"):
+                                                result["salvageable_scrap"] = 1
+                                            if "storm crystal" in tl or hint_id in ("STORM1", "STORM_CRYSTAL"):
+                                                result["storm_crystals"] = 1
+                                            if "gravitino" in tl or hint_id in ("GRAVITINO", "GRAV_BALL"):
+                                                result["gravitino_balls"] = 1
+                                            if "vile brood" in tl or "whispering egg" in tl or hint_id in ("INFESTATION", "VILEBROOD", "LARVA", "LARVAL"):
+                                                result["vile_brood"] = 1
+                                except Exception:
+                                    pass
+                    if hasattr(planet_data, 'HasScrap') and bool(planet_data.HasScrap):
                         result["salvageable_scrap"] = 1
-                    if "storm crystal" in res:
-                        result["storm_crystals"] = 1
-                    if "vile brood" in res or "whispering egg" in res:
-                        result["vile_brood"] = 1
-                    if "gravitino" in res:
-                        result["gravitino_balls"] = 1
+                except Exception:
+                    pass
 
                 # Infested biome subtype
                 if result.get("biome_subtype", "").lower() == "infested":
@@ -4126,6 +4078,28 @@ class HavenExtractorMod(Mod):
                             result["rare_resource"] = translate_resource(val)
                 except Exception:
                     pass
+
+            # v1.4.5: Derive plant resource from biome type
+            biome = result.get("biome", "Unknown")
+            plant_resource = BIOME_PLANT_RESOURCE.get(biome, "")
+            if plant_resource:
+                result["plant_resource"] = plant_resource
+                logger.info(f"    [PLANT] {biome} -> {plant_resource}")
+
+            # v1.4.5: Fix dead/airless moon resources - replace hidden SPACEGUNK
+            # with Rusted Metal (what the discovery screen actually shows)
+            # Check BOTH translated display names AND raw internal IDs
+            for res_key in ("common_resource", "uncommon_resource", "rare_resource"):
+                res_val = result.get(res_key, "")
+                if res_val in HIDDEN_SUBSTANCE_NAMES or res_val in HIDDEN_SUBSTANCE_IDS:
+                    result[res_key] = "Rusted Metal"
+                    logger.info(f"    [RESOURCE FIX] {res_key}: '{res_val}' -> 'Rusted Metal'")
+
+            # Log final resources for debugging
+            logger.info(f"    [RESOURCES] common={result.get('common_resource')}, "
+                         f"uncommon={result.get('uncommon_resource')}, "
+                         f"rare={result.get('rare_resource')}, "
+                         f"plant={result.get('plant_resource', 'N/A')}")
 
             return result
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { uploadPhoto } from '../utils/api'
+import Modal from './Modal'
 import SearchableSelect from './SearchableSelect'
 import {
   biomeAdjectives,
@@ -8,6 +9,7 @@ import {
   floraAdjectives,
   faunaAdjectives,
   resourcesList,
+  exoticTrophyList,
   toSelectOptions
 } from '../data/adjectives'
 
@@ -18,9 +20,11 @@ const sentinelOptions = toSelectOptions(sentinelAdjectives)
 const floraOptions = toSelectOptions(floraAdjectives)
 const faunaOptions = toSelectOptions(faunaAdjectives)
 const resourcesOptions = toSelectOptions(resourcesList)
+const exoticTrophyOptions = toSelectOptions(exoticTrophyList)
 
 export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
   const [uploading, setUploading] = useState(false)
+  const [attrsModalOpen, setAttrsModalOpen] = useState(false)
 
   function setField(k, v){
     const m = {...moon, [k]: v}
@@ -146,14 +150,74 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
           )}
         </div>
       </div>
-      <div className="mt-3 flex justify-between items-center">
-        <div>
-          {onSave && (
-            <button type="button" onClick={() => onSave(moon)} className="px-3 py-1.5 bg-blue-600 rounded text-sm">Save</button>
-          )}
-        </div>
-        <button type="button" onClick={() => onRemove(index)} className="px-3 py-1.5 bg-red-600 rounded text-sm">Remove Moon</button>
+      <div className="mt-3 flex flex-wrap gap-2 items-center">
+        <button type="button" onClick={() => setAttrsModalOpen(true)} className="px-3 py-1.5 bg-purple-600 rounded text-sm">
+          Moon Attributes
+          {(() => {
+            const c = [
+              moon.has_rings, moon.is_dissonant, moon.is_infested,
+              moon.extreme_weather, moon.water_world, moon.vile_brood
+            ].filter(Boolean).length + (moon.exotic_trophy ? 1 : 0)
+            return c > 0 ? <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">{c}</span> : null
+          })()}
+        </button>
+        {onSave && (
+          <button type="button" onClick={() => onSave(moon)} className="px-3 py-1.5 bg-blue-600 rounded text-sm">Save</button>
+        )}
+        <button type="button" onClick={() => onRemove(index)} className="ml-auto px-3 py-1.5 bg-red-600 rounded text-sm">Remove Moon</button>
       </div>
+      {attrsModalOpen && (
+        <Modal title="Moon Attributes" onClose={() => setAttrsModalOpen(false)}>
+          <div className="space-y-5 pb-48">
+            <div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Moon Specials</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  { key: 'has_rings', label: 'Has Rings', icon: 'ring' },
+                  { key: 'is_dissonant', label: 'Dissonant', icon: 'wave' },
+                  { key: 'is_infested', label: 'Infested', icon: 'bug' },
+                  { key: 'extreme_weather', label: 'Extreme Weather', icon: 'bolt' },
+                  { key: 'water_world', label: 'Water World', icon: 'water' },
+                  { key: 'vile_brood', label: 'Vile Brood', icon: 'skull' },
+                ].map(({ key, label, icon }) => {
+                  const active = !!moon[key]
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setField(key, active ? 0 : 1)}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                        active
+                          ? 'border-purple-500 bg-purple-500/20 text-purple-200'
+                          : 'border-gray-600 bg-white/5 text-gray-400 hover:border-gray-500 hover:bg-white/10'
+                      }`}
+                    >
+                      <span className="text-base">
+                        {icon === 'ring' && '\u{1FA90}'}
+                        {icon === 'wave' && '\u{1F50A}'}
+                        {icon === 'bug' && '\u{1F9A0}'}
+                        {icon === 'bolt' && '\u{26A1}'}
+                        {icon === 'water' && '\u{1F30A}'}
+                        {icon === 'skull' && '\u{1F480}'}
+                      </span>
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Exotic Trophy</h3>
+              <SearchableSelect
+                options={exoticTrophyOptions}
+                value={moon.exotic_trophy || ''}
+                onChange={(val) => setField('exotic_trophy', val)}
+                placeholder="Search exotic trophy..."
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

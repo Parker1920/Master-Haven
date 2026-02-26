@@ -620,157 +620,161 @@ export default function SystemDetail() {
 
                 {/* Planet Details (Expanded) */}
                 {expandedPlanets[index] && (
-                  <div className="p-4 bg-gray-900/50">
-                    {/* Core Properties */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
-                      {/* Biome/Environment */}
-                      {planet.biome && (
-                        <div>
-                          <div className="text-xs text-gray-400">Biome</div>
-                          <div className="text-green-400 font-medium">{planet.biome}</div>
-                        </div>
-                      )}
-                      {planet.biome_subtype && planet.biome_subtype !== 'None_' && (
-                        <div>
-                          <div className="text-xs text-gray-400">Biome Subtype</div>
-                          <div>{planet.biome_subtype}</div>
-                        </div>
-                      )}
-                      {planet.planet_size && (
-                        <div>
-                          <div className="text-xs text-gray-400">Size</div>
-                          <div>{planet.planet_size}</div>
-                        </div>
-                      )}
-                      {planet.is_moon === 1 && (
-                        <div>
-                          <div className="text-xs text-gray-400">Type</div>
-                          <div className="text-purple-400">Moon</div>
-                        </div>
-                      )}
-
-                      {/* Sentinel */}
-                      <div>
-                        <div className="text-xs text-gray-400">Sentinel Level</div>
-                        <div className={
-                          (planet.sentinel || planet.sentinel_level) === 'Aggressive' ? 'text-red-400' :
-                          (planet.sentinel || planet.sentinel_level) === 'High' ? 'text-orange-400' :
-                          (planet.sentinel || planet.sentinel_level) === 'Low' ? 'text-green-400' : ''
-                        }>{planet.sentinel || planet.sentinel_level || 'Unknown'}</div>
+                  <div className="p-4 bg-gray-900/50 space-y-3">
+                    {/* Environment & Weather Section */}
+                    <div className="p-3 bg-emerald-900/15 border border-emerald-800/40 rounded-lg">
+                      <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                        <span>{'\u{1F30D}'}</span> Environment
                       </div>
-                      {planet.sentinels_text && (
-                        <div>
-                          <div className="text-xs text-gray-400">Sentinel Info</div>
-                          <div className="text-sm">{planet.sentinels_text}</div>
-                        </div>
-                      )}
-
-                      {/* Fauna */}
-                      <div>
-                        <div className="text-xs text-gray-400">Fauna</div>
-                        <div className={
-                          planet.fauna === 'Rich' ? 'text-yellow-400' :
-                          planet.fauna === 'Average' ? 'text-blue-300' : ''
-                        }>{planet.fauna || 'N/A'}{planet.fauna_count > 0 && ` (${planet.fauna_count} species)`}</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {planet.biome && (
+                          <div>
+                            <div className="text-xs text-gray-500">Biome</div>
+                            <div className="text-green-400 font-medium">{planet.biome}</div>
+                          </div>
+                        )}
+                        {planet.biome_subtype && planet.biome_subtype !== 'None_' && (
+                          <div>
+                            <div className="text-xs text-gray-500">Subtype</div>
+                            <div>{planet.biome_subtype}</div>
+                          </div>
+                        )}
+                        {planet.planet_size && (
+                          <div>
+                            <div className="text-xs text-gray-500">Size</div>
+                            <div>{planet.planet_size}</div>
+                          </div>
+                        )}
+                        {planet.weather && (
+                          <div>
+                            <div className="text-xs text-gray-500">Weather</div>
+                            <div className="text-blue-300">{planet.weather}</div>
+                          </div>
+                        )}
+                        {planet.climate && (
+                          <div>
+                            <div className="text-xs text-gray-500">Climate</div>
+                            <div>{planet.climate}</div>
+                          </div>
+                        )}
+                        {planet.storm_frequency && planet.storm_frequency !== 'Unknown' && (
+                          <div>
+                            <div className="text-xs text-gray-500">Storm Frequency</div>
+                            <div className={
+                              planet.storm_frequency === 'Always' ? 'text-red-400' :
+                              planet.storm_frequency === 'High' ? 'text-orange-400' :
+                              planet.storm_frequency === 'Low' ? 'text-yellow-400' : ''
+                            }>{planet.storm_frequency}</div>
+                          </div>
+                        )}
+                        {planet.weather_intensity && planet.weather_intensity !== 'Unknown' && (
+                          <div>
+                            <div className="text-xs text-gray-500">Weather Intensity</div>
+                            <div className={planet.weather_intensity === 'Extreme' ? 'text-red-400' : ''}>{planet.weather_intensity}</div>
+                          </div>
+                        )}
+                        {planet.has_water === 1 && (
+                          <div>
+                            <div className="text-xs text-gray-500">Water</div>
+                            <div className="text-cyan-400">Present {'\u{1F30A}'}</div>
+                          </div>
+                        )}
+                        {planet.building_density && planet.building_density !== 'Unknown' && (
+                          <div>
+                            <div className="text-xs text-gray-500">Building Density</div>
+                            <div>{planet.building_density}</div>
+                          </div>
+                        )}
                       </div>
-                      {planet.fauna_text && (
-                        <div>
-                          <div className="text-xs text-gray-400">Fauna Info</div>
-                          <div className="text-sm">{planet.fauna_text}</div>
+                      {(planet.weather_text || planet.sentinels_text) && (
+                        <div className="mt-2 pt-2 border-t border-emerald-800/30 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {planet.weather_text && (
+                            <div className="text-xs text-gray-400 italic">{planet.weather_text}</div>
+                          )}
+                          {planet.sentinels_text && (
+                            <div className="text-xs text-gray-400 italic">{planet.sentinels_text}</div>
+                          )}
                         </div>
                       )}
+                    </div>
 
-                      {/* Flora */}
-                      <div>
-                        <div className="text-xs text-gray-400">Flora</div>
-                        <div className={
-                          planet.flora === 'Rich' ? 'text-green-400' :
-                          planet.flora === 'Average' ? 'text-blue-300' : ''
-                        }>{planet.flora || 'N/A'}{planet.flora_count > 0 && ` (${planet.flora_count} species)`}</div>
+                    {/* Life Section */}
+                    <div className="p-3 bg-amber-900/15 border border-amber-800/40 rounded-lg">
+                      <div className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                        <span>{'\u{1F43E}'}</span> Life & Sentinels
                       </div>
-                      {planet.flora_text && (
-                        <div>
-                          <div className="text-xs text-gray-400">Flora Info</div>
-                          <div className="text-sm">{planet.flora_text}</div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="text-center p-2 bg-white/5 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-0.5">Sentinels</div>
+                          <div className={`font-medium ${
+                            (planet.sentinel || planet.sentinel_level) === 'Aggressive' ? 'text-red-400' :
+                            (planet.sentinel || planet.sentinel_level) === 'High' ? 'text-orange-400' :
+                            (planet.sentinel || planet.sentinel_level) === 'Low' ? 'text-green-400' :
+                            (planet.sentinel || planet.sentinel_level) === 'None' ? 'text-green-400' : 'text-gray-300'
+                          }`}>{planet.sentinel || planet.sentinel_level || 'Unknown'}</div>
                         </div>
-                      )}
-
-                      {/* Climate/Weather */}
-                      {planet.climate && (
-                        <div>
-                          <div className="text-xs text-gray-400">Climate</div>
-                          <div>{planet.climate}</div>
+                        <div className="text-center p-2 bg-white/5 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-0.5">Fauna</div>
+                          <div className={`font-medium ${
+                            planet.fauna === 'Rich' ? 'text-yellow-400' :
+                            planet.fauna === 'Generous' ? 'text-yellow-300' :
+                            planet.fauna === 'Average' ? 'text-blue-300' :
+                            planet.fauna === 'Full' ? 'text-green-400' : 'text-gray-300'
+                          }`}>
+                            {planet.fauna || 'N/A'}
+                            {planet.fauna_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.fauna_count})</span>}
+                          </div>
                         </div>
-                      )}
-                      {planet.weather && (
-                        <div>
-                          <div className="text-xs text-gray-400">Weather</div>
-                          <div className="text-blue-300">{planet.weather}</div>
+                        <div className="text-center p-2 bg-white/5 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-0.5">Flora</div>
+                          <div className={`font-medium ${
+                            planet.flora === 'Rich' ? 'text-green-400' :
+                            planet.flora === 'Generous' ? 'text-green-300' :
+                            planet.flora === 'Average' ? 'text-blue-300' :
+                            planet.flora === 'Full' ? 'text-green-400' : 'text-gray-300'
+                          }`}>
+                            {planet.flora || 'N/A'}
+                            {planet.flora_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.flora_count})</span>}
+                          </div>
                         </div>
-                      )}
-                      {planet.weather_text && (
-                        <div>
-                          <div className="text-xs text-gray-400">Weather Info</div>
-                          <div className="text-sm">{planet.weather_text}</div>
-                        </div>
-                      )}
-                      {planet.storm_frequency && planet.storm_frequency !== 'Unknown' && (
-                        <div>
-                          <div className="text-xs text-gray-400">Storm Frequency</div>
-                          <div className={
-                            planet.storm_frequency === 'Always' ? 'text-red-400' :
-                            planet.storm_frequency === 'High' ? 'text-orange-400' :
-                            planet.storm_frequency === 'Low' ? 'text-yellow-400' : ''
-                          }>{planet.storm_frequency}</div>
-                        </div>
-                      )}
-                      {planet.weather_intensity && planet.weather_intensity !== 'Unknown' && (
-                        <div>
-                          <div className="text-xs text-gray-400">Weather Intensity</div>
-                          <div className={planet.weather_intensity === 'Extreme' ? 'text-red-400' : ''}>{planet.weather_intensity}</div>
-                        </div>
-                      )}
-
-                      {/* Building Density */}
-                      {planet.building_density && planet.building_density !== 'Unknown' && (
-                        <div>
-                          <div className="text-xs text-gray-400">Building Density</div>
-                          <div>{planet.building_density}</div>
-                        </div>
-                      )}
-
-                      {/* Water */}
-                      {planet.has_water === 1 && (
-                        <div>
-                          <div className="text-xs text-gray-400">Water</div>
-                          <div className="text-cyan-400">Present</div>
+                      </div>
+                      {(planet.fauna_text || planet.flora_text) && (
+                        <div className="mt-2 pt-2 border-t border-amber-800/30 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {planet.fauna_text && (
+                            <div className="text-xs text-gray-400 italic">{planet.fauna_text}</div>
+                          )}
+                          {planet.flora_text && (
+                            <div className="text-xs text-gray-400 italic">{planet.flora_text}</div>
+                          )}
                         </div>
                       )}
                     </div>
 
                     {/* Hazards Section */}
                     {(planet.hazard_temperature !== 0 || planet.hazard_radiation !== 0 || planet.hazard_toxicity !== 0) && (
-                      <div className="mb-4 p-3 bg-red-900/20 border border-red-800/50 rounded">
-                        <div className="text-xs text-gray-400 mb-2 font-semibold">Environmental Hazards</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="p-3 bg-red-900/15 border border-red-800/40 rounded-lg">
+                        <div className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                          <span>{'\u{26A0}\u{FE0F}'}</span> Environmental Hazards
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
                           {planet.hazard_temperature !== 0 && (
-                            <div>
-                              <div className="text-xs text-gray-400">Temperature</div>
-                              <div className={planet.hazard_temperature > 0 ? 'text-orange-400' : 'text-cyan-400'}>
+                            <div className="text-center p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Temperature</div>
+                              <div className={`font-medium ${planet.hazard_temperature > 0 ? 'text-orange-400' : 'text-cyan-400'}`}>
                                 {planet.hazard_temperature > 0 ? '+' : ''}{planet.hazard_temperature?.toFixed(1)}°
                               </div>
                             </div>
                           )}
                           {planet.hazard_radiation !== 0 && (
-                            <div>
-                              <div className="text-xs text-gray-400">Radiation</div>
-                              <div className="text-yellow-400">{planet.hazard_radiation?.toFixed(1)} rad</div>
+                            <div className="text-center p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Radiation</div>
+                              <div className="text-yellow-400 font-medium">{planet.hazard_radiation?.toFixed(1)} rad</div>
                             </div>
                           )}
                           {planet.hazard_toxicity !== 0 && (
-                            <div>
-                              <div className="text-xs text-gray-400">Toxicity</div>
-                              <div className="text-green-500">{planet.hazard_toxicity?.toFixed(1)} tox</div>
+                            <div className="text-center p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Toxicity</div>
+                              <div className="text-green-500 font-medium">{planet.hazard_toxicity?.toFixed(1)} tox</div>
                             </div>
                           )}
                         </div>
@@ -779,118 +783,205 @@ export default function SystemDetail() {
 
                     {/* Resources Section */}
                     {(planet.common_resource || planet.uncommon_resource || planet.rare_resource || planet.materials) && (
-                      <div className="mb-4 p-3 bg-blue-900/20 border border-blue-800/50 rounded">
-                        <div className="text-xs text-gray-400 mb-2 font-semibold">Resources</div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div className="p-3 bg-blue-900/15 border border-blue-800/40 rounded-lg">
+                        <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                          <span>{'\u{1F48E}'}</span> Resources
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           {planet.common_resource && planet.common_resource !== 'Unknown' && (
-                            <div>
-                              <div className="text-xs text-gray-400">Common</div>
+                            <div className="p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Common</div>
                               <div className="text-gray-300">{planet.common_resource}</div>
                             </div>
                           )}
                           {planet.uncommon_resource && planet.uncommon_resource !== 'Unknown' && (
-                            <div>
-                              <div className="text-xs text-gray-400">Uncommon</div>
+                            <div className="p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Uncommon</div>
                               <div className="text-blue-300">{planet.uncommon_resource}</div>
                             </div>
                           )}
                           {planet.rare_resource && planet.rare_resource !== 'Unknown' && (
-                            <div>
-                              <div className="text-xs text-gray-400">Rare</div>
+                            <div className="p-2 bg-white/5 rounded-lg">
+                              <div className="text-xs text-gray-500 mb-0.5">Rare</div>
                               <div className="text-purple-400">{planet.rare_resource}</div>
                             </div>
                           )}
-                          {planet.materials && (
-                            <div className="col-span-2 md:col-span-3">
-                              <div className="text-xs text-gray-400">All Materials</div>
-                              <div>{planet.materials}</div>
-                            </div>
-                          )}
                         </div>
+                        {planet.materials && (
+                          <div className="mt-2 pt-2 border-t border-blue-800/30">
+                            <div className="text-xs text-gray-500 mb-1">All Materials</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {planet.materials.split(',').map((mat, mi) => (
+                                <span key={mi} className="px-2 py-0.5 bg-blue-900/40 border border-blue-700/40 rounded text-xs text-blue-200">{mat.trim()}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* Additional Info */}
-                    <div className="grid grid-cols-1 gap-4 mb-4">
-                      {planet.base_location && (
-                        <div>
-                          <div className="text-xs text-gray-400">Base Location</div>
-                          <div>{planet.base_location}</div>
+                    {/* Planet Attributes Section */}
+                    {(() => {
+                      const attrs = [
+                        { key: 'has_rings', label: 'Has Rings', icon: '\u{1FA90}' },
+                        { key: 'is_dissonant', label: 'Dissonant', icon: '\u{1F50A}' },
+                        { key: 'is_infested', label: 'Infested', icon: '\u{1F9A0}' },
+                        { key: 'extreme_weather', label: 'Extreme Weather', icon: '\u{26A1}' },
+                        { key: 'water_world', label: 'Water World', icon: '\u{1F30A}' },
+                        { key: 'vile_brood', label: 'Vile Brood', icon: '\u{1F480}' },
+                      ].filter(a => planet[a.key])
+                      const hasExoticTrophy = planet.exotic_trophy && planet.exotic_trophy.trim()
+                      if (attrs.length === 0 && !hasExoticTrophy) return null
+                      return (
+                        <div className="p-3 bg-purple-900/15 border border-purple-800/40 rounded-lg">
+                          <div className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                            <span>{'\u{2728}'}</span> Special Attributes
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {attrs.map(a => (
+                              <span key={a.key} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/20 border border-purple-500/40 rounded-full text-sm text-purple-200">
+                                <span>{a.icon}</span> {a.label}
+                              </span>
+                            ))}
+                            {hasExoticTrophy && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-yellow-500/20 border border-yellow-500/40 rounded-full text-sm text-yellow-200">
+                                <span>{'\u{1F3C6}'}</span> {planet.exotic_trophy}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      {planet.description && (
-                        <div>
-                          <div className="text-xs text-gray-400">Description</div>
-                          <div className="text-gray-300">{planet.description}</div>
-                        </div>
-                      )}
-                    </div>
+                      )
+                    })()}
 
-                    {planet.notes && (
-                      <div className="mb-4">
-                        <div className="text-xs text-gray-400 mb-1">Notes</div>
-                        <div className="text-sm text-gray-300">{planet.notes}</div>
+                    {/* Additional Info */}
+                    {(planet.base_location || planet.description || planet.notes) && (
+                      <div className="p-3 bg-gray-800/50 border border-gray-700/50 rounded-lg space-y-2">
+                        {planet.base_location && (
+                          <div>
+                            <span className="text-xs text-gray-500">Base Location: </span>
+                            <span className="text-gray-300">{planet.base_location}</span>
+                          </div>
+                        )}
+                        {planet.description && (
+                          <div>
+                            <span className="text-xs text-gray-500">Description: </span>
+                            <span className="text-gray-300">{planet.description}</span>
+                          </div>
+                        )}
+                        {planet.notes && (
+                          <div>
+                            <span className="text-xs text-gray-500">Notes: </span>
+                            <span className="text-sm text-gray-300">{planet.notes}</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {planet.photo && (
-                      <div className="mb-4">
-                        <div className="text-xs text-gray-400 mb-2">Photo</div>
+                      <div>
                         <img
                           src={getPhotoUrl(planet.photo)}
                           alt={planet.name}
-                          className="w-full max-w-md rounded border border-gray-700"
+                          className="w-full max-w-md rounded-lg border border-gray-700"
                         />
                       </div>
                     )}
 
                     {/* Moons */}
                     {planet.moons && planet.moons.length > 0 && (
-                      <div className="mt-4">
-                        <h4 className="font-semibold mb-2 text-cyan-400">Moons ({planet.moons.length})</h4>
-                        <div className="space-y-2">
+                      <div className="p-3 bg-cyan-900/15 border border-cyan-800/40 rounded-lg">
+                        <div className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                          <span>{'\u{1F319}'}</span> Moons ({planet.moons.length})
+                        </div>
+                        <div className="space-y-3">
                           {planet.moons.map((moon, moonIndex) => (
-                            <div key={moonIndex} className="bg-gray-800 p-3 rounded border border-cyan-800">
-                              <div className="font-medium mb-2">{moon.name}</div>
-                              <div className="grid grid-cols-2 gap-2 text-sm">
-                                {/* Always show core moon properties */}
-                                <div>
-                                  <div className="text-xs text-gray-400">Sentinel</div>
-                                  <div>{moon.sentinel || 'Unknown'}</div>
+                            <div key={moonIndex} className="bg-gray-800/80 rounded-lg border border-cyan-800/30 overflow-hidden">
+                              <div className="px-3 py-2 bg-cyan-900/20 border-b border-cyan-800/30">
+                                <span className="font-medium text-cyan-200">{moon.name || `Moon ${moonIndex + 1}`}</span>
+                                {moon.biome && <span className="ml-2 text-xs text-green-400">{moon.biome}</span>}
+                              </div>
+                              <div className="p-3">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                                  <div className="text-center p-1.5 bg-white/5 rounded">
+                                    <div className="text-[10px] text-gray-500">Sentinels</div>
+                                    <div className={`text-sm ${
+                                      moon.sentinel === 'Aggressive' ? 'text-red-400' :
+                                      moon.sentinel === 'High' ? 'text-orange-400' :
+                                      moon.sentinel === 'Low' ? 'text-green-400' :
+                                      moon.sentinel === 'None' ? 'text-green-400' : ''
+                                    }`}>{moon.sentinel || 'Unknown'}</div>
+                                  </div>
+                                  <div className="text-center p-1.5 bg-white/5 rounded">
+                                    <div className="text-[10px] text-gray-500">Fauna</div>
+                                    <div className={`text-sm ${
+                                      moon.fauna === 'Rich' ? 'text-yellow-400' : ''
+                                    }`}>{moon.fauna || 'N/A'}</div>
+                                  </div>
+                                  <div className="text-center p-1.5 bg-white/5 rounded">
+                                    <div className="text-[10px] text-gray-500">Flora</div>
+                                    <div className={`text-sm ${
+                                      moon.flora === 'Rich' ? 'text-green-400' : ''
+                                    }`}>{moon.flora || 'N/A'}</div>
+                                  </div>
+                                  {(moon.climate || moon.weather) && (
+                                    <div className="text-center p-1.5 bg-white/5 rounded">
+                                      <div className="text-[10px] text-gray-500">Weather</div>
+                                      <div className="text-sm text-blue-300">{moon.weather || moon.climate}</div>
+                                    </div>
+                                  )}
                                 </div>
-                                <div>
-                                  <div className="text-xs text-gray-400">Fauna</div>
-                                  <div>{moon.fauna || 'N/A'}</div>
-                                </div>
-                                <div>
-                                  <div className="text-xs text-gray-400">Flora</div>
-                                  <div>{moon.flora || 'N/A'}</div>
-                                </div>
-                                {moon.climate && (
-                                  <div>
-                                    <div className="text-xs text-gray-400">Climate</div>
-                                    <div>{moon.climate}</div>
+                                {moon.materials && (
+                                  <div className="mt-2">
+                                    <div className="flex flex-wrap gap-1">
+                                      {moon.materials.split(',').map((mat, mi) => (
+                                        <span key={mi} className="px-1.5 py-0.5 bg-blue-900/30 border border-blue-700/30 rounded text-xs text-blue-200">{mat.trim()}</span>
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
-                                {moon.materials && (
-                                  <div className="col-span-2">
-                                    <div className="text-xs text-gray-400">Materials</div>
-                                    <div>{moon.materials}</div>
+                                {/* Moon Attributes */}
+                                {(() => {
+                                  const moonAttrs = [
+                                    { key: 'has_rings', label: 'Rings', icon: '\u{1FA90}' },
+                                    { key: 'is_dissonant', label: 'Dissonant', icon: '\u{1F50A}' },
+                                    { key: 'is_infested', label: 'Infested', icon: '\u{1F9A0}' },
+                                    { key: 'extreme_weather', label: 'Extreme', icon: '\u{26A1}' },
+                                    { key: 'water_world', label: 'Water', icon: '\u{1F30A}' },
+                                    { key: 'vile_brood', label: 'Vile Brood', icon: '\u{1F480}' },
+                                  ].filter(a => moon[a.key])
+                                  const hasMoonTrophy = moon.exotic_trophy && moon.exotic_trophy.trim()
+                                  if (moonAttrs.length === 0 && !hasMoonTrophy) return null
+                                  return (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {moonAttrs.map(a => (
+                                        <span key={a.key} className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/15 border border-purple-500/30 rounded-full text-xs text-purple-300">
+                                          <span>{a.icon}</span> {a.label}
+                                        </span>
+                                      ))}
+                                      {hasMoonTrophy && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-500/15 border border-yellow-500/30 rounded-full text-xs text-yellow-300">
+                                          <span>{'\u{1F3C6}'}</span> {moon.exotic_trophy}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
+                                {(moon.description || moon.notes) && (
+                                  <div className="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400">
+                                    {moon.description && <div>{moon.description}</div>}
+                                    {moon.notes && <div className="italic">{moon.notes}</div>}
+                                  </div>
+                                )}
+                                {moon.photo && (
+                                  <div className="mt-2">
+                                    <img
+                                      src={getPhotoUrl(moon.photo)}
+                                      alt={moon.name}
+                                      className="max-w-xs max-h-32 rounded border border-gray-700"
+                                    />
                                   </div>
                                 )}
                               </div>
-                              {moon.description && (
-                                <div className="mt-2">
-                                  <div className="text-xs text-gray-400">Description</div>
-                                  <div className="text-sm text-gray-300">{moon.description}</div>
-                                </div>
-                              )}
-                              {moon.notes && (
-                                <div className="mt-2">
-                                  <div className="text-xs text-gray-400">Notes</div>
-                                  <div className="text-sm text-gray-300">{moon.notes}</div>
-                                </div>
-                              )}
                             </div>
                           ))}
                         </div>

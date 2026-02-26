@@ -47,7 +47,14 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       flora: 'N/A',
       materials: '',
       notes: '',
-      photo: null
+      photo: null,
+      has_rings: 0,
+      is_dissonant: 0,
+      is_infested: 0,
+      extreme_weather: 0,
+      water_world: 0,
+      vile_brood: 0,
+      exotic_trophy: ''
     })
     setMoonModalOpen(true)
   }

@@ -2875,35 +2875,41 @@ def migrate_1_40_0(conn):
 
 @register_migration("1.41.0", "Ensure planet attribute columns exist and re-score")
 def migrate_1_41_0(conn):
-    """Fix for v1.40.0 rewrite: ensure all planet attribute columns exist.
+    """Fix for v1.40.0 rewrite: ensure all planet/moon attribute columns exist.
 
     v1.40.0 was rewritten after initial deploy to rename columns. If v1.40.0
     already ran with the old schema, the new columns (has_rings, is_dissonant,
     extreme_weather, water_world) were never created. This migration ensures
-    they all exist and re-scores completeness with the materials fix.
+    they all exist on both planets and moons tables, and re-scores completeness.
     """
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Ensure ALL planet attribute columns exist (safe to re-add, silently skips existing)
-    columns = [
+    # Attribute columns shared by planets and moons
+    attr_columns = [
         ('has_rings', 'INTEGER DEFAULT 0'),
         ('is_dissonant', 'INTEGER DEFAULT 0'),
         ('is_infested', 'INTEGER DEFAULT 0'),
         ('extreme_weather', 'INTEGER DEFAULT 0'),
         ('water_world', 'INTEGER DEFAULT 0'),
         ('vile_brood', 'INTEGER DEFAULT 0'),
+        ('exotic_trophy', 'TEXT'),
+    ]
+
+    # Planet-only columns (valuable resources + legacy)
+    planet_extra_columns = [
         ('ancient_bones', 'INTEGER DEFAULT 0'),
         ('salvageable_scrap', 'INTEGER DEFAULT 0'),
         ('storm_crystals', 'INTEGER DEFAULT 0'),
         ('gravitino_balls', 'INTEGER DEFAULT 0'),
-        ('exotic_trophy', 'TEXT'),
         # Legacy names from original v1.40.0
         ('dissonance', 'INTEGER DEFAULT 0'),
         ('infested', 'INTEGER DEFAULT 0'),
     ]
+
+    # Add attribute columns to planets table
     added = 0
-    for col_name, col_type in columns:
+    for col_name, col_type in attr_columns + planet_extra_columns:
         try:
             cursor.execute(f'ALTER TABLE planets ADD COLUMN {col_name} {col_type}')
             logger.info(f"Added missing column planets.{col_name}")
@@ -2915,6 +2921,21 @@ def migrate_1_41_0(conn):
         logger.info(f"Added {added} missing planet attribute columns")
     else:
         logger.info("All planet attribute columns already present")
+
+    # Add attribute columns to moons table
+    moon_added = 0
+    for col_name, col_type in attr_columns:
+        try:
+            cursor.execute(f'ALTER TABLE moons ADD COLUMN {col_name} {col_type}')
+            logger.info(f"Added column moons.{col_name}")
+            moon_added += 1
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
+    if moon_added > 0:
+        logger.info(f"Added {moon_added} moon attribute columns")
+    else:
+        logger.info("All moon attribute columns already present")
 
     # Re-score completeness with materials fix
     NO_LIFE_BIOMES = {'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere', 'Gas Giant', 'Empty'}

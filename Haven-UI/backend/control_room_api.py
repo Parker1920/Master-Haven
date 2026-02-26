@@ -2288,7 +2288,7 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
             if map_vis == 'hidden':
                 continue  # Don't show on map
             elif map_vis == 'point_only':
-                # Strip hover/detail info - keep only position data
+                # Strip hover/detail info - keep only position + display data
                 filtered_system = {
                     'id': system.get('id'),
                     'name': system.get('name'),
@@ -2299,6 +2299,7 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
                     'star_y': system.get('star_y'),
                     'star_z': system.get('star_z'),
                     'galaxy': system.get('galaxy'),
+                    'star_type': system.get('star_type'),
                     'map_visibility': 'point_only',
                     'planets': []
                 }
@@ -9163,8 +9164,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # Insert moons with ALL fields
             for moon in planet.get('moons', []):
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name', 'Unknown'),
@@ -9177,7 +9179,14 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     moon.get('materials'),
                     moon.get('notes'),
                     moon.get('description', ''),
-                    moon.get('photo')
+                    moon.get('photo'),
+                    1 if moon.get('has_rings') else 0,
+                    1 if moon.get('is_dissonant') else 0,
+                    1 if moon.get('is_infested') else 0,
+                    1 if moon.get('extreme_weather') else 0,
+                    1 if moon.get('water_world') else 0,
+                    1 if moon.get('vile_brood') else 0,
+                    moon.get('exotic_trophy')
                 ))
 
         # Insert space station if present
@@ -12560,8 +12569,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             # Insert moons (nested under planet)
             for moon in planet.get('moons', []):
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -12574,7 +12584,14 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     moon.get('materials'),
                     moon.get('notes'),
                     moon.get('description', ''),
-                    moon.get('photo')
+                    moon.get('photo'),
+                    1 if moon.get('has_rings') else 0,
+                    1 if moon.get('is_dissonant') else 0,
+                    1 if moon.get('is_infested') else 0,
+                    1 if moon.get('extreme_weather') else 0,
+                    1 if moon.get('water_world') else 0,
+                    1 if moon.get('vile_brood') else 0,
+                    moon.get('exotic_trophy')
                 ))
 
         # Handle root-level moons (from Haven Extractor which sends moons as flat list)
@@ -12586,8 +12603,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             logger.info(f"Processing {len(root_moons)} root-level moons for system {system_id}")
             for moon in root_moons:
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                        has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,  # Attach to last planet
                     moon.get('name'),
@@ -12600,7 +12618,14 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     moon.get('materials'),
                     moon.get('notes'),
                     moon.get('description', ''),
-                    moon.get('photo')
+                    moon.get('photo'),
+                    1 if moon.get('has_rings') else 0,
+                    1 if moon.get('is_dissonant') else 0,
+                    1 if moon.get('is_infested') else 0,
+                    1 if moon.get('extreme_weather') else 0,
+                    1 if moon.get('water_world') else 0,
+                    1 if moon.get('vile_brood') else 0,
+                    moon.get('exotic_trophy')
                 ))
 
         # Insert space station if present
@@ -13208,8 +13233,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
 
                     for moon in planet.get('moons', []):
                         cursor.execute('''
-                            INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                                has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             planet_id,
                             moon.get('name'),
@@ -13222,7 +13248,14 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             moon.get('materials'),
                             moon.get('notes'),
                             moon.get('description', ''),
-                            moon.get('photo')
+                            moon.get('photo'),
+                            1 if moon.get('has_rings') else 0,
+                            1 if moon.get('is_dissonant') else 0,
+                            1 if moon.get('is_infested') else 0,
+                            1 if moon.get('extreme_weather') else 0,
+                            1 if moon.get('water_world') else 0,
+                            1 if moon.get('vile_brood') else 0,
+                            moon.get('exotic_trophy')
                         ))
 
                 # Insert space station if present
@@ -13777,6 +13810,7 @@ async def receive_extraction(
             'planet_size': planet_data.get('planet_size', 'Unknown'),
             'resources': [
                 r for r in [
+                    planet_data.get('plant_resource'),
                     planet_data.get('common_resource'),
                     planet_data.get('uncommon_resource'),
                     planet_data.get('rare_resource')
@@ -13784,6 +13818,7 @@ async def receive_extraction(
             ],
             'materials': ', '.join([
                 r for r in [
+                    planet_data.get('plant_resource'),
                     planet_data.get('common_resource'),
                     planet_data.get('uncommon_resource'),
                     planet_data.get('rare_resource')
@@ -13791,9 +13826,9 @@ async def receive_extraction(
             ]),  # Comma-separated for Haven UI display
             # Planet specials + valuable resources
             'has_rings': planet_data.get('has_rings'),
-            'is_dissonant': planet_data.get('is_dissonant'),
-            'is_infested': planet_data.get('is_infested'),
-            'extreme_weather': planet_data.get('extreme_weather'),
+            'is_dissonant': planet_data.get('is_dissonant') or planet_data.get('dissonance'),
+            'is_infested': planet_data.get('is_infested') or planet_data.get('infested'),
+            'extreme_weather': planet_data.get('extreme_weather') or planet_data.get('is_weather_extreme'),
             'water_world': planet_data.get('water_world'),
             'vile_brood': planet_data.get('vile_brood'),
             'ancient_bones': planet_data.get('ancient_bones'),
