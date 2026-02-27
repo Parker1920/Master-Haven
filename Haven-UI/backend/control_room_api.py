@@ -14312,7 +14312,7 @@ async def receive_extraction(
                 UPDATE pending_systems
                 SET raw_json = ?, system_data = ?, submission_timestamp = ?,
                     discord_tag = ?, personal_discord_username = ?, personal_id = ?,
-                    system_name = ?, galaxy = ?, region_x = ?, region_y = ?, region_z = ?,
+                    system_name = ?, galaxy = ?, reality = ?, region_x = ?, region_y = ?, region_z = ?,
                     x = ?, y = ?, z = ?
                 WHERE id = ?
             ''', (
@@ -14324,6 +14324,7 @@ async def receive_extraction(
                 personal_id if personal_id else None,
                 submission_data['name'],
                 submission_data['galaxy'],
+                reality,
                 region_x,
                 region_y,
                 region_z,
@@ -14355,16 +14356,17 @@ async def receive_extraction(
 
         cursor.execute('''
             INSERT INTO pending_systems (
-                system_name, glyph_code, galaxy, x, y, z,
+                system_name, glyph_code, galaxy, reality, x, y, z,
                 region_x, region_y, region_z,
                 submitter_name, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
                 submitted_by_ip, api_key_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
             submission_data['galaxy'],
+            reality,
             submission_data['x'],
             submission_data['y'],
             submission_data['z'],
