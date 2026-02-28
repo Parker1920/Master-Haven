@@ -3,7 +3,7 @@ param(
     [string[]]$Include = @(
         'src/control_room_api.py',
         'Haven-UI/server.py',
-        'scripts/ngrok_check.ps1',
+        'scripts/create_update_archive.ps1',
         'docs/PI-DEPLOYMENT-GUIDE.md'
     )
 )

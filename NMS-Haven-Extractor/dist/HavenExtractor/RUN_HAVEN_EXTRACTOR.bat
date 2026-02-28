@@ -18,7 +18,7 @@ if not exist "python\python.exe" (
 )
 
 REM API URL is hardcoded in the mod - always enabled!
-echo API Config: HARDCODED - voyagers-haven-3dmap.ngrok.io
+echo API Config: HARDCODED - havenmap.online
 echo Remote sync is enabled by default!
 echo.
 

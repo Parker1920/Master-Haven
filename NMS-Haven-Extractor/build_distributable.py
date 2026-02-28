@@ -174,7 +174,7 @@ if not exist "python\python.exe" (
 )
 
 REM API URL is hardcoded in the mod - always enabled!
-echo API Config: HARDCODED - voyagers-haven-3dmap.ngrok.io
+echo API Config: HARDCODED - havenmap.online
 echo Remote sync is enabled by default!
 echo.
 
@@ -246,14 +246,14 @@ QUICK START:
 
 API SYNC:
 Remote sync is ENABLED BY DEFAULT!
-The API URL (voyagers-haven-3dmap.ngrok.io) is hardcoded in the mod.
+The API URL (havenmap.online) is hardcoded in the mod.
 No configuration needed - just run and extract!
 
-If you need to use a DIFFERENT ngrok URL:
+If you need to use a DIFFERENT API URL:
 1. Go to mod/ folder
 2. Copy "haven_config.json.example" to "haven_config.json"
-3. Edit haven_config.json and set your custom ngrok URL:
-   {"api_url": "https://your-custom-url.ngrok-free.app"}
+3. Edit haven_config.json and set your custom URL:
+   {"api_url": "https://your-custom-url.example.com"}
 
 REQUIREMENTS:
 - No Man's Sky (Steam version recommended)
@@ -270,7 +270,7 @@ TROUBLESHOOTING:
 - If the game doesn't start, try running as Administrator
 - Make sure No Man's Sky is installed via Steam
 - Check that antivirus isn't blocking the launcher
-- If API sync fails, make sure Haven UI host has ngrok running
+- If API sync fails, make sure Haven UI host is accessible at havenmap.online
 
 LOCAL OUTPUT (always saved as backup):
   %USERPROFILE%\Documents\Haven-Extractor\latest.json

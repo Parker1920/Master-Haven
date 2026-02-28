@@ -649,7 +649,7 @@ Edit `NMS-Haven-Extractor/haven_config.json.example`:
 
 Edit `NMS-Haven-Extractor/build_distributable.py`:
 
-Find any references to `ngrok` URLs and replace with `havenmap.online`.
+All references now use `havenmap.online`.
 
 ### Step 8.3: Update Your Local Config
 
@@ -886,7 +886,7 @@ sudo /usr/local/bin/cloudflare-ddns.sh
 - [ ] Dynamic DNS cron job is set up
 - [ ] Haven auto-starts after reboot (`sudo reboot` then check)
 - [ ] Haven Extractor config updated with new domain
-- [ ] ngrok subscription cancelled
+- [x] ngrok subscription cancelled
 
 ---
 

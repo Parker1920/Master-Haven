@@ -29,7 +29,7 @@ Haven is a shared database for No Man's Sky discoveries. It allows players and c
 Open your web browser and go to:
 
 ```
-https://voyagers-haven-3dmap.ngrok.io
+https://havenmap.online
 ```
 
 ---
@@ -44,7 +44,7 @@ This section is for **all users** - whether you're part of a Discord community o
 
 From the homepage, click **"Add System"** or go directly to:
 ```
-https://voyagers-haven-3dmap.ngrok.io/haven-ui/wizard
+https://havenmap.online/haven-ui/wizard
 ```
 
 #### Step 2: Enter System Information
@@ -136,7 +136,7 @@ Partner accounts are created by Haven administrators. If you'd like to register 
 
 1. Go to **Admin Login** or visit:
    ```
-   https://voyagers-haven-3dmap.ngrok.io/haven-ui/login
+   https://havenmap.online/haven-ui/login
    ```
 
 2. Enter your Partner credentials (username and password)
@@ -165,7 +165,7 @@ Your main job is reviewing submissions from your community members:
 
 1. Go to **Pending Approvals**
    ```
-   https://voyagers-haven-3dmap.ngrok.io/haven-ui/approvals
+   https://havenmap.online/haven-ui/approvals
    ```
 
 2. You'll see submissions tagged with your community
@@ -196,7 +196,7 @@ Need help managing submissions? Create Sub-Admin accounts for trusted community 
 
 1. Go to **Sub-Admins**
    ```
-   https://voyagers-haven-3dmap.ngrok.io/haven-ui/sub-admins
+   https://havenmap.online/haven-ui/sub-admins
    ```
 
 2. Click **"Create Sub-Admin"**
@@ -238,7 +238,7 @@ Sub-Admins are **community helpers** who assist Partners with managing submissio
 
 1. Go to **Admin Login**:
    ```
-   https://voyagers-haven-3dmap.ngrok.io/haven-ui/login
+   https://havenmap.online/haven-ui/login
    ```
 
 2. Enter the credentials your Partner gave you

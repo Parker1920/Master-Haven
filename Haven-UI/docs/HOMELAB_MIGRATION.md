@@ -65,16 +65,16 @@ The project extracts planet and system data from NMS via a Python mod (pyMHF/NMS
 - **Web server:** Local Python web server running on port 8005
 - **Data storage:** JSON files + database (SQLite or similar, stored locally on disk)
 - **Game integration:** pyMHF/NMS.py mod extracts game data → writes JSON → web server reads and displays
-- **Current hosting:** Haven AND ngrok both run on the 2GB Pi already. ngrok tunnel ($20/month paid tier) is being migrated away.
+- **Current hosting:** Haven runs on the 2GB Pi. Previously used ngrok tunnel ($20/month paid tier), now migrated to self-hosted domain (havenmap.online).
 - **GitHub:** Parker1920/Master-Haven (public repository)
 - **Domain:** havenmap.online (purchased from Namecheap, 2-year registration)
 
 **Why It's Being Migrated:**
-Parker is currently on ngrok's $20/month paid tier. Haven doesn't generate revenue, so a recurring subscription for hosting a community project doesn't make financial sense long-term — especially since costs would only increase if the project gains traction and needs higher ngrok tiers. Self-hosting on hardware Parker already owns eliminates that ongoing cost entirely. As a bonus, Parker gets a permanent custom domain URL instead of ngrok's generated subdomains, and full control over the infrastructure.
+Parker was on ngrok's $20/month paid tier. Haven doesn't generate revenue, so a recurring subscription for hosting a community project didn't make financial sense long-term. Self-hosting on hardware Parker already owns eliminated that ongoing cost entirely, with a permanent custom domain URL (havenmap.online) and full control over the infrastructure.
 
-**Migration Path: ngrok → Self-Hosted:**
-1. Haven currently runs as a bare Python process on port 8005 on the 2GB Pi, with ngrok tunneling traffic to it
-2. Phase 1: Add NPM on the same Pi, route `havenmap.online` through NPM → localhost:8005. Both ngrok and NPM can run simultaneously during migration.
+**Migration Path (ngrok → Self-Hosted) — COMPLETED:**
+1. Haven ran as a bare Python process on port 8005 on the 2GB Pi, with ngrok tunneling traffic to it
+2. Phase 1 (DONE): Added NPM on the same Pi, routed `havenmap.online` through NPM → localhost:8005
 3. Phase 2: Containerize Haven in Docker (Dockerfile wrapping the Python app)
 4. Long-term: Haven runs as a Docker container, managed by Portainer, monitored by Uptime Kuma, accessible at `https://havenmap.online`
 
@@ -85,7 +85,7 @@ Parker is currently on ngrok's $20/month paid tier. Haven doesn't generate reven
 ### Currently Owned
 | Item | Specs | Role | Notes |
 |------|-------|------|-------|
-| Raspberry Pi 5 | 2GB RAM | **Temporary:** All services | Running at static IP 10.0.0.33 over WiFi. Currently hosts Haven (bare Python) + NPM + DDNS. ngrok still running but being phased out. Will become network infrastructure only (Pi-hole, DDNS, VPN) after 8GB Pi is purchased. |
+| Raspberry Pi 5 | 2GB RAM | **Temporary:** All services | Running at static IP 10.0.0.33 over WiFi. Currently hosts Haven (bare Python) + NPM + DDNS. Will become network infrastructure only (Pi-hole, DDNS, VPN) after 8GB Pi is purchased. |
 | Xfinity Router/Gateway | Residential gateway, LAN subnet 10.0.0.0/24, gateway IP 10.0.0.1 | Internet + port forwarding | Port forwarding configured via xFi app: 80→Pi, 443→Pi |
 | Domain | havenmap.online, purchased from Namecheap, 2-year registration | Public URL for Haven | Nameservers: noel.ns.cloudflare.com, dina.ns.cloudflare.com ✅ Active |
 
@@ -320,7 +320,7 @@ These are configured via the **xFi app** (not the web interface — Xfinity's we
 Each phase builds on the previous. **Do not skip phases.** Validate each phase works before advancing. Parker should be able to test and confirm success at each checkpoint.
 
 ### Phase 1: Get Haven Live on Domain
-**Goal:** Replace ngrok with self-hosted domain access. This is the most critical phase — nothing else matters until Haven is accessible at `https://havenmap.online`.
+**Goal:** Replace ngrok with self-hosted domain access. ✅ COMPLETED — Haven is live at `https://havenmap.online`.
 
 **Prerequisites:** CGNAT confirmed absent ✅ (Feb 1, 2026). Domain purchased ✅. SSH key auth configured ✅.
 
@@ -335,10 +335,10 @@ Each phase builds on the previous. **Do not skip phases.** Validate each phase w
 8. Access NPM admin at `http://10.0.0.33:81`, change default credentials ✅
 9. Add proxy host: domain → forward to `http://10.0.0.33:8005` → request SSL → force HTTPS ✅
    - **Note:** Forward Hostname must be the Pi's IP (10.0.0.33), NOT localhost. NPM runs in Docker, so localhost inside the container means the container itself.
-10. Haven already running on port 8005 (via existing ngrok setup) ✅
+10. Haven already running on port 8005 ✅
 11. Test from phone (not on home WiFi) or ask someone external to test ✅
 12. Fix NAT hairpinning for local access (hosts file on Windows PC) ✅
-13. If working: shut down ngrok permanently ⏳ (can do anytime — ngrok still running in parallel for now)
+13. Shut down ngrok permanently ✅
 
 **Success checkpoint:** ✅ ACHIEVED — Visiting `https://havenmap.online` from outside the home network shows Haven with a green padlock.
 
@@ -491,7 +491,7 @@ Run existing monitoring stack first, identify gaps, then define scope. Python st
 No CGNAT. Confirmed Feb 1, 2026. Public IP 174.59.238.206 matches Xfinity WAN IPv4. Phase 1 is fully unblocked. Dynamic IP handled by DDNS container.
 
 ### 6.4 8GB Pi Purchase Timeline — NOT YET PURCHASED
-Parker plans to buy it but hasn't yet. **Phase 1 is proceeding on the 2GB Pi** — it runs Haven (bare process) + ngrok + NPM + DDNS comfortably (~375MB total, leaves ~1.4GB headroom). When the 8GB Pi arrives, NPM and Haven will migrate to it, and the 2GB Pi becomes dedicated to network infrastructure (Pi-hole, DDNS, VPN).
+Parker plans to buy it but hasn't yet. **Phase 1 completed on the 2GB Pi** — it runs Haven (bare process) + NPM + DDNS comfortably (~350MB total, leaves ~1.5GB headroom). When the 8GB Pi arrives, NPM and Haven will migrate to it, and the 2GB Pi becomes dedicated to network infrastructure (Pi-hole, DDNS, VPN).
 
 ---
 
@@ -586,7 +586,7 @@ services:
     restart: unless-stopped
 ```
 
-**Note:** Haven runs as a bare Python process alongside these containers (not containerized yet — that's Phase 2). ngrok also runs on this Pi for now; it will be shut down once `havenmap.online` is confirmed working.
+**Note:** Haven runs as a bare Python process alongside these containers (not containerized yet — that's Phase 2).
 
 #### 2GB Pi: Future Configuration (After 8GB Pi is purchased)
 
