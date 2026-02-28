@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v9.0.0
+title Haven Extractor v1.5.1
 echo ============================================================
-echo   HAVEN EXTRACTOR v9.0.0 - Batch Mode
+echo   HAVEN EXTRACTOR v1.5.1 - Batch Mode
 echo   For No Man's Sky
 echo ============================================================
 echo.

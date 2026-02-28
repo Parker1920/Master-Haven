@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v9.0.0 - First Time Setup
+title Haven Extractor v1.5.1 - First Time Setup
 echo ============================================================
-echo   HAVEN EXTRACTOR v9.0.0 - Installation Verification
+echo   HAVEN EXTRACTOR v1.5.1 - Installation Verification
 echo ============================================================
 echo.
 
