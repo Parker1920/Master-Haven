@@ -50,4 +50,7 @@ roundtable_ai/
 NMS-Memory-Browser/
 NMS-Save-Watcher/
 NMS-Haven-Extractor/haven_extractor_mod/
+NMS-Haven-Extractor/dist/
+NMS-Debug-Enabler/
+Planet_Atlas/
 scripts/
