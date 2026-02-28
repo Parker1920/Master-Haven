@@ -1,6 +1,6 @@
 {
   "api": {
-    "base_url": "http://localhost:8000",
+    "base_url": "http://localhost:8005",
     "key": "your_api_key_here"
   },
   "watcher": {

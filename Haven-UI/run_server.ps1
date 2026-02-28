@@ -5,7 +5,7 @@ Usage: Run this from PowerShell in the Haven-UI folder or as an absolute path.
 #>
 param(
   [string]$HostName = '127.0.0.1',
-  [int]$Port = 8000,
+  [int]$Port = 8005,
   [switch]$Reload
 )
 

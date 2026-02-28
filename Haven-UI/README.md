@@ -41,7 +41,7 @@ $env:HAVEN_UI_DIR = "$PWD\Haven-UI"
 python -m uvicorn src.control_room_api:app --host 127.0.0.1 --port 8005 --reload
 ```
 
-4. Open a browser to `http://localhost:8000/haven-ui/`.
+4. Open a browser to `http://localhost:8005/haven-ui/`.
 
 Note: This server expects to be run from the repo root so that it can import shared modules (e.g., `src.control_room_api`). If you want a fully standalone package, copy `src/common` and other required modules, or adapt PYTHONPATH accordingly.
 

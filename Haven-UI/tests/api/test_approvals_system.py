@@ -125,7 +125,7 @@ try:
     print("  1. Start the Control Room server:")
     print("     python src\\control_room_api.py")
     print()
-    print("  2. Open browser to http://localhost:8000/haven-ui/")
+    print("  2. Open browser to http://localhost:8005/haven-ui/")
     print()
     print("  3. Test non-admin submission:")
     print("     - Go to 'Create' page (do NOT login)")

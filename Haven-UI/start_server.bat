@@ -4,7 +4,7 @@ REM This runs in the foreground so you can see the logs directly
 
 cd /d "%~dp0.."
 echo Starting Haven Control Room API...
-echo Server will run on http://localhost:8000
+echo Server will run on http://localhost:8005
 echo Press Ctrl+C to stop the server
 echo.
 
