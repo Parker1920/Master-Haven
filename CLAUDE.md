@@ -22,10 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.38.1 | 2026-02-26 | Galaxy name fix |
-| Haven-UI | 1.38.1 | 2026-02-26 | React dashboard |
-| Backend API | 1.38.1 | 2026-02-26 | FastAPI + SQLite |
-| Haven Extractor | 1.5.1 | 2026-02-26 | Galaxy name fix - all 256 galaxies |
+| **Master Haven** | 1.39.0 | 2026-02-27 | Dynamic communities, login fix, star colors |
+| Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
+| Backend API | 1.38.2 | 2026-02-27 | Login response completeness fix |
+| Haven Extractor | 1.6.0 | 2026-02-27 | Dynamic community list, auto-updater |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -66,6 +66,29 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | Keeper Bot | `keeper-discord-bot-main/CLAUDE.md` → Quick Reference | |
 
 ### Changelog
+
+#### Master Haven 1.39.0 (2026-02-27) - Dynamic Communities, Login Fix, Star Colors
+Multiple bug fixes and extractor feature upgrade.
+
+**Haven-UI 1.38.2**
+- Fixed: star color always displayed yellow on SystemDetail page — now conditional based on star_type (Yellow/Red/Green/Blue/Purple)
+- Fixed: super admin login response missing `discord_tag`, `display_name`, `enabled_features`, `account_id`
+- Fixed: partner login response missing `account_id`
+- Fixed: sub-admin login response missing `account_id`
+
+**Backend API 1.38.2**
+- Login endpoint responses now include all fields that AuthContext expects (`account_id`, `discord_tag`, `display_name`, `enabled_features`)
+- Matches `/api/admin/status` response shape for consistent auth state
+
+**Haven Extractor 1.6.0**
+- Dynamic community list: fetches from `/api/communities` on startup, caches locally, falls back to hardcoded defaults
+- `CommunityTag` enum built dynamically from server response instead of static 25-entry class
+- Cache stored at `~/Documents/Haven-Extractor/communities_cache.json`
+- New communities added via partner dashboard appear in extractor dropdown automatically
+- Auto-updater: new `UPDATE_HAVEN_EXTRACTOR.bat` + `haven_updater.ps1` for mod-only updates via GitHub Releases
+- Updater checks version, downloads mod-only zip (~500 KB), backs up current mod, preserves user config
+
+---
 
 #### Master Haven 1.38.1 (2026-02-26) - Galaxy Name Fix
 Fix extractor galaxy naming bug and merge misnamed galaxy entries.

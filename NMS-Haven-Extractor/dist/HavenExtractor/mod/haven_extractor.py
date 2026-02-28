@@ -225,6 +225,85 @@ USER_DISCORD_TAG = _config.get("discord_tag", "personal")
 USER_REALITY = _config.get("reality", "Normal")
 
 # =============================================================================
+# DYNAMIC COMMUNITY LIST
+# Fetched from server on startup, cached locally, hardcoded fallback
+# =============================================================================
+
+_DEFAULT_COMMUNITY_TAGS = [
+    "personal", "Haven", "AGT", "ARCH", "AA", "AP", "B.E.S", "YGS", "CR",
+    "EVRN", "GHUB", "IEA", "NEO", "O.Q", "Ph-Z0", "QRR", "RwR", "SHDW",
+    "Veil1", "TBH", "INDM", "TMA", "UFE", "VCTH", "ZBA",
+]
+
+def _fetch_communities_list() -> list:
+    """
+    Fetch community tags from Haven API, with local cache fallback.
+    Priority: live server → cached file → hardcoded defaults.
+    """
+    cache_path = Path.home() / "Documents" / "Haven-Extractor" / "communities_cache.json"
+
+    # Try fetching from server
+    try:
+        url = f"{API_BASE_URL}/api/communities"
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(url, headers={
+            'User-Agent': f'HavenExtractor',
+        })
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        communities = data.get('communities', [])
+        tags = [c['tag'] for c in communities if c.get('tag')]
+
+        if tags:
+            # Normalize "Personal" → "personal" (API returns capital P)
+            tags = ["personal" if t.lower() == "personal" else t for t in tags]
+            # Ensure "personal" is always first
+            if "personal" in tags:
+                tags.remove("personal")
+            tags.insert(0, "personal")
+
+            # Cache to disk
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump({"tags": tags}, f, indent=2)
+
+            logger.info(f"[COMMUNITIES] Fetched {len(tags)} communities from server")
+            return tags
+    except Exception as e:
+        logger.debug(f"[COMMUNITIES] Could not fetch from server: {e}")
+
+    # Try loading from cache
+    try:
+        if cache_path.exists():
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                cached = json.load(f)
+            tags = cached.get('tags', [])
+            if tags:
+                logger.info(f"[COMMUNITIES] Using cached list ({len(tags)} communities)")
+                return tags
+    except Exception as e:
+        logger.debug(f"[COMMUNITIES] Could not read cache: {e}")
+
+    # Hardcoded fallback
+    logger.info(f"[COMMUNITIES] Using default list ({len(_DEFAULT_COMMUNITY_TAGS)} communities)")
+    return list(_DEFAULT_COMMUNITY_TAGS)
+
+
+def _make_enum_name(tag: str) -> str:
+    """Convert a community tag string to a valid Python enum member name."""
+    name = tag.replace('.', '_').replace('-', '_')
+    if name[0].isdigit():
+        name = '_' + name
+    return name
+
+
+# Fetch community list at module load (before class definition)
+_COMMUNITY_TAGS = _fetch_communities_list()
+
+# =============================================================================
 # MEMORY OFFSET CONSTANTS (from MBINCompiler / NMS 4.13 PDB)
 # These may need adjustment for different game versions
 # =============================================================================
@@ -1036,32 +1115,8 @@ def map_weather_enum_to_adjective(value: str) -> str:
 # GUI Enum types for pymhf 0.2.2+ (replaces deprecated gui_combobox)
 # =========================================================================
 
-class CommunityTag(Enum):
-    personal = "personal"
-    Haven = "Haven"
-    AGT = "AGT"
-    ARCH = "ARCH"
-    AA = "AA"
-    AP = "AP"
-    BES = "B.E.S"
-    YGS = "YGS"
-    CR = "CR"
-    EVRN = "EVRN"
-    GHUB = "GHUB"
-    IEA = "IEA"
-    NEO = "NEO"
-    OQ = "O.Q"
-    PhZ0 = "Ph-Z0"
-    QRR = "QRR"
-    RwR = "RwR"
-    SHDW = "SHDW"
-    Veil1 = "Veil1"
-    TBH = "TBH"
-    INDM = "INDM"
-    TMA = "TMA"
-    UFE = "UFE"
-    VCTH = "VCTH"
-    ZBA = "ZBA"
+# CommunityTag enum built dynamically from server/cache/fallback list
+CommunityTag = Enum('CommunityTag', {_make_enum_name(tag): tag for tag in _COMMUNITY_TAGS})
 
 
 class RealityMode(Enum):
@@ -1071,7 +1126,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.5.1"
+    __version__ = "1.6.0"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1220,34 +1275,8 @@ class HavenExtractorMod(Mod):
         USER_DISCORD_USERNAME = value
         self._save_config_to_file()
 
-    # All community partner tags - alphabetically sorted by display name
-    COMMUNITY_TAGS = [
-        "personal",      # Independent Explorers (default)
-        "Haven",         # Haven Hub
-        "AGT",           # Alliance of Galactic Travelers
-        "ARCH",          # ARCH
-        "AA",            # AstroAcutioneer
-        "AP",            # Aurelis Prime
-        "B.E.S",         # B.E.S
-        "YGS",           # Circle of Yggdrasil
-        "CR",            # Crimson Runners
-        "EVRN",          # EVRN
-        "GHUB",          # Galactic Hub Project
-        "IEA",           # IEA
-        "NEO",           # Neo Terra Collective
-        "O.Q",           # Outskirt Queers
-        "Ph-Z0",         # Phantom-Zer0
-        "QRR",           # The Quasar Republic Reforged
-        "RwR",           # Red Water Runners
-        "SHDW",          # Shadow Worlds
-        "Veil1",         # Soren Veil
-        "TBH",           # T-BH (The Black Hole)
-        "INDM",          # The Indominus Legion
-        "TMA",           # The Mourning Amity
-        "UFE",           # UltimateFeudEnterprise
-        "VCTH",          # Void Citadel
-        "ZBA",           # Zabia
-    ]
+    # Community tags - dynamically fetched from server (see _fetch_communities_list)
+    COMMUNITY_TAGS = _COMMUNITY_TAGS
 
     @property
     @gui_variable.ENUM("Community Tag", enum=CommunityTag)

@@ -443,7 +443,13 @@ export default function SystemDetail() {
             {system.star_type && (
               <div>
                 <div className="text-xs text-gray-400">Star Type</div>
-                <div className="text-yellow-400">{system.star_type}</div>
+                <div className={
+                  system.star_type === 'Yellow' ? 'text-yellow-400' :
+                  system.star_type === 'Red' ? 'text-red-400' :
+                  system.star_type === 'Green' ? 'text-green-400' :
+                  system.star_type === 'Blue' ? 'text-blue-400' :
+                  system.star_type === 'Purple' ? 'text-purple-400' : 'text-gray-400'
+                }>{system.star_type}</div>
               </div>
             )}
             {system.stellar_classification && (

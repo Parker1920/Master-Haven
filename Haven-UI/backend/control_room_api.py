@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.2', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -2406,7 +2406,11 @@ async def admin_login(credentials: dict, response: Response):
                 'status': 'ok',
                 'logged_in': True,
                 'user_type': 'super_admin',
-                'username': username
+                'username': username,
+                'discord_tag': None,
+                'display_name': 'Super Admin',
+                'enabled_features': ['all'],
+                'account_id': None
             }
         raise HTTPException(status_code=401, detail='Invalid password')
 
@@ -2466,7 +2470,8 @@ async def admin_login(credentials: dict, response: Response):
                 'username': username,
                 'discord_tag': row['discord_tag'],
                 'display_name': row['display_name'] or username,
-                'enabled_features': enabled_features
+                'enabled_features': enabled_features,
+                'account_id': row['id']
             }
 
         # Not a partner - check sub_admin_accounts
@@ -2548,7 +2553,8 @@ async def admin_login(credentials: dict, response: Response):
             'display_name': sub_row['display_name'] or username,
             'parent_display_name': parent_display_name,
             'enabled_features': enabled_features,
-            'is_haven_sub_admin': is_haven_sub_admin
+            'is_haven_sub_admin': is_haven_sub_admin,
+            'account_id': sub_row['id']
         }
     finally:
         if conn:
