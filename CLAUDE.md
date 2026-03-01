@@ -24,7 +24,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
 | Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
-| Backend API | 1.38.4 | 2026-02-28 | Fix resource [] in extraction, remove resources list field |
+| Backend API | 1.38.5 | 2026-02-28 | Bundle galaxies.json for production Pi deployment |
 | Haven Extractor | 1.6.4 | 2026-02-28 | Fix star color always yellow, direct memory read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -94,8 +94,8 @@ Fix pending submissions not being recognized as edits, causing glyph conflict er
 
 ---
 
-#### Haven Extractor 1.6.4 + Backend API 1.38.4 (2026-02-28) - Star Color & Resource Fixes
-Fix star color always sending yellow and resource `[]` bracket issue in pending submissions.
+#### Haven Extractor 1.6.4 + Backend API 1.38.5 (2026-02-28) - Star Color, Resource & Galaxy Fixes
+Fix star color always sending yellow, resource `[]` bracket issue, and galaxy validation failure on production Pi.
 
 **Haven Extractor 1.6.4**
 - Fixed: star color always sent as "Yellow" — `_extract_system_properties()` now uses direct memory read (offset 0x2270) as primary, NMS.py struct as fallback
@@ -104,6 +104,13 @@ Fix star color always sending yellow and resource `[]` bracket issue in pending 
 **Backend API 1.38.4**
 - Fixed: `resources` list field in `/api/extraction` stored as `[]` when all resources were Unknown — replaced with individual `common_resource`/`uncommon_resource`/`rare_resource` fields that approval system already handles
 - `materials` comma-joined string now filters out empty strings in addition to `Unknown` and `None`
+
+**Backend API 1.38.5**
+- Fixed: editing extractor-submitted systems failed with "can't find galaxy 256" on production Pi
+- Root cause: `galaxies.json` was loaded from `NMS-Save-Watcher/data/` which isn't deployed to the Pi
+- Fallback only had `{"0": "Euclid"}`, making every non-Euclid galaxy fail `validate_galaxy()`
+- Bundled `galaxies.json` (all 256 galaxies) into `Haven-UI/backend/data/` so it deploys with the API
+- Updated `GALAXIES_JSON_PATH` to use `Path(__file__).parent / 'data' / 'galaxies.json'`
 
 ---
 

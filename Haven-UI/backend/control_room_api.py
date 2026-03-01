@@ -158,8 +158,8 @@ def get_discovery_type_slug(discovery_type: str) -> str:
 
 
 # Load galaxies reference data for validation
-# Path goes from backend/ → Haven-UI/ → Master-Haven/ → NMS-Save-Watcher/
-GALAXIES_JSON_PATH = MASTER_HAVEN_ROOT / 'NMS-Save-Watcher' / 'data' / 'galaxies.json'
+# Bundled with the backend so it deploys to production (Pi) without NMS-Save-Watcher
+GALAXIES_JSON_PATH = Path(__file__).resolve().parent / 'data' / 'galaxies.json'
 
 def load_galaxies() -> dict:
     """Load galaxy reference data (all 256 NMS galaxies)."""
@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.4', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.5', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
