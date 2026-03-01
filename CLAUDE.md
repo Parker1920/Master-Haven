@@ -24,8 +24,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
 | Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
-| Backend API | 1.38.3 | 2026-02-28 | Fix edit detection in approval + extraction endpoints |
-| Haven Extractor | 1.6.3 | 2026-02-28 | Fix hgpaktool auto-install using embedded Python path |
+| Backend API | 1.38.4 | 2026-02-28 | Fix resource [] in extraction, remove resources list field |
+| Haven Extractor | 1.6.4 | 2026-02-28 | Fix star color always yellow, direct memory read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -91,6 +91,19 @@ Fix pending submissions not being recognized as edits, causing glyph conflict er
 - Fixed: batch approve used exact glyph match instead of `find_matching_system()` (last-11-chars + galaxy + reality), missing same-system submissions with different planet index
 - Fixed: `/api/extraction` endpoint only checked exact 12-char glyph match for duplicates — now also uses `find_matching_system()` to detect coordinate matches and sets `edit_system_id` so approval workflow correctly treats them as edits
 - Extraction INSERT now includes `edit_system_id` column (was missing entirely)
+
+---
+
+#### Haven Extractor 1.6.4 + Backend API 1.38.4 (2026-02-28) - Star Color & Resource Fixes
+Fix star color always sending yellow and resource `[]` bracket issue in pending submissions.
+
+**Haven Extractor 1.6.4**
+- Fixed: star color always sent as "Yellow" — `_extract_system_properties()` now uses direct memory read (offset 0x2270) as primary, NMS.py struct as fallback
+- Removed hardcoded `'Yellow'` default from struct fallback — returns `None` if struct value unmapped, keeping "Unknown" for further fallback
+
+**Backend API 1.38.4**
+- Fixed: `resources` list field in `/api/extraction` stored as `[]` when all resources were Unknown — replaced with individual `common_resource`/`uncommon_resource`/`rare_resource` fields that approval system already handles
+- `materials` comma-joined string now filters out empty strings in addition to `Unknown` and `None`
 
 ---
 

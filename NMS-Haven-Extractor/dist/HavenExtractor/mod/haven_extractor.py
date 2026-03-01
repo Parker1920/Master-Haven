@@ -767,7 +767,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.6.3"
+    __version__ = "1.6.4"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -3156,12 +3156,24 @@ class HavenExtractorMod(Mod):
             'None': 'None', 'None_': 'None', '6': 'None',
         }
 
-        # Get other properties from NMS.py struct access
+        # Star color: prefer direct memory read (reliable), fall back to NMS.py struct
+        try:
+            sys_data_addr = get_addressof(sys_data)
+            if sys_data_addr and sys_data_addr > 0x10000:
+                star_type_val = self._read_uint32(sys_data_addr, SolarSystemDataOffsets.STAR_TYPE)
+                result["star_color"] = STAR_TYPES.get(star_type_val, f"Unknown({star_type_val})")
+                logger.info(f"  Star color (direct): {result['star_color']} (raw: {star_type_val})")
+        except Exception as e:
+            logger.debug(f"  Star color direct read failed: {e}")
+
+        # Fallback to NMS.py struct access if direct read didn't work
         try:
             if result["star_color"] == "Unknown" and hasattr(sys_data, 'Class'):
                 raw_star = self._safe_enum(sys_data.Class)
-                result["star_color"] = STAR_COLOR_MAP.get(raw_star, STAR_COLOR_MAP.get(raw_star.rstrip('_'), 'Yellow'))
-                logger.debug(f"  Star color: raw='{raw_star}' -> '{result['star_color']}'")
+                mapped = STAR_COLOR_MAP.get(raw_star, STAR_COLOR_MAP.get(raw_star.rstrip('_'), None))
+                if mapped:
+                    result["star_color"] = mapped
+                    logger.debug(f"  Star color (struct): raw='{raw_star}' -> '{mapped}'")
         except Exception:
             pass
 

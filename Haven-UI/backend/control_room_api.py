@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.3', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.4', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -14263,21 +14263,16 @@ async def receive_extraction(
             'flora': planet_data.get('flora_level', 'Unknown'),
             'fauna': planet_data.get('fauna_level', 'Unknown'),
             'planet_size': planet_data.get('planet_size', 'Unknown'),
-            'resources': [
-                r for r in [
-                    planet_data.get('plant_resource'),
-                    planet_data.get('common_resource'),
-                    planet_data.get('uncommon_resource'),
-                    planet_data.get('rare_resource')
-                ] if r and r != 'Unknown'
-            ],
+            'common_resource': planet_data.get('common_resource') if planet_data.get('common_resource') != 'Unknown' else None,
+            'uncommon_resource': planet_data.get('uncommon_resource') if planet_data.get('uncommon_resource') != 'Unknown' else None,
+            'rare_resource': planet_data.get('rare_resource') if planet_data.get('rare_resource') != 'Unknown' else None,
             'materials': ', '.join([
                 r for r in [
                     planet_data.get('plant_resource'),
                     planet_data.get('common_resource'),
                     planet_data.get('uncommon_resource'),
                     planet_data.get('rare_resource')
-                ] if r and r != 'Unknown'
+                ] if r and r not in ('Unknown', '', None)
             ]),  # Comma-separated for Haven UI display
             # Planet specials + valuable resources
             'has_rings': planet_data.get('has_rings'),
