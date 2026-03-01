@@ -1,5 +1,5 @@
 ============================================================
-  HAVEN EXTRACTOR v1.5.0
+  HAVEN EXTRACTOR v1.6.0
   For No Man's Sky
 ============================================================
 
@@ -11,6 +11,11 @@ QUICK START:
 5. Pick your Community Tag from the dropdown
 6. Warp to solar systems - data is captured automatically!
 7. Click "Export to Haven" when ready to upload
+
+UPDATING:
+Run "UPDATE_HAVEN_EXTRACTOR.bat" to check for and install
+updates. The updater downloads only the mod files (~60 KB),
+preserves your config, and backs up the previous version.
 
 IMPORTANT - SYSTEM NAMES:
 The extractor captures system data when you warp in, but
@@ -41,6 +46,12 @@ future uploads. No manual setup needed.
 
 Your config is saved at:
   %USERPROFILE%\Documents\Haven-Extractor\config.json
+
+COMMUNITY DROPDOWN:
+The community tag dropdown is fetched from the Haven server
+on each launch. New communities added by partners will appear
+automatically. If the server is unreachable, a cached or
+default list is used.
 
 GUI FIELDS:
 - Discord Username  - Your Discord name (required)
@@ -74,10 +85,11 @@ REQUIREMENTS:
 - No additional Python installation required!
 
 FILES:
-- RUN_HAVEN_EXTRACTOR.bat  - Main launcher (run this!)
-- FIRST_TIME_SETUP.bat     - Verify installation (first time)
-- python/                  - Embedded Python (don't modify)
-- mod/                     - Extractor mod files
+- RUN_HAVEN_EXTRACTOR.bat      - Main launcher (run this!)
+- FIRST_TIME_SETUP.bat         - Verify installation (first time)
+- UPDATE_HAVEN_EXTRACTOR.bat   - Check for and install updates
+- python/                      - Embedded Python (don't modify)
+- mod/                         - Extractor mod files
 
 TROUBLESHOOTING:
 - If the game doesn't start, try running as Administrator

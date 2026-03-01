@@ -744,371 +744,12 @@ def clean_weather_string(weather_str: str) -> str:
     return weather_str
 
 
-def map_display_string_to_adjective(value: str, field_type: str) -> str:
-    """
-    Map internal enum names like 'RARITY_HIGH3' or 'SENTINEL_RARE7' to actual adjectives.
-
-    The number suffix is the INDEX into the game's internal adjective list.
-    These mappings are based on NMS game data analysis.
-
-    Args:
-        value: The raw display string from PlanetInfo
-        field_type: 'flora', 'fauna', or 'sentinel'
-
-    Returns:
-        The proper in-game adjective, or the original value if already valid
-    """
-    if not value or value == "None":
-        return "Unknown"
-
-    # If already a valid adjective (doesn't look like an internal name), return as-is
-    if not value.startswith("RARITY_") and not value.startswith("SENTINEL_"):
-        return value
-
-    # Extract the number from the end of the string (e.g., RARITY_HIGH3 -> 3)
-    import re
-    match = re.search(r'(\d+)$', value)
-    idx = int(match.group(1)) if match else 0
-
-    # =============================================================================
-    # FLORA/FAUNA RARITY MAPPINGS - Index to exact in-game adjective
-    # Based on NMS game data (GcCreatureRoleDescriptionTable.MBIN)
-    # =============================================================================
-
-    # RARITY_HIGH: High flora/fauna - indexed list (0-10+)
-    # Based on actual game screenshots (Jedexoi-Ikom system)
-    RARITY_HIGH_MAP = {
-        0: "Rich",
-        1: "Abundant",      # Verified (Toya 23/L2 Fauna: RARITY_HIGH1 → "Abundant")
-        2: "High",          # Verified (Obushart Fauna: RARITY_HIGH2 → "High")
-        3: "Ample",
-        4: "Frequent",      # Verified (Ilva VI Flora)
-        5: "Full",          # Verified (Roin V Flora: RARITY_HIGH5 → "Full")
-        6: "Generous",
-        7: "Numerous",
-        8: "Copious",       # Verified (Toya 23/L2 Flora, Xumin Flora: RARITY_HIGH8 → "Copious")
-        9: "Rich",          # Verified (Xumin Fauna: RARITY_HIGH9 → "Rich")
-        10: "Abundant",     # Verified (Ilva VI Fauna, Yalosalci Flora: RARITY_HIGH10 → "Abundant")
-        11: "Thriving",
-        12: "Flourishing",
-    }
-
-    # RARITY_NONE: None/absent flora/fauna - indexed list
-    # Based on actual game screenshots
-    RARITY_NONE_MAP = {
-        0: "Absent",
-        1: "None",
-        2: "Devoid",
-        3: "Undetected",    # Verified (Fotesburs Delta Fauna)
-        4: "Lacking",
-        5: "Barren",
-        6: "Nonexistent",
-        7: "Empty",
-        8: "Not Present",
-        9: "Sparse",
-        10: "Barren",       # Confirmed correct (Fotesburs Delta Flora)
-        11: "Deficient",
-        12: "Low",
-    }
-
-    # RARITY_LOW: Low flora/fauna - indexed list
-    RARITY_LOW_MAP = {
-        0: "Sparse",
-        1: "Rare",
-        2: "Scarce",
-        3: "Uncommon",
-        4: "Infrequent",
-        5: "Limited",
-        6: "Few",
-        7: "Low",
-        8: "Uncommon",
-        9: "Minimal",
-        10: "Sporadic",
-        11: "Occasional",
-        12: "Intermittent",
-    }
-
-    # RARITY_MID: Medium/typical flora/fauna - indexed list
-    # Verified: Roin V Fauna RARITY_MID4 → "Typical", Pellarni Fauna RARITY_MID10 → "Medium"
-    RARITY_MID_MAP = {
-        0: "Average",
-        1: "Regular",
-        2: "Moderate",
-        3: "Common",
-        4: "Typical",       # Verified (Roin V Fauna: RARITY_MID4 → "Typical")
-        5: "Ordinary",
-        6: "Standard",
-        7: "Normal",
-        8: "Usual",
-        9: "Fair",
-        10: "Medium",        # Verified (Pellarni Fauna: RARITY_MID10 → "Medium")
-        11: "Adequate",
-        12: "Sufficient",
-    }
-
-    # RARITY_WEIRD: Exotic/anomaly flora/fauna - indexed list
-    RARITY_WEIRD_MAP = {
-        0: "Displaced",
-        1: "Unusual",
-        2: "Twisted",
-        3: "Infected",
-        4: "Invasive",
-        5: "From Elsewhere",
-        6: "Misplaced",
-        7: "Lost",
-        8: "Between Worlds",
-        9: "Diseased",
-        10: "Forfeited",
-        11: "Uprooted",
-        12: "Viral",
-        13: "Screaming",
-    }
-
-    # =============================================================================
-    # SENTINEL RARITY MAPPINGS - Index to exact in-game adjective
-    # SENTINEL_RARE = rare to encounter sentinels (low security)
-    # =============================================================================
-
-    # v1.4.4: Sentinel maps corrected from PAK/MBIN adjective cache (authoritative game data)
-    # Previous maps were contaminated by reading SentinelsPerDifficulty[0] (Casual mode)
-    # which returned SENTINEL_RARE for ALL planets regardless of actual level
-
-    SENTINEL_NONE_MAP = {
-        1: "None", 2: "Absent", 3: "Not Present", 4: "None Present",
-        5: "None", 6: "Not Present", 7: "None", 8: "None",
-        9: "None", 10: "None", 11: "None", 12: "Missing",
-    }
-
-    SENTINEL_RARE_MAP = {
-        1: "Low", 2: "Minimal", 3: "Low Security", 4: "Limited",
-        5: "Infrequent", 6: "Sparse", 7: "Isolated", 8: "Remote",
-        9: "Irregular Patrols", 10: "Spread Thin", 11: "Intermittent", 12: "Few",
-    }
-
-    SENTINEL_DEFAULT_MAP = {
-        1: "Attentive", 2: "Enforcing", 3: "Frequent", 4: "Require Orthodoxy",
-        5: "Require Obedience", 6: "Regular Patrols", 7: "Frequent",
-        8: "Unwavering", 9: "Observant", 10: "Ever-present",
-    }
-
-    SENTINEL_AGGRESSIVE_MAP = {
-        1: "Aggressive", 2: "Frenzied", 3: "High Security", 4: "Hostile Patrols",
-        5: "Threatening", 6: "Hateful", 7: "Zealous", 8: "Malicious",
-        9: "Inescapable",
-    }
-
-    SENTINEL_CORRUPT_MAP = {
-        1: "Corrupted", 2: "Forsaken", 3: "Rebellious", 4: "Answer To None",
-        5: "Sharded from the Atlas", 6: "Dissonant", 7: "De-Harmonised",
-    }
-
-    # Map based on prefix pattern
-    if value.startswith("RARITY_HIGH"):
-        return RARITY_HIGH_MAP.get(idx, f"High ({idx})")
-    elif value.startswith("RARITY_MID"):
-        return RARITY_MID_MAP.get(idx, f"Typical ({idx})")
-    elif value.startswith("RARITY_NONE"):
-        return RARITY_NONE_MAP.get(idx, f"Absent ({idx})")
-    elif value.startswith("RARITY_LOW"):
-        return RARITY_LOW_MAP.get(idx, f"Low ({idx})")
-    elif value.startswith("RARITY_WEIRD") or value.startswith("RARITY_EXOTIC"):
-        return RARITY_WEIRD_MAP.get(idx, f"Unusual ({idx})")
-    elif value.startswith("SENTINEL_NONE"):
-        return SENTINEL_NONE_MAP.get(idx, f"None ({idx})")
-    elif value.startswith("SENTINEL_RARE") or value.startswith("SENTINEL_LOW"):
-        return SENTINEL_RARE_MAP.get(idx, f"Low ({idx})")
-    elif value.startswith("SENTINEL_DEFAULT") or value.startswith("SENTINEL_MED") or value.startswith("SENTINEL_NORMAL"):
-        return SENTINEL_DEFAULT_MAP.get(idx, f"Regular ({idx})")
-    elif value.startswith("SENTINEL_AGGRESSIVE") or value.startswith("SENTINEL_HIGH"):
-        return SENTINEL_AGGRESSIVE_MAP.get(idx, f"Aggressive ({idx})")
-    elif value.startswith("SENTINEL_CORRUPT"):
-        return SENTINEL_CORRUPT_MAP.get(idx, f"Corrupted ({idx})")
-
-    # Unknown pattern, return original value
-    return value
 
 
-def map_weather_enum_to_adjective(value: str) -> str:
-    """
-    Map weather enum strings like 'WEATHER_COLD7' to actual game adjectives.
 
-    The pattern is: WEATHER_{TYPE}{INDEX} or WEATHER_{TYPE}_CLEAR{INDEX}
-    Mappings verified against actual in-game screenshots.
 
-    Args:
-        value: The raw weather string from PlanetInfo.Weather
 
-    Returns:
-        The proper in-game weather adjective, or the original value if already valid
-    """
-    if not value or value == "None":
-        return "Unknown"
 
-    # If already a valid adjective (doesn't look like an internal name), return as-is
-    if not value.startswith("WEATHER_") and not value.startswith("Weather_"):
-        return value
-
-    # Direct mappings from game screenshots
-    # Format: WEATHER_{TYPE}{INDEX} -> actual game adjective
-    WEATHER_ENUM_MAP = {
-        # Cold/Frozen weather
-        "WEATHER_COLD1": "Icy",
-        "WEATHER_COLD2": "Freezing",
-        "WEATHER_COLD3": "Snowy",
-        "WEATHER_COLD4": "Blizzard",
-        "WEATHER_COLD5": "Bitter Cold",
-        "WEATHER_COLD6": "Permafrost",
-        "WEATHER_COLD7": "Ice Storms",         # Verified (Toya 23/L2)
-        "WEATHER_COLD8": "Harsh Frost",
-        "WEATHER_COLD9": "Deep Freeze",
-        "WEATHER_COLD10": "Glacial Winds",
-
-        # Heat/Scorched weather
-        "WEATHER_HEAT1": "Hot",
-        "WEATHER_HEAT2": "Sweltering",
-        "WEATHER_HEAT3": "Superheated Gas Pockets",  # Verified (Yalosalci)
-        "WEATHER_HEAT4": "Firestorms",
-        "WEATHER_HEAT5": "Blistering",
-        "WEATHER_HEAT6": "Scorching",
-        "WEATHER_HEAT7": "Heated Atmosphere",  # Verified (Obushart)
-        "WEATHER_HEAT8": "Extreme Heat",
-        "WEATHER_HEAT9": "Inferno",
-        "WEATHER_HEAT10": "Burning Air",       # Verified (Xumin)
-
-        # Toxic weather
-        "WEATHER_TOXIC1": "Toxic Mist",
-        "WEATHER_TOXIC2": "Acid Rain",
-        "WEATHER_TOXIC3": "Poison Fog",
-        "WEATHER_TOXIC4": "Noxious Gas",
-        "WEATHER_TOXIC5": "Acidic Dust Pockets",
-        "WEATHER_TOXIC6": "Choking Atmosphere",
-        "WEATHER_TOXIC7": "Caustic Winds",     # Verified (Ilva VI)
-        "WEATHER_TOXIC8": "Corrosive Storms",
-        "WEATHER_TOXIC9": "Dangerously Toxic Rain",
-        "WEATHER_TOXIC10": "Toxic Dust",
-
-        # Toxic Clear (mild toxic)
-        "WEATHER_TOXIC_CLEAR1": "Mild Toxins",
-        "WEATHER_TOXIC_CLEAR2": "Occasional Toxins",
-        "WEATHER_TOXIC_CLEAR3": "Poison Rain",  # Verified (Roin V)
-        "WEATHER_TOXIC_CLEAR4": "Toxic Atmosphere",
-        "WEATHER_TOXIC_CLEAR5": "Light Toxicity",
-
-        # Radiation weather
-        "WEATHER_RADIO1": "Radioactive",
-        "WEATHER_RADIO2": "Irradiated",
-        "WEATHER_RADIO3": "Gamma Dust",
-        "WEATHER_RADIO4": "Nuclear Fallout",
-        "WEATHER_RADIO5": "Contaminated",
-        "WEATHER_RADIO6": "High Radiation",
-        "WEATHER_RADIO7": "Roaring Nuclear Wind",
-        "WEATHER_RADIO8": "Extreme Radiation",
-        "WEATHER_RADIO9": "Lethal Radiation",
-        "WEATHER_RADIO10": "Radioactive Decay",
-
-        # Swamp/Humid weather
-        "WEATHER_SWAMP1": "Humid",
-        "WEATHER_SWAMP2": "Muggy",
-        "WEATHER_SWAMP3": "Soggy",
-        "WEATHER_SWAMP4": "Marshy",
-        "WEATHER_SWAMP5": "Sweltering Damp",
-        "WEATHER_SWAMP6": "Heavy Fog",
-        "WEATHER_SWAMP7": "Soggy Danger",
-        "WEATHER_SWAMP8": "Choking Humidity",
-        "WEATHER_SWAMP9": "Superheated Drizzle",
-        "WEATHER_SWAMP10": "Infrequent Heat Storms",
-
-        # Lush/temperate weather
-        "WEATHER_LUSH1": "Temperate",
-        "WEATHER_LUSH2": "Mild",
-        "WEATHER_LUSH3": "Pleasant",
-        "WEATHER_LUSH4": "Light Showers",
-        "WEATHER_LUSH5": "Occasional Storms",
-        "WEATHER_LUSH6": "Heavy Rain",
-        "WEATHER_LUSH7": "Downpour",
-        "WEATHER_LUSH8": "Monsoon",
-        "WEATHER_LUSH9": "Tropical Storm",
-        "WEATHER_LUSH10": "Boiling Superstorms",
-
-        # Lush Clear (calm lush)        "WEATHER_LUSH_CLEAR1": "Temperate",
-        "WEATHER_LUSH_CLEAR2": "Mild",
-        "WEATHER_LUSH_CLEAR3": "Pleasant",
-        "WEATHER_LUSH_CLEAR4": "Light Showers",
-        "WEATHER_LUSH_CLEAR5": "Refreshing Breeze",
-        "WEATHER_LUSH_CLEAR6": "Gentle Rain",
-        "WEATHER_LUSH_CLEAR7": "Balmy",           # Verified (Hagioni)
-        "WEATHER_LUSH_CLEAR8": "Warm",
-        "WEATHER_LUSH_CLEAR9": "Usually Mild",
-        "WEATHER_LUSH_CLEAR10": "Mellow",
-
-        # Cold Clear (calm cold)        "WEATHER_COLD_CLEAR1": "Chilly",
-        "WEATHER_COLD_CLEAR2": "Crisp",
-        "WEATHER_COLD_CLEAR3": "Cool",
-        "WEATHER_COLD_CLEAR4": "Frosty",
-        "WEATHER_COLD_CLEAR5": "Fresh",
-        "WEATHER_COLD_CLEAR6": "Occasional Frost",
-        "WEATHER_COLD_CLEAR7": "Freezing",
-        "WEATHER_COLD_CLEAR8": "Permafrost",       # Verified (Pellarni)
-        "WEATHER_COLD_CLEAR9": "Frozen",
-        "WEATHER_COLD_CLEAR10": "Sub-Zero",
-
-        # Cold Extreme (stormy cold)        "WEATHER_COLDEXTREME1": "Howling Blizzards",  # Verified (Markelic)
-        "WEATHER_COLDEXTREME2": "Frozen Storms",
-        "WEATHER_COLDEXTREME3": "Icebound Tempests",
-        "WEATHER_COLDEXTREME4": "Whiteout Blizzards",
-        "WEATHER_COLDEXTREME5": "Arctic Storms",
-        "WEATHER_COLDEXTREME6": "Extreme Snowfall",
-        "WEATHER_COLDEXTREME7": "Violent Frost",
-        "WEATHER_COLDEXTREME8": "Glacial Tempests",
-        "WEATHER_COLDEXTREME9": "Brutal Blizzards",
-        "WEATHER_COLDEXTREME10": "Deadly Cold Fronts",
-
-        # Lush Extreme (stormy lush)        "WEATHER_LUSHEXTREME1": "Severe Storms",
-        "WEATHER_LUSHEXTREME2": "Torrential Downpours",
-        "WEATHER_LUSHEXTREME3": "Violent Thunderstorms",
-        "WEATHER_LUSHEXTREME4": "Catastrophic Storms",
-        "WEATHER_LUSHEXTREME5": "Superheated Rain",
-        "WEATHER_LUSHEXTREME6": "Boiling Rainfall",
-        "WEATHER_LUSHEXTREME7": "Extreme Monsoons",
-        "WEATHER_LUSHEXTREME8": "Scalding Showers",
-        "WEATHER_LUSHEXTREME9": "Scalding Rainstorms",  # Verified (Vapuscurna)
-        "WEATHER_LUSHEXTREME10": "Boiling Superstorms",
-
-        # Dead planet weather        "WEATHER_DEAD1": "Airless",
-        "WEATHER_DEAD2": "Airless",
-        "WEATHER_DEAD3": "Airless",
-        "WEATHER_DEAD4": "Airless",
-        "WEATHER_DEAD5": "Airless",
-        "WEATHER_DEAD6": "Airless",
-        "WEATHER_DEAD7": "Airless",                # Verified (Itchelories)
-        "WEATHER_DEAD8": "Airless",
-        "WEATHER_DEAD9": "Airless",
-        "WEATHER_DEAD10": "Airless",
-
-        # Lava planet weather        "WEATHER_LAVA1": "Volcanic",
-        "WEATHER_LAVA2": "Lava Flows",
-        "WEATHER_LAVA3": "Molten",
-        "WEATHER_LAVA4": "Fiery",
-        "WEATHER_LAVA5": "Magma Storms",
-        "WEATHER_LAVA6": "Inferno",
-        "WEATHER_LAVA7": "Volcanic Eruptions",
-        "WEATHER_LAVA8": "Plumes of Fire",          # Verified (Gourn)
-        "WEATHER_LAVA9": "Flaming Tornadoes",
-        "WEATHER_LAVA10": "Extreme Volcanism",
-    }
-
-    # Clean the value and look it up
-    cleaned = value.strip().upper()
-    if cleaned in WEATHER_ENUM_MAP:
-        return WEATHER_ENUM_MAP[cleaned]
-
-    # Try case-insensitive match
-    for key, adj in WEATHER_ENUM_MAP.items():
-        if key.upper() == cleaned:
-            return adj
-
-    # Unknown weather enum, return original
-    return value
 
 
 # =========================================================================
@@ -1126,7 +767,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.6.0"
+    __version__ = "1.6.3"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1135,122 +776,8 @@ class HavenExtractorMod(Mod):
     # Uses lists per level for variety, selected by planet_index % len(list)
     # ==========================================================================
 
-    # Flora adjectives by level - ALL values from floraAdjectives in adjectives.js
-    # Level 0 = None/Empty, Level 1 = Low, Level 2 = Medium, Level 3 = High
-    FLORA_BY_LEVEL = {
-        0: ["Absent", "Barren", "Devoid", "Empty", "None", "Nonexistent", "Not Present"],
-        1: ["Deficient", "Few", "Infrequent", "Lacking", "Limited", "Low", "Rare", "Sparse", "Sporadic", "Uncommon"],
-        2: ["Average", "Common", "Fair", "Moderate", "Occasional", "Ordinary", "Regular", "Typical"],
-        3: ["Abundant", "Ample", "Bountiful", "Copious", "Frequent", "Full", "Generous", "High", "Lush", "Numerous", "Rich"],
-    }
 
-    # Fauna adjectives by level - ALL values from faunaAdjectives in adjectives.js
-    FAUNA_BY_LEVEL = {
-        0: ["Absent", "Barren", "Devoid", "Empty", "None", "Nonexistent", "Not Present"],
-        1: ["Deficient", "Few", "Infrequent", "Lacking", "Limited", "Low", "Rare", "Sparse", "Sporadic", "Uncommon"],
-        2: ["Average", "Common", "Fair", "Moderate", "Occasional", "Ordinary", "Regular", "Typical"],
-        3: ["Abundant", "Ample", "Bountiful", "Copious", "Frequent", "Full", "Generous", "High", "Numerous", "Rich"],
-    }
 
-    # Sentinel adjectives by level - ALL values from sentinelAdjectives in adjectives.js
-    # Level 0 = Minimal, Level 1 = Low, Level 2 = Medium, Level 3 = High/Aggressive
-    SENTINEL_BY_LEVEL = {
-        0: ["Absent", "Forsaken", "Isolated", "Missing", "None", "None Present", "Not Present", "Remote"],
-        1: ["Few", "Infrequent", "Intermittent", "Irregular Patrols", "Limited", "Low", "Low Security", "Minimal", "Sparse", "Spread Thin"],
-        2: ["Attentive", "Frequent", "High Security", "Hostile Patrols", "Normal", "Observant", "Regular Patrols"],
-        3: ["Aggressive", "Enforcing", "Frenzied", "Hateful", "Malicious", "Threatening", "Unwavering", "Zealous"],
-    }
-
-    # Weather adjectives by weather_raw enum + storm_raw level
-    # ALL values from weatherAdjectives in adjectives.js
-    # Key: (weather_raw, storm_raw) -> list of valid adjectives
-    WEATHER_BY_TYPE_STORM = {
-        # Clear weather (0) - calm to stormy
-        (0, 0): ["Beautiful", "Blissful", "Clear", "Crisp", "Fair", "Fine", "Mild", "Peaceful", "Peaceful Climate", "Pleasant", "Temperate", "Unclouded Skies"],
-        (0, 1): ["Balmy", "Gentle Mist", "Light Showers", "Mellow", "Moderate", "Mostly Calm", "Refreshing Breeze", "Temperate", "Usually Mild", "Warm"],
-        (0, 2): ["Coastal Storms", "Downpours", "Harsh Winds", "Heavy Rain", "Howling Gales", "Intense Rainfall", "Pouring Rain", "Rainstorms", "Torrential Rain"],
-        (0, 3): ["Cataclysmic Monsoons", "Deluge", "Extreme Winds", "Planetwide Maelstrom", "Tropical Storms"],
-        # Dust weather (1) - arid planets
-        (1, 0): ["Arid", "Ceaseless Drought", "Dehydrated", "Desiccated", "Droughty", "Dry Gusts", "Moistureless", "Parched", "Parched Sands"],
-        (1, 1): ["Billowing Dust Storms", "Caustic Dust", "Combustible Dust", "Dusty", "Infrequent Dust Storms", "Particulate Winds", "Sporadic Grit Storms"],
-        (1, 2): ["Choking Sandstorms", "Dust-Choked Winds", "Intense Dust", "Sand Blizzards", "Sandstorms", "Volatile Dust Storms"],
-        (1, 3): ["Extreme Wind Blasting", "Planetwide Desiccation", "Winds of Glass"],
-        # Humid weather (2) - lush planets
-        (2, 0): ["Balmy", "Damp", "Humid", "Muggy Haze", "Tepid Damp", "Warm", "Warm Dewdrops", "Wet"],
-        (2, 1): ["Drizzle", "Light Showers", "Mild Rain", "Occasional Snowfall", "Rainstorms", "Sweltering Damp"],
-        (2, 2): ["Blistering Damp", "Boiling Monsoons", "Broiling Humidity", "Choking Humidity", "Heavy Rain", "Intense Rainfall", "Monsoon", "Tropical Storms"],
-        (2, 3): ["Boiling Superstorms", "Cataclysmic Monsoons", "Lethal Humidity Outbreaks", "Torrential Rain"],
-        # Snow weather (3) - frozen planets
-        (3, 0): ["Cold", "Freezing", "Frigid", "Frost", "Frozen", "Gelid", "Glacial", "Icy", "Permafrost", "Snowy", "Wintry"],
-        (3, 1): ["Drifting Snowstorms", "Freezing Night Winds", "Freezing Rain", "Frozen Clouds", "Frozen Mists", "Icy Nights", "Infrequent Blizzards", "Occasional Snowfall", "Powder Snow", "Snow", "Snowfall"],
-        (3, 2): ["Blizzard", "Frequent Blizzards", "Harsh, Icy Winds", "Hazardous Whiteouts", "Howling Blizzards", "Ice Storms", "Icy Blasts", "Icy Tempests", "Migratory Blizzards", "Raging Snowstorms", "Roaring Ice Storms", "Snowstorms", "Supercooled Storms", "Whiteout"],
-        (3, 3): ["All-Consuming Cold", "Deep Freeze", "Extreme Cold", "Intense Cold", "Outbreaks of Frozen Rain"],
-        # Toxic weather (4) - toxic planets
-        (4, 0): ["Acidic Dust", "Acidic Dust Pockets", "Caustic Moisture", "Choking Clouds", "Contaminated", "Noxious Gases", "Poisonous Dust", "Poisonous Gas", "Stinging Atmosphere", "Toxic Damp", "Toxic Dust"],
-        (4, 1): ["Acid Rain", "Alkaline Rain", "Contaminated Puddles", "Dangerously Toxic Rain", "Harmful Rain", "Infrequent Toxic Drizzle", "Passing Toxic Fronts", "Poison Rain", "Stinging Puddles", "Toxic Outbreaks", "Toxic Rain"],
-        (4, 2): ["Acidic Deluges", "Alkaline Cloudbursts", "Alkaline Storms", "Bilious Storms", "Bone-Stripping Acid Storms", "Corrosive Cyclones", "Corrosive Rainstorms", "Corrosive Sleet Storms", "Corrosive Storms", "Frequent Toxic Floods", "Heavily Toxic Rain", "Occasional Acid Storms", "Poison Cyclones", "Poison Flurries", "Pouring Toxic Rain", "Toxic Monsoons", "Toxic Superstorms", "Torrential Acid"],
-        (4, 3): ["Echoes of Acid", "Extreme Acidity", "Extreme Contamination", "Extreme Toxicity", "Inescapeable Toxins", "Infinite Toxic Mist", "Toxic Horror"],
-        # Scorched weather (5) - scorched planets
-        (5, 0): ["Baked", "Blazed", "Burning", "Dangerously Hot", "Direct Sunlight", "Heated", "Hot", "Scalding Heat", "Smouldering", "Sticky Heat", "Sunny", "Sweltering", "Unending Sunlight", "Warm"],
-        (5, 1): ["Burning Air", "Dangerously Hot Fog", "Heated Atmosphere", "Heated Gas Pockets", "Infrequent Heat Storms", "Intense Heat", "Occasional Boiling Fog", "Overly Warm", "Superheated Air", "Superheated Gas Pockets", "Wandering Hot Spots"],
-        (5, 2): ["Atmospheric Heat Instabilities", "Boiling Puddles", "Drifting Firestorms", "Extreme Heat", "Firestorms", "Frequent Firestorms", "Hazardous Temperature Extremes", "Highly Variable Temperatures", "Intense Heatbursts", "Occasional Firestorms", "Occasional Scalding Cloudbursts", "Rare Firestorms", "Superheated Drizzle", "Superheated Mists", "Superheated Rain", "Torrential Heat"],
-        (5, 3): ["Boiling Catastrophe", "Colossal Firestorms", "Inferno", "Inferno Winds", "Pillars of Flame", "Plumes of Fire", "Self-Igniting Storm", "Unpredictable Conflagrations", "Walls of Flame"],
-        # Radioactive weather (6) - radioactive planets
-        (6, 0): ["Contaminated", "Elevated Radioactivity", "High Energy", "Nuclidic Atmosphere", "Radioactive", "Radioactive Damp", "Radioactivity", "Reactive"],
-        (6, 1): ["Gamma Dust", "Irradiated", "Irradiated Downpours", "Irradiated Winds", "Nuclear Emission", "Occasional Radiation Outbursts", "Radioactive Decay", "Radioactive Humidity", "Reactive Dust", "Reactive Rain"],
-        (6, 2): ["Enormous Nuclear Storms", "Gamma Cyclones", "Irradiated Storms", "Irradiated Thunderstorms", "Planetwide Radiation Storms", "Radioactive Dust Storms", "Radioactive Storms", "Roaring Nuclear Wind"],
-        (6, 3): ["Extreme Nuclear Decay", "Extreme Radioactivity", "Extreme Thermonuclear Fog"],
-        # Red exotic weather (7)
-        (7, 0): ["Anomalous", "Eerily Calm", "Red Mist", "Silent", "Utterly Still"],
-        (7, 1): ["Carmine Winds", "Crimson Heat", "Unstable"],
-        (7, 2): ["Burning Crimson", "Vermillion Storms"],
-        (7, 3): ["Corrupted Blood", "Scarlet Rain"],
-        # Green exotic weather (8)
-        (8, 0): ["Anomalous", "Eerily Calm", "Silent", "Utterly Still"],
-        (8, 1): ["Clouds of Haunted Green", "Invisible Jade Winds", "Unstable"],
-        (8, 2): ["Azure Storms", "Deathly Green Anomaly"],
-        (8, 3): ["Haunted Frost"],
-        # Blue exotic weather (9)
-        (9, 0): ["Anomalous", "Eerily Calm", "Silent", "Utterly Still"],
-        (9, 1): ["Ultramarine Wind", "Unstable"],
-        (9, 2): ["Azure Storms", "Unimaginable Blue"],
-        (9, 3): ["Harsh Blue Globe"],
-        # Swamp weather (10)
-        (10, 0): ["Damp", "Hazardous Moisture", "Humid", "Muggy Haze", "Wet"],
-        (10, 1): ["Blistering Damp", "Clammy Menace", "Damp Misery", "Soggy Danger", "Sweltering Damp", "Tepid Damp"],
-        (10, 2): ["Blistering Floods", "Broiling Humidity", "Caustic Floods", "Choking Humidity", "Corrosive Damp", "Monsoon"],
-        (10, 3): ["Boiling Superstorms", "Lethal Humidity Outbreaks"],
-        # Lava weather (11)
-        (11, 0): ["Burning", "Hot", "Molten", "Smouldering", "Volcanic"],
-        (11, 1): ["Burning Air", "Incendiary Dust", "Incendiary Winds", "Magma Geysers", "Obsidian Heat"],
-        (11, 2): ["Ash Plumes", "Ashen Destruction", "Choking Ash", "Enveloping Ash", "Lethal Ash Storms", "Magma Rain", "Molten Rain", "Occasional Ash Storms", "Smothering Ash", "Tectonic Storms"],
-        (11, 3): ["Basalt Hail", "Cinderfalls", "Flaming Hail", "Inferno", "Liquid Hell", "Mists of Annihilation", "Obsidian Doom"],
-        # Bubble exotic weather (12)
-        (12, 0): ["Anomalous", "Eerily Calm", "Inert", "Silent", "Sterile", "Utterly Still"],
-        (12, 1): ["Invisible Mist", "Lost Clouds", "Unstable"],
-        (12, 2): ["Inverted Superstorms", "Unfathomable Storms", "Unstable Fog"],
-        (12, 3): ["All-Consuming Fog", "Winds From Beyond"],
-        # Weird exotic weather (13)
-        (13, 0): ["Anomalous", "Eerily Calm", "Inert", "Silent", "Sterile", "Utterly Still"],
-        (13, 1): ["Internal Rain", "Invisible Mist", "Lost Clouds", "Memories of Frost", "Unstable", "Wandering Frosts"],
-        (13, 2): ["Atmospheric Corruption", "Inverted Superstorms", "Rain of Atlas", "Storms of Desolation", "Unfathomable Storms", "Unstable Atmosphere", "Unstable Fog", "Volatile Storms"],
-        (13, 3): ["All-Consuming Fog", "Blasted Atmosphere", "Dead Wastes", "Death Fog", "Extreme Atmospheric Decay", "Lethal Atmosphere", "Winds From Beyond"],
-        # Fire weather (14) - extreme heat
-        (14, 0): ["Burning", "Dangerously Hot", "Hot", "Scalding Heat", "Smouldering"],
-        (14, 1): ["Burning Air", "Clouds of Fire", "Heated Atmosphere", "Incendiary Dust", "Incendiary Winds"],
-        (14, 2): ["Drifting Firestorms", "Firestorms", "Frequent Firestorms", "Occasional Firestorms", "Rare Firestorms", "Walls of Flame"],
-        (14, 3): ["Boiling Catastrophe", "Colossal Firestorms", "Inferno", "Inferno Winds", "Pillars of Flame", "Plumes of Fire"],
-        # ClearCold weather (15) - cold clear
-        (15, 0): ["Cold", "Freezing", "Frigid", "Frost", "Frozen", "Glacial", "Icy", "Wintry"],
-        (15, 1): ["Freezing Night Winds", "Frozen Clouds", "Frozen Mists", "Icy Nights"],
-        (15, 2): ["Harsh, Icy Winds", "Icy Blasts", "Roaring Ice Storms"],
-        (15, 3): ["All-Consuming Cold", "Extreme Cold", "Intense Cold"],
-        # GasGiant weather (16)
-        (16, 0): ["Airless", "Extreme Low Pressure", "Gas Clouds", "Inert", "No Atmosphere", "Sterile"],
-        (16, 1): ["Constant Pressure Storms", "Deadly Pressure Variations", "Gas Storms"],
-        (16, 2): ["Energetic Storms", "Explosive Gas Eruptions", "Frequent Particle Eruptions", "Noxious Gas Storms", "Volatile Windstorms"],
-        (16, 3): ["Extreme Low Pressure", "Lethal Atmosphere"],
-    }
 
     # Fallback mappings (simple level-based, used when list selection fails)
     FLORA_LEVELS = {0: "None", 1: "Sparse", 2: "Average", 3: "Bountiful"}
@@ -1622,14 +1149,13 @@ class HavenExtractorMod(Mod):
     def _resolve_adjective(self, text_id: str, field_type: str = 'flora') -> str:
         """
         Resolve a text ID to its display adjective using layered lookup:
-        1. In-memory translation cache (from game's Translate hook - most accurate)
-        2. Disk-based PAK/MBIN cache (adjective_cache.json)
-        3. Legacy hardcoded mapping tables (existing functions)
-        4. Original value as last resort
+        1. Disk-based PAK/MBIN cache (adjective_cache.json - primary)
+        2. In-memory translation cache (from game's Translate hook - backup)
+        3. Original value as last resort
 
         Args:
             text_id: The raw text ID (e.g., 'RARITY_HIGH3', 'WEATHER_COLD7')
-            field_type: 'flora', 'fauna', 'sentinel', or 'weather' (for legacy fallback)
+            field_type: 'flora', 'fauna', 'sentinel', or 'weather'
 
         Returns:
             The resolved display adjective
@@ -1645,27 +1171,17 @@ class HavenExtractorMod(Mod):
         ]):
             return text_id
 
-        # Layer 1: In-memory translation cache (from Translate hook)
+        # Layer 1: Disk-based PAK/MBIN cache (primary - built from game files)
+        if text_id in self._adjective_file_cache:
+            return self._adjective_file_cache[text_id]
+
+        # Layer 2: In-memory translation cache (backup - from Translate hook)
         if text_id in self._translation_cache:
             self._translation_cache_hits += 1
             return self._translation_cache[text_id]
 
-        # Layer 2: Disk-based PAK/MBIN cache
-        if text_id in self._adjective_file_cache:
-            return self._adjective_file_cache[text_id]
-
-        # Layer 3: Legacy hardcoded mapping tables
+        # Unresolved - return original text ID
         self._translation_cache_misses += 1
-        if text_id.startswith('WEATHER_'):
-            result = map_weather_enum_to_adjective(text_id)
-            if result != text_id:
-                return result
-        elif text_id.startswith(('RARITY_', 'SENTINEL_')):
-            result = map_display_string_to_adjective(text_id, field_type)
-            if result != text_id:
-                return result
-
-        # Layer 4: Return original value
         return text_id
 
     # =========================================================================
@@ -3858,47 +3374,24 @@ class HavenExtractorMod(Mod):
                 # Flora - prefer display string from PlanetInfo.Flora
                 flora_display = captured.get('flora_display', '')
                 if flora_display:
-                    # v1.4.0: Use layered adjective resolution
                     result["flora_level"] = self._resolve_adjective(flora_display, 'flora')
-                    logger.debug(f"    [DISPLAY] Using Flora: '{result['flora_level']}' (raw: '{flora_display}')")
                 else:
-                    # Fallback to list-based selection
                     flora_raw = captured.get('flora_raw', -1)
-                    if flora_raw >= 0 and flora_raw in self.FLORA_BY_LEVEL:
-                        flora_list = self.FLORA_BY_LEVEL[flora_raw]
-                        result["flora_level"] = flora_list[index % len(flora_list)]
-                    else:
-                        result["flora_level"] = self.FLORA_LEVELS.get(flora_raw, captured.get('flora', 'Unknown'))
+                    result["flora_level"] = self.FLORA_LEVELS.get(flora_raw, captured.get('flora', 'Unknown'))
 
-                # Fauna - prefer display string from PlanetInfo.Fauna
                 fauna_display = captured.get('fauna_display', '')
                 if fauna_display:
-                    # v1.4.0: Use layered adjective resolution
                     result["fauna_level"] = self._resolve_adjective(fauna_display, 'fauna')
-                    logger.debug(f"    [DISPLAY] Using Fauna: '{result['fauna_level']}' (raw: '{fauna_display}')")
                 else:
-                    # Fallback to list-based selection
                     fauna_raw = captured.get('fauna_raw', -1)
-                    if fauna_raw >= 0 and fauna_raw in self.FAUNA_BY_LEVEL:
-                        fauna_list = self.FAUNA_BY_LEVEL[fauna_raw]
-                        result["fauna_level"] = fauna_list[index % len(fauna_list)]
-                    else:
-                        result["fauna_level"] = self.FAUNA_LEVELS.get(fauna_raw, captured.get('fauna', 'Unknown'))
+                    result["fauna_level"] = self.FAUNA_LEVELS.get(fauna_raw, captured.get('fauna', 'Unknown'))
 
-                # Sentinel - prefer display string from PlanetInfo.SentinelsPerDifficulty
                 sentinel_display = captured.get('sentinel_display', '')
                 if sentinel_display:
-                    # v1.4.0: Use layered adjective resolution
                     result["sentinel_level"] = self._resolve_adjective(sentinel_display, 'sentinel')
-                    logger.debug(f"    [DISPLAY] Using Sentinel: '{result['sentinel_level']}' (raw: '{sentinel_display}')")
                 else:
-                    # Fallback to list-based selection
                     sentinel_raw = captured.get('sentinel_raw', -1)
-                    if sentinel_raw >= 0 and sentinel_raw in self.SENTINEL_BY_LEVEL:
-                        sentinel_list = self.SENTINEL_BY_LEVEL[sentinel_raw]
-                        result["sentinel_level"] = sentinel_list[index % len(sentinel_list)]
-                    else:
-                        result["sentinel_level"] = self.SENTINEL_LEVELS.get(sentinel_raw, captured.get('sentinel', 'Unknown'))
+                    result["sentinel_level"] = self.SENTINEL_LEVELS.get(sentinel_raw, captured.get('sentinel', 'Unknown'))
 
                 # v1.4.2: Store PlanetDescription as informational field (do NOT override biome)
                 # PlanetDescription text IDs (DEAD6, TOXIC2, LUSH8, WIRECELLSBIOME1, etc.)
@@ -3951,52 +3444,12 @@ class HavenExtractorMod(Mod):
                     logger.info(f"    [SPECIAL] Detected flags: {', '.join(flags)}")
 
                 # Apply weather - prefer display string from PlanetInfo.Weather
-                # (exact game text). Fall back to list-based selection if unavailable.
                 weather_display = captured.get('weather_display', '')
-                is_extreme = captured.get('is_weather_extreme', False)
                 if weather_display:
-                    # v1.4.0: Use layered adjective resolution for weather
                     resolved = self._resolve_adjective(weather_display, 'weather')
-                    # Post-process: clean_weather_string handles "Extreme" prefix stripping, etc.
                     result["weather"] = clean_weather_string(resolved)
-                    logger.debug(f"    [DISPLAY] Using Weather: '{result['weather']}' (raw: '{weather_display}', extreme={is_extreme})")
-                elif captured.get('weather') and captured.get('weather_raw', -1) >= 0:
-                    # Fallback to list-based selection
-                    # Use deterministic hash based on glyph code + planet index
-                    # for consistent results on the same planet
-                    weather_raw = captured.get('weather_raw', -1)
-                    storm_raw = captured.get('storm_raw', 0)
-                    storm_info = captured.get('storm_frequency', '')
-
-                    # Create deterministic hash from glyph code + planet index
-                    glyph_code = self._cached_coords.get('glyph_code', '') if self._cached_coords else ''
-                    hash_input = f"{glyph_code}_{index}_{weather_raw}_{storm_raw}"
-                    weather_hash = hash(hash_input) & 0x7FFFFFFF  # Positive integer
-
-                    # Try list-based weather lookup: (weather_raw, storm_raw) -> list
-                    weather_key = (weather_raw, storm_raw)
-                    weather_list = self.WEATHER_BY_TYPE_STORM.get(weather_key)
-
-                    if weather_list:
-                        weather_idx = weather_hash % len(weather_list)
-                        result["weather"] = weather_list[weather_idx]
-                        logger.debug(f"    [LIST] Weather = {result['weather']} (from list: weather={weather_raw}, storm={storm_raw}, hash_idx={weather_idx})")
-                    else:
-                        # Fallback: try storm_raw=0 (calm weather) if specific storm level not found
-                        weather_key_calm = (weather_raw, 0)
-                        weather_list_calm = self.WEATHER_BY_TYPE_STORM.get(weather_key_calm)
-                        if weather_list_calm:
-                            weather_idx = weather_hash % len(weather_list_calm)
-                            result["weather"] = weather_list_calm[weather_idx]
-                            logger.debug(f"    [LIST] Weather = {result['weather']} (calm fallback: weather={weather_raw}, hash_idx={weather_idx})")
-                        else:
-                            # Last resort: use captured weather name
-                            result["weather"] = captured['weather']
-                            logger.debug(f"    [RAW] Weather = {result['weather']} (raw fallback)")
-                elif result["weather"] == "Unknown" and captured.get('weather'):
-                    # Fallback when weather_raw not available
+                elif captured.get('weather'):
                     result["weather"] = captured['weather']
-                    logger.debug(f"    [RAW] Weather = {result['weather']} (no raw value)")
 
                 # Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires

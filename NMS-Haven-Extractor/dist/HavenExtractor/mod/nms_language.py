@@ -26,13 +26,30 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Try importing hgpaktool - gracefully degrade if not installed
+# Try importing hgpaktool - auto-install if missing, gracefully degrade if that fails
 try:
     from hgpaktool import HGPAKFile
     HAS_HGPAKTOOL = True
 except ImportError:
     HAS_HGPAKTOOL = False
-    logger.debug("[LANG] hgpaktool not installed - PAK parsing unavailable")
+    logger.info("[LANG] hgpaktool not found - attempting auto-install...")
+    try:
+        import subprocess
+        # sys.executable is NMS.exe inside pyMHF — find embedded Python relative to this file
+        # nms_language.py is in mod/, python.exe is in python/ (sibling folder)
+        _embedded_python = Path(__file__).resolve().parent.parent / "python" / "python.exe"
+        if not _embedded_python.exists():
+            raise FileNotFoundError(f"Embedded Python not found at {_embedded_python}")
+        subprocess.check_call(
+            [str(_embedded_python), '-m', 'pip', 'install', 'hgpaktool'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
+        )
+        from hgpaktool import HGPAKFile
+        HAS_HGPAKTOOL = True
+        logger.info("[LANG] hgpaktool auto-installed successfully")
+    except Exception as e:
+        logger.warning(f"[LANG] hgpaktool auto-install failed: {e}")
+        logger.warning("[LANG] PAK parsing unavailable - run: pip install hgpaktool")
 
 
 # =========================================================================

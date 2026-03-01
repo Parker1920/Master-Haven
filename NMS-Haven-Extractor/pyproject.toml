@@ -1,6 +1,6 @@
 [project]
 name = "nms-haven-extractor"
-version = "1.6.0"
+version = "1.6.3"
 description = "Extract planet and system data from No Man's Sky for Voyagers Haven"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

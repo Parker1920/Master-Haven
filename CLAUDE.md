@@ -22,10 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.39.0 | 2026-02-27 | Dynamic communities, login fix, star colors |
+| **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
 | Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
-| Backend API | 1.38.2 | 2026-02-27 | Login response completeness fix |
-| Haven Extractor | 1.6.0 | 2026-02-27 | Dynamic community list, auto-updater |
+| Backend API | 1.38.3 | 2026-02-28 | Fix edit detection in approval + extraction endpoints |
+| Haven Extractor | 1.6.3 | 2026-02-28 | Fix hgpaktool auto-install using embedded Python path |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -65,7 +65,59 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | Save Watcher | `NMS-Save-Watcher/CLAUDE.md` → Quick Reference | |
 | Keeper Bot | `keeper-discord-bot-main/CLAUDE.md` → Quick Reference | |
 
+### Haven Extractor Mod Zip Workflow
+
+When updating the Haven Extractor mod, a new mod-only zip must be created for GitHub Releases:
+
+1. **Create the new zip** from `NMS-Haven-Extractor/dist/HavenExtractor/mod/` containing only: `haven_extractor.py`, `nms_language.py`, `structs.py`, `pymhf.toml`, `__init__.py`, `haven_config.json.example`
+2. **Name it** `HavenExtractor-mod-v{VERSION}.zip` and place it in the repo root
+3. **Archive the old zip** by moving the previous version's zip to `NMS-Haven-Extractor/archive/`
+4. **Upload** the new zip to the GitHub Release (edit the existing release or create a new one with tag `v{VERSION}`)
+
+The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor-mod-*` in the latest GitHub Release.
+
+**Two zip types exist:**
+- **Mod-only zip** (~50-60 KB): Contains just the `mod/` files. Used by the auto-updater for existing users.
+- **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
+
 ### Changelog
+
+#### Master Haven 1.39.1 (2026-02-28) - Edit Detection Fix for Approvals
+Fix pending submissions not being recognized as edits, causing glyph conflict errors on approval.
+
+**Backend API 1.38.3**
+- Fixed: `approve_system` endpoint ignored `edit_system_id` column from `pending_systems` row — only checked `system_data` JSON `id` field, missing edits detected by glyph coordinate matching
+- Fixed: `batch_approve_systems` had same `edit_system_id` blind spot
+- Fixed: batch approve used exact glyph match instead of `find_matching_system()` (last-11-chars + galaxy + reality), missing same-system submissions with different planet index
+- Fixed: `/api/extraction` endpoint only checked exact 12-char glyph match for duplicates — now also uses `find_matching_system()` to detect coordinate matches and sets `edit_system_id` so approval workflow correctly treats them as edits
+- Extraction INSERT now includes `edit_system_id` column (was missing entirely)
+
+---
+
+#### Haven Extractor 1.6.3 (2026-02-28) - Fix hgpaktool Auto-Install
+Fix auto-install using embedded Python path instead of sys.executable (which is NMS.exe inside pyMHF).
+
+**Haven Extractor 1.6.3**
+- Fixed: `sys.executable` inside pyMHF returns `NMS.exe`, not Python — caused game restart on auto-install attempt
+- Auto-install now locates embedded Python via `Path(__file__).parent.parent / "python" / "python.exe"`
+- Increased pip install timeout from 60s to 120s
+- FIRST_TIME_SETUP.bat: Added step [6/7] to check for hgpaktool and install if missing
+
+---
+
+#### Haven Extractor 1.6.1 (2026-02-28) - Remove Hardcoded Adjective Tables
+Removes all Layer 3 hardcoded adjective mapping tables (~500 lines) that produced inaccurate values, simplifying to 2-layer resolution.
+
+**Haven Extractor 1.6.1**
+- Removed `map_display_string_to_adjective()` function (~180 lines of hardcoded RARITY_*/SENTINEL_* index maps)
+- Removed `map_weather_enum_to_adjective()` function (~180 lines of hardcoded WEATHER_* enum maps)
+- Removed `FLORA_BY_LEVEL`, `FAUNA_BY_LEVEL`, `SENTINEL_BY_LEVEL` class tables (list-based fallbacks)
+- Removed `WEATHER_BY_TYPE_STORM` class table (~90-entry weather type+storm level lookup)
+- Simplified `_resolve_adjective()` to 2-layer: PAK/MBIN disk cache (primary) → in-memory Translate hook (backup) → raw text ID
+- Simplified export fallback code for flora/fauna/sentinel/weather (removed BY_LEVEL list selection and WEATHER_BY_TYPE_STORM hash lookup)
+- Kept integer enum mappings (FLORA_LEVELS, FAUNA_LEVELS, SENTINEL_LEVELS, LIFE_LEVELS) for capture-time enum→name conversion
+
+---
 
 #### Master Haven 1.39.0 (2026-02-27) - Dynamic Communities, Login Fix, Star Colors
 Multiple bug fixes and extractor feature upgrade.

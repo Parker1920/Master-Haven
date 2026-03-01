@@ -206,6 +206,7 @@ NMS-Haven-Extractor/RUN_DEBUG_TEST.bat
 NMS-Haven-Extractor/ANALYZE_DUMP.bat
 NMS-Haven-Extractor/logs/
 NMS-Haven-Extractor/haven_extractor_mod/
+NMS-Haven-Extractor/archive/
 
 # -----------------
 # NMS-DEBUG-ENABLER ANALYSIS FILES

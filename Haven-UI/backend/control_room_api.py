@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.2', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.3', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -12638,7 +12638,14 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             system_data['region_z'] = region_z
 
         # Check if this is an edit of an existing system (has an id)
+        # Priority: 1) system_data JSON 'id' field, 2) edit_system_id column from pending_systems row
         existing_system_id = system_data.get('id')
+        if not existing_system_id:
+            existing_system_id = submission.get('edit_system_id')
+            if existing_system_id:
+                system_data['id'] = existing_system_id
+                logger.info(f"Submission {submission_id}: using edit_system_id from pending_systems row: {existing_system_id}")
+
         is_edit = False
         original_glyph_data = None  # Store original glyph info for edits
         original_discovered_by = None
@@ -12689,14 +12696,12 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 existing_name = existing_system_row[1]
                 submitted_name = system_data.get('name', '').strip()
 
-                # Check if names differ - require manual review
+                # Log warning if names differ, but proceed as edit
+                # Matching glyph coordinates = same system in NMS regardless of name
                 if existing_name and submitted_name and existing_name.strip() != submitted_name:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"System glyph coordinates match existing system '{existing_name}' "
-                               f"but submitted name is '{submitted_name}'. "
-                               f"Please verify the names match or edit one before approving."
-                    )
+                    logger.warning(f"Submission {submission_id}: glyph coordinates match existing system "
+                                   f"'{existing_name}' but submitted name is '{submitted_name}' - "
+                                   f"proceeding as edit (admin approved)")
 
                 is_edit = True
                 system_id = existing_system_row[0]
@@ -13454,7 +13459,14 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     system_data['region_z'] = region_z
 
                 # Check if edit or new
+                # Priority: 1) system_data JSON 'id' field, 2) edit_system_id column from pending_systems row
                 existing_system_id = system_data.get('id')
+                if not existing_system_id:
+                    existing_system_id = submission.get('edit_system_id')
+                    if existing_system_id:
+                        system_data['id'] = existing_system_id
+                        logger.info(f"Batch approval {submission_id}: using edit_system_id from pending_systems row: {existing_system_id}")
+
                 is_edit = False
                 system_id = None
                 original_glyph_data = None  # Store original glyph info for edits
@@ -13472,16 +13484,22 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         }
 
                 if not is_edit and system_data.get('glyph_code'):
-                    cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE glyph_code = ?', (system_data['glyph_code'],))
-                    existing_glyph_row = cursor.fetchone()
+                    # Use coordinate-based matching (last 11 chars + galaxy + reality)
+                    # to detect same system even with different planet index
+                    existing_glyph_row = find_matching_system(
+                        cursor, system_data['glyph_code'],
+                        system_data.get('galaxy', 'Euclid'),
+                        system_data.get('reality', 'Normal')
+                    )
                     if existing_glyph_row:
                         is_edit = True
                         system_id = existing_glyph_row[0]
                         original_glyph_data = {
-                            'glyph_code': existing_glyph_row[1],
-                            'glyph_planet': existing_glyph_row[2],
-                            'glyph_solar_system': existing_glyph_row[3]
+                            'glyph_code': existing_glyph_row[2],
+                            'glyph_planet': existing_glyph_row[3],
+                            'glyph_solar_system': existing_glyph_row[4]
                         }
+                        logger.info(f"Batch approval {submission_id}: glyph matches existing system '{existing_glyph_row[1]}' (ID: {system_id}) - treating as edit")
 
                 # For EDITS: If submission doesn't have glyph data, preserve the original
                 if is_edit and original_glyph_data:
@@ -14305,6 +14323,17 @@ async def receive_extraction(
                 'glyph_code': glyph_code
             }, status_code=409)  # Conflict
 
+        # Check for coordinate match (same system, possibly different planet index)
+        # This catches the case where the same system was charted via a different portal glyph
+        edit_system_id = None
+        existing_system_row = find_matching_system(
+            cursor, glyph_code, submission_data['galaxy'], reality
+        )
+        if existing_system_row:
+            edit_system_id = existing_system_row[0]
+            logger.info(f"Extraction matches existing system '{existing_system_row[1]}' "
+                        f"(ID: {edit_system_id}) via coordinate match - marking as edit")
+
         # Check for duplicate in pending submissions
         cursor.execute('''
             SELECT id, status FROM pending_systems
@@ -14366,8 +14395,8 @@ async def receive_extraction(
                 region_x, region_y, region_z,
                 submitter_name, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
-                submitted_by_ip, api_key_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                submitted_by_ip, api_key_name, edit_system_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -14390,7 +14419,8 @@ async def receive_extraction(
             discord_username if discord_username else None,
             personal_id if personal_id else None,
             client_ip,
-            api_key_name
+            api_key_name,
+            edit_system_id
         ))
         conn.commit()
         submission_id = cursor.lastrowid
