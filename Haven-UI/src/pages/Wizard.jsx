@@ -464,8 +464,23 @@ export default function Wizard(){
 
             {/* Stellar Classification */}
             <div>
-              <label className="block text-sm font-medium mb-1">
+              <label className="block text-sm font-medium mb-1 flex items-center gap-1.5">
                 Spectral Class
+                <span className="relative group">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-600 text-gray-300 text-[10px] font-bold cursor-help select-none">?</span>
+                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 rounded-lg bg-gray-800 border border-gray-600 shadow-xl text-xs hidden group-hover:block z-50">
+                    <span className="block text-gray-300 mb-1.5">Letter + Number (0-9) + Suffix</span>
+                    <span className="block text-gray-400 mb-2">e.g. G2pf, M7, O3f, E5p</span>
+                    <span className="flex flex-wrap gap-x-2 gap-y-1">
+                      <span><span className="text-blue-400 font-medium">O/B</span><span className="text-gray-500"> Blue</span></span>
+                      <span><span className="text-yellow-400 font-medium">F/G</span><span className="text-gray-500"> Yellow</span></span>
+                      <span><span className="text-red-400 font-medium">K/M</span><span className="text-gray-500"> Red</span></span>
+                      <span><span className="text-green-400 font-medium">E</span><span className="text-gray-500"> Green</span></span>
+                      <span><span className="text-purple-400 font-medium">X/Y</span><span className="text-gray-500"> Purple</span></span>
+                    </span>
+                    <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></span>
+                  </span>
+                </span>
               </label>
               <div className="flex items-center gap-2">
                 <input
@@ -509,26 +524,16 @@ export default function Wizard(){
                     {(() => {
                       const firstChar = (system.stellar_classification || '')[0]?.toUpperCase();
                       switch(firstChar) {
-                        case 'O': case 'B': return '🔵 Blue';
-                        case 'F': case 'G': return '🟡 Yellow';
-                        case 'K': case 'M': return '🔴 Red';
-                        case 'E': return '🟢 Green';
-                        case 'X': case 'Y': return '🟣 Purple';
+                        case 'O': case 'B': return 'Blue';
+                        case 'F': case 'G': return 'Yellow';
+                        case 'K': case 'M': return 'Red';
+                        case 'E': return 'Green';
+                        case 'X': case 'Y': return 'Purple';
                         default: return '';
                       }
                     })()}
                   </span>
                 )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Format: Letter + Number (0-9) + Suffix. Examples: G2pf, M7, O3f, E5p
-              </p>
-              <div className="text-xs text-gray-600 mt-1">
-                <span className="text-blue-400">O/B</span>=Blue,
-                <span className="text-yellow-400 ml-1">F/G</span>=Yellow,
-                <span className="text-red-400 ml-1">K/M</span>=Red,
-                <span className="text-green-400 ml-1">E</span>=Green,
-                <span className="text-purple-400 ml-1">X/Y</span>=Purple
               </div>
             </div>
           </div>
