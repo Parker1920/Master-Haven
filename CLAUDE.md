@@ -25,7 +25,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
 | Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
 | Backend API | 1.38.5 | 2026-02-28 | Bundle galaxies.json for production Pi deployment |
-| Haven Extractor | 1.6.4 | 2026-02-28 | Fix star color always yellow, direct memory read |
+| Haven Extractor | 1.6.5 | 2026-03-01 | Fix STAR_TYPES enum ordering, add Purple star type |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -81,6 +81,19 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven Extractor 1.6.5 (2026-03-01) - Fix Star Type Enum Mapping
+Fix STAR_TYPES dict ordering to match NMS.py `cGcGalaxyStarTypes` enum, add Purple star type support.
+
+**Haven Extractor 1.6.5**
+- CRITICAL: STAR_TYPES dict had wrong ordering `{0:Yellow, 1:Red, 2:Green, 3:Blue}` — corrected to match game enum `{0:Yellow, 1:Green, 2:Blue, 3:Red, 4:Purple}`
+- Added Purple (value 4) to STAR_TYPES — was returning `"Unknown(4)"` for purple stars
+- Fixed STAR_COLOR_MAP struct fallback to match corrected enum ordering and include Purple
+- Removed hardcoded `'Yellow'` default from backend `/api/extraction` endpoint (now defaults to `'Unknown'`)
+- Migration v1.47.0: Fixes any `Unknown(N)` star_type values in systems and pending_systems JSON
+- Frontend: Added Purple to PendingApprovals dropdown and display, Systems page star badge
+
+---
 
 #### Master Haven 1.39.1 (2026-02-28) - Edit Detection Fix for Approvals
 Fix pending submissions not being recognized as edits, causing glyph conflict errors on approval.

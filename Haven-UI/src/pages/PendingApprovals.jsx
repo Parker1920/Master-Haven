@@ -1180,6 +1180,7 @@ export default function PendingApprovals() {
                           <option value="Red">Red</option>
                           <option value="Green">Green</option>
                           <option value="Blue">Blue</option>
+                          <option value="Purple">Purple</option>
                         </select>
                       </label>
                       <label className="block"><span className="text-gray-400">Economy Type:</span>
@@ -1258,7 +1259,8 @@ export default function PendingApprovals() {
                             starColor === 'Yellow' ? 'text-yellow-400' :
                             starColor === 'Red' ? 'text-red-400' :
                             starColor === 'Green' ? 'text-green-400' :
-                            starColor === 'Blue' ? 'text-blue-400' : ''
+                            starColor === 'Blue' ? 'text-blue-400' :
+                            starColor === 'Purple' ? 'text-purple-400' : ''
                           }>{starColor}</span></p>
                         );
                       }

@@ -361,6 +361,7 @@ export default function Systems() {
                           system.star_type === 'Red' ? 'bg-red-500 text-white' :
                           system.star_type === 'Blue' ? 'bg-blue-500 text-white' :
                           system.star_type === 'Green' ? 'bg-green-500 text-white' :
+                          system.star_type === 'Purple' ? 'bg-purple-500 text-white' :
                           'bg-gray-500 text-white'
                         }`}>
                           {system.star_type}

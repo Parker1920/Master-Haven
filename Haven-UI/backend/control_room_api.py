@@ -14222,7 +14222,7 @@ async def receive_extraction(
     reality = payload.get('reality', 'Normal')
 
     # Accept both star_color (v10+) and star_type (legacy)
-    star_color = payload.get('star_color') or payload.get('star_type', 'Yellow')
+    star_color = payload.get('star_color') or payload.get('star_type', 'Unknown')
 
     # Convert extraction format to submission format
     submission_data = {

@@ -3564,73 +3564,56 @@ def migrate_1_45_0(conn):
         logger.info("Updated _metadata version to 1.45.0")
 
 
-@register_migration("1.46.0", "Correct star_type from stellar_classification (extractor always sent Yellow)")
+@register_migration("1.47.0", "Fix Unknown(N) star colors from wrong STAR_TYPES enum mapping")
 def migrate_1_46_0(conn):
-    """Fix star_type for systems where the extractor bug sent 'Yellow' for all star types.
+    """Fix star_type values corrupted by the wrong STAR_TYPES enum mapping.
 
-    Before v1.6.4, the extractor had a hardcoded 'Yellow' default that meant every
-    system was submitted with star_color='Yellow' regardless of actual star type.
-    The correct star color can be derived from stellar_classification (first letter):
-        O/B = Blue, F/G = Yellow, K/M = Red, E = Green, X/Y = Purple
+    The extractor's STAR_TYPES dict had incorrect ordering (1=Red, 2=Green, 3=Blue)
+    instead of matching the game's cGcGalaxyStarTypes enum (1=Green, 2=Blue, 3=Red, 4=Purple).
+    This caused:
+      - "Unknown(4)" for Purple stars (value 4 was missing entirely)
+      - Potentially swapped Red/Green/Blue for values 1-3
+
+    This migration cleans up:
+      1. "Unknown(N)" pattern values in systems.star_type → correct color name
+      2. Same pattern in pending_systems system_data JSON (star_color and star_type fields)
     """
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Spectral class first letter -> star color
-    SPECTRAL_TO_STAR = {
-        'O': 'Blue', 'B': 'Blue',
-        'F': 'Yellow', 'G': 'Yellow',
-        'K': 'Red', 'M': 'Red',
-        'E': 'Green',
-        'X': 'Purple', 'Y': 'Purple',
+    import re
+
+    # cGcGalaxyStarTypes enum (authoritative from NMS.py)
+    ENUM_TO_COLOR = {
+        0: "Yellow", 1: "Green", 2: "Blue", 3: "Red", 4: "Purple"
     }
 
-    # Find all systems that have a stellar_classification and star_type that
-    # might be wrong (Yellow from the bug, NULL, empty, or Unknown)
+    # --- Fix systems table ---
     cursor.execute("""
-        SELECT id, name, star_type, stellar_classification
-        FROM systems
-        WHERE stellar_classification IS NOT NULL
-          AND stellar_classification != ''
-          AND stellar_classification != 'Unknown'
+        SELECT id, name, star_type FROM systems
+        WHERE star_type LIKE 'Unknown(%'
     """)
     systems = cursor.fetchall()
-
-    if not systems:
-        logger.info("No systems with stellar_classification found - nothing to correct")
-        return
-
-    corrected = 0
-    already_correct = 0
-    no_mapping = 0
+    sys_fixed = 0
 
     for system in systems:
-        first_char = (system['stellar_classification'] or '')[0:1].upper()
-        expected_color = SPECTRAL_TO_STAR.get(first_char)
+        match = re.match(r'Unknown\((\d+)\)', system['star_type'] or '')
+        if match:
+            raw_val = int(match.group(1))
+            correct_color = ENUM_TO_COLOR.get(raw_val)
+            if correct_color:
+                cursor.execute("UPDATE systems SET star_type = ? WHERE id = ?",
+                               (correct_color, system['id']))
+                sys_fixed += 1
+                logger.info(f"  Fixed system '{system['name']}': '{system['star_type']}' -> '{correct_color}'")
 
-        if not expected_color:
-            no_mapping += 1
-            continue
+    if sys_fixed:
+        conn.commit()
+        logger.info(f"Fixed {sys_fixed} systems with Unknown(N) star_type")
+    else:
+        logger.info("No systems with Unknown(N) star_type found")
 
-        current = system['star_type']
-        if current == expected_color:
-            already_correct += 1
-            continue
-
-        cursor.execute(
-            "UPDATE systems SET star_type = ? WHERE id = ?",
-            (expected_color, system['id'])
-        )
-        corrected += 1
-        if current and current != 'Unknown':
-            logger.info(f"  Corrected star_type '{current}' -> '{expected_color}' for '{system['name']}' (spectral: {system['stellar_classification']})")
-        else:
-            logger.info(f"  Set star_type '{expected_color}' for '{system['name']}' (spectral: {system['stellar_classification']})")
-
-    conn.commit()
-    logger.info(f"Star type correction: {corrected} corrected, {already_correct} already correct, {no_mapping} unmappable out of {len(systems)} total")
-
-    # Also fix pending_systems JSON so future approvals get the right value
+    # --- Fix pending_systems JSON ---
     cursor.execute("""
         SELECT id, system_data FROM pending_systems
         WHERE system_data IS NOT NULL AND system_data != ''
@@ -3641,33 +3624,30 @@ def migrate_1_46_0(conn):
     for row in pending_rows:
         try:
             data = json.loads(row['system_data'])
-            spec = data.get('stellar_classification', '')
-            if not spec:
-                continue
+            changed = False
 
-            first_char = spec[0:1].upper()
-            expected_color = SPECTRAL_TO_STAR.get(first_char)
-            if not expected_color:
-                continue
+            for field in ('star_color', 'star_type'):
+                val = data.get(field, '')
+                match = re.match(r'Unknown\((\d+)\)', val or '')
+                if match:
+                    raw_val = int(match.group(1))
+                    correct_color = ENUM_TO_COLOR.get(raw_val)
+                    if correct_color:
+                        data[field] = correct_color
+                        changed = True
 
-            current_color = data.get('star_color') or data.get('star_type')
-            if current_color == expected_color:
-                continue
-
-            # Update both fields in the JSON
-            data['star_color'] = expected_color
-            data['star_type'] = expected_color
-            cursor.execute(
-                "UPDATE pending_systems SET system_data = ? WHERE id = ?",
-                (json.dumps(data), row['id'])
-            )
-            pending_fixed += 1
+            if changed:
+                cursor.execute(
+                    "UPDATE pending_systems SET system_data = ? WHERE id = ?",
+                    (json.dumps(data), row['id'])
+                )
+                pending_fixed += 1
         except (json.JSONDecodeError, TypeError):
             continue
 
     if pending_fixed:
         conn.commit()
-        logger.info(f"Fixed star color in {pending_fixed} pending_systems JSON records")
+        logger.info(f"Fixed {pending_fixed} pending_systems with Unknown(N) star colors")
 
     cursor.execute("""
         SELECT name FROM sqlite_master
@@ -3675,7 +3655,7 @@ def migrate_1_46_0(conn):
     """)
     if cursor.fetchone():
         cursor.execute("""
-            UPDATE _metadata SET value = '1.46.0', updated_at = ?
+            UPDATE _metadata SET value = '1.47.0', updated_at = ?
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
-        logger.info("Updated _metadata version to 1.46.0")
+        logger.info("Updated _metadata version to 1.47.0")

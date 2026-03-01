@@ -422,8 +422,9 @@ ALIEN_RACES = {
     6: "None"        # Uninhabited
 }
 
+# cGcGalaxyStarTypes enum (from nmspy cGcGalaxyStarTypes IntEnum)
 STAR_TYPES = {
-    0: "Yellow", 1: "Red", 2: "Green", 3: "Blue"
+    0: "Yellow", 1: "Green", 2: "Blue", 3: "Red", 4: "Purple"
 }
 
 # cGcWeatherOptions enum values (from nmspy/libMBIN - 17 values)
@@ -767,7 +768,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.6.4"
+    __version__ = "1.6.5"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -3137,11 +3138,14 @@ class HavenExtractorMod(Mod):
             logger.debug(f"System name extraction failed: {e}")
 
         # Star color mapping (enum names to clean values)
+        # Struct fallback mapping (enum name strings from NMS.py → clean color names)
+        # Numeric keys match cGcGalaxyStarTypes enum: Yellow=0, Green=1, Blue=2, Red=3, Purple=4
         STAR_COLOR_MAP = {
             'Yellow': 'Yellow', 'Yellow_': 'Yellow', 'yellow': 'Yellow', '0': 'Yellow',
-            'Red': 'Red', 'Red_': 'Red', 'red': 'Red', '1': 'Red',
-            'Green': 'Green', 'Green_': 'Green', 'green': 'Green', '2': 'Green',
-            'Blue': 'Blue', 'Blue_': 'Blue', 'blue': 'Blue', '3': 'Blue',
+            'Green': 'Green', 'Green_': 'Green', 'green': 'Green', '1': 'Green',
+            'Blue': 'Blue', 'Blue_': 'Blue', 'blue': 'Blue', '2': 'Blue',
+            'Red': 'Red', 'Red_': 'Red', 'red': 'Red', '3': 'Red',
+            'Purple': 'Purple', 'Purple_': 'Purple', 'purple': 'Purple', '4': 'Purple',
             'Default': 'Yellow', 'Default_': 'Yellow',  # Default is Yellow
         }
 
