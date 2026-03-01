@@ -19,11 +19,11 @@ Multiple No Man's Sky communities are already archiving their discoveries:
 | Community | Tag | Focus |
 |-----------|-----|-------|
 | Haven Hub | Haven | Central archive hub |
-| Intergalactic Exploration Agency | IEA | Exploration collective |
-| Bureau of Exploration Services | B.E.S | Service organization |
+| Intergalactic Explorers Alliance | IEA | Exploration collective |
+| Black Edge Syndicate | B.E.S | Pirate organization |
 | Archive Community | ARCH | Preservation focused |
-| The Black Hole | TBH | Deep space exploration |
-| Euclid Virtual Republic Network | EVRN | Republic network |
+| The Brotherhood | TBH | Deep space exploration |
+| Everion | EVRN | Republic network |
 | Independent Explorers | Personal | Solo travelers |
 
 Each community has its own color-coded badge, making it easy to see who discovered what.
