@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.5', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.38.6', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -14266,16 +14266,17 @@ async def receive_extraction(
             'flora': planet_data.get('flora_level', 'Unknown'),
             'fauna': planet_data.get('fauna_level', 'Unknown'),
             'planet_size': planet_data.get('planet_size', 'Unknown'),
-            'common_resource': planet_data.get('common_resource') if planet_data.get('common_resource') != 'Unknown' else None,
-            'uncommon_resource': planet_data.get('uncommon_resource') if planet_data.get('uncommon_resource') != 'Unknown' else None,
-            'rare_resource': planet_data.get('rare_resource') if planet_data.get('rare_resource') != 'Unknown' else None,
+            'common_resource': planet_data.get('common_resource') if planet_data.get('common_resource') not in ('Unknown', 'None', '', None) and isinstance(planet_data.get('common_resource'), str) and len(planet_data.get('common_resource', '')) >= 2 else None,
+            'uncommon_resource': planet_data.get('uncommon_resource') if planet_data.get('uncommon_resource') not in ('Unknown', 'None', '', None) and isinstance(planet_data.get('uncommon_resource'), str) and len(planet_data.get('uncommon_resource', '')) >= 2 else None,
+            'rare_resource': planet_data.get('rare_resource') if planet_data.get('rare_resource') not in ('Unknown', 'None', '', None) and isinstance(planet_data.get('rare_resource'), str) and len(planet_data.get('rare_resource', '')) >= 2 else None,
             'materials': ', '.join([
                 r for r in [
                     planet_data.get('plant_resource'),
                     planet_data.get('common_resource'),
                     planet_data.get('uncommon_resource'),
                     planet_data.get('rare_resource')
-                ] if r and r not in ('Unknown', '', None)
+                ] if r and isinstance(r, str) and len(r) >= 2 and r[0].isalpha()
+                   and r not in ('Unknown', 'None')
             ]),  # Comma-separated for Haven UI display
             # Planet specials + valuable resources
             'has_rings': planet_data.get('has_rings'),

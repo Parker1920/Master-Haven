@@ -470,14 +470,14 @@ RESOURCE_NAMES = {
     "GREEN2": "Emeril",         # Game shows Emeril, not Chromatic Metal
     "BLUE": "Indium",
     "BLUE2": "Indium",          # Game shows Indium, not Chromatic Metal
-    "PURPLE": "Indium",
-    "PURPLE2": "Indium",
+    "PURPLE": "Quartzite",
+    "PURPLE2": "Quartzite",
     # Activated stellar metals (extreme weather planets)
     "EX_YELLOW": "Activated Copper",
     "EX_RED": "Activated Cadmium",
     "EX_GREEN": "Activated Emeril",
     "EX_BLUE": "Activated Indium",
-    "EX_PURPLE": "Activated Indium",
+    "EX_PURPLE": "Activated Quartzite",
     # Biome-specific resources
     "COLD1": "Dioxite",
     "SNOW1": "Dioxite",
@@ -487,6 +487,8 @@ RESOURCE_NAMES = {
     "TOXIC1": "Ammonia",
     "RADIO1": "Uranium",
     "SWAMP1": "Faecium",
+    "PLANT_POOP": "Faecium",       # Alternate internal ID for Swamp biome resource
+    "PLANT_SWAMP": "Faecium",      # Another possible swamp plant ID
     "LAVA1": "Basalt",
     "WEIRD1": "Magnetised Ferrite",
     # Common elements
@@ -527,9 +529,9 @@ RESOURCE_NAMES = {
     "SPACEGUNK5": "Tainted Metal",
     # Special biome resources
     "ROBOT1": "Pugneum",
-    "GAS1": "Nitrogen",
-    "GAS2": "Sulphurine",
-    "GAS3": "Radon",
+    "GAS1": "Sulphurine",
+    "GAS2": "Radon",
+    "GAS3": "Nitrogen",
     # Buried/excavation resources
     "FOSSIL1": "Ancient Bones",
     "FOSSIL2": "Ancient Bones",
@@ -768,7 +770,7 @@ class RealityMode(Enum):
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.6.5"
+    __version__ = "1.6.7"
     __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
 
     # ==========================================================================
@@ -1331,11 +1333,11 @@ class HavenExtractorMod(Mod):
                 result["planet_size"] = PLANET_SIZES.get(size_val, f"Unknown({size_val})")
             logger.debug(f"    [DIRECT] Size: {result['planet_size']} (raw: {size_val}, is_moon: {result['is_moon']})")
 
-            # Read resources (16-byte strings) and translate to human-readable names
-            raw_common = self._read_string(planet_gen_addr, PlanetGenInputOffsets.COMMON_SUBSTANCE, 16)
-            raw_rare = self._read_string(planet_gen_addr, PlanetGenInputOffsets.RARE_SUBSTANCE, 16)
-            result["common_resource"] = translate_resource(raw_common)
-            result["rare_resource"] = translate_resource(raw_rare)
+            # Read resources (16-byte strings), clean, and translate to human-readable names
+            raw_common = self._clean_resource_string(self._read_string(planet_gen_addr, PlanetGenInputOffsets.COMMON_SUBSTANCE, 16))
+            raw_rare = self._clean_resource_string(self._read_string(planet_gen_addr, PlanetGenInputOffsets.RARE_SUBSTANCE, 16))
+            result["common_resource"] = translate_resource(raw_common) if raw_common else ""
+            result["rare_resource"] = translate_resource(raw_rare) if raw_rare else ""
             logger.debug(f"    [DIRECT] Resources: common={result['common_resource']} ({raw_common}), rare={result['rare_resource']} ({raw_rare})")
 
         except Exception as e:
@@ -3465,7 +3467,7 @@ class HavenExtractorMod(Mod):
                     resolved = self._resolve_adjective(weather_display, 'weather')
                     result["weather"] = clean_weather_string(resolved)
                 elif captured.get('weather'):
-                    result["weather"] = captured['weather']
+                    result["weather"] = clean_weather_string(captured['weather'])
 
                 # Apply captured planet name from cGcPlanetData.Name
                 # This is the RELIABLE source - captures all planet names when hook fires
@@ -3683,11 +3685,16 @@ class HavenExtractorMod(Mod):
                     logger.debug(f"    [HINTS-EXTRACT] Failed: {e}")
 
             # v1.4.5: Derive plant resource from biome type
+            # v1.6.6: Only assign if flora actually exists (flora_raw > 0)
             biome = result.get("biome", "Unknown")
             plant_resource = BIOME_PLANT_RESOURCE.get(biome, "")
             if plant_resource:
-                result["plant_resource"] = plant_resource
-                logger.info(f"    [PLANT] {biome} -> {plant_resource}")
+                flora_raw_val = captured.get('flora_raw', -1) if index in self._captured_planets else -1
+                if flora_raw_val > 0:
+                    result["plant_resource"] = plant_resource
+                    logger.info(f"    [PLANT] {biome} -> {plant_resource} (flora_raw={flora_raw_val})")
+                else:
+                    logger.info(f"    [PLANT] Skipped {biome} -> {plant_resource}: flora_raw={flora_raw_val} (no flora)")
 
             # v1.4.5: Fix dead/airless moon resources - replace hidden SPACEGUNK
             # with Rusted Metal (what the discovery screen actually shows)

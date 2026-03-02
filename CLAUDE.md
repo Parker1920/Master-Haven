@@ -24,8 +24,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
 | Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
-| Backend API | 1.38.5 | 2026-02-28 | Bundle galaxies.json for production Pi deployment |
-| Haven Extractor | 1.6.5 | 2026-03-01 | Fix STAR_TYPES enum ordering, add Purple star type |
+| Backend API | 1.38.6 | 2026-03-01 | Robust resource validation in extraction endpoint |
+| Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -81,6 +81,29 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven Extractor 1.6.7 + Backend API 1.38.6 (2026-03-01) - Fix Garbage Characters in Resources
+Fix garbage box characters (□) appearing in materials display from unvalidated direct memory reads.
+
+**Haven Extractor 1.6.7**
+- Fixed direct memory read path missing `_clean_resource_string()` validation — garbage bytes from PlanetGenInput COMMON_SUBSTANCE/RARE_SUBSTANCE passed through `translate_resource()` unfiltered and displayed as □ box characters
+- Hook-time and struct-fallback paths already had this validation; only the primary direct-read path was missing it
+
+**Backend API 1.38.6**
+- Fixed materials filter allowing garbage single-char or non-alpha strings through — now requires `len >= 2`, starts with alpha, is a string, excludes literal "None"
+- Individual resource fields (`common_resource`, `uncommon_resource`, `rare_resource`) now validated with same rules before DB storage
+
+---
+
+#### Haven Extractor 1.6.6 (2026-03-01) - Fix Resource Mappings & Plant Resource Gate
+Fix all 3 gas resource mappings, purple stellar metal (Quartzite not Indium), and plant resource false positives.
+
+**Haven Extractor 1.6.6**
+- CRITICAL: All 3 gas resource mappings were wrong — GAS1=Sulphurine (was Nitrogen), GAS2=Radon (was Sulphurine), GAS3=Nitrogen (was Radon)
+- Fixed purple star stellar metal: PURPLE/PURPLE2 now map to Quartzite (was Indium), EX_PURPLE to Activated Quartzite (was Activated Indium) — Quartzite added in Worlds Part II
+- Plant resource now gated on flora level > 0: planets with no flora (flora_raw=0) no longer get a plant resource assigned
+
+---
 
 #### Haven Extractor 1.6.5 (2026-03-01) - Fix Star Type Enum Mapping
 Fix STAR_TYPES dict ordering to match NMS.py `cGcGalaxyStarTypes` enum, add Purple star type support.
