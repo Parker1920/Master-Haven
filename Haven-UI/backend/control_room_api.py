@@ -11491,8 +11491,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
         if submission['status'] != 'pending':
             raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
 
-        # Self-approval blocking for non-super-admins
-        if current_user_type != 'super_admin':
+        # Self-approval blocking for sub-admins only (partners are trusted)
+        if current_user_type not in ('super_admin', 'partner'):
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
             submitted_by = submission.get('submitted_by')
@@ -12181,8 +12181,10 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         rows = cursor.fetchall()
         submissions = [dict(row) for row in rows]
 
-        # For non-super-admins, filter out self-submissions (users cannot approve their own)
-        if not is_super:
+        # For sub-admins, mark self-submissions (cannot approve their own)
+        # Partners and super admins can self-approve (trusted community leaders who need to test the mod)
+        is_partner = session_data.get('user_type') == 'partner'
+        if not is_super and not is_partner:
             logged_in_username = normalize_discord_username(session_data.get('username', ''))
             logged_in_account_id = session_data.get('sub_admin_id') or session_data.get('partner_id')
             logged_in_account_type = session_data.get('user_type')
@@ -12201,7 +12203,8 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
                     return True
                 return False
 
-            submissions = [s for s in submissions if not is_self_submission(s)]
+            for sub in submissions:
+                sub['is_self_submission'] = is_self_submission(sub)
 
         # Hide personal_discord_username for Haven sub-admins (only super admin sees contact info)
         # But keep discord_tag so frontend can distinguish personal uploads from Haven submissions
@@ -12489,9 +12492,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             )
 
         # SELF-APPROVAL BLOCKING
-        # Super admin can approve anything (trusted role)
-        # Partners and sub-admins cannot approve their own submissions
-        if current_user_type != 'super_admin':
+        # Super admin and partners can approve anything (trusted roles)
+        # Sub-admins cannot approve their own submissions
+        if current_user_type not in ('super_admin', 'partner'):
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
             submitted_by = submission.get('submitted_by')
@@ -13350,8 +13353,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     })
                     continue
 
-                # Self-approval check (skip for non-super-admins)
-                if not is_super:
+                # Self-approval check (only block sub-admins, not partners)
+                if not is_super and current_user_type != 'partner':
                     submitter_account_id = submission.get('submitter_account_id')
                     submitter_account_type = submission.get('submitter_account_type')
                     submitted_by = submission.get('submitted_by')

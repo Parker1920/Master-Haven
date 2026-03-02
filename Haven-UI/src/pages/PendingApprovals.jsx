@@ -72,6 +72,10 @@ export default function PendingApprovals() {
   const isSelfSubmission = useCallback((submission) => {
     if (!user) return false
     if (isSuperAdmin) return false
+    // Partners can self-approve (trusted community leaders)
+    if (user.type === 'partner') return false
+    // Use backend flag if available (most reliable)
+    if (submission.is_self_submission) return true
     if (submission.submitter_account_id && submission.submitter_account_type) {
       return user.type === submission.submitter_account_type &&
              user.accountId === submission.submitter_account_id
