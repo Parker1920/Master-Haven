@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.39.1 | 2026-02-28 | Edit detection fix for approvals |
-| Haven-UI | 1.38.2 | 2026-02-27 | Star color fix, login response fix |
-| Backend API | 1.38.6 | 2026-03-01 | Robust resource validation in extraction endpoint |
+| **Master Haven** | 1.40.0 | 2026-03-02 | Analytics source split (manual vs extractor) |
+| Haven-UI | 1.39.0 | 2026-03-02 | Analytics source split tabs |
+| Backend API | 1.39.0 | 2026-03-02 | Source-filtered analytics endpoints |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,25 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.40.0 (2026-03-02) - Analytics Source Split (Manual vs Extractor)
+Separate analytics for manual web submissions and Haven Extractor mod submissions with tabbed dashboard.
+
+**Haven-UI 1.39.0**
+- Analytics page redesigned with tab system: "Manual Submissions" (default) and "Haven Extractor"
+- Source overview bar showing proportional split with colored segments (cyan=manual, purple=extractor)
+- Manual tab: stat cards, timeline, community breakdown, leaderboard — all filtered to manual submissions only
+- Extractor tab: stat cards (registered users, active users, avg per user), timeline, community breakdown, leaderboard
+- Tab badges show submission count per source
+- PartnerAnalytics page: new "Source" dropdown filter (All Sources / Manual Only / Extractor Only)
+
+**Backend API 1.39.0**
+- Added `source` query parameter to 4 analytics endpoints: `submission-leaderboard`, `submissions-timeline`, `community-stats`, `partner-overview`
+- Source filter treats NULL/legacy rows as `'manual'` via `COALESCE`, `companion_app` excluded from both categories
+- New `GET /api/analytics/source-breakdown`: returns per-source totals (manual vs extractor) for overview bar
+- New `GET /api/analytics/extractor-summary`: returns extractor-specific stats (registered users, active users 7d, avg per user) from api_keys table
+
+---
 
 #### Haven Extractor 1.6.7 + Backend API 1.38.6 (2026-03-01) - Fix Garbage Characters in Resources
 Fix garbage box characters (□) appearing in materials display from unvalidated direct memory reads.

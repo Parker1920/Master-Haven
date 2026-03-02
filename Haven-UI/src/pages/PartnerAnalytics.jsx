@@ -66,6 +66,9 @@ export default function PartnerAnalytics() {
   const [discordTags, setDiscordTags] = useState([])
   const [selectedCommunity, setSelectedCommunity] = useState('')
 
+  // Source filter
+  const [sourceFilter, setSourceFilter] = useState('')
+
   // Data state
   const [overview, setOverview] = useState(null)
   const [subLeaderboard, setSubLeaderboard] = useState([])
@@ -109,6 +112,9 @@ export default function PartnerAnalytics() {
         if (selectedCommunity) {
           params.discord_tag = selectedCommunity
         }
+        if (sourceFilter) {
+          params.source = sourceFilter
+        }
 
         const opts = { params, withCredentials: true }
 
@@ -144,7 +150,7 @@ export default function PartnerAnalytics() {
     }
 
     fetchData()
-  }, [dateRange, period, selectedCommunity, isSuperAdmin, isAdmin])
+  }, [dateRange, period, selectedCommunity, sourceFilter, isSuperAdmin, isAdmin])
 
   const handleDateChange = ({ startDate, endDate }) => {
     setDateRange({ startDate, endDate })
@@ -240,6 +246,20 @@ export default function PartnerAnalytics() {
             endDate={dateRange.endDate}
             onChange={handleDateChange}
           />
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="px-3 py-2 rounded-lg text-sm"
+            style={{
+              background: 'var(--app-card)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--app-text)'
+            }}
+          >
+            <option value="">All Sources</option>
+            <option value="manual">Manual Only</option>
+            <option value="haven_extractor">Extractor Only</option>
+          </select>
           {isSuperAdmin && (
             <select
               value={selectedCommunity}

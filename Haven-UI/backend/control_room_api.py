@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.38.6', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.39.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -3628,6 +3628,7 @@ async def export_approval_audit(
 @app.get('/api/analytics/submission-leaderboard')
 async def get_submission_leaderboard(
     discord_tag: Optional[str] = None,
+    source: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     period: Optional[str] = None,
@@ -3641,6 +3642,7 @@ async def get_submission_leaderboard(
 
     Params:
     - discord_tag: Filter by community (partners automatically filtered)
+    - source: Filter by submission source ('manual' or 'haven_extractor')
     - start_date, end_date: Date range (ISO format)
     - period: Preset periods (week, month, year, all)
     - limit: Max results (default 50)
@@ -3684,6 +3686,16 @@ async def get_submission_leaderboard(
         if discord_tag:
             tag_filter = ' AND discord_tag = ?'
             tag_params = [discord_tag]
+
+        # Build source filter (manual includes legacy NULL rows)
+        source_filter = ''
+        source_params = []
+        if source:
+            if source == 'manual':
+                source_filter = " AND COALESCE(source, 'manual') = 'manual'"
+            else:
+                source_filter = ' AND source = ?'
+                source_params = [source]
 
         # Query for leaderboard from pending_systems (includes both approved and rejected)
         # Extract username from multiple sources: submitted_by, personal_discord_username, or discovered_by from JSON
@@ -3729,14 +3741,14 @@ async def get_submission_leaderboard(
                 MIN(submission_date) as first_submission,
                 MAX(submission_date) as last_submission
             FROM pending_systems
-            WHERE 1=1 {tag_filter} {date_filter}
+            WHERE 1=1 {tag_filter} {date_filter} {source_filter}
             GROUP BY {normalized_username}
             HAVING {normalized_username} != 'unknown'
             ORDER BY total_submissions DESC
             LIMIT ?
         '''
 
-        params = tag_params + date_params + [limit]
+        params = tag_params + date_params + source_params + [limit]
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
@@ -3760,11 +3772,11 @@ async def get_submission_leaderboard(
                         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
                     FROM pending_systems
                     WHERE {normalized_username} = ?
-                      {date_filter}
+                      {date_filter} {source_filter}
                     GROUP BY {tag_display}
                     ORDER BY total DESC
                 '''
-                cursor.execute(breakdown_query, [norm_name] + date_params)
+                cursor.execute(breakdown_query, [norm_name] + date_params + source_params)
                 breakdown_rows = cursor.fetchall()
                 entry['tag_breakdown'] = [dict(b) for b in breakdown_rows]
 
@@ -3779,9 +3791,9 @@ async def get_submission_leaderboard(
                 SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
                 SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as total_rejected
             FROM pending_systems
-            WHERE 1=1 {tag_filter} {date_filter}
+            WHERE 1=1 {tag_filter} {date_filter} {source_filter}
         '''
-        cursor.execute(totals_query, tag_params + date_params)
+        cursor.execute(totals_query, tag_params + date_params + source_params)
         totals_row = cursor.fetchone()
 
         return {
@@ -3799,6 +3811,7 @@ async def get_submission_leaderboard(
 
 @app.get('/api/analytics/community-stats')
 async def get_community_stats(
+    source: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     period: Optional[str] = None,
@@ -3807,6 +3820,9 @@ async def get_community_stats(
     """
     Get statistics per community/Discord tag.
     Super admin only - shows all communities.
+
+    Params:
+    - source: Filter by submission source ('manual' or 'haven_extractor')
     """
     if not is_super_admin(session):
         raise HTTPException(status_code=403, detail='Super admin access required')
@@ -3832,6 +3848,16 @@ async def get_community_stats(
             if end_date:
                 date_filter += " AND submission_date <= ?"
                 date_params.append(end_date + 'T23:59:59')
+
+        # Build source filter (manual includes legacy NULL rows)
+        source_filter = ''
+        source_params = []
+        if source:
+            if source == 'manual':
+                source_filter = " AND COALESCE(source, 'manual') = 'manual'"
+            else:
+                source_filter = ' AND source = ?'
+                source_params = [source]
 
         # Get community stats from pending_systems
         # Normalize usernames: trim whitespace, remove #, strip trailing 4-digit Discord discriminators, lowercase
@@ -3863,12 +3889,12 @@ async def get_community_stats(
                 SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as total_rejected,
                 COUNT(DISTINCT {normalized_username}) as unique_submitters
             FROM pending_systems
-            WHERE 1=1 {date_filter}
+            WHERE 1=1 {date_filter} {source_filter}
             GROUP BY discord_tag
             ORDER BY total_submissions DESC
         '''
 
-        cursor.execute(query, date_params)
+        cursor.execute(query, date_params + source_params)
         rows = cursor.fetchall()
 
         communities = []
@@ -3885,21 +3911,21 @@ async def get_community_stats(
                     SELECT MAX({raw_username}) as username,
                            COUNT(*) as count
                     FROM pending_systems
-                    WHERE discord_tag = ? {date_filter}
+                    WHERE discord_tag = ? {date_filter} {source_filter}
                     GROUP BY {normalized_username}
                     ORDER BY count DESC
                     LIMIT 1
-                ''', [tag] + date_params)
+                ''', [tag] + date_params + source_params)
             else:
                 cursor.execute(f'''
                     SELECT MAX({raw_username}) as username,
                            COUNT(*) as count
                     FROM pending_systems
-                    WHERE (discord_tag IS NULL OR discord_tag = '') {date_filter}
+                    WHERE (discord_tag IS NULL OR discord_tag = '') {date_filter} {source_filter}
                     GROUP BY {normalized_username}
                     ORDER BY count DESC
                     LIMIT 1
-                ''', date_params)
+                ''', date_params + source_params)
 
             top_row = cursor.fetchone()
             entry['top_submitter'] = top_row['username'] if top_row else None
@@ -3922,6 +3948,7 @@ async def get_community_stats(
 @app.get('/api/analytics/submissions-timeline')
 async def get_submissions_timeline(
     discord_tag: Optional[str] = None,
+    source: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     granularity: str = 'day',
@@ -3933,6 +3960,7 @@ async def get_submissions_timeline(
 
     Params:
     - discord_tag: Filter by community
+    - source: Filter by submission source ('manual' or 'haven_extractor')
     - start_date, end_date: Date range
     - granularity: day, week, or month
     """
@@ -3974,6 +4002,15 @@ async def get_submissions_timeline(
             tag_filter = ' AND discord_tag = ?'
             params.append(discord_tag)
 
+        # Build source filter (manual includes legacy NULL rows)
+        source_filter = ''
+        if source:
+            if source == 'manual':
+                source_filter = " AND COALESCE(source, 'manual') = 'manual'"
+            else:
+                source_filter = ' AND source = ?'
+                params.append(source)
+
         query = f'''
             SELECT
                 {date_format} as date,
@@ -3981,7 +4018,7 @@ async def get_submissions_timeline(
                 SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
                 SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
             FROM pending_systems
-            WHERE submission_date >= ? AND submission_date <= ? {tag_filter}
+            WHERE submission_date >= ? AND submission_date <= ? {tag_filter} {source_filter}
             GROUP BY {date_format}
             ORDER BY date ASC
         '''
@@ -3992,6 +4029,152 @@ async def get_submissions_timeline(
         timeline = [dict(row) for row in rows]
 
         return {'timeline': timeline, 'granularity': granularity}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/analytics/source-breakdown')
+async def get_source_breakdown(
+    discord_tag: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    period: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get submission counts broken down by source type (manual vs haven_extractor).
+    Used for the analytics overview bar showing proportional split.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    if not is_super and user_discord_tag:
+        discord_tag = user_discord_tag
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build date filter
+        date_filter = ''
+        date_params = []
+        if period == 'week':
+            date_filter = " AND submission_date >= date('now', '-7 days')"
+        elif period == 'month':
+            date_filter = " AND submission_date >= date('now', '-30 days')"
+        elif period == 'year':
+            date_filter = " AND submission_date >= date('now', '-365 days')"
+        elif start_date:
+            date_filter = " AND submission_date >= ?"
+            date_params.append(start_date)
+            if end_date:
+                date_filter += " AND submission_date <= ?"
+                date_params.append(end_date + 'T23:59:59')
+
+        tag_filter = ''
+        tag_params = []
+        if discord_tag:
+            tag_filter = ' AND discord_tag = ?'
+            tag_params = [discord_tag]
+
+        # Group by source, treating NULL and companion_app as manual
+        cursor.execute(f'''
+            SELECT
+                CASE
+                    WHEN source = 'haven_extractor' THEN 'haven_extractor'
+                    ELSE 'manual'
+                END as source_type,
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+            FROM pending_systems
+            WHERE 1=1 {tag_filter} {date_filter}
+            GROUP BY source_type
+            ORDER BY total DESC
+        ''', tag_params + date_params)
+        rows = cursor.fetchall()
+
+        breakdown = [dict(row) for row in rows]
+        grand_total = sum(row['total'] for row in breakdown)
+
+        return {'breakdown': breakdown, 'grand_total': grand_total}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/analytics/extractor-summary')
+async def get_extractor_summary(
+    discord_tag: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """
+    Get Haven Extractor-specific statistics from the api_keys table.
+    Returns registered user counts, active users, and submission totals.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    user_discord_tag = session_data.get('discord_tag')
+
+    if not is_super and user_discord_tag:
+        discord_tag = user_discord_tag
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Total registered extractor users
+        cursor.execute("SELECT COUNT(*) FROM api_keys WHERE key_type = 'extractor'")
+        registered_users = cursor.fetchone()[0]
+
+        # Active in last 7 days
+        cursor.execute('''
+            SELECT COUNT(*) FROM api_keys
+            WHERE key_type = 'extractor'
+              AND last_submission_at >= datetime('now', '-7 days')
+        ''')
+        active_users_7d = cursor.fetchone()[0]
+
+        # Total extractor submissions (with optional community filter)
+        tag_filter = ''
+        tag_params = []
+        if discord_tag:
+            tag_filter = ' AND discord_tag = ?'
+            tag_params = [discord_tag]
+
+        cursor.execute(f'''
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+            FROM pending_systems
+            WHERE source = 'haven_extractor' {tag_filter}
+        ''', tag_params)
+        ext_stats = dict(cursor.fetchone())
+
+        avg_per_user = round(ext_stats['total'] / registered_users, 1) if registered_users > 0 else 0
+
+        return {
+            'registered_users': registered_users,
+            'active_users_7d': active_users_7d,
+            'total_submissions': ext_stats['total'],
+            'approved': ext_stats['approved'] or 0,
+            'rejected': ext_stats['rejected'] or 0,
+            'pending': ext_stats['pending'] or 0,
+            'avg_per_user': avg_per_user
+        }
     finally:
         if conn:
             conn.close()
@@ -4323,6 +4506,7 @@ async def get_discovery_type_breakdown(
 @app.get('/api/analytics/partner-overview')
 async def get_partner_overview(
     discord_tag: Optional[str] = None,
+    source: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     period: Optional[str] = None,
@@ -4332,6 +4516,9 @@ async def get_partner_overview(
     Combined overview endpoint for the partner analytics dashboard.
     Returns system submission totals, discovery totals, top submitters,
     top discoverers, and activity trends in a single call.
+
+    Params:
+    - source: Filter system submissions by source ('manual' or 'haven_extractor')
     """
     session_data = get_session(session)
     if not session_data:
@@ -4384,6 +4571,16 @@ async def get_partner_overview(
             disc_tag_filter = ' AND discord_tag = ?'
             disc_tag_params = [discord_tag]
 
+        # Build source filter for submission queries (manual includes legacy NULL rows)
+        sub_source_filter = ''
+        sub_source_params = []
+        if source:
+            if source == 'manual':
+                sub_source_filter = " AND COALESCE(source, 'manual') = 'manual'"
+            else:
+                sub_source_filter = ' AND source = ?'
+                sub_source_params = [source]
+
         # --- System submission stats ---
         cursor.execute(f'''
             SELECT
@@ -4392,8 +4589,8 @@ async def get_partner_overview(
                 SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as total_rejected,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as total_pending
             FROM pending_systems
-            WHERE 1=1 {sub_tag_filter} {sub_date_filter}
-        ''', sub_tag_params + sub_date_params)
+            WHERE 1=1 {sub_tag_filter} {sub_date_filter} {sub_source_filter}
+        ''', sub_tag_params + sub_date_params + sub_source_params)
         sub_stats = dict(cursor.fetchone())
 
         # Active submitters (unique normalized usernames)
@@ -4418,9 +4615,9 @@ async def get_partner_overview(
         cursor.execute(f'''
             SELECT COUNT(DISTINCT {normalized_sub}) as active_submitters
             FROM pending_systems
-            WHERE 1=1 {sub_tag_filter} {sub_date_filter}
+            WHERE 1=1 {sub_tag_filter} {sub_date_filter} {sub_source_filter}
               AND {normalized_sub} != 'unknown'
-        ''', sub_tag_params + sub_date_params)
+        ''', sub_tag_params + sub_date_params + sub_source_params)
         active_submitters = cursor.fetchone()['active_submitters']
 
         # --- Discovery stats ---
@@ -4442,12 +4639,12 @@ async def get_partner_overview(
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved
             FROM pending_systems
-            WHERE 1=1 {sub_tag_filter} {sub_date_filter}
+            WHERE 1=1 {sub_tag_filter} {sub_date_filter} {sub_source_filter}
             GROUP BY {normalized_sub}
             HAVING {normalized_sub} != 'unknown'
             ORDER BY total DESC
             LIMIT 5
-        ''', sub_tag_params + sub_date_params)
+        ''', sub_tag_params + sub_date_params + sub_source_params)
         top_submitters = [dict(row) for row in cursor.fetchall()]
 
         # --- Top 5 discoverers ---
@@ -4486,10 +4683,10 @@ async def get_partner_overview(
                 COUNT(*) as submissions
             FROM pending_systems
             WHERE submission_date >= date('now', '-7 days')
-              {sub_tag_filter}
+              {sub_tag_filter} {sub_source_filter}
             GROUP BY date(submission_date)
             ORDER BY date ASC
-        ''', sub_tag_params)
+        ''', sub_tag_params + sub_source_params)
         sub_trend = {row['date']: row['submissions'] for row in cursor.fetchall()}
 
         cursor.execute(f'''

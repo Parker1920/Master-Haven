@@ -15,6 +15,9 @@ export default function Analytics() {
 
   const [loading, setLoading] = useState(true)
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState('manual')
+
   // Date range state
   const [dateRange, setDateRange] = useState({ startDate: null, endDate: null })
   const [period, setPeriod] = useState('month')
@@ -26,6 +29,12 @@ export default function Analytics() {
   const [communities, setCommunities] = useState([])
   const [selectedCommunity, setSelectedCommunity] = useState('')
   const [discordTags, setDiscordTags] = useState([])
+
+  // Source breakdown (for overview bar + tab badges)
+  const [sourceBreakdown, setSourceBreakdown] = useState([])
+
+  // Extractor-specific data
+  const [extractorSummary, setExtractorSummary] = useState(null)
 
   // Redirect if not admin
   useEffect(() => {
@@ -49,7 +58,7 @@ export default function Analytics() {
     }
   }, [isAdmin])
 
-  // Fetch data when filters change
+  // Fetch data when filters or tab changes
   useEffect(() => {
     if (!isAdmin) return
 
@@ -70,31 +79,66 @@ export default function Analytics() {
           params.discord_tag = selectedCommunity
         }
 
-        // Fetch leaderboard
-        const leaderboardRes = await axios.get('/api/analytics/submission-leaderboard', {
-          params,
-          withCredentials: true
-        })
-        setLeaderboard(leaderboardRes.data.leaderboard || [])
-        setTotals(leaderboardRes.data.totals || { total_submissions: 0, total_approved: 0, total_rejected: 0 })
+        // Add source filter based on active tab
+        const sourceParam = activeTab === 'manual' ? 'manual' : 'haven_extractor'
 
-        // Fetch timeline
-        const timelineRes = await axios.get('/api/analytics/submissions-timeline', {
-          params: {
-            ...params,
-            granularity: period === 'year' ? 'month' : period === 'month' ? 'week' : 'day'
-          },
-          withCredentials: true
-        })
-        setTimeline(timelineRes.data.timeline || [])
-
-        // Fetch community stats (super admin only)
-        if (isSuperAdmin) {
-          const communityRes = await axios.get('/api/analytics/community-stats', {
+        // Fetch source-filtered data + source breakdown in parallel
+        const requests = [
+          // Source-filtered leaderboard
+          axios.get('/api/analytics/submission-leaderboard', {
+            params: { ...params, source: sourceParam },
+            withCredentials: true
+          }),
+          // Source-filtered timeline
+          axios.get('/api/analytics/submissions-timeline', {
+            params: {
+              ...params,
+              source: sourceParam,
+              granularity: period === 'year' ? 'month' : period === 'month' ? 'week' : 'day'
+            },
+            withCredentials: true
+          }),
+          // Source breakdown (unfiltered by source, for overview bar)
+          axios.get('/api/analytics/source-breakdown', {
             params,
             withCredentials: true
           })
-          setCommunities(communityRes.data.communities || [])
+        ]
+
+        // Community stats (super admin only)
+        if (isSuperAdmin) {
+          requests.push(
+            axios.get('/api/analytics/community-stats', {
+              params: { ...params, source: sourceParam },
+              withCredentials: true
+            })
+          )
+        }
+
+        // Extractor summary (extractor tab only)
+        if (activeTab === 'extractor') {
+          requests.push(
+            axios.get('/api/analytics/extractor-summary', {
+              params: selectedCommunity ? { discord_tag: selectedCommunity } : {},
+              withCredentials: true
+            })
+          )
+        }
+
+        const results = await Promise.all(requests)
+
+        setLeaderboard(results[0].data.leaderboard || [])
+        setTotals(results[0].data.totals || { total_submissions: 0, total_approved: 0, total_rejected: 0 })
+        setTimeline(results[1].data.timeline || [])
+        setSourceBreakdown(results[2].data.breakdown || [])
+
+        if (isSuperAdmin) {
+          setCommunities(results[3].data.communities || [])
+          if (activeTab === 'extractor' && results[4]) {
+            setExtractorSummary(results[4].data)
+          }
+        } else if (activeTab === 'extractor' && results[3]) {
+          setExtractorSummary(results[3].data)
         }
 
       } catch (err) {
@@ -105,7 +149,7 @@ export default function Analytics() {
     }
 
     fetchData()
-  }, [dateRange, period, selectedCommunity, isSuperAdmin, isAdmin])
+  }, [dateRange, period, selectedCommunity, isSuperAdmin, isAdmin, activeTab])
 
   const handleDateChange = ({ startDate, endDate }) => {
     setDateRange({ startDate, endDate })
@@ -132,12 +176,24 @@ export default function Analytics() {
     return null
   }
 
-  // Memoize approval rate calculation to avoid recalculating on every render
+  // Derive counts from source breakdown for tab badges and overview bar
+  const manualData = sourceBreakdown.find(s => s.source_type === 'manual') || { total: 0, approved: 0, rejected: 0, pending: 0 }
+  const extractorData = sourceBreakdown.find(s => s.source_type === 'haven_extractor') || { total: 0, approved: 0, rejected: 0, pending: 0 }
+  const grandTotal = manualData.total + extractorData.total
+  const manualPct = grandTotal > 0 ? Math.round((manualData.total / grandTotal) * 100) : 0
+  const extractorPct = grandTotal > 0 ? 100 - manualPct : 0
+
+  // Memoize approval rate calculation
   const approvalRate = useMemo(() => {
     return totals.total_submissions > 0
       ? ((totals.total_approved / totals.total_submissions) * 100).toFixed(1)
       : 0
   }, [totals.total_submissions, totals.total_approved])
+
+  const cardStyle = {
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
+    border: '1px solid rgba(255,255,255,0.04)'
+  }
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--app-bg)' }}>
@@ -191,118 +247,280 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          title="Total Submissions"
-          value={totals.total_submissions.toLocaleString()}
-          subtitle={period === 'all' ? 'All time' : `This ${period}`}
-        />
-        <StatCard
-          title="Approved"
-          value={totals.total_approved.toLocaleString()}
-          subtitle={`${((totals.total_approved / (totals.total_submissions || 1)) * 100).toFixed(1)}% of total`}
-        />
-        <StatCard
-          title="Rejected"
-          value={totals.total_rejected.toLocaleString()}
-          subtitle={`${((totals.total_rejected / (totals.total_submissions || 1)) * 100).toFixed(1)}% of total`}
-        />
-        <StatCard
-          title="Approval Rate"
-          value={`${approvalRate}%`}
-          subtitle={totals.total_submissions > 0 ? `${totals.total_approved} approved` : 'No submissions'}
-        />
-      </div>
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Timeline Chart */}
+      {/* Source Overview Bar */}
+      {grandTotal > 0 && (
         <div
-          className="rounded-xl p-4"
-          style={{
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
-            border: '1px solid rgba(255,255,255,0.04)'
-          }}
+          className="rounded-xl p-4 mb-6"
+          style={cardStyle}
         >
-          <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
-            Submissions Over Time
-          </h2>
-          <SubmissionChart data={timeline} loading={loading} height={280} />
-        </div>
-
-        {/* Community Breakdown (Super Admin Only) */}
-        {isSuperAdmin && (
-          <div
-            className="rounded-xl p-4"
-            style={{
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
-              border: '1px solid rgba(255,255,255,0.04)'
-            }}
-          >
-            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
-              Community Breakdown
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+              Submission Sources
             </h2>
-            <CommunityPieChart data={communities} loading={loading} height={280} />
-          </div>
-        )}
-
-        {/* If not super admin, show a larger timeline */}
-        {!isSuperAdmin && (
-          <div
-            className="rounded-xl p-4"
-            style={{
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
-              border: '1px solid rgba(255,255,255,0.04)'
-            }}
-          >
-            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
-              Your Community Stats
-            </h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 rounded-lg" style={{ background: 'rgba(0, 194, 179, 0.1)' }}>
-                <div className="text-3xl font-bold" style={{ color: 'var(--app-primary)' }}>
-                  {leaderboard.length}
-                </div>
-                <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
-                  Active Submitters
-                </div>
-              </div>
-              <div className="p-4 rounded-lg" style={{ background: 'rgba(34, 197, 94, 0.1)' }}>
-                <div className="text-3xl font-bold" style={{ color: '#22c55e' }}>
-                  {approvalRate}%
-                </div>
-                <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
-                  Approval Rate
-                </div>
-              </div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--app-text)' }}>
+              {grandTotal.toLocaleString()} total
             </div>
           </div>
-        )}
-      </div>
-
-      {/* Leaderboard */}
-      <div
-        className="rounded-xl p-4"
-        style={{
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
-          border: '1px solid rgba(255,255,255,0.04)'
-        }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold" style={{ color: 'var(--app-text)' }}>
-            Submission Leaderboard
-          </h2>
-          <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
-            Top {leaderboard.length} submitters
+          {/* Proportional bar */}
+          <div className="flex rounded-full overflow-hidden h-3 mb-3" style={{ background: 'rgba(255,255,255,0.05)' }}>
+            {manualData.total > 0 && (
+              <div
+                className="transition-all duration-500"
+                style={{ width: `${manualPct}%`, background: '#06b6d4' }}
+                title={`Manual: ${manualData.total}`}
+              />
+            )}
+            {extractorData.total > 0 && (
+              <div
+                className="transition-all duration-500"
+                style={{ width: `${extractorPct}%`, background: '#a855f7' }}
+                title={`Extractor: ${extractorData.total}`}
+              />
+            )}
+          </div>
+          {/* Legend */}
+          <div className="flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full" style={{ background: '#06b6d4' }} />
+              <span style={{ color: 'var(--app-text)' }}>
+                Manual: <span className="font-semibold">{manualData.total.toLocaleString()}</span>
+                <span style={{ opacity: 0.5 }}> ({manualPct}%)</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full" style={{ background: '#a855f7' }} />
+              <span style={{ color: 'var(--app-text)' }}>
+                Extractor: <span className="font-semibold">{extractorData.total.toLocaleString()}</span>
+                <span style={{ opacity: 0.5 }}> ({extractorPct}%)</span>
+              </span>
+            </div>
           </div>
         </div>
-        <LeaderboardTable
-          data={leaderboard}
-          showCommunity={isSuperAdmin && !selectedCommunity}
-          loading={loading}
-        />
+      )}
+
+      {/* Tab Switcher */}
+      <div className="flex border-b mb-6" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+        <button
+          className="px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'manual' ? '#06b6d4' : 'transparent',
+            color: activeTab === 'manual' ? '#06b6d4' : 'var(--app-text)',
+            opacity: activeTab === 'manual' ? 1 : 0.6
+          }}
+          onClick={() => setActiveTab('manual')}
+        >
+          Manual Submissions
+          {manualData.total > 0 && (
+            <span
+              className="ml-2 px-2 py-0.5 text-xs rounded-full font-semibold"
+              style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}
+            >
+              {manualData.total.toLocaleString()}
+            </span>
+          )}
+        </button>
+        <button
+          className="px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'extractor' ? '#a855f7' : 'transparent',
+            color: activeTab === 'extractor' ? '#a855f7' : 'var(--app-text)',
+            opacity: activeTab === 'extractor' ? 1 : 0.6
+          }}
+          onClick={() => setActiveTab('extractor')}
+        >
+          Haven Extractor
+          {extractorData.total > 0 && (
+            <span
+              className="ml-2 px-2 py-0.5 text-xs rounded-full font-semibold"
+              style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}
+            >
+              {extractorData.total.toLocaleString()}
+            </span>
+          )}
+        </button>
       </div>
+
+      {/* === MANUAL TAB === */}
+      {activeTab === 'manual' && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatCard
+              title="Manual Submissions"
+              value={totals.total_submissions.toLocaleString()}
+              subtitle={period === 'all' ? 'All time' : `This ${period}`}
+            />
+            <StatCard
+              title="Approved"
+              value={totals.total_approved.toLocaleString()}
+              subtitle={`${((totals.total_approved / (totals.total_submissions || 1)) * 100).toFixed(1)}% of total`}
+            />
+            <StatCard
+              title="Rejected"
+              value={totals.total_rejected.toLocaleString()}
+              subtitle={`${((totals.total_rejected / (totals.total_submissions || 1)) * 100).toFixed(1)}% of total`}
+            />
+            <StatCard
+              title="Approval Rate"
+              value={`${approvalRate}%`}
+              subtitle={totals.total_submissions > 0 ? `${totals.total_approved} approved` : 'No submissions'}
+            />
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="rounded-xl p-4" style={cardStyle}>
+              <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                Manual Submissions Over Time
+              </h2>
+              <SubmissionChart data={timeline} loading={loading} height={280} />
+            </div>
+
+            {isSuperAdmin && (
+              <div className="rounded-xl p-4" style={cardStyle}>
+                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                  Community Breakdown
+                </h2>
+                <CommunityPieChart data={communities} loading={loading} height={280} />
+              </div>
+            )}
+
+            {!isSuperAdmin && (
+              <div className="rounded-xl p-4" style={cardStyle}>
+                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                  Your Community Stats
+                </h2>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg" style={{ background: 'rgba(0, 194, 179, 0.1)' }}>
+                    <div className="text-3xl font-bold" style={{ color: 'var(--app-primary)' }}>
+                      {leaderboard.length}
+                    </div>
+                    <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+                      Active Submitters
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-lg" style={{ background: 'rgba(34, 197, 94, 0.1)' }}>
+                    <div className="text-3xl font-bold" style={{ color: '#22c55e' }}>
+                      {approvalRate}%
+                    </div>
+                    <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+                      Approval Rate
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Leaderboard */}
+          <div className="rounded-xl p-4" style={cardStyle}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--app-text)' }}>
+                Manual Submission Leaderboard
+              </h2>
+              <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
+                Top {leaderboard.length} submitters
+              </div>
+            </div>
+            <LeaderboardTable
+              data={leaderboard}
+              showCommunity={isSuperAdmin && !selectedCommunity}
+              loading={loading}
+            />
+          </div>
+        </>
+      )}
+
+      {/* === EXTRACTOR TAB === */}
+      {activeTab === 'extractor' && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatCard
+              title="Extractor Submissions"
+              value={totals.total_submissions.toLocaleString()}
+              subtitle={period === 'all' ? 'All time' : `This ${period}`}
+            />
+            <StatCard
+              title="Registered Users"
+              value={(extractorSummary?.registered_users || 0).toLocaleString()}
+              subtitle={`${extractorSummary?.active_users_7d || 0} active this week`}
+            />
+            <StatCard
+              title="Avg Per User"
+              value={(extractorSummary?.avg_per_user || 0).toLocaleString()}
+              subtitle="submissions per user"
+            />
+            <StatCard
+              title="Approval Rate"
+              value={`${approvalRate}%`}
+              subtitle={totals.total_submissions > 0 ? `${totals.total_approved} approved` : 'No submissions'}
+            />
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="rounded-xl p-4" style={cardStyle}>
+              <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                Extractor Submissions Over Time
+              </h2>
+              <SubmissionChart data={timeline} loading={loading} height={280} />
+            </div>
+
+            {isSuperAdmin && (
+              <div className="rounded-xl p-4" style={cardStyle}>
+                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                  Community Breakdown
+                </h2>
+                <CommunityPieChart data={communities} loading={loading} height={280} />
+              </div>
+            )}
+
+            {!isSuperAdmin && (
+              <div className="rounded-xl p-4" style={cardStyle}>
+                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--app-text)' }}>
+                  Extractor Overview
+                </h2>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
+                    <div className="text-3xl font-bold" style={{ color: '#a855f7' }}>
+                      {extractorSummary?.registered_users || 0}
+                    </div>
+                    <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+                      Registered Users
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-lg" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
+                    <div className="text-3xl font-bold" style={{ color: '#a855f7' }}>
+                      {extractorSummary?.active_users_7d || 0}
+                    </div>
+                    <div className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.7 }}>
+                      Active This Week
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Leaderboard */}
+          <div className="rounded-xl p-4" style={cardStyle}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--app-text)' }}>
+                Extractor Submission Leaderboard
+              </h2>
+              <div className="text-sm" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
+                Top {leaderboard.length} submitters
+              </div>
+            </div>
+            <LeaderboardTable
+              data={leaderboard}
+              showCommunity={isSuperAdmin && !selectedCommunity}
+              loading={loading}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }
