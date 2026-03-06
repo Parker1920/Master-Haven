@@ -1290,7 +1290,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.39.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.41.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -6520,6 +6520,373 @@ async def list_communities():
     # Reformat for extractor consumption
     tags = result.get('tags', [])
     return {'communities': [{'tag': t['tag'], 'name': t['name']} for t in tags]}
+
+
+# ─── Public Community Stats Endpoints ────────────────────────────────────────
+# These endpoints are public (no auth required) and power the Community Stats page.
+
+@app.get('/api/public/community-overview')
+async def public_community_overview():
+    """
+    Public endpoint: per-community stats (systems, discoveries, contributors, upload method split).
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Systems per community
+        cursor.execute('''
+            SELECT COALESCE(NULLIF(discord_tag, ''), 'Personal') as tag,
+                   COUNT(*) as total_systems,
+                   COUNT(DISTINCT COALESCE(NULLIF(discovered_by, ''), personal_discord_username)) as unique_contributors
+            FROM systems
+            GROUP BY tag
+            ORDER BY total_systems DESC
+        ''')
+        sys_rows = {r['tag']: dict(r) for r in cursor.fetchall()}
+
+        # Discoveries per community
+        cursor.execute('''
+            SELECT COALESCE(NULLIF(discord_tag, ''), 'Personal') as tag,
+                   COUNT(*) as total_discoveries
+            FROM discoveries
+            GROUP BY tag
+        ''')
+        disc_rows = {r['tag']: dict(r) for r in cursor.fetchall()}
+
+        # Upload method split per community (from pending_systems approved only)
+        cursor.execute('''
+            SELECT COALESCE(NULLIF(discord_tag, ''), 'Personal') as tag,
+                   SUM(CASE WHEN COALESCE(source, 'manual') = 'manual' THEN 1 ELSE 0 END) as manual_systems,
+                   SUM(CASE WHEN source = 'haven_extractor' THEN 1 ELSE 0 END) as extractor_systems
+            FROM pending_systems
+            WHERE status = 'approved'
+            GROUP BY tag
+        ''')
+        source_rows = {r['tag']: dict(r) for r in cursor.fetchall()}
+
+        # Community display names from partner_accounts
+        cursor.execute("SELECT discord_tag, display_name FROM partner_accounts WHERE discord_tag IS NOT NULL")
+        display_names = {r['discord_tag']: r['display_name'] for r in cursor.fetchall()}
+
+        # Merge all data
+        all_tags = set(sys_rows.keys()) | set(disc_rows.keys())
+        communities = []
+        for tag in sorted(all_tags, key=lambda t: sys_rows.get(t, {}).get('total_systems', 0), reverse=True):
+            communities.append({
+                'discord_tag': tag,
+                'display_name': display_names.get(tag, tag),
+                'total_systems': sys_rows.get(tag, {}).get('total_systems', 0),
+                'total_discoveries': disc_rows.get(tag, {}).get('total_discoveries', 0),
+                'unique_contributors': sys_rows.get(tag, {}).get('unique_contributors', 0),
+                'manual_systems': source_rows.get(tag, {}).get('manual_systems', 0),
+                'extractor_systems': source_rows.get(tag, {}).get('extractor_systems', 0),
+            })
+
+        # Grand totals
+        total_systems = sum(c['total_systems'] for c in communities)
+        total_discoveries = sum(c['total_discoveries'] for c in communities)
+
+        cursor.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(discovered_by, ''), personal_discord_username)) FROM systems")
+        total_contributors = cursor.fetchone()[0] or 0
+
+        return {
+            'communities': communities,
+            'totals': {
+                'total_systems': total_systems,
+                'total_discoveries': total_discoveries,
+                'total_communities': len(communities),
+                'total_contributors': total_contributors,
+            }
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/public/contributors')
+async def public_contributors(community: Optional[str] = None, limit: int = 50):
+    """
+    Public endpoint: ranked contributor list with upload method per member.
+    Only shows approved system counts and discovery counts (no rejection data).
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        tag_filter = ''
+        tag_params = []
+        if community:
+            tag_filter = ' AND discord_tag = ?'
+            tag_params = [community]
+
+        # Username normalization (same pattern as admin leaderboard)
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+        trimmed_username = f"TRIM(REPLACE({raw_username}, '#', ''))"
+        normalized_username = f"""LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))"""
+
+        tag_display = "COALESCE(NULLIF(discord_tag, ''), 'Personal')"
+
+        # Approved systems per contributor with source breakdown
+        query = f'''
+            SELECT
+                MAX({raw_username}) as username,
+                {normalized_username} as normalized_name,
+                GROUP_CONCAT(DISTINCT {tag_display}) as discord_tags,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_systems,
+                SUM(CASE WHEN status = 'approved' AND COALESCE(source, 'manual') = 'manual' THEN 1 ELSE 0 END) as manual_count,
+                SUM(CASE WHEN status = 'approved' AND source = 'haven_extractor' THEN 1 ELSE 0 END) as extractor_count,
+                MAX(submission_date) as last_activity
+            FROM pending_systems
+            WHERE status = 'approved' {tag_filter}
+            GROUP BY {normalized_username}
+            HAVING {normalized_username} != 'unknown' AND total_systems > 0
+            ORDER BY total_systems DESC
+            LIMIT ?
+        '''
+        cursor.execute(query, tag_params + [limit])
+        sys_rows = cursor.fetchall()
+
+        # Build contributor dict keyed by normalized name
+        contributors = {}
+        for row in sys_rows:
+            entry = dict(row)
+            norm = entry.pop('normalized_name')
+            contributors[norm] = entry
+            contributors[norm]['total_discoveries'] = 0
+
+        # Discovery counts per contributor
+        disc_raw = "COALESCE(NULLIF(NULLIF(discovered_by, 'Anonymous'), 'anonymous'), 'Unknown')"
+        disc_trimmed = f"TRIM(REPLACE({disc_raw}, '#', ''))"
+        disc_normalized = f"""LOWER(TRIM(
+            CASE
+                WHEN LENGTH({disc_trimmed}) > 4
+                    AND SUBSTR({disc_trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({disc_trimmed}) = 4
+                        OR SUBSTR({disc_trimmed}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({disc_trimmed}, 1, LENGTH({disc_trimmed}) - 4)
+                ELSE {disc_trimmed}
+            END
+        ))"""
+
+        disc_tag_filter = ''
+        disc_tag_params = []
+        if community:
+            disc_tag_filter = ' AND discord_tag = ?'
+            disc_tag_params = [community]
+
+        disc_query = f'''
+            SELECT {disc_normalized} as normalized_name, COUNT(*) as total_discoveries
+            FROM discoveries
+            WHERE 1=1 {disc_tag_filter}
+            GROUP BY {disc_normalized}
+        '''
+        cursor.execute(disc_query, disc_tag_params)
+        for row in cursor.fetchall():
+            norm = row['normalized_name']
+            if norm in contributors:
+                contributors[norm]['total_discoveries'] = row['total_discoveries']
+
+        # Build ranked list
+        ranked = sorted(contributors.values(), key=lambda c: c['total_systems'], reverse=True)
+        for i, entry in enumerate(ranked, 1):
+            entry['rank'] = i
+
+        # Total unique contributors
+        count_query = f'''
+            SELECT COUNT(DISTINCT {normalized_username}) as cnt
+            FROM pending_systems
+            WHERE status = 'approved' {tag_filter}
+              AND {normalized_username} != 'unknown'
+        '''
+        cursor.execute(count_query, tag_params)
+        total = cursor.fetchone()['cnt'] or 0
+
+        return {
+            'contributors': ranked,
+            'total_contributors': total,
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/public/activity-timeline')
+async def public_activity_timeline(granularity: str = 'week', months: int = 6):
+    """
+    Public endpoint: combined systems + discoveries timeline.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Date format based on granularity
+        if granularity == 'day':
+            date_fmt = '%Y-%m-%d'
+        elif granularity == 'month':
+            date_fmt = '%Y-%m'
+        else:
+            date_fmt = '%Y-W%W'
+            granularity = 'week'
+
+        date_cutoff = f"date('now', '-{months} months')"
+
+        # Systems timeline (using created_at from systems table)
+        sys_query = f'''
+            SELECT strftime('{date_fmt}', created_at) as date,
+                   COUNT(*) as systems
+            FROM systems
+            WHERE created_at >= {date_cutoff}
+            GROUP BY date
+            ORDER BY date
+        '''
+        cursor.execute(sys_query)
+        sys_data = {r['date']: r['systems'] for r in cursor.fetchall()}
+
+        # Discoveries timeline
+        disc_query = f'''
+            SELECT strftime('{date_fmt}', submission_timestamp) as date,
+                   COUNT(*) as discoveries
+            FROM discoveries
+            WHERE submission_timestamp >= {date_cutoff}
+            GROUP BY date
+            ORDER BY date
+        '''
+        cursor.execute(disc_query)
+        disc_data = {r['date']: r['discoveries'] for r in cursor.fetchall()}
+
+        # Merge into combined timeline
+        all_dates = sorted(set(sys_data.keys()) | set(disc_data.keys()))
+        timeline = []
+        for date in all_dates:
+            if date:  # skip NULL dates
+                timeline.append({
+                    'date': date,
+                    'systems': sys_data.get(date, 0),
+                    'discoveries': disc_data.get(date, 0),
+                })
+
+        return {'timeline': timeline, 'granularity': granularity}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/public/discovery-breakdown')
+async def public_discovery_breakdown():
+    """
+    Public endpoint: discovery counts grouped by type (all communities combined).
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT
+                COALESCE(type_slug, 'other') as type_slug,
+                COALESCE(discovery_type, 'Other') as discovery_type,
+                COUNT(*) as count
+            FROM discoveries
+            GROUP BY type_slug
+            ORDER BY count DESC
+        ''')
+        rows = cursor.fetchall()
+        breakdown = [dict(row) for row in rows]
+
+        total = sum(item['count'] for item in breakdown)
+        for item in breakdown:
+            item['percentage'] = round((item['count'] / total * 100), 1) if total > 0 else 0
+
+        return {'breakdown': breakdown, 'total': total}
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/public/community-regions')
+async def public_community_regions(community: str):
+    """
+    Public endpoint: regions for a specific community with lightweight system lists.
+    Returns region name/coordinates, system count, and system id+name+star_type+grade.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all systems for this community with region info
+        cursor.execute('''
+            SELECT s.id, s.name, s.star_type, s.is_complete,
+                   s.region_x, s.region_y, s.region_z,
+                   r.custom_name as region_name
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+            WHERE s.discord_tag = ?
+            ORDER BY r.custom_name IS NULL, r.custom_name, s.name
+        ''', [community])
+        rows = cursor.fetchall()
+
+        # Group by region
+        regions_map = {}
+        for row in rows:
+            key = (row['region_x'], row['region_y'], row['region_z'])
+            if key not in regions_map:
+                custom = row['region_name']
+                regions_map[key] = {
+                    'region_x': row['region_x'],
+                    'region_y': row['region_y'],
+                    'region_z': row['region_z'],
+                    'custom_name': custom,
+                    'display_name': custom if custom else f"Region ({row['region_x']}, {row['region_y']}, {row['region_z']})",
+                    'system_count': 0,
+                    'systems': [],
+                }
+            score = row['is_complete'] or 0
+            if score >= 85:
+                grade = 'S'
+            elif score >= 65:
+                grade = 'A'
+            elif score >= 40:
+                grade = 'B'
+            else:
+                grade = 'C'
+            regions_map[key]['systems'].append({
+                'id': row['id'],
+                'name': row['name'],
+                'star_type': row['star_type'] or 'Unknown',
+                'completeness_grade': grade,
+            })
+            regions_map[key]['system_count'] += 1
+
+        # Sort: named regions first by count desc, then unnamed by count desc
+        regions = sorted(
+            regions_map.values(),
+            key=lambda r: (r['custom_name'] is None, -r['system_count'])
+        )
+
+        return {'regions': regions, 'total_regions': len(regions)}
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get('/api/extractor/users')

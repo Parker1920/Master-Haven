@@ -8,6 +8,9 @@
 # Keeper Discord Bot - maintained separately
 keeper-discord-bot-main/
 
+# Travelers Collective - separate project with its own repo
+Travelers-Collective/
+
 
 # -----------------
 # ENVIRONMENT & SECRETS

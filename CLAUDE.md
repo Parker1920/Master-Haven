@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.40.0 | 2026-03-02 | Analytics source split (manual vs extractor) |
-| Haven-UI | 1.39.0 | 2026-03-02 | Analytics source split tabs |
-| Backend API | 1.39.0 | 2026-03-02 | Source-filtered analytics endpoints |
+| **Master Haven** | 1.42.0 | 2026-03-05 | Community detail drill-down page |
+| Haven-UI | 1.41.0 | 2026-03-05 | Community detail drill-down page |
+| Backend API | 1.41.0 | 2026-03-05 | Community regions endpoint |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,46 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.42.0 (2026-03-05) - Community Detail Drill-Down
+Click into any community card to see a dedicated detail page with member stats, regions, and direct system navigation.
+
+**Haven-UI 1.41.0**
+- New `CommunityDetail` page at `/community-stats/:tag` — full-page drill-down for each community
+- Community header with stat cards (systems, discoveries, members, upload method split)
+- Members table: ranked contributors with systems, discoveries, and per-member upload method bar
+- Regions section: expandable list of all regions (named + unnamed) the community has uploaded to
+- Click region to expand inline → shows system names with star type dot and completeness grade badge
+- Click system name → navigates directly to `/systems/:id` detail page
+- Back link returns to Community Stats overview
+- Community cards on CommunityStats page now clickable with hover scale effect
+
+**Backend API 1.41.0**
+- New `GET /api/public/community-regions`: lightweight regions + system lists for a community (id, name, star_type, grade only)
+- Named regions sorted first, then unnamed, both by system count descending
+
+---
+
+#### Master Haven 1.41.0 (2026-03-05) - Public Community Stats Page
+New public-facing Community Stats page showcasing all Discord communities' contributions without requiring login.
+
+**Haven-UI 1.40.0**
+- New `CommunityStats` page at `/community-stats` — fully public, no auth required
+- Overview stat cards: total systems mapped, discoveries, communities, contributors
+- Community cards grid: per-community system count, discovery count, member count, upload method split bar (cyan=manual, purple=extractor)
+- Activity timeline: dual-area chart showing systems and discoveries over time
+- Discovery type breakdown: bar chart + type cards with counts and percentages (fauna, flora, mineral, etc.)
+- Contributors table: ranked list with community tags, system/discovery counts, per-member upload method ratio bar
+- Community filter dropdown on contributors table
+- Top-level nav link added (desktop + mobile) after Discoveries
+
+**Backend API 1.40.0**
+- New `GET /api/public/community-overview`: per-community stats (systems, discoveries, contributors, manual/extractor split) with grand totals
+- New `GET /api/public/contributors`: ranked contributor list with upload method per member, optional community filter
+- New `GET /api/public/activity-timeline`: combined systems + discoveries timeline with configurable granularity (day/week/month)
+- New `GET /api/public/discovery-breakdown`: discovery counts by type (all communities combined)
+
+---
 
 #### Master Haven 1.40.0 (2026-03-02) - Analytics Source Split (Manual vs Extractor)
 Separate analytics for manual web submissions and Haven Extractor mod submissions with tabbed dashboard.

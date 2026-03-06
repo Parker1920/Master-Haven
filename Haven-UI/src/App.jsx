@@ -28,6 +28,8 @@ const Events = lazy(() => import('./pages/Events'))
 const CsvImport = lazy(() => import('./pages/CsvImport'))
 const DataRestrictions = lazy(() => import('./pages/DataRestrictions'))
 const ExtractorUsers = lazy(() => import('./pages/ExtractorUsers'))
+const CommunityStats = lazy(() => import('./pages/CommunityStats'))
+const CommunityDetail = lazy(() => import('./pages/CommunityDetail'))
 
 // Heavy components with Three.js - load separately for better code splitting
 const WarRoom = lazy(() => import('./pages/WarRoom'))
@@ -114,6 +116,8 @@ export default function App() {
               <Route path="/discoveries" element={<Discoveries />} />
               <Route path="/discoveries/:type" element={<DiscoveryType />} />
               <Route path="/db_stats" element={<DBStats />} />
+              <Route path="/community-stats" element={<CommunityStats />} />
+              <Route path="/community-stats/:tag" element={<CommunityDetail />} />
 
               {/* Super admin only routes */}
               <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />

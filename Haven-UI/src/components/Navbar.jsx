@@ -158,6 +158,7 @@ export default function Navbar() {
             <a className={navLink} href="/map/latest">Map</a>
             <Link className={navLink} to="/create">Create</Link>
             <Link className={navLink} to="/discoveries">Discoveries</Link>
+            <Link className={navLink} to="/community-stats">Community Stats</Link>
             {isAdmin && !isCorrespondent && <Link className={navLink} to="/events">Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
               <Link className={`${navLink} text-red-400 font-bold relative`} to="/war-room">
@@ -265,6 +266,7 @@ export default function Navbar() {
             <a className="px-3 py-2 hover:bg-gray-700 rounded" href="/map/latest" onClick={closeMenu}>Map</a>
             <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/create" onClick={closeMenu}>Create</Link>
             <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/discoveries" onClick={closeMenu}>Discoveries</Link>
+            <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/community-stats" onClick={closeMenu}>Community Stats</Link>
             {isAdmin && !isCorrespondent && <Link className="px-3 py-2 hover:bg-gray-700 rounded" to="/events" onClick={closeMenu}>Events</Link>}
             {(canAccess(FEATURES.WAR_ROOM) || isCorrespondent) && (
               <Link className="px-3 py-2 hover:bg-gray-700 rounded text-red-400 font-bold flex justify-between items-center" to="/war-room" onClick={closeMenu}>
