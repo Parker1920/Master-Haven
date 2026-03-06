@@ -6748,12 +6748,13 @@ async def public_activity_timeline(granularity: str = 'week', months: int = 6):
 
         date_cutoff = f"date('now', '-{months} months')"
 
-        # Manual systems timeline
+        # Manual systems timeline (source column is on pending_systems, not systems)
         manual_query = f'''
-            SELECT strftime('{date_fmt}', created_at) as date,
+            SELECT strftime('{date_fmt}', submission_date) as date,
                    COUNT(*) as count
-            FROM systems
-            WHERE created_at >= {date_cutoff}
+            FROM pending_systems
+            WHERE submission_date >= {date_cutoff}
+              AND status = 'approved'
               AND COALESCE(source, 'manual') = 'manual'
             GROUP BY date
             ORDER BY date
@@ -6763,10 +6764,11 @@ async def public_activity_timeline(granularity: str = 'week', months: int = 6):
 
         # Extractor systems timeline
         extractor_query = f'''
-            SELECT strftime('{date_fmt}', created_at) as date,
+            SELECT strftime('{date_fmt}', submission_date) as date,
                    COUNT(*) as count
-            FROM systems
-            WHERE created_at >= {date_cutoff}
+            FROM pending_systems
+            WHERE submission_date >= {date_cutoff}
+              AND status = 'approved'
               AND source = 'haven_extractor'
             GROUP BY date
             ORDER BY date

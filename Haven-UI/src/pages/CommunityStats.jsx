@@ -81,13 +81,16 @@ export default function CommunityStats() {
   const [timeline, setTimeline] = useState([])
   const [typeBreakdown, setTypeBreakdown] = useState([])
 
-  // Fetch all data on mount
+  // Fetch all data on mount — each fetch handles errors independently
   useEffect(() => {
+    const safeFetch = (url, fallback = {}) =>
+      fetch(url).then(r => r.ok ? r.json() : fallback).catch(() => fallback)
+
     Promise.all([
-      fetch('/api/public/community-overview').then(r => r.json()),
-      fetch('/api/public/contributors').then(r => r.json()),
-      fetch('/api/public/activity-timeline').then(r => r.json()),
-      fetch('/api/public/discovery-breakdown').then(r => r.json()),
+      safeFetch('/api/public/community-overview', {}),
+      safeFetch('/api/public/contributors', {}),
+      safeFetch('/api/public/activity-timeline', {}),
+      safeFetch('/api/public/discovery-breakdown', {}),
     ])
       .then(([overviewData, contribData, timelineData, breakdownData]) => {
         setOverview(overviewData)
@@ -95,7 +98,6 @@ export default function CommunityStats() {
         setTimeline(timelineData.timeline || [])
         setTypeBreakdown(breakdownData.breakdown || [])
       })
-      .catch(err => console.error('Failed to load community stats:', err))
       .finally(() => setLoading(false))
   }, [])
 
