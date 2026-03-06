@@ -51,13 +51,6 @@ function getTagColors(tag) {
   return color
 }
 
-// Rank badge colors
-const rankStyles = {
-  1: { bg: 'rgba(255, 215, 0, 0.15)', border: 'rgba(255, 215, 0, 0.3)', text: '#FFD700' },
-  2: { bg: 'rgba(192, 192, 192, 0.15)', border: 'rgba(192, 192, 192, 0.3)', text: '#C0C0C0' },
-  3: { bg: 'rgba(205, 127, 50, 0.15)', border: 'rgba(205, 127, 50, 0.3)', text: '#CD7F32' },
-}
-
 // Chart tooltip
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null
@@ -77,42 +70,24 @@ const ChartTooltip = ({ active, payload, label }) => {
 export default function CommunityStats() {
   const [loading, setLoading] = useState(true)
   const [overview, setOverview] = useState(null)
-  const [contributors, setContributors] = useState([])
-  const [totalContributors, setTotalContributors] = useState(0)
   const [timeline, setTimeline] = useState([])
   const [typeBreakdown, setTypeBreakdown] = useState([])
-  const [communityFilter, setCommunityFilter] = useState('')
 
   // Fetch all data on mount
   useEffect(() => {
     Promise.all([
       fetch('/api/public/community-overview').then(r => r.json()),
-      fetch('/api/public/contributors').then(r => r.json()),
       fetch('/api/public/activity-timeline').then(r => r.json()),
       fetch('/api/public/discovery-breakdown').then(r => r.json()),
     ])
-      .then(([overviewData, contribData, timelineData, breakdownData]) => {
+      .then(([overviewData, timelineData, breakdownData]) => {
         setOverview(overviewData)
-        setContributors(contribData.contributors || [])
-        setTotalContributors(contribData.total_contributors || 0)
         setTimeline(timelineData.timeline || [])
         setTypeBreakdown(breakdownData.breakdown || [])
       })
       .catch(err => console.error('Failed to load community stats:', err))
       .finally(() => setLoading(false))
   }, [])
-
-  // Refetch contributors when community filter changes
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (communityFilter) params.set('community', communityFilter)
-    fetch(`/api/public/contributors?${params}`).then(r => r.json())
-      .then(data => {
-        setContributors(data.contributors || [])
-        setTotalContributors(data.total_contributors || 0)
-      })
-      .catch(() => {})
-  }, [communityFilter])
 
   // Format type breakdown for bar chart
   const formattedTypeBreakdown = useMemo(() => {
@@ -348,146 +323,6 @@ export default function CommunityStats() {
         </div>
       )}
 
-      {/* Contributors Table */}
-      <div
-        className="rounded-xl p-4"
-        style={{
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
-          border: '1px solid rgba(255,255,255,0.04)'
-        }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold" style={{ color: 'var(--app-text)' }}>
-            Contributors
-            <span className="text-sm font-normal ml-2" style={{ opacity: 0.5 }}>({totalContributors})</span>
-          </h2>
-          {/* Community filter */}
-          <select
-            value={communityFilter}
-            onChange={e => setCommunityFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-sm"
-            style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: 'var(--app-text)'
-            }}
-          >
-            <option value="">All Communities</option>
-            {communities.map(c => (
-              <option key={c.discord_tag} value={c.discord_tag}>{c.display_name}</option>
-            ))}
-          </select>
-        </div>
-
-        {contributors.length === 0 ? (
-          <div className="text-center py-12" style={{ color: 'var(--app-text)', opacity: 0.5 }}>
-            No contributors found
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                  <th className="text-left py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6, width: '3rem' }}>#</th>
-                  <th className="text-left py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Name</th>
-                  <th className="text-left py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Community</th>
-                  <th className="text-right py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Systems</th>
-                  <th className="text-right py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Discoveries</th>
-                  <th className="text-left py-3 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6, minWidth: '10rem' }}>Upload Method</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contributors.map((c) => {
-                  const rs = rankStyles[c.rank]
-                  const tags = (c.discord_tags || '').split(',').filter(Boolean)
-                  const methodTotal = (c.manual_count || 0) + (c.extractor_count || 0)
-                  const manualPct = methodTotal > 0 ? Math.round(((c.manual_count || 0) / methodTotal) * 100) : 0
-
-                  return (
-                    <tr
-                      key={c.rank}
-                      className="transition-colors"
-                      style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      {/* Rank */}
-                      <td className="py-3 px-2">
-                        {rs ? (
-                          <span
-                            className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold"
-                            style={{ background: rs.bg, border: `1px solid ${rs.border}`, color: rs.text }}
-                          >
-                            {c.rank}
-                          </span>
-                        ) : (
-                          <span className="text-xs font-medium pl-2" style={{ color: 'var(--app-text)', opacity: 0.4 }}>
-                            {c.rank}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Username */}
-                      <td className="py-3 px-2 font-medium" style={{ color: 'var(--app-text)' }}>
-                        {c.username}
-                      </td>
-
-                      {/* Community tags */}
-                      <td className="py-3 px-2">
-                        <div className="flex flex-wrap gap-1">
-                          {tags.map(tag => {
-                            const tc = getTagColors(tag.trim())
-                            return (
-                              <span
-                                key={tag}
-                                className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                style={{ background: tc.bg, border: `1px solid ${tc.border}`, color: tc.text }}
-                              >
-                                {tag.trim()}
-                              </span>
-                            )
-                          })}
-                        </div>
-                      </td>
-
-                      {/* Systems count */}
-                      <td className="py-3 px-2 text-right font-semibold" style={{ color: '#06b6d4' }}>
-                        {c.total_systems}
-                      </td>
-
-                      {/* Discoveries count */}
-                      <td className="py-3 px-2 text-right font-semibold" style={{ color: '#a855f7' }}>
-                        {c.total_discoveries}
-                      </td>
-
-                      {/* Upload method bar */}
-                      <td className="py-3 px-2">
-                        {methodTotal > 0 ? (
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 rounded-full overflow-hidden flex" style={{ background: 'rgba(255,255,255,0.05)' }}>
-                              {manualPct > 0 && (
-                                <div className="h-full" style={{ width: `${manualPct}%`, background: '#06b6d4' }} />
-                              )}
-                              {(100 - manualPct) > 0 && (
-                                <div className="h-full" style={{ width: `${100 - manualPct}%`, background: '#a855f7' }} />
-                              )}
-                            </div>
-                            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--app-text)', opacity: 0.4 }}>
-                              {c.manual_count || 0}/{c.extractor_count || 0}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs" style={{ color: 'var(--app-text)', opacity: 0.3 }}>-</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
