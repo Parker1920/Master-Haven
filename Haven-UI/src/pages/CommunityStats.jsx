@@ -51,6 +51,13 @@ function getTagColors(tag) {
   return color
 }
 
+// Rank badge colors
+const rankStyles = {
+  1: { bg: 'rgba(255, 215, 0, 0.15)', border: 'rgba(255, 215, 0, 0.3)', text: '#FFD700' },
+  2: { bg: 'rgba(192, 192, 192, 0.15)', border: 'rgba(192, 192, 192, 0.3)', text: '#C0C0C0' },
+  3: { bg: 'rgba(205, 127, 50, 0.15)', border: 'rgba(205, 127, 50, 0.3)', text: '#CD7F32' },
+}
+
 // Chart tooltip
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null
@@ -70,6 +77,7 @@ const ChartTooltip = ({ active, payload, label }) => {
 export default function CommunityStats() {
   const [loading, setLoading] = useState(true)
   const [overview, setOverview] = useState(null)
+  const [contributors, setContributors] = useState([])
   const [timeline, setTimeline] = useState([])
   const [typeBreakdown, setTypeBreakdown] = useState([])
 
@@ -77,11 +85,13 @@ export default function CommunityStats() {
   useEffect(() => {
     Promise.all([
       fetch('/api/public/community-overview').then(r => r.json()),
+      fetch('/api/public/contributors').then(r => r.json()),
       fetch('/api/public/activity-timeline').then(r => r.json()),
       fetch('/api/public/discovery-breakdown').then(r => r.json()),
     ])
-      .then(([overviewData, timelineData, breakdownData]) => {
+      .then(([overviewData, contribData, timelineData, breakdownData]) => {
         setOverview(overviewData)
+        setContributors(contribData.contributors || [])
         setTimeline(timelineData.timeline || [])
         setTypeBreakdown(breakdownData.breakdown || [])
       })
@@ -322,6 +332,161 @@ export default function CommunityStats() {
           </div>
         </div>
       )}
+
+      {/* Contributors — Manual & Extractor Side-by-Side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Manual Submissions */}
+        {(() => {
+          const manualList = contributors
+            .filter(c => (c.manual_count || 0) > 0)
+            .sort((a, b) => (b.manual_count || 0) - (a.manual_count || 0))
+            .map((c, i) => ({ ...c, _rank: i + 1 }))
+          return (
+            <div
+              className="rounded-xl p-4"
+              style={{
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
+                border: '1px solid rgba(6, 182, 212, 0.15)'
+              }}
+            >
+              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--app-text)' }}>
+                <span className="inline-block w-3 h-3 rounded-full" style={{ background: '#06b6d4' }} />
+                Manual Submissions
+                <span className="text-sm font-normal" style={{ opacity: 0.5 }}>({manualList.length})</span>
+              </h2>
+              {manualList.length === 0 ? (
+                <div className="text-center py-8" style={{ color: 'var(--app-text)', opacity: 0.5 }}>No manual submissions</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6, width: '3rem' }}>#</th>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Name</th>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Community</th>
+                        <th className="text-right py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Systems</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {manualList.map((c) => {
+                        const rs = rankStyles[c._rank]
+                        const tags = (c.discord_tags || '').split(',').filter(Boolean)
+                        return (
+                          <tr
+                            key={c.username}
+                            style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <td className="py-2.5 px-2">
+                              {rs ? (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold"
+                                  style={{ background: rs.bg, border: `1px solid ${rs.border}`, color: rs.text }}>{c._rank}</span>
+                              ) : (
+                                <span className="text-xs font-medium pl-1.5" style={{ color: 'var(--app-text)', opacity: 0.4 }}>{c._rank}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>{c.username}</td>
+                            <td className="py-2.5 px-2">
+                              <div className="flex flex-wrap gap-1">
+                                {tags.map(tag => {
+                                  const tc = getTagColors(tag.trim())
+                                  return (
+                                    <span key={tag} className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: tc.bg, border: `1px solid ${tc.border}`, color: tc.text }}>
+                                      {tag.trim()}
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-2 text-right font-semibold" style={{ color: '#06b6d4' }}>{c.manual_count}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
+        {/* Extractor Submissions */}
+        {(() => {
+          const extractorList = contributors
+            .filter(c => (c.extractor_count || 0) > 0)
+            .sort((a, b) => (b.extractor_count || 0) - (a.extractor_count || 0))
+            .map((c, i) => ({ ...c, _rank: i + 1 }))
+          return (
+            <div
+              className="rounded-xl p-4"
+              style={{
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)',
+                border: '1px solid rgba(168, 85, 247, 0.15)'
+              }}
+            >
+              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--app-text)' }}>
+                <span className="inline-block w-3 h-3 rounded-full" style={{ background: '#a855f7' }} />
+                Extractor Submissions
+                <span className="text-sm font-normal" style={{ opacity: 0.5 }}>({extractorList.length})</span>
+              </h2>
+              {extractorList.length === 0 ? (
+                <div className="text-center py-8" style={{ color: 'var(--app-text)', opacity: 0.5 }}>No extractor submissions</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6, width: '3rem' }}>#</th>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Name</th>
+                        <th className="text-left py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Community</th>
+                        <th className="text-right py-2 px-2 font-medium" style={{ color: 'var(--app-text)', opacity: 0.6 }}>Systems</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {extractorList.map((c) => {
+                        const rs = rankStyles[c._rank]
+                        const tags = (c.discord_tags || '').split(',').filter(Boolean)
+                        return (
+                          <tr
+                            key={c.username}
+                            style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <td className="py-2.5 px-2">
+                              {rs ? (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold"
+                                  style={{ background: rs.bg, border: `1px solid ${rs.border}`, color: rs.text }}>{c._rank}</span>
+                              ) : (
+                                <span className="text-xs font-medium pl-1.5" style={{ color: 'var(--app-text)', opacity: 0.4 }}>{c._rank}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>{c.username}</td>
+                            <td className="py-2.5 px-2">
+                              <div className="flex flex-wrap gap-1">
+                                {tags.map(tag => {
+                                  const tc = getTagColors(tag.trim())
+                                  return (
+                                    <span key={tag} className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: tc.bg, border: `1px solid ${tc.border}`, color: tc.text }}>
+                                      {tag.trim()}
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-2 text-right font-semibold" style={{ color: '#a855f7' }}>{c.extractor_count}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+      </div>
 
     </div>
   )
