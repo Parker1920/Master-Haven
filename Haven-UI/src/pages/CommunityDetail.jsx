@@ -12,21 +12,10 @@ const tagColors = {
   'EVRN': { bg: 'rgba(236, 72, 153, 0.15)', border: 'rgba(236, 72, 153, 0.3)', text: '#ec4899' },
   'Personal': { bg: 'rgba(107, 114, 128, 0.15)', border: 'rgba(107, 114, 128, 0.3)', text: '#6b7280' },
 }
-const fallbackPalette = [
-  { bg: 'rgba(59, 130, 246, 0.15)', border: 'rgba(59, 130, 246, 0.3)', text: '#3b82f6' },
-  { bg: 'rgba(244, 63, 94, 0.15)', border: 'rgba(244, 63, 94, 0.3)', text: '#f43f5e' },
-  { bg: 'rgba(20, 184, 166, 0.15)', border: 'rgba(20, 184, 166, 0.3)', text: '#14b8a6' },
-  { bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(245, 158, 11, 0.3)', text: '#f59e0b' },
-]
-const tagColorCache = new Map()
+const defaultTagColor = { bg: 'rgba(20, 184, 166, 0.15)', border: 'rgba(20, 184, 166, 0.3)', text: '#14b8a6' }
+
 function getTagColors(tag) {
-  if (tagColors[tag]) return tagColors[tag]
-  if (tagColorCache.has(tag)) return tagColorCache.get(tag)
-  let hash = 0
-  for (let i = 0; i < (tag || '').length; i++) hash = tag.charCodeAt(i) + ((hash << 5) - hash)
-  const color = fallbackPalette[Math.abs(hash) % fallbackPalette.length]
-  tagColorCache.set(tag, color)
-  return color
+  return tagColors[tag] || defaultTagColor
 }
 
 // Rank badge styles
