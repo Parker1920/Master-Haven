@@ -6748,17 +6748,31 @@ async def public_activity_timeline(granularity: str = 'week', months: int = 6):
 
         date_cutoff = f"date('now', '-{months} months')"
 
-        # Systems timeline (using created_at from systems table)
-        sys_query = f'''
+        # Manual systems timeline
+        manual_query = f'''
             SELECT strftime('{date_fmt}', created_at) as date,
-                   COUNT(*) as systems
+                   COUNT(*) as count
             FROM systems
             WHERE created_at >= {date_cutoff}
+              AND COALESCE(source, 'manual') = 'manual'
             GROUP BY date
             ORDER BY date
         '''
-        cursor.execute(sys_query)
-        sys_data = {r['date']: r['systems'] for r in cursor.fetchall()}
+        cursor.execute(manual_query)
+        manual_data = {r['date']: r['count'] for r in cursor.fetchall()}
+
+        # Extractor systems timeline
+        extractor_query = f'''
+            SELECT strftime('{date_fmt}', created_at) as date,
+                   COUNT(*) as count
+            FROM systems
+            WHERE created_at >= {date_cutoff}
+              AND source = 'haven_extractor'
+            GROUP BY date
+            ORDER BY date
+        '''
+        cursor.execute(extractor_query)
+        extractor_data = {r['date']: r['count'] for r in cursor.fetchall()}
 
         # Discoveries timeline
         disc_query = f'''
@@ -6773,13 +6787,14 @@ async def public_activity_timeline(granularity: str = 'week', months: int = 6):
         disc_data = {r['date']: r['discoveries'] for r in cursor.fetchall()}
 
         # Merge into combined timeline
-        all_dates = sorted(set(sys_data.keys()) | set(disc_data.keys()))
+        all_dates = sorted(set(manual_data.keys()) | set(extractor_data.keys()) | set(disc_data.keys()))
         timeline = []
         for date in all_dates:
             if date:  # skip NULL dates
                 timeline.append({
                     'date': date,
-                    'systems': sys_data.get(date, 0),
+                    'manual': manual_data.get(date, 0),
+                    'extractor': extractor_data.get(date, 0),
                     'discoveries': disc_data.get(date, 0),
                 })
 
