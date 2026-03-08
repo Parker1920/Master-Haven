@@ -1843,7 +1843,7 @@ async def api_glyph_images():
     """
     Get mapping of hex digits to glyph image filenames.
 
-    Response: {"0": "IMG_9202.jpg", "1": "IMG_9203.jpg", ...}
+    Response: {"0": "IMG_9202.webp", "1": "IMG_9203.webp", ...}
     """
     return GLYPH_IMAGES
 

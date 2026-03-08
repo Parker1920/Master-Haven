@@ -2129,25 +2129,12 @@
             return `${glyph[0]}-${glyph.slice(1,4)}-${glyph.slice(4,6)}-${glyph.slice(6,9)}-${glyph.slice(9,12)}`;
         }
 
-        // Glyph image filenames mapping (hex digit -> image file)
-        const GLYPH_IMAGES = {
-            '0': 'IMG_9202.jpg',
-            '1': 'IMG_9203.jpg',
-            '2': 'IMG_9204.jpg',
-            '3': 'IMG_9205.jpg',
-            '4': 'IMG_9206.jpg',
-            '5': 'IMG_9207.jpg',
-            '6': 'IMG_9208.png',
-            '7': 'IMG_9209.jpg',
-            '8': 'IMG_9210.jpg',
-            '9': 'IMG_9211.jpg',
-            'A': 'IMG_9212.jpg',
-            'B': 'IMG_9213.jpg',
-            'C': 'IMG_9214.jpg',
-            'D': 'IMG_9215.jpg',
-            'E': 'IMG_9216.jpg',
-            'F': 'IMG_9217.jpg'
-        };
+        // Glyph image filenames — fetched from /api/glyph_images (single source of truth in glyph_decoder.py)
+        let GLYPH_IMAGES = {};
+        fetch('/api/glyph_images')
+            .then(r => r.json())
+            .then(data => { GLYPH_IMAGES = data; })
+            .catch(err => console.error('Failed to load glyph images:', err));
 
         function renderGlyphDisplay(glyphCode) {
             const container = document.getElementById('glyph-display-container');
