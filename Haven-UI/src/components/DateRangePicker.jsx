@@ -3,6 +3,9 @@ import DatePicker from 'react-datepicker'
 import { format, subDays, subMonths, subYears, startOfWeek, startOfMonth, startOfYear } from 'date-fns'
 import 'react-datepicker/dist/react-datepicker.css'
 
+/** Renders a dropdown date-range picker with quick presets and custom calendar inputs. Props: startDate, endDate, onChange. */
+
+// Quick-select presets; "All time" clears both dates
 const presets = [
   { label: 'Last 7 days', getValue: () => ({ start: subDays(new Date(), 7), end: new Date() }) },
   { label: 'Last 30 days', getValue: () => ({ start: subDays(new Date(), 30), end: new Date() }) },

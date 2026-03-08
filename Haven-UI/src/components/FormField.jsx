@@ -1,5 +1,6 @@
 import React from 'react'
 
+/** Renders a labeled form field wrapper with optional hint text. */
 export default function FormField({label, children, hint, className=''}){
   return (
     <div className={`mb-4 ${className}`}>

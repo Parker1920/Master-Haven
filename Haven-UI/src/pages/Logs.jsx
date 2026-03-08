@@ -2,6 +2,19 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import { useInactivityAware } from '../hooks/useInactivityAware'
 
+/**
+ * Live Logs Viewer — Route: currently unused / internal only.
+ * Auth: None enforced in this component (endpoint-level auth applies).
+ *
+ * Displays server logs in a scrollable pre block. Fetches initial log
+ * lines via REST, then streams new lines over WebSocket. The WebSocket
+ * connection is managed by the inactivity-aware hook — it disconnects
+ * after idle timeout and reconnects when the user returns.
+ *
+ * API endpoints:
+ *   GET /api/logs        — fetch initial log lines
+ *   WS  /ws/logs         — live log stream (WebSocket)
+ */
 export default function Logs() {
   const [lines, setLines] = useState([])
   const ref = useRef(null)

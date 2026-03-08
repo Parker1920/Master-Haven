@@ -1,40 +1,16 @@
 import React, { useState, useMemo } from 'react'
+import { getTagColor } from '../utils/tagColors'
 
+/**
+ * Renders a ranked submissions leaderboard table with expandable per-community breakdowns.
+ * Props: data (array of leaderboard entries), showCommunity, showRank, loading.
+ */
+
+// Gold/silver/bronze highlight for top 3 ranks
 const rankColors = {
   1: { bg: 'rgba(255, 215, 0, 0.15)', border: 'rgba(255, 215, 0, 0.3)', text: '#FFD700' },
   2: { bg: 'rgba(192, 192, 192, 0.15)', border: 'rgba(192, 192, 192, 0.3)', text: '#C0C0C0' },
   3: { bg: 'rgba(205, 127, 50, 0.15)', border: 'rgba(205, 127, 50, 0.3)', text: '#CD7F32' },
-}
-
-const tagColors = {
-  'Haven': 'bg-cyan-500',
-  'IEA': 'bg-green-500',
-  'B.E.S': 'bg-orange-500',
-  'ARCH': 'bg-purple-500',
-  'TBH': 'bg-yellow-500',
-  'EVRN': 'bg-pink-500',
-  'Personal': 'bg-gray-500',
-}
-
-const hashColorPalette = ['bg-indigo-500', 'bg-violet-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500']
-
-// Module-level cache for hash-computed colors - persists across renders
-const tagColorCache = new Map()
-
-function getTagColor(tag) {
-  if (tagColors[tag]) return tagColors[tag]
-
-  // Check cache first
-  if (tagColorCache.has(tag)) return tagColorCache.get(tag)
-
-  // Hash-based color for unknown tags - compute once and cache
-  let hash = 0
-  for (let i = 0; i < (tag || '').length; i++) {
-    hash = tag.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  const color = hashColorPalette[Math.abs(hash) % hashColorPalette.length]
-  tagColorCache.set(tag, color)
-  return color
 }
 
 export default function LeaderboardTable({ data, showCommunity = true, showRank = true, loading = false }) {

@@ -1,5 +1,6 @@
 import React from 'react'
 
+/** Reusable button with variant styles: primary, ghost, neutral. */
 export default function Button({children, onClick, className = '', type = 'button', variant='primary', ...rest}){
   const base = 'px-4 py-2 rounded inline-flex items-center justify-center'
   const variants = {

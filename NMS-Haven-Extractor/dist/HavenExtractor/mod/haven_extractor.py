@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 # as "unregistered" on the server side.
 # =============================================================================
 DEFAULT_API_URL = "https://havenmap.online"
-_OLD_SHARED_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"  # Legacy, triggers re-registration
+_OLD_SHARED_KEY = "vh_live_HvnXtr8k9Lm2NpQ4rStUvWxYz1A3bC5dE7fG"  # Legacy shared key — kept to detect users who haven't re-registered since v1.5.0 (Feb 2026). Safe to remove once all active users have personal keys (check api_keys table for key_type='shared').
 HAVEN_EXTRACTOR_API_KEY = ""  # Per-user key loaded from config; empty = needs registration
 
 # Default user config (populated by config GUI)

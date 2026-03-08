@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 
+/** Auto-dismissing toast notification (3.5s). Props: message, show, onClose. */
 export default function Toast({ message, show, onClose }){
   const [visible, setVisible] = useState(show)
   useEffect(()=>{ setVisible(show) }, [show])

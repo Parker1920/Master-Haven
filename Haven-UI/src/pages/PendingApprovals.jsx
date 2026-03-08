@@ -7,8 +7,35 @@ import Modal from '../components/Modal'
 import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
 import { usePersonalColor } from '../utils/usePersonalColor'
+import { tagColors } from '../utils/tagColors'
+import { TYPE_INFO } from '../data/discoveryTypes'
 import { getPhotoUrl, getThumbnailUrl } from '../utils/api'
 
+/**
+ * Pending Approvals Queue
+ * Route: /pending-approvals
+ * Auth: Feature-gated (FEATURES.approvals). Admin role required.
+ *
+ * Two-tab interface for reviewing pending submissions:
+ *   - Systems tab: system submissions, region name proposals, and edit requests
+ *   - Discoveries tab: discovery submissions
+ *
+ * Self-approval prevention: sub-admins cannot approve their own submissions.
+ * Determined via backend flag (is_self_submission), account ID matching, and
+ * Discord username normalization (strips #discriminator, lowercases).
+ * Super admins and partners are exempt from self-approval checks.
+ *
+ * Super admin can filter by discord_tag and enter edit mode on pending submissions.
+ * Batch approval/rejection available for system submissions.
+ *
+ * Key APIs:
+ *   GET  /api/pending_systems, /api/pending_region_names, /api/pending_edits, /api/pending_discoveries
+ *   GET  /api/pending_systems/:id, /api/pending_discoveries/:id
+ *   POST /api/approve_system/:id, /api/reject_system/:id
+ *   POST /api/approve_systems/batch, /api/reject_systems/batch
+ *   POST /api/approve_discovery/:id, /api/reject_discovery/:id
+ *   PUT  /api/pending_systems/:id  (super admin edit mode)
+ */
 export default function PendingApprovals() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
@@ -39,7 +66,7 @@ export default function PendingApprovals() {
   // Discord tag filtering (super admin only)
   const [discordTags, setDiscordTags] = useState([])
   const [filterTag, setFilterTag] = useState('all') // 'all', 'untagged', or specific tag
-  // Discoveries tab state
+  // Tab switcher: 'systems' (system/region/edit submissions) vs 'discoveries' (discovery submissions)
   const [activeTab, setActiveTab] = useState('systems')
   const [discoverySubmissions, setDiscoverySubmissions] = useState([])
   const [selectedDiscoveryApproval, setSelectedDiscoveryApproval] = useState(null)
@@ -69,7 +96,10 @@ export default function PendingApprovals() {
     return user?.username ? normalizeDiscordUsername(user.username) : ''
   }, [user?.username, normalizeDiscordUsername])
 
-  // Check if a submission was made by the current user (self-submission) - memoized
+  // Self-approval prevention: checks if the current user submitted this entry.
+  // Super admins and partners are exempt (trusted). Sub-admins are blocked from
+  // approving their own work. Uses three-tier matching: backend flag, account ID,
+  // then normalized Discord username comparison.
   const isSelfSubmission = useCallback((submission) => {
     if (!user) return false
     if (isSuperAdmin) return false
@@ -577,46 +607,14 @@ export default function PendingApprovals() {
     )
   }
 
-  // Pre-computed color palette for unknown tags
-  const colorPalette = useMemo(() => [
-    'bg-indigo-500 text-white',
-    'bg-violet-500 text-white',
-    'bg-fuchsia-500 text-white',
-    'bg-amber-500 text-black',
-    'bg-lime-500 text-black',
-    'bg-teal-500 text-white',
-    'bg-sky-500 text-white',
-    'bg-rose-500 text-white',
-  ], [])
-
-  // Pre-defined colors for known tags
-  const knownTagColors = useMemo(() => ({
-    'Haven': 'bg-cyan-500 text-white',
-    'IEA': 'bg-green-500 text-white',
-    'B.E.S': 'bg-orange-500 text-white',
-    'ARCH': 'bg-purple-500 text-white',
-    'TBH': 'bg-yellow-500 text-black',
-    'EVRN': 'bg-pink-500 text-white',
-  }), [])
-
-  // Cache for hash-based colors - computed once per unique tag
-  const tagColorCache = useMemo(() => new Map(), [])
-
-  // Helper to get tag color class - O(1) with caching instead of O(n) hash per render
-  const getTagColorClass = useCallback((tag) => {
-    if (knownTagColors[tag]) return knownTagColors[tag]
-
-    if (tagColorCache.has(tag)) return tagColorCache.get(tag)
-
-    // Compute hash once and cache
-    let hash = 0
-    for (let i = 0; i < tag.length; i++) {
-      hash = tag.charCodeAt(i) + ((hash << 5) - hash)
+  // Build a label-to-color lookup from the canonical TYPE_INFO
+  const typeColorByLabel = useMemo(() => {
+    const map = {}
+    for (const [, info] of Object.entries(TYPE_INFO)) {
+      map[info.label] = info.color
     }
-    const colorClass = colorPalette[Math.abs(hash) % colorPalette.length]
-    tagColorCache.set(tag, colorClass)
-    return colorClass
-  }, [knownTagColors, colorPalette, tagColorCache])
+    return map
+  }, [])
 
   // Helper to get discord tag badge color - each tag gets its own unique color
   const getDiscordTagBadge = useCallback((tag, personalDiscordUsername = null) => {
@@ -641,13 +639,13 @@ export default function PendingApprovals() {
       )
     }
 
-    const colorClass = getTagColorClass(tag)
+    const colorClass = tagColors[tag] || 'bg-indigo-500 text-white'
     return (
       <span className={`px-2 py-1 rounded text-xs font-semibold ${colorClass}`}>
         {tag}
       </span>
     )
-  }, [getTagColorClass, personalColor])
+  }, [personalColor])
 
   // Early return for loading state - MUST be after all hooks
   if (authLoading || loading) {
@@ -1051,7 +1049,7 @@ export default function PendingApprovals() {
                           {getStatusBadge(submission.status)}
                           {/* Type badge */}
                           {submission.type_info && (
-                            <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: submission.type_info.color + '33', color: submission.type_info.color }}>
+                            <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: (typeColorByLabel[submission.type_info.label] || '#6b7280') + '33', color: typeColorByLabel[submission.type_info.label] || '#6b7280' }}>
                               {submission.type_info.emoji} {submission.type_info.label}
                             </span>
                           )}
@@ -1123,7 +1121,7 @@ export default function PendingApprovals() {
                       <h4 className="font-semibold">{submission.discovery_name}</h4>
                       {getStatusBadge(submission.status)}
                       {submission.type_info && (
-                        <span className="px-2 py-1 rounded text-xs font-semibold" style={{ backgroundColor: submission.type_info.color + '33', color: submission.type_info.color }}>
+                        <span className="px-2 py-1 rounded text-xs font-semibold" style={{ backgroundColor: (typeColorByLabel[submission.type_info.label] || '#6b7280') + '33', color: typeColorByLabel[submission.type_info.label] || '#6b7280' }}>
                           {submission.type_info.emoji} {submission.type_info.label}
                         </span>
                       )}

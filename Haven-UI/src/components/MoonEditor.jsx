@@ -22,6 +22,7 @@ const faunaOptions = toSelectOptions(faunaAdjectives)
 const resourcesOptions = toSelectOptions(resourcesList)
 const exoticTrophyOptions = toSelectOptions(exoticTrophyList)
 
+/** Form editor for a single moon's properties (biome, weather, resources, photo, special features). Props: moon, index, onChange, onRemove, onSave. */
 export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
   const [uploading, setUploading] = useState(false)
   const [attrsModalOpen, setAttrsModalOpen] = useState(false)
@@ -171,6 +172,7 @@ export default function MoonEditor({moon, index, onChange, onRemove, onSave}){
           <div className="space-y-5 pb-48">
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Moon Specials</h3>
+              {/* Special feature toggle buttons - stored as 0/1 integers in the DB */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {[
                   { key: 'has_rings', label: 'Has Rings', icon: 'ring' },

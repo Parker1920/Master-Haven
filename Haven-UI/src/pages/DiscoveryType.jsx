@@ -4,29 +4,19 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Button from '../components/Button'
 import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 import { DiscoveryCard, DiscoveryFilters, DiscoveryDetailModal } from '../components/discoveries'
+import { TYPE_INFO } from '../data/discoveryTypes'
 
 /**
- * DiscoveryType - Type-specific discovery showcase page
+ * Discovery Type Page — Route: /discoveries/:type
+ * Auth: Public (no login required).
  *
  * Shows all discoveries of a specific type (fauna, starship, etc.)
- * with filtering, sorting, and pagination.
+ * with search, sort, and pagination. URL params (q, sort, page) are
+ * synced bidirectionally so filtered views are shareable.
+ *
+ * API endpoint:
+ *   GET /api/discoveries/browse?type=X&q=...&sort=...&page=N&limit=24
  */
-
-// Type metadata for display
-const TYPE_INFO = {
-  fauna: { emoji: '🦗', label: 'Fauna', description: 'Creatures and wildlife' },
-  flora: { emoji: '🌿', label: 'Flora', description: 'Plants and vegetation' },
-  mineral: { emoji: '💎', label: 'Mineral', description: 'Minerals and resources' },
-  ancient: { emoji: '🏛️', label: 'Ancient', description: 'Ancient structures and ruins' },
-  history: { emoji: '📜', label: 'History', description: 'Historical findings' },
-  bones: { emoji: '🦴', label: 'Bones', description: 'Skeletal remains and fossils' },
-  alien: { emoji: '👽', label: 'Alien', description: 'Alien encounters' },
-  starship: { emoji: '🚀', label: 'Starship', description: 'Ships and spacecraft' },
-  multitool: { emoji: '⚙️', label: 'Multi-tool', description: 'Multi-tools and gear' },
-  lore: { emoji: '📖', label: 'Lore', description: 'Stories and knowledge' },
-  base: { emoji: '🏠', label: 'Custom Base', description: 'Player-built bases' },
-  other: { emoji: '🆕', label: 'Other', description: 'Miscellaneous discoveries' },
-}
 
 // Custom hook for debouncing
 function useDebounce(value, delay) {

@@ -37,10 +37,22 @@ function useDebounce(value, delay) {
 }
 
 /**
- * Containerized Systems Page
+ * Systems Browser
+ * Route: /systems
+ * Auth: Public
  *
- * Hierarchy: Reality → Galaxy → Region → System
- * Each level loads data lazily when selected.
+ * Hierarchical drill-down browser: Reality -> Galaxy -> Region -> System.
+ * Each level loads data lazily when selected. Supports full-text search
+ * with debounce, discord tag filtering, and advanced filters (star type,
+ * biome, weather, sentinel, resources, economy, completeness grade, etc.).
+ *
+ * URL params preserve navigation state (reality, galaxy, rx/ry/rz/rname).
+ *
+ * Key APIs:
+ *   GET /api/systems/search?q=...  (full-text search)
+ *   GET /api/discord_tags          (community filter dropdown)
+ *   Galaxy/region/system list APIs are delegated to child components
+ *     (GalaxyGrid, RegionBrowser, SystemsList)
  */
 export default function Systems() {
   const navigate = useNavigate()

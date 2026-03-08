@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 
+/** Simple tab switcher. Props: tabs (array of {label, content}), initial index, onChange callback. */
 export default function Tabs({tabs = [], initial = 0, onChange}){
   const [active, setActive] = useState(initial)
   return (

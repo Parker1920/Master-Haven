@@ -35,6 +35,7 @@ const CustomTooltip = ({ active, payload, label }) => {
   )
 }
 
+/** Recharts area chart showing submission/approval/rejection timelines. Props: data (array with date, submissions, approved, rejected), loading, height. */
 export default function SubmissionChart({ data, loading = false, height = 300 }) {
   if (loading) {
     return (

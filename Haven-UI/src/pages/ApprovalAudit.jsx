@@ -7,6 +7,18 @@ import { AuthContext } from '../utils/AuthContext'
 import DateRangePicker from '../components/DateRangePicker'
 import { format } from 'date-fns'
 
+/**
+ * Approval Audit Log — Route: /admin/audit
+ * Auth: Super admin only; redirects to /systems otherwise.
+ *
+ * Paginated, filterable log of all approval/rejection actions.
+ * Supports CSV and JSON export of filtered results.
+ *
+ * API endpoints:
+ *   GET /api/approval_audit         — paginated audit entries with filters
+ *   GET /api/approval_audit/export  — download filtered results as CSV or JSON
+ *   GET /api/discord_tags           — community list for filter dropdown
+ */
 export default function ApprovalAudit() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)

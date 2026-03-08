@@ -6,6 +6,22 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Partner Management
+ * Route: /admin/partners
+ * Auth: Super admin only
+ *
+ * CRUD interface for partner accounts (community Discord server representatives).
+ * Each partner is tied to a discord_tag and has a configurable set of feature flags.
+ * Key APIs:
+ *   GET    /api/partners
+ *   POST   /api/partners
+ *   PUT    /api/partners/:id
+ *   POST   /api/partners/:id/reset_password
+ *   DELETE /api/partners/:id          (deactivate)
+ *   POST   /api/partners/:id/activate (reactivate)
+ */
+
 // Available features that can be toggled for partners
 const AVAILABLE_FEATURES = [
   { id: 'system_create', label: 'Create Systems', description: 'Can create new star systems' },

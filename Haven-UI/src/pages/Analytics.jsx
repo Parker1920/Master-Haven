@@ -8,6 +8,22 @@ import CommunityPieChart from '../components/CommunityPieChart'
 import StatCard from '../components/StatCard'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Analytics Dashboard — Route: /analytics
+ * Auth: Admin (partner or super admin) required; redirects to / otherwise.
+ *
+ * Tabbed view of submission analytics split by source:
+ *   - Manual tab: web form submissions with leaderboard, timeline, community pie chart
+ *   - Extractor tab: Haven Extractor mod submissions with registered user stats
+ *
+ * API endpoints:
+ *   GET /api/analytics/submission-leaderboard (source-filtered)
+ *   GET /api/analytics/submissions-timeline   (source-filtered)
+ *   GET /api/analytics/source-breakdown       (unfiltered, for overview bar)
+ *   GET /api/analytics/community-stats        (super admin only)
+ *   GET /api/analytics/extractor-summary      (extractor tab only)
+ *   GET /api/discord_tags                     (community dropdown)
+ */
 export default function Analytics() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
@@ -79,7 +95,7 @@ export default function Analytics() {
           params.discord_tag = selectedCommunity
         }
 
-        // Add source filter based on active tab
+        // Map UI tab name to API source param ('manual' or 'haven_extractor')
         const sourceParam = activeTab === 'manual' ? 'manual' : 'haven_extractor'
 
         // Fetch source-filtered data + source breakdown in parallel
@@ -127,6 +143,9 @@ export default function Analytics() {
 
         const results = await Promise.all(requests)
 
+        // results[0..2] are always present; [3] is community-stats (super admin)
+        // or extractor-summary (non-super-admin on extractor tab); [4] is
+        // extractor-summary when super admin is on extractor tab.
         setLeaderboard(results[0].data.leaderboard || [])
         setTotals(results[0].data.totals || { total_submissions: 0, total_approved: 0, total_rejected: 0 })
         setTimeline(results[1].data.timeline || [])
@@ -176,7 +195,8 @@ export default function Analytics() {
     return null
   }
 
-  // Derive counts from source breakdown for tab badges and overview bar
+  // Derive per-source totals for tab badges and the proportional overview bar.
+  // source_type values: 'manual' (web form), 'haven_extractor' (mod).
   const manualData = sourceBreakdown.find(s => s.source_type === 'manual') || { total: 0, approved: 0, rejected: 0, pending: 0 }
   const extractorData = sourceBreakdown.find(s => s.source_type === 'haven_extractor') || { total: 0, approved: 0, rejected: 0, pending: 0 }
   const grandTotal = manualData.total + extractorData.total

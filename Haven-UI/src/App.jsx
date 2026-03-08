@@ -44,7 +44,7 @@ function PageLoader() {
   )
 }
 
-// Requires any logged-in admin (super admin or partner)
+/** Route guard: requires any logged-in admin role (super admin, partner, or sub-admin). Redirects unauthenticated users to /. */
 function RequireAdmin({ children }) {
   const auth = useContext(AuthContext)
   if (auth.loading) return <div className="flex items-center justify-center min-h-64"><div className="text-lg text-gray-400">Loading...</div></div>
@@ -52,7 +52,7 @@ function RequireAdmin({ children }) {
   return children
 }
 
-// Requires super admin specifically
+/** Route guard: requires super admin role specifically. Partners and sub-admins are redirected. */
 function RequireSuperAdmin({ children }) {
   const auth = useContext(AuthContext)
   if (auth.loading) return <div className="flex items-center justify-center min-h-64"><div className="text-lg text-gray-400">Loading...</div></div>
@@ -60,7 +60,7 @@ function RequireSuperAdmin({ children }) {
   return children
 }
 
-// Requires admin with specific feature access
+/** Route guard: requires admin with a specific FEATURES flag (e.g., APPROVALS, SETTINGS, CSV_IMPORT). Checks both auth and feature access. */
 function RequireFeature({ feature, children }) {
   const auth = useContext(AuthContext)
   if (auth.loading) return <div className="flex items-center justify-center min-h-64"><div className="text-lg text-gray-400">Loading...</div></div>
@@ -69,7 +69,7 @@ function RequireFeature({ feature, children }) {
   return children
 }
 
-// Special guard for War Room - allows enrolled partners, super admin, and correspondents
+/** Route guard: War Room access - allows war correspondents (non-admin role), super admin, or any admin with WAR_ROOM feature enabled. */
 function RequireWarRoomAccess({ children }) {
   const auth = useContext(AuthContext)
   if (auth.loading) return <div className="flex items-center justify-center min-h-64"><div className="text-lg text-gray-400">Loading...</div></div>

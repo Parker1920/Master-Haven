@@ -1,5 +1,6 @@
-// Planetary Adjectives Data - Updated 1/1/26
-// These are the in-game adjectives for biome, weather, sentinel, flora, and fauna
+// Planetary adjective autocomplete lists and resource catalogs for system/planet editors.
+// Used by PlanetEditor, MoonEditor, and PendingApprovals for dropdown options.
+// Adjective values match NMS in-game display strings. Arrays are sorted alphabetically.
 
 export const biomeAdjectives = [
   "[REDACTED]",
@@ -877,6 +878,7 @@ export const resourcesList = [
   "Tritium Hypercluster"
 ].sort((a, b) => a.localeCompare(b));
 
+// Collectible items unique to exotic biome planets (one per exotic subtype)
 export const exoticTrophyList = [
   "Bubble Cluster",
   "Cable Pod",
@@ -891,5 +893,5 @@ export const exoticTrophyList = [
   "Terbium Growth",
 ];
 
-// Helper function to convert arrays to react-select format
+/** Convert a string array to react-select option format: [{ value, label }]. */
 export const toSelectOptions = (arr) => arr.map(value => ({ value, label: value }));

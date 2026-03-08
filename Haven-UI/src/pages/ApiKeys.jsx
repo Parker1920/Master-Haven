@@ -6,6 +6,21 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { adminStatus } from '../utils/api'
 
+/**
+ * API Keys Management — Route: /api-keys
+ * Auth: Super admin only (checked via adminStatus()).
+ *
+ * CRUD interface for API keys used by NMS Save Watcher and other integrations.
+ * Keys are shown in full only once at creation time; afterwards only the prefix
+ * is displayed. Each key can be scoped to a community via discord_tag.
+ *
+ * API endpoints:
+ *   GET    /api/keys           — list all keys
+ *   POST   /api/keys           — create new key (returns full key string)
+ *   PUT    /api/keys/:id       — edit name, rate limit, discord tag, or reactivate
+ *   DELETE /api/keys/:id       — revoke (soft-delete) a key
+ *   GET    /api/discord_tags   — community list for tag dropdown
+ */
 export default function ApiKeys() {
   const navigate = useNavigate()
   const [isAdmin, setIsAdmin] = useState(false)

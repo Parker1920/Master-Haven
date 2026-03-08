@@ -3,6 +3,24 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * War Room Administration
+ * Route: /war-room/admin
+ * Auth: Super admin only
+ *
+ * Admin panel for the War Room system. Manages civilization enrollment,
+ * war correspondents, reporting organizations and their members, home
+ * region assignments, conflict resolution, and news article moderation.
+ *
+ * Key APIs:
+ *   GET/POST /api/warroom/enrollment
+ *   GET/POST /api/warroom/correspondents
+ *   GET/POST /api/warroom/reporting-orgs
+ *   GET/POST /api/warroom/reporting-orgs/:id/members
+ *   GET      /api/warroom/conflicts?status=resolved
+ *   GET      /api/warroom/news?limit=50
+ *   GET      /api/partners  (for enrollment dropdown)
+ */
 export default function WarRoomAdmin() {
   const auth = useContext(AuthContext)
   const navigate = useNavigate()

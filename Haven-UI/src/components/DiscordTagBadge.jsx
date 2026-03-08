@@ -1,20 +1,15 @@
 import React from 'react'
 import { usePersonalColor } from '../utils/usePersonalColor'
+import { tagColors } from '../utils/tagColors'
 
-const tagColors = {
-  'Haven': 'bg-cyan-500 text-white',
-  'IEA': 'bg-green-500 text-white',
-  'B.E.S': 'bg-orange-500 text-white',
-  'ARCH': 'bg-purple-500 text-white',
-  'TBH': 'bg-yellow-500 text-black',
-  'EVRN': 'bg-pink-500 text-white',
-}
+/** Renders a small colored badge for a community discord tag. Props: tag, className. */
 
 export default function DiscordTagBadge({ tag, className = '' }) {
   const { personalColor } = usePersonalColor()
 
   if (!tag) return null
 
+  // "personal" tags use the user's chosen personal color from context
   if (tag === 'personal') {
     return (
       <span

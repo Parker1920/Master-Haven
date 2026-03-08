@@ -1,18 +1,23 @@
+// Authentication context providing session state, login/logout, and role-based access control.
+// Polls /api/admin/status on mount to restore sessions across page reloads.
 import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react'
 
-// Feature constants for permission checking
+// Feature flags for permission checking via canAccess(feature).
+// Super admins bypass all checks. Partners/sub-admins must have the feature in enabledFeatures[].
+// Features marked "frontend-only" are checked in the UI but not yet enforced by backend middleware
+// (tracked TODO for backend enforcement).
 export const FEATURES = {
-  API_KEYS: 'api_keys',
-  BACKUP_RESTORE: 'backup_restore',
-  PARTNER_MANAGEMENT: 'partner_management',
-  SYSTEM_CREATE: 'system_create',
-  SYSTEM_EDIT: 'system_edit',
-  APPROVALS: 'approvals',
-  STATS: 'stats',
-  SETTINGS: 'settings',
-  CSV_IMPORT: 'csv_import',
-  BATCH_APPROVALS: 'batch_approvals',
-  WAR_ROOM: 'war_room'
+  API_KEYS: 'api_keys',                   // Manage extractor API keys
+  BACKUP_RESTORE: 'backup_restore',       // Database backup/restore (frontend-only)
+  PARTNER_MANAGEMENT: 'partner_management', // Create/edit partner accounts
+  SYSTEM_CREATE: 'system_create',         // Create new systems directly (frontend-only)
+  SYSTEM_EDIT: 'system_edit',             // Edit existing systems (frontend-only)
+  APPROVALS: 'approvals',                 // Approve/reject pending submissions
+  STATS: 'stats',                         // View analytics dashboard
+  SETTINGS: 'settings',                   // Access admin settings page
+  CSV_IMPORT: 'csv_import',              // Bulk CSV import tool
+  BATCH_APPROVALS: 'batch_approvals',     // Approve multiple submissions at once (frontend-only)
+  WAR_ROOM: 'war_room'                   // Territorial conflict system
 }
 
 export const AuthContext = createContext({
@@ -30,6 +35,7 @@ export const AuthContext = createContext({
   refreshAuth: async () => {}
 })
 
+/** Provides auth state to the app. Checks session on mount and exposes login/logout/canAccess. */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -71,6 +77,7 @@ export function AuthProvider({ children }) {
   const isHavenSubAdmin = user?.isHavenSubAdmin || false
   const isCorrespondent = user?.type === 'correspondent'
 
+  /** Check if the current user can access a given FEATURES flag. Super admins always pass. */
   const canAccess = useCallback((feature) => {
     if (!user) return false
     if (isSuperAdmin) return true

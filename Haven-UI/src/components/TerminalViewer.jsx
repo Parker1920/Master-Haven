@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useInactivityAware } from '../hooks/useInactivityAware'
 
+/** Live log viewer via WebSocket (/ws/logs). Auto-scrolls to newest entries, supports pause/clear. Disconnects on user inactivity. */
 export default function TerminalViewer({ lines = 400 }) {
   const [rows, setRows] = useState([])
   const [paused, setPaused] = useState(false)

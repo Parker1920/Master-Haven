@@ -11,22 +11,25 @@ import {
   ResponsiveContainer, Legend, BarChart, Bar, Cell
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
+import { TYPE_INFO } from '../data/discoveryTypes'
 
-// Discovery type display info
-const TYPE_INFO = {
-  fauna: { label: 'Fauna', emoji: '🦗', color: '#22c55e' },
-  flora: { label: 'Flora', emoji: '🌿', color: '#10b981' },
-  mineral: { label: 'Mineral', emoji: '💎', color: '#6366f1' },
-  ancient: { label: 'Ancient', emoji: '🏛️', color: '#f59e0b' },
-  history: { label: 'History', emoji: '📜', color: '#eab308' },
-  bones: { label: 'Bones', emoji: '🦴', color: '#a3a3a3' },
-  alien: { label: 'Alien', emoji: '👽', color: '#8b5cf6' },
-  starship: { label: 'Starship', emoji: '🚀', color: '#3b82f6' },
-  multitool: { label: 'Multi-tool', emoji: '⚙️', color: '#64748b' },
-  lore: { label: 'Lore', emoji: '📖', color: '#d946ef' },
-  base: { label: 'Base', emoji: '🏠', color: '#f97316' },
-  other: { label: 'Other', emoji: '🆕', color: '#737373' }
-}
+/**
+ * Partner Analytics Dashboard
+ * Route: /partner-analytics
+ * Auth: Admin required (partners see own community; super admin can filter by community)
+ *
+ * Displays submission and discovery statistics with date range, period, source,
+ * and community filters. Fetches data from six analytics endpoints in parallel:
+ *   GET /api/analytics/partner-overview
+ *   GET /api/analytics/submission-leaderboard
+ *   GET /api/analytics/discovery-leaderboard
+ *   GET /api/analytics/submissions-timeline
+ *   GET /api/analytics/discovery-timeline
+ *   GET /api/analytics/discovery-type-breakdown
+ *
+ * Super admin sees a community selector dropdown; partners are scoped automatically.
+ * Source filter splits between manual web submissions and Haven Extractor mod submissions.
+ */
 
 // Custom tooltip for charts
 const ChartTooltip = ({ active, payload, label }) => {

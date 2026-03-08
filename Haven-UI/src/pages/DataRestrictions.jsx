@@ -3,6 +3,24 @@ import { AuthContext } from '../utils/AuthContext'
 import Card from '../components/Card'
 import Button from '../components/Button'
 
+/**
+ * Data Restrictions — Route: /data-restrictions
+ * Auth: Admin (partner or super admin) required.
+ *
+ * Manages per-system visibility rules that control what public viewers can see.
+ * Supports single-system and bulk operations. Three restriction types:
+ *   - Hide from public entirely (is_hidden_from_public toggle)
+ *   - Hide specific fields (coordinates, glyphs, discoverer, etc.)
+ *   - Map visibility (normal / point-only / hidden)
+ *
+ * API endpoints:
+ *   GET    /api/partner/my_systems           — systems owned by this partner (or all for super admin)
+ *   POST   /api/data_restrictions            — create/update restriction for one system
+ *   DELETE /api/data_restrictions/:id        — remove restriction from one system
+ *   POST   /api/data_restrictions/bulk       — apply restrictions to multiple systems
+ *   POST   /api/data_restrictions/bulk_remove — remove restrictions from multiple systems
+ */
+
 // Restrictable field options with descriptions
 const RESTRICTABLE_FIELDS = [
   { id: 'coordinates', label: 'Coordinates', description: 'X, Y, Z position and region coordinates' },

@@ -387,7 +387,12 @@ function Scene({ regions, homeRegions, enrolledCivs, selectedRegion, onSelectReg
   )
 }
 
-// Main WarMap3D component
+/**
+ * Interactive 3D territorial war map using React Three Fiber (Three.js).
+ * Scene setup: OrbitControls camera, tactical grid plane, region spheres positioned by galactic coordinates,
+ * HQ beacons with animated glow, territory connection lines between same-civ regions, and contested pulse effects.
+ * Supports click-to-select, double-click drill-down into region systems, and camera focus animation.
+ */
 export default function WarMap3D({ className = '', onSystemSelect }) {
   const [mapData, setMapData] = useState(null)
   const [loading, setLoading] = useState(true)

@@ -6,6 +6,25 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Sub-Admin Management
+ * Route: /admin/partners/:id/sub-admins  (super admin managing a partner's sub-admins)
+ *    or: /admin/sub-admins               (super admin managing Haven sub-admins, or partner managing own)
+ * Auth: Any admin role (super admin or partner)
+ *
+ * CRUD interface for sub-admin accounts. Sub-admins inherit a subset of their
+ * parent partner's feature flags and can only approve content for their community.
+ * Haven sub-admins (no parent partner) can be granted additional discord tag visibility
+ * and personal-upload approval rights.
+ *
+ * Key APIs:
+ *   GET    /api/sub_admins(?partner_id=N)
+ *   POST   /api/sub_admins
+ *   PUT    /api/sub_admins/:id
+ *   POST   /api/sub_admins/:id/reset_password
+ *   DELETE /api/sub_admins/:id          (deactivate)
+ */
+
 // Available features that can be toggled for sub-admins (subset of parent's features)
 const AVAILABLE_FEATURES = [
   { id: 'system_create', label: 'Create Systems', description: 'Can create new star systems' },

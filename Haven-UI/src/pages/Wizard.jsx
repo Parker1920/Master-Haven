@@ -14,6 +14,29 @@ import { GALAXIES, REALITIES } from '../data/galaxies'
 
 function useQuery(){ return new URLSearchParams(useLocation().search) }
 
+/**
+ * System Create/Edit Wizard
+ * Route: /wizard (create) or /wizard?edit=<systemId> (edit)
+ * Auth: Public for submissions (goes to pending queue); admin for direct save
+ *
+ * Multi-section form for creating or editing a star system with planets, moons,
+ * and space station data. Glyph code entry auto-decodes to region coordinates.
+ *
+ * NOTE: INTENTIONAL DESIGN -- partners with the SYSTEM_CREATE feature flag bypass
+ * the pending queue and save directly to the database via POST /api/save_system.
+ * This is intentional because partners are trusted community leaders. The
+ * SYSTEM_CREATE flag controls the submission path (direct DB vs pending queue),
+ * not just UI visibility. Backend enforcement of this flag is a tracked TODO.
+ *
+ * Non-admin users submit via POST /api/submit_system (goes to pending_systems
+ * for admin review). Discord community tag is required for non-admin submissions.
+ *
+ * Key APIs:
+ *   POST /api/save_system     (admin: direct save)
+ *   POST /api/submit_system   (public: submit for approval)
+ *   GET  /api/systems/:id     (load existing system for editing)
+ *   GET  /api/discord_tags    (community dropdown)
+ */
 export default function Wizard(){
   const query = useQuery();
   const navigate = useNavigate();
@@ -103,6 +126,8 @@ export default function Wizard(){
 
     setIsSubmitting(true)
     try{
+      // Submission path split: admins (including partners with system_create) save
+      // directly to the systems table; non-admins go to the pending_systems queue.
       if(isAdmin){
         // Admin: save directly to database
         // For partners editing untagged systems, include explanation

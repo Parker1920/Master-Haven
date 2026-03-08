@@ -6,14 +6,16 @@ import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 import { TypeCard, DiscoveryCard, DiscoveryDetailModal } from '../components/discoveries'
 
 /**
- * Discoveries Landing Page
+ * Discoveries Landing Page — Route: /discoveries
+ * Auth: Public (no login required). Submit button opens a modal that
+ *       sends submissions to the pending approval queue.
  *
- * Shows:
- * - Total discovery stats
- * - Grid of 12 type cards linking to type-specific pages
- * - Recent discoveries section
- * - Quick search bar
- * - Submit discovery button
+ * Shows a grid of 12 discovery type cards (linking to /discoveries/:type),
+ * total stats with weekly delta, recent discoveries, and a search bar.
+ *
+ * API endpoints:
+ *   GET /api/discoveries/stats      — total count + per-type breakdown
+ *   GET /api/discoveries/recent     — latest 6 discoveries for the bottom section
  */
 
 // Discovery type order for the grid

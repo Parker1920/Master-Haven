@@ -3,6 +3,8 @@ import axios from 'axios'
 import Card from './Card'
 import { SparklesIcon, MapIcon, ArrowPathIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 
+// NOTE: INTENTIONAL DESIGN -- galaxy type/description metadata is hardcoded in this component.
+// Accuracy is unverified; migration to API-driven data is a tracked TODO.
 // Complete galaxy data - all 256 galaxies from No Man's Sky
 const ALL_GALAXIES = {
   'Euclid': { num: 1, type: 'norm', desc: 'The starting galaxy - most explored' },
@@ -303,6 +305,11 @@ const GALAXY_TYPES = {
  * Each galaxy card shows system count and region count.
  * Galaxies are sorted by their canonical number.
  */
+/**
+ * Renders a grid of galaxy cards for a given reality, sorted by canonical number.
+ * Each card shows system/region counts and a completeness grade distribution bar.
+ * Props: reality, onSelect, selectedGalaxy, filters (AdvancedFilters), discordTag.
+ */
 export default function GalaxyGrid({ reality, onSelect, selectedGalaxy, filters = {}, discordTag = 'all' }) {
   const [galaxies, setGalaxies] = useState([])
   const [loading, setLoading] = useState(true)
@@ -315,6 +322,7 @@ export default function GalaxyGrid({ reality, onSelect, selectedGalaxy, filters 
     if (reality) {
       loadGalaxies()
     }
+  // eslint-disable-next-line -- JSON.stringify(filters) is intentional for deep comparison
   }, [reality, JSON.stringify(filters), discordTag])
 
   async function loadGalaxies() {

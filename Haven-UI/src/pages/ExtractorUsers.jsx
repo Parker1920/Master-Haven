@@ -7,6 +7,19 @@ import Modal from '../components/Modal'
 import StatCard from '../components/StatCard'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Extractor Users Management — Route: /admin/extractors
+ * Auth: Admin required (partner sees read-only view of their community's users;
+ *       super admin can edit rate limits and suspend/reactivate users).
+ *
+ * Lists all users who registered a per-user Haven Extractor API key.
+ * Each card shows submission count, rate limit, registration date, last
+ * activity, key prefix, and community tags with per-community counts.
+ *
+ * API endpoints:
+ *   GET /api/extractor/users       — list all extractor users with community breakdown
+ *   PUT /api/extractor/users/:id   — edit rate limit or toggle active (super admin only)
+ */
 export default function ExtractorUsers() {
   const navigate = useNavigate()
   const auth = useContext(AuthContext)

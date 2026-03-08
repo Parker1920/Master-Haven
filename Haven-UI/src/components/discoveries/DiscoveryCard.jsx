@@ -2,7 +2,9 @@ import React from 'react'
 import { StarIcon } from '@heroicons/react/24/solid'
 import { getThumbnailUrl } from '../../utils/api'
 
-// Placeholder gradient backgrounds when no photo
+/** Renders a discovery card with thumbnail, type badge, location breadcrumb, and featured star. Props: discovery, onClick. */
+
+// Placeholder gradient backgrounds when no photo is available, keyed by type slug
 const TYPE_PLACEHOLDERS = {
   fauna: 'bg-gradient-to-br from-green-900 to-green-950',
   flora: 'bg-gradient-to-br from-emerald-900 to-emerald-950',

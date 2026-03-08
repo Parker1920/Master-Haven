@@ -8,6 +8,9 @@ import {
   Legend
 } from 'recharts'
 
+/** Renders a donut chart of submissions per community (discord_tag). Props: data, loading, height, showLegend. */
+
+// Rotating palette applied to slices by index
 const COLORS = [
   '#00C2B3', // Cyan (primary)
   '#9d4edd', // Purple

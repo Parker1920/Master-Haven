@@ -10,6 +10,24 @@ import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjecti
 
 import { getPhotoUrl } from '../utils/api'
 
+/**
+ * System Detail Page
+ * Route: /systems/:id
+ * Auth: Public (edit/delete require admin with matching discord_tag scope)
+ *
+ * Displays full system information: star properties, economy, planets with
+ * expandable detail rows, moon cards, space station trade goods, photos,
+ * completeness grade breakdown, and contributor history.
+ *
+ * Key APIs:
+ *   GET    /api/systems/:id
+ *   DELETE /api/systems/:id  (admin only)
+ *
+ * Color-coded adjective tiers for fauna/flora/sentinel use shared utility
+ * functions from adjectiveColors.js. Star type badge colors are conditional
+ * (Yellow/Red/Green/Blue/Purple).
+ */
+
 // Format date for display
 function formatDate(dateStr) {
   if (!dateStr) return null

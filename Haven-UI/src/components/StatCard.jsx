@@ -1,6 +1,7 @@
 import React from 'react'
 import Sparkline from './Sparkline'
 
+/** Reusable metric card with title, large value, optional subtitle, sparkline trend, and icon slot (children). */
 export default function StatCard({title, value, subtitle, accent, children, className='', trend}){
   return (
     <div className={`p-4 rounded-xl shadow-md border ${className}`} style={{background: 'linear-gradient(180deg, rgba(255,255,255,0.02), transparent)', borderColor: 'rgba(255,255,255,0.04)'}}>

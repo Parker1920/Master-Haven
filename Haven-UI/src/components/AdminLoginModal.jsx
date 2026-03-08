@@ -3,6 +3,7 @@ import Modal from './Modal'
 import AuthContext from '../utils/AuthContext'
 import axios from 'axios'
 
+/** Renders a login modal with tab toggle between Admin/Partner and War Correspondent modes. Props: open, onClose. */
 export default function AdminLoginModal({ open, onClose }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -19,7 +20,7 @@ export default function AdminLoginModal({ open, onClose }) {
     setLoading(true)
     try {
       if (loginType === 'correspondent') {
-        // Use correspondent login endpoint
+        // Correspondent login uses a separate endpoint; refreshAuth() picks up the session cookie
         const response = await axios.post('/api/warroom/correspondents/login', {
           username,
           password

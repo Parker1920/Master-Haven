@@ -5,7 +5,13 @@ import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import { AuthContext } from '../../utils/AuthContext'
 import { getPhotoUrl, getThumbnailUrl } from '../../utils/api'
 
-// Parse evidence URLs (comma-separated or array)
+/**
+ * Renders a full-screen modal with hero image, photo gallery, location links,
+ * type metadata, and admin feature-toggle for a single discovery.
+ * Props: discovery, isOpen, onClose, onFeatureToggle.
+ */
+
+// Parse evidence URLs (comma-separated string or array) into full photo URLs
 function parseEvidenceUrls(evidence) {
   if (!evidence) return []
   if (Array.isArray(evidence)) return evidence.map(u => getPhotoUrl(u) || u)
@@ -35,7 +41,7 @@ export default function DiscoveryDetailModal({
     }
   }, [discovery])
 
-  // Increment view count
+  // Fire-and-forget view count increment when modal opens for a discovery
   useEffect(() => {
     if (isOpen && discovery?.id) {
       fetch(`/api/discoveries/${discovery.id}/view`, { method: 'POST' }).catch(() => {})

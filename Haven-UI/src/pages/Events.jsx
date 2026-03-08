@@ -5,6 +5,28 @@ import LeaderboardTable from '../components/LeaderboardTable'
 import { format, parseISO } from 'date-fns'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Community Events — Route: /events
+ * Auth: Admin or Partner required; redirects to / otherwise.
+ *
+ * Manages time-boxed community competitions. Three event types:
+ *   - submissions: track system submissions only
+ *   - discoveries: track discovery submissions only
+ *   - both: combined leaderboard with systems + discoveries
+ *
+ * Each event card shows status (active/upcoming/ended/inactive), counts,
+ * and a leaderboard modal with tabbed views for the event type.
+ * Super admin can create events for any community; partners create for their own.
+ *
+ * API endpoints:
+ *   GET    /api/events                    — list events (include_inactive=true)
+ *   POST   /api/events                    — create new event
+ *   PUT    /api/events/:id                — toggle active status
+ *   DELETE /api/events/:id                — delete event
+ *   GET    /api/events/:id/leaderboard    — tabbed leaderboard (submissions/discoveries/combined)
+ *   GET    /api/discord_tags              — community dropdown (super admin only)
+ */
+
 const EVENT_TYPE_LABELS = {
   submissions: { label: 'System Submissions', icon: '🌌', color: 'bg-cyan-500' },
   discoveries: { label: 'Discoveries', icon: '🔬', color: 'bg-purple-500' },
@@ -184,7 +206,8 @@ export default function Events() {
     return { label: 'Active', color: 'bg-green-500' }
   }
 
-  // Get available tabs for event's leaderboard modal
+  // Determine which leaderboard tabs to show based on event type.
+  // 'both' events get all three tabs; single-type events get one tab.
   const getAvailableTabs = (event) => {
     const eventType = event?.event_type || 'submissions'
     if (eventType === 'submissions') return ['submissions']
@@ -630,6 +653,7 @@ export default function Events() {
 }
 
 
+/** Leaderboard table for discovery-only events (shows discoverer, count, types) */
 function DiscoveryLeaderboard({ data, loading }) {
   if (loading) {
     return <div className="text-center py-8 text-gray-400">Loading leaderboard...</div>
@@ -676,6 +700,7 @@ function DiscoveryLeaderboard({ data, loading }) {
 }
 
 
+/** Leaderboard table for 'both' events (shows systems + discoveries + combined total) */
 function CombinedLeaderboard({ data, loading }) {
   if (loading) {
     return <div className="text-center py-8 text-gray-400">Loading leaderboard...</div>

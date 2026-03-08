@@ -266,12 +266,12 @@ export const REALITIES = [
   { value: 'Permadeath', label: 'Permadeath' }
 ];
 
-// Helper to get galaxy by index
+/** Find a galaxy object by its 1-based index. Returns undefined if not found. */
 export function getGalaxyByIndex(index) {
   return GALAXIES.find(g => g.index === index);
 }
 
-// Helper to get galaxy by name
+/** Find a galaxy object by name (case-insensitive). Returns undefined if not found. */
 export function getGalaxyByName(name) {
   return GALAXIES.find(g => g.name.toLowerCase() === name.toLowerCase());
 }

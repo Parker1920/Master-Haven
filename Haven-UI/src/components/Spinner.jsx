@@ -1,5 +1,6 @@
 import React from 'react'
 
+/** Animated SVG loading spinner. Props: sizeClass. */
 export default function Spinner({sizeClass = 'h-5 w-5'}){
   return (
     <svg className={`animate-spin ${sizeClass} text-gray-600`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

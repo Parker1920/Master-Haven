@@ -1,5 +1,6 @@
 import React from 'react'
 
+/** Centered overlay modal with title bar and scrollable content area. Props: title, children, onClose, isOpen. */
 export default function Modal({title, children, onClose, isOpen = true}){
   if (!isOpen) return null
 

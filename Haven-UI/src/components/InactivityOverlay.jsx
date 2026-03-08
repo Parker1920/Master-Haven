@@ -1,6 +1,7 @@
 import React from 'react'
 import { useInactivityAware } from '../hooks/useInactivityAware'
 
+/** Renders a full-screen overlay when the user's session is paused due to inactivity, with a reconnect button. */
 export default function InactivityOverlay() {
   const { isDisconnected, reconnect } = useInactivityAware()
 

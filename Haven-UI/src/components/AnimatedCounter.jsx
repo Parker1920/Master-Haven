@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 
+/** Renders an animated number that tweens from its previous value to the new one. Props: value, duration, prefix, suffix. */
 export default function AnimatedCounter({ value, duration = 1000, prefix = '', suffix = '' }) {
   const [displayValue, setDisplayValue] = useState(0)
   const previousValue = useRef(0)

@@ -2,6 +2,7 @@ import React from 'react'
 import Button from './Button'
 import { ChartBarIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 
+/** Admin action buttons for triggering 3D map generation and opening the latest map. */
 export default function QuickActions(){
   return (
     <div className="space-x-3">

@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import StatCard from '../components/StatCard'
+import { getTagColorStyle as getTagColors } from '../utils/tagColors'
 
-// Community tag colors (same as CommunityStats)
-const tagColors = {
-  'Haven': { bg: 'rgba(6, 182, 212, 0.15)', border: 'rgba(6, 182, 212, 0.3)', text: '#06b6d4' },
-  'IEA': { bg: 'rgba(34, 197, 94, 0.15)', border: 'rgba(34, 197, 94, 0.3)', text: '#22c55e' },
-  'B.E.S': { bg: 'rgba(249, 115, 22, 0.15)', border: 'rgba(249, 115, 22, 0.3)', text: '#f97316' },
-  'ARCH': { bg: 'rgba(168, 85, 247, 0.15)', border: 'rgba(168, 85, 247, 0.3)', text: '#a855f7' },
-  'TBH': { bg: 'rgba(234, 179, 8, 0.15)', border: 'rgba(234, 179, 8, 0.3)', text: '#eab308' },
-  'EVRN': { bg: 'rgba(236, 72, 153, 0.15)', border: 'rgba(236, 72, 153, 0.3)', text: '#ec4899' },
-  'Personal': { bg: 'rgba(107, 114, 128, 0.15)', border: 'rgba(107, 114, 128, 0.3)', text: '#6b7280' },
-}
-const defaultTagColor = { bg: 'rgba(20, 184, 166, 0.15)', border: 'rgba(20, 184, 166, 0.3)', text: '#14b8a6' }
-
-function getTagColors(tag) {
-  return tagColors[tag] || defaultTagColor
-}
+/**
+ * Community Detail — Route: /community-stats/:tag
+ * Auth: Public (no login required).
+ *
+ * Drill-down page for a single community. Shows stat cards, two ranked
+ * contributor tables (manual vs extractor), and an expandable region list
+ * where each region reveals its systems with star type dots and grade badges.
+ * Clicking a system navigates to /systems/:id.
+ *
+ * API endpoints:
+ *   GET /api/public/community-overview   — find this community's stats from the overview list
+ *   GET /api/public/contributors?community=TAG — ranked contributors for this community
+ *   GET /api/public/community-regions?community=TAG — regions with nested system lists
+ */
 
 // Rank badge styles
 const rankStyles = {
@@ -113,9 +113,9 @@ export default function CommunityDetail() {
         </div>
       </div>
 
-      {/* Members Section — Two Side-by-Side Lists */}
+      {/* Members Section — Two Side-by-Side Lists (manual vs extractor) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Manual Submissions List */}
+        {/* Manual Submissions List — filter to manual-only, sort by count, assign ranks */}
         {(() => {
           const manualList = contributors
             .filter(c => (c.manual_count || 0) > 0)
@@ -260,6 +260,7 @@ export default function CommunityDetail() {
         ) : (
           <div className="space-y-1">
             {regions.map((region) => {
+              // Use coordinate triple as unique key since unnamed regions have no id
               const key = `${region.region_x},${region.region_y},${region.region_z}`
               const isExpanded = !!expandedRegions[key]
 

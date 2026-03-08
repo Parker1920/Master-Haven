@@ -4,6 +4,26 @@ import { clearPersonalColorCache } from '../utils/usePersonalColor'
 import Card from '../components/Card'
 import Button from '../components/Button'
 
+/**
+ * Settings Page
+ * Route: /settings
+ * Auth: Feature-gated (settings feature flag) -- any admin role
+ *
+ * Provides role-dependent settings sections:
+ *   - All admins: change password, logout
+ *   - Partners: change username, per-session theme, region color for 3D map
+ *   - Super admin: global theme, personal submission badge color, DB backup/restore, data migrations
+ *
+ * Key APIs:
+ *   GET/POST /api/settings              (global settings + personal color)
+ *   GET/PUT  /api/partner/theme          (partner theme)
+ *   GET/PUT  /api/partner/region_color   (3D map region color)
+ *   POST     /api/change_password
+ *   POST     /api/change_username
+ *   POST     /api/backup
+ *   POST     /api/db_upload
+ *   POST     /api/migrate_hub_tags
+ */
 export default function Settings() {
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isPartner, user, logout } = auth || {}

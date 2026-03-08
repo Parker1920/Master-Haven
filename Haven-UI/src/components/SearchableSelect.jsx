@@ -116,6 +116,7 @@ const darkThemeStyles = {
   })
 }
 
+/** Dark-themed react-select wrapper. Supports single and multi-select (multi uses comma-separated string values). Props: options, value, onChange, placeholder, isClearable, isMulti. */
 export default function SearchableSelect({
   options,
   value,

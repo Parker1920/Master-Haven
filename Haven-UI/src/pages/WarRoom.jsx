@@ -4,6 +4,27 @@ import axios from 'axios'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
 import WarMap3D from '../components/WarMap3D'
 
+/**
+ * War Room Dashboard
+ * Route: /war-room
+ * Auth: Requires war_room access (FEATURES.war_room) or public enrollment view
+ *
+ * Territorial conflict system for NMS civilizations. Displays enrolled civs,
+ * active/pending conflicts, territorial claims, 3D war map, news ticker,
+ * mission debrief, and activity feed. War correspondents can submit news articles.
+ *
+ * Key APIs:
+ *   GET  /api/warroom/enrollment
+ *   GET  /api/warroom/conflicts
+ *   GET  /api/warroom/claims
+ *   GET  /api/warroom/news
+ *   GET  /api/warroom/activity
+ *   GET  /api/warroom/debrief
+ *   POST /api/warroom/conflicts      (declare conflict)
+ *   POST /api/warroom/claims         (claim territory)
+ *   POST /api/warroom/news           (submit article)
+ */
+
 // War Room themed card component
 function WarCard({ children, className = '', title, danger = false }) {
   return (

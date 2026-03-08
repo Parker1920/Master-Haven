@@ -1,6 +1,17 @@
 import React, { useEffect, useState, useContext } from 'react'
 import { AuthContext } from '../utils/AuthContext'
 
+/**
+ * Database Statistics — Route: /db_stats
+ * Auth: Public (anyone can view). Display adapts to user role:
+ *   - Public: global aggregate counts only
+ *   - Partner/Sub-admin: community-scoped counts (filtered by discord_tag server-side)
+ *   - Super admin: categorized view with admin-only stats (api_keys, audit entries, etc.)
+ *
+ * API endpoint:
+ *   GET /api/db_stats — returns stats object filtered by the caller's session role
+ */
+
 // Format stat labels for display
 function formatLabel(key) {
   // Check for custom labels first
@@ -22,7 +33,8 @@ const customLabels = {
   'regions': 'Named Regions'
 }
 
-// Group stats into categories for super admin view
+// Group stats keys into named categories for the super admin's sectioned layout.
+// Returns null for non-super-admin users (they get a flat grid instead).
 function categorizeStats(stats, userType) {
   if (userType === 'super_admin') {
     return {

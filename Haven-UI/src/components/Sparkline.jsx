@@ -1,5 +1,6 @@
 import React from 'react'
 
+/** Inline SVG sparkline chart for trend data in stat cards. Props: data (number[]), width, height, stroke. */
 export default function Sparkline({data = [], width=120, height=28, stroke='var(--app-primary)'}){
   if(!data || data.length === 0) return <svg width={width} height={height} />
   const max = Math.max(...data)

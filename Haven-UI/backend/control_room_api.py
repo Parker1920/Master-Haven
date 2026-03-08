@@ -80,7 +80,11 @@ else:
     PHOTOS_DIR = HAVEN_UI_DIR / 'photos'
     LOGS_DIR = HAVEN_UI_DIR / 'logs'
 
-DATA_JSON = HAVEN_UI_DIR / 'data' / 'data.json'
+# ============================================================================
+# Discovery Constants
+# Emoji-to-slug mapping, type metadata, and per-type submission fields.
+# Used by discovery browsing, submission, and approval endpoints.
+# ============================================================================
 
 # Discovery type emoji-to-slug mapping for URL routing
 DISCOVERY_EMOJI_TO_SLUG = {
@@ -104,20 +108,21 @@ DISCOVERY_SLUG_TO_EMOJI = {v: k for k, v in DISCOVERY_EMOJI_TO_SLUG.items()}
 # All valid discovery type slugs
 DISCOVERY_TYPE_SLUGS = list(DISCOVERY_SLUG_TO_EMOJI.keys())
 
-# Discovery type display info (for frontend)
+# Discovery type display info (emoji and label only; colors live in the frontend's
+# src/data/discoveryTypes.js to avoid drift between backend and frontend copies)
 DISCOVERY_TYPE_INFO = {
-    'fauna': {'emoji': '🦗', 'label': 'Fauna', 'color': '#22c55e'},
-    'flora': {'emoji': '🌿', 'label': 'Flora', 'color': '#10b981'},
-    'mineral': {'emoji': '💎', 'label': 'Mineral', 'color': '#a855f7'},
-    'ancient': {'emoji': '🏛️', 'label': 'Ancient', 'color': '#eab308'},
-    'history': {'emoji': '📜', 'label': 'History', 'color': '#f59e0b'},
-    'bones': {'emoji': '🦴', 'label': 'Bones', 'color': '#78716c'},
-    'alien': {'emoji': '👽', 'label': 'Alien', 'color': '#06b6d4'},
-    'starship': {'emoji': '🚀', 'label': 'Starship', 'color': '#3b82f6'},
-    'multitool': {'emoji': '⚙️', 'label': 'Multi-tool', 'color': '#f97316'},
-    'lore': {'emoji': '📖', 'label': 'Lore', 'color': '#6366f1'},
-    'base': {'emoji': '🏠', 'label': 'Custom Base', 'color': '#14b8a6'},
-    'other': {'emoji': '🆕', 'label': 'Other', 'color': '#6b7280'},
+    'fauna': {'emoji': '🦗', 'label': 'Fauna'},
+    'flora': {'emoji': '🌿', 'label': 'Flora'},
+    'mineral': {'emoji': '💎', 'label': 'Mineral'},
+    'ancient': {'emoji': '🏛️', 'label': 'Ancient'},
+    'history': {'emoji': '📜', 'label': 'History'},
+    'bones': {'emoji': '🦴', 'label': 'Bones'},
+    'alien': {'emoji': '👽', 'label': 'Alien'},
+    'starship': {'emoji': '🚀', 'label': 'Starship'},
+    'multitool': {'emoji': '⚙️', 'label': 'Multi-tool'},
+    'lore': {'emoji': '📖', 'label': 'Lore'},
+    'base': {'emoji': '🏠', 'label': 'Custom Base'},
+    'other': {'emoji': '🆕', 'label': 'Other'},
 }
 
 # Simplified type-specific fields for discovery submissions (2-3 per type)
@@ -160,7 +165,12 @@ def get_discovery_type_slug(discovery_type: str) -> str:
     return text_mappings.get(text_lower, 'other')
 
 
-# Load galaxies reference data for validation
+# ============================================================================
+# Galaxy Reference Data
+# All 256 NMS galaxy names loaded from bundled JSON. Provides lookup dicts
+# by index and by name, plus validation helpers.
+# ============================================================================
+
 # Bundled with the backend so it deploys to production (Pi) without NMS-Save-Watcher
 GALAXIES_JSON_PATH = Path(__file__).resolve().parent / 'data' / 'galaxies.json'
 
@@ -304,19 +314,6 @@ else:
 # In-memory system cache
 _systems_cache: Dict[str, dict] = {}
 _systems_lock = asyncio.Lock()
-
-def load_data_json() -> dict:
-    if not DATA_JSON.exists():
-        return {'systems': []}
-    try:
-        return json.loads(DATA_JSON.read_text(encoding='utf-8'))
-    except Exception as e:
-        logger.error('Failed loading data.json: %s', e)
-        return {'systems': []}
-
-def save_data_json(data: dict):
-    DATA_JSON.write_text(json.dumps(data, indent=2), encoding='utf-8')
-
 
 def get_db_path() -> Path:
     """Get the path to the Haven database using centralized config."""
@@ -1176,6 +1173,7 @@ async def workbox(version: str):
 
 @app.get('/haven-ui/workbox-{version}.js')
 async def workbox_haven(version: str):
+    """Serve workbox JS from dist if present, otherwise 204."""
     from fastapi.responses import FileResponse, Response
     # Try to serve from dist, otherwise return 204
     dist_path = HAVEN_UI_DIR / 'dist' / f'workbox-{version}.js'
@@ -1186,6 +1184,7 @@ async def workbox_haven(version: str):
 
 @app.get('/haven-ui/sw.js')
 async def sw_js():
+    """Serve service worker JS from dist or static, otherwise 204."""
     from fastapi.responses import FileResponse, Response
     dist_path = HAVEN_UI_DIR / 'dist' / 'sw.js'
     if dist_path.exists():
@@ -1199,6 +1198,7 @@ async def sw_js():
 
 @app.get('/haven-ui/registerSW.js')
 async def register_sw():
+    """Serve service worker registration script from dist or static."""
     from fastapi.responses import FileResponse, Response
     dist_path = HAVEN_UI_DIR / 'dist' / 'registerSW.js'
     if dist_path.exists():
@@ -1293,6 +1293,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
+    """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
     return {'status': 'ok', 'version': '1.42.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
@@ -1871,7 +1872,8 @@ async def api_validate_glyph(payload: dict):
     else:
         return {'valid': False, 'error': message}
 
-# Settings storage (simple JSON-based)
+# In-memory settings cache — populated from DB on startup, updated on save.
+# Keys: 'personal_color' (region color for non-community submissions).
 _settings_cache = {}
 
 @app.get('/api/settings')
@@ -1898,7 +1900,9 @@ import secrets
 # ============================================================================
 
 # Super admin credentials
+# NOTE: INTENTIONAL DESIGN — 'Haven' is Parker's personal login, not a generic default
 SUPER_ADMIN_USERNAME = "Haven"
+# NOTE: INTENTIONAL DESIGN — default password, changed on first login in production
 DEFAULT_SUPER_ADMIN_PASSWORD_HASH = hashlib.sha256("WhrStrsG".encode()).hexdigest()
 
 def get_super_admin_password_hash() -> str:
@@ -1976,9 +1980,10 @@ def set_personal_color(color: str) -> bool:
         if conn:
             conn.close()
 
-# Session storage: session_token -> session_data
-# Session data structure: {
-#   'user_type': 'super_admin' | 'partner',
+# In-memory session storage — all sessions lost on server restart (10-min TTL).
+# Maps session_token -> session_data dict:
+# {
+#   'user_type': 'super_admin' | 'partner' | 'sub_admin',
 #   'username': str,
 #   'discord_tag': str | None,  # Only for partners
 #   'partner_id': int | None,   # Only for partners
@@ -1997,7 +2002,7 @@ def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 def get_session(session_token: Optional[str]) -> Optional[dict]:
-    """Get session data if token is valid and not expired"""
+    """Look up session by token; returns session dict or None if missing/expired. Auto-deletes expired."""
     if not session_token or session_token not in _sessions:
         return None
     session = _sessions[session_token]
@@ -2007,28 +2012,28 @@ def get_session(session_token: Optional[str]) -> Optional[dict]:
     return session
 
 def verify_session(session_token: Optional[str]) -> bool:
-    """Check if session token is valid (backward compatibility)"""
+    """Returns True if session token maps to a valid, non-expired session. Thin wrapper around get_session()."""
     return get_session(session_token) is not None
 
 def is_super_admin(session_token: Optional[str]) -> bool:
-    """Check if session belongs to super admin"""
+    """Returns True if session token belongs to the super admin (user_type == 'super_admin')."""
     session = get_session(session_token)
     return session is not None and session.get('user_type') == 'super_admin'
 
 def is_partner(session_token: Optional[str]) -> bool:
-    """Check if session belongs to a partner"""
+    """Returns True if session token belongs to a partner account (user_type == 'partner')."""
     session = get_session(session_token)
     return session is not None and session.get('user_type') == 'partner'
 
 def get_partner_discord_tag(session_token: Optional[str]) -> Optional[str]:
-    """Get the discord_tag for a partner session"""
+    """Return discord_tag if session is a partner, else None. Partners only (not sub-admins)."""
     session = get_session(session_token)
     if session and session.get('user_type') == 'partner':
         return session.get('discord_tag')
     return None
 
 def can_access_feature(session_token: Optional[str], feature: str) -> bool:
-    """Check if current user can access a specific feature"""
+    """Check if user can access a feature. Super admin always passes; others need it in enabled_features."""
     session = get_session(session_token)
     if not session:
         return False
@@ -2040,12 +2045,12 @@ def can_access_feature(session_token: Optional[str], feature: str) -> bool:
     return feature in enabled
 
 def is_sub_admin(session_token: Optional[str]) -> bool:
-    """Check if session belongs to a sub-admin"""
+    """Returns True if session token belongs to a sub-admin (user_type == 'sub_admin')."""
     session = get_session(session_token)
     return session is not None and session.get('user_type') == 'sub_admin'
 
 def get_effective_discord_tag(session_token: Optional[str]) -> Optional[str]:
-    """Get discord_tag - direct for partners, inherited for sub-admins"""
+    """Return discord_tag for partners or sub-admins (sub-admins inherit parent's tag). None for super admin."""
     session = get_session(session_token)
     if not session:
         return None
@@ -2054,7 +2059,7 @@ def get_effective_discord_tag(session_token: Optional[str]) -> Optional[str]:
     return None
 
 def get_submitter_identity(session_token: Optional[str]) -> dict:
-    """Get full identity info for audit and self-approval detection purposes"""
+    """Return {type, username, account_id, discord_tag} for audit logging and self-approval prevention."""
     session = get_session(session_token)
     if not session:
         return {'type': 'anonymous', 'username': None, 'account_id': None, 'discord_tag': None}
@@ -2076,8 +2081,15 @@ def get_submitter_identity(session_token: Optional[str]) -> dict:
 # ============================================================================
 # DATA RESTRICTION HELPER FUNCTIONS
 # ============================================================================
+# Per-system data visibility controls. Partners can restrict their systems'
+# data from public view: hide entire systems, redact specific field groups
+# (coordinates, glyphs, discoverer info, etc.), or control map visibility
+# (normal / point_only / hidden). Super admin bypasses all restrictions;
+# partners bypass restrictions on their own community's systems.
+# Restrictions are stored in the data_restrictions table (one row per system).
+# ============================================================================
 
-# Fields that can be restricted and what they hide
+# Maps field group names to the specific columns they redact when restricted
 RESTRICTABLE_FIELDS = {
     'coordinates': ['x', 'y', 'z', 'region_x', 'region_y', 'region_z'],
     'glyph_code': ['glyph_code', 'glyph_planet', 'glyph_solar_system'],
@@ -2355,7 +2367,7 @@ def check_rate_limit(client_ip: str, limit: int = 60, window_hours: int = 1) -> 
 
 @app.get('/api/admin/status')
 async def admin_status(session: Optional[str] = Cookie(None)):
-    """Check login status and return user info"""
+    """Check login status and return user info. Called by AuthContext on every page load."""
     session_data = get_session(session)
     if not session_data:
         return {'logged_in': False}
@@ -3625,7 +3637,10 @@ async def export_approval_audit(
 
 
 # ============================================================================
-# Analytics Endpoints
+# Analytics Endpoints (System Submissions)
+# Partner-scoped: partners are auto-filtered to their community's data.
+# Super admin sees all data, optionally filtered by discord_tag.
+# All source filters treat NULL/legacy rows as 'manual' via COALESCE.
 # ============================================================================
 
 @app.get('/api/analytics/submission-leaderboard')
@@ -4240,6 +4255,9 @@ async def get_rejection_reasons(
 
 # ============================================================================
 # Discovery Analytics Endpoints (Partner Analytics Dashboard)
+# All discovery analytics auto-scope: partners see only their community,
+# super admin sees all (optionally filtered by discord_tag).
+# NOTE: discoveries table uses 'submission_timestamp' (not 'submission_date').
 # ============================================================================
 
 @app.get('/api/analytics/discovery-leaderboard')
@@ -6880,6 +6898,7 @@ async def public_community_regions(community: str):
                     'system_count': 0,
                     'systems': [],
                 }
+            # NOTE: is_complete stores score 0-100 (repurposed from boolean)
             score = row['is_complete'] or 0
             if score >= 85:
                 grade = 'S'
@@ -7525,6 +7544,9 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
     Shared logic between /api/systems, /api/systems/search, and /api/galaxies/summary.
     Modifies where_clauses and params lists in place.
 
+    System-level filters match directly on the systems table. Planet-level filters use EXISTS
+    subqueries to avoid JOIN-based row duplication (a system with 5 matching planets appears once).
+
     Args:
         params_dict: Dictionary of filter parameter values
         where_clauses: List of SQL WHERE clause strings (modified in place)
@@ -7931,6 +7953,7 @@ async def api_search(
                OR s.galaxy LIKE ? COLLATE NOCASE
                OR s.description LIKE ? COLLATE NOCASE)
             {adv_sql}
+            -- NOTE: Priority ordering: exact match first, prefix match second, substring last
             ORDER BY
                 CASE WHEN LOWER(s.name) = LOWER(?) THEN 0
                      WHEN LOWER(s.name) LIKE LOWER(?) THEN 1
@@ -8526,7 +8549,8 @@ async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: in
 
         all_systems = [dict(row) for row in cursor.fetchall()]
 
-        # Apply data restrictions BEFORE pagination
+        # NOTE: Data restrictions must be applied BEFORE pagination so hidden systems
+        # do not consume page slots (otherwise pages would have fewer visible results).
         all_systems = apply_data_restrictions(all_systems, session_data)
 
         # Now paginate the filtered results
@@ -8692,6 +8716,7 @@ async def api_system_planets(system_id: str, session: Optional[str] = Cookie(Non
 
 # =============================================================================
 # Planet Atlas Integration - POI (Points of Interest) Endpoints
+# CRUD for lat/long markers on planet surfaces, used by the 3D globe view.
 # =============================================================================
 
 @app.get('/api/planets/{planet_id}/pois')
@@ -8741,7 +8766,7 @@ async def api_get_planet_pois(planet_id: int, session: Optional[str] = Cookie(No
 
 @app.post('/api/planets/{planet_id}/pois')
 async def api_create_planet_poi(planet_id: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Create a new POI on a planet."""
+    """Create a new POI on a planet. Any authenticated user."""
     # Validate required fields
     name = payload.get('name', '').strip()
     latitude = payload.get('latitude')
@@ -8821,7 +8846,7 @@ async def api_create_planet_poi(planet_id: int, payload: dict, session: Optional
 
 @app.put('/api/planets/pois/{poi_id}')
 async def api_update_planet_poi(poi_id: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Update an existing POI."""
+    """Update an existing POI. Partial update - only provided fields are changed."""
     conn = None
     try:
         db_path = get_db_path()
@@ -8902,7 +8927,7 @@ async def api_update_planet_poi(poi_id: int, payload: dict, session: Optional[st
 
 @app.delete('/api/planets/pois/{poi_id}')
 async def api_delete_planet_poi(poi_id: int, session: Optional[str] = Cookie(None)):
-    """Delete a POI."""
+    """Delete a POI by ID. Any authenticated user."""
     conn = None
     try:
         db_path = get_db_path()
@@ -9092,7 +9117,7 @@ async def api_delete_region_name(rx: int, ry: int, rz: int, session: Optional[st
 
 @app.post('/api/regions/{rx}/{ry}/{rz}/submit')
 async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, request: Request):
-    """Submit a proposed region name for approval. Any user can submit."""
+    """Submit a proposed region name for approval. Public, no auth required."""
     from datetime import datetime, timezone
 
     # Debug logging for region name submissions
@@ -9335,7 +9360,7 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
         rx, ry, rz = submission['region_x'], submission['region_y'], submission['region_z']
         proposed_name = submission['proposed_name']
 
-        # Check if name is still unique
+        # NOTE: Race condition guard - name may have been taken between submission and approval
         cursor.execute('SELECT id FROM regions WHERE custom_name = ?', (proposed_name,))
         if cursor.fetchone():
             # Mark as rejected since name was taken
@@ -9514,22 +9539,6 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
 
             return system
 
-        # JSON fallback
-        data = load_data_json()
-        systems = data.get('systems', [])
-        for s in systems:
-            if s.get('id') == system_id or s.get('name') == system_id:
-                # Apply restrictions for JSON fallback too
-                system_discord_tag = s.get('discord_tag')
-                can_bypass = can_bypass_restriction(session_data, system_discord_tag)
-                if not can_bypass:
-                    restriction = get_restriction_for_system(s.get('id'))
-                    if restriction:
-                        if restriction.get('is_hidden_from_public'):
-                            raise HTTPException(status_code=404, detail='System not found')
-                        if restriction.get('hidden_fields'):
-                            s = apply_field_restrictions(s, restriction['hidden_fields'])
-                return s
         raise HTTPException(status_code=404, detail='System not found')
     except HTTPException:
         raise
@@ -9541,7 +9550,10 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
 
 
 @app.delete('/api/systems/{system_id}')
-async def delete_system(system_id: str):
+async def delete_system(system_id: str, session: Optional[str] = Cookie(None)):
+    """Delete a system and all its children (planets, moons, discoveries). Super admin only."""
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
     conn = None
     try:
         db_path = get_db_path()
@@ -9590,19 +9602,7 @@ async def delete_system(system_id: str):
 
             return {'status': 'ok'}
 
-        # Fallback to JSON
-        data = load_data_json()
-        systems = data.get('systems', [])
-        new_systems = [s for s in systems if not (s.get('id') == system_id or s.get('name') == system_id)]
-        if len(new_systems) == len(systems):
-            raise HTTPException(status_code=404, detail='System not found')
-        data['systems'] = new_systems
-        save_data_json(data)
-        async with _systems_lock:
-            _systems_cache.clear()
-            for s in new_systems:
-                _systems_cache[s.get('name')] = s
-        return {'status': 'ok'}
+        raise HTTPException(status_code=404, detail='System not found')
     except HTTPException:
         raise
     except Exception as e:
@@ -9687,7 +9687,8 @@ async def create_system_stub(payload: dict, request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check for duplicate by name (case-insensitive)
+        # NOTE: Stubs are idempotent - if a system with the same name or glyph already exists,
+        # return it instead of creating a duplicate.
         cursor.execute('SELECT id, name, galaxy, is_stub FROM systems WHERE LOWER(name) = LOWER(?)', (name,))
         existing = cursor.fetchone()
         if existing:
@@ -9754,9 +9755,14 @@ async def create_system_stub(payload: dict, request: Request):
 
 @app.post('/api/save_system')
 async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
-    """
-    Save a system directly to the database (admin only).
-    Non-admin users should use /api/submit_system instead.
+    """Create or update a full system with planets, moons, and space station. Admin only.
+
+    # NOTE: INTENTIONAL DESIGN — Two-track submission pipeline:
+    # Partners with SYSTEM_CREATE feature bypass the pending queue and save directly.
+    # This is intentional — partners are trusted community leaders; the SYSTEM_CREATE flag
+    # controls this privilege, not a security boundary. Their saves are still audit-logged.
+    # Public submissions go through /api/submit_system -> pending_systems queue for review.
+
     Partners can only edit systems tagged with their discord_tag or untagged systems (with explanation).
     """
     # Verify admin session
@@ -9834,7 +9840,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             if conn_check:
                 conn_check.close()
 
-    # For partners creating new systems, auto-tag with their discord
+    # NOTE: INTENTIONAL DESIGN - partners creating new systems are auto-tagged with their
+    # community discord tag to ensure proper attribution.
     if not is_super and not system_id and partner_tag:
         # Only auto-tag if no tag is provided or if they're trying to use their own tag
         if not payload.get('discord_tag') or payload.get('discord_tag') == partner_tag:
@@ -9954,7 +9961,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             ))
             logger.info(f"Updated system {sys_id}, last_updated_by: {editor_username}")
 
-            # Delete existing planets (will cascade to moons)
+            # NOTE: Delete-and-reinsert for planets. Frontend sends the complete planet list
+            # each time, so we replace all rather than diffing individual planet rows.
             cursor.execute('DELETE FROM planets WHERE system_id = ?', (sys_id,))
             # Delete existing space station
             cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (sys_id,))
@@ -10160,12 +10168,6 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         except Exception as audit_err:
             logger.warning(f"Failed to add audit log entry: {audit_err}")
 
-        # Also save to JSON for backup
-        async with _systems_lock:
-            payload['id'] = sys_id
-            _systems_cache[name] = payload
-            save_data_json({'systems': list(_systems_cache.values())})
-
         return {'status': 'ok', 'saved': payload, 'system_id': sys_id}
 
     except Exception as e:
@@ -10194,7 +10196,8 @@ async def db_stats(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Determine user type
+        # NOTE: Response shape varies by role - super admin gets admin-specific counts,
+        # partners get community-filtered stats, public gets basic global counts.
         user_type = session_data.get('user_type') if session_data else None
         is_super = user_type == 'super_admin'
         is_partner = user_type == 'partner'
@@ -10407,19 +10410,6 @@ async def partner_stats(session: Optional[str] = Cookie(None)):
     """Legacy endpoint - redirects to unified /api/db_stats"""
     return await db_stats(session)
 
-@app.post('/api/generate_map')
-async def generate_map():
-    """Trigger map generation (queued for background processing)"""
-    # Add activity log for map generation
-    add_activity_log(
-        'map_generated',
-        "Galaxy map regeneration triggered",
-        details="Background processing queued"
-    )
-    # This would normally trigger a background task
-    # For now, just return success
-    return {'status': 'ok', 'message': 'Map generation queued'}
-
 @app.get('/api/tests')
 async def list_tests():
     """List available test files"""
@@ -10464,6 +10454,7 @@ async def run_test(payload: dict):
 
 @app.post('/api/photos')
 async def upload_photo(file: UploadFile = File(...)):
+    """Upload a photo, auto-compressing to WebP with thumbnail generation. Public."""
     filename = file.filename or 'photo'
     raw_bytes = await file.read()
 
@@ -10509,6 +10500,8 @@ async def upload_photo(file: UploadFile = File(...)):
         'original_size': result['original_size'],
         'compressed_size': result['compressed_size'],
     })
+
+# ========== MAP ENDPOINTS ==========
 
 @app.get('/map/latest')
 async def get_map():
@@ -10837,7 +10830,8 @@ async def get_system_3d_view(system_id: str):
         station_row = cursor.fetchone()
         system['space_station'] = parse_station_data(station_row)
 
-        # Inject system data into HTML
+        # NOTE: Server-side data injection - system JSON is embedded into the HTML template
+        # so the 3D viewer has data immediately without a second API call.
         # Use ensure_ascii=True to convert unicode chars to \uXXXX escapes
         system_json = json.dumps(system, ensure_ascii=True)
         # Use a lambda replacement to avoid regex escape sequence interpretation
@@ -10869,52 +10863,16 @@ async def get_system_3d_view(system_id: str):
             conn.close()
 
 
-# Simple logs API
+# ========== ADMIN TOOLS ==========
+
 @app.get('/api/logs')
 async def get_logs():
+    """Return last 200 lines of the server log file. No auth required."""
     logfile = LOGS_DIR / 'control-room-web.log'
     if not logfile.exists():
         return {'lines': []}
     lines = logfile.read_text(encoding='utf-8', errors='ignore').splitlines()[-200:]
     return {'lines': lines}
-
-# Minimal RT-AI integration: import and initialize if available
-try:
-    from roundtable_ai.api_integration import get_round_table_ai
-    HAVE_RTAI = True
-    rtai_instance = None
-except Exception:
-    HAVE_RTAI = False
-    rtai_instance = None
-
-@app.get('/api/rtai/status')
-async def rtai_status():
-    if not HAVE_RTAI:
-        return {'available': False}
-    if rtai_instance is None:
-        return {'available': False}
-    return {'available': True, 'agents': rtai_instance.list_agents(), 'stats': rtai_instance.get_statistics()}
-
-@app.post('/api/rtai/analyze/discoveries')
-async def analyze_discoveries(limit: int = 10):
-    if not HAVE_RTAI or rtai_instance is None:
-        raise HTTPException(status_code=503, detail='RTAI not available')
-    result = await rtai_instance.analyze_discoveries(limit=limit)
-    return {'result': result}
-
-# RT-AI chat history (simple in-memory storage)
-_rtai_history = []
-
-@app.get('/api/rtai/history')
-async def rtai_history():
-    """Get RT-AI chat history"""
-    return {'messages': _rtai_history}
-
-@app.post('/api/rtai/clear')
-async def rtai_clear():
-    """Clear RT-AI chat history"""
-    _rtai_history.clear()
-    return {'status': 'ok'}
 
 @app.post('/api/backup')
 async def create_backup():
@@ -11196,85 +11154,10 @@ async def import_csv(file: UploadFile = File(...), session: Optional[str] = Cook
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
-@app.post('/api/migrate_hub_tags')
-async def migrate_hub_tags(session: Optional[str] = Cookie(None)):
-    """Migrate existing systems: extract HUB Tag from description and use it as system name"""
-    import re
+# =============================================================================
+# DISCOVERY CRUD - List, Create, Legacy Redirect
+# =============================================================================
 
-    # Check session - super admin only
-    if not is_super_admin(session):
-        raise HTTPException(status_code=403, detail='Super admin access required')
-
-    session_data = get_session(session)
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Find all systems with "HUB Tag:" in description
-        cursor.execute('''
-            SELECT id, name, description FROM systems
-            WHERE description LIKE '%HUB Tag:%'
-        ''')
-        systems = cursor.fetchall()
-
-        updated_count = 0
-        for system in systems:
-            sys_id = system['id']
-            old_name = system['name']
-            description = system['description'] or ''
-
-            # Extract hub tag from description
-            match = re.search(r'HUB Tag:\s*([^\n]+)', description)
-            if not match:
-                continue
-
-            hub_tag = match.group(1).strip()
-            if not hub_tag or hub_tag == old_name:
-                continue
-
-            # Build new description: remove "HUB Tag:" line, add "New Name:" if old name wasn't already stored
-            new_desc_parts = []
-            has_new_name = 'New Name:' in description
-
-            for line in description.split('\n'):
-                line = line.strip()
-                if line.startswith('HUB Tag:'):
-                    # Skip this line (we're using it as the name now)
-                    continue
-                if line:
-                    new_desc_parts.append(line)
-
-            # Add old name as "New Name:" if not already present
-            if not has_new_name and old_name and old_name != hub_tag:
-                new_desc_parts.insert(0, f"New Name: {old_name}")
-
-            new_description = '\n'.join(new_desc_parts)
-
-            # Update the system
-            cursor.execute('''
-                UPDATE systems SET name = ?, description = ? WHERE id = ?
-            ''', (hub_tag, new_description, sys_id))
-            updated_count += 1
-
-        conn.commit()
-        conn.close()
-
-        # Log the migration
-        add_activity_log(
-            'hub_tag_migration',
-            f"Migrated {updated_count} systems to use hub tag as name",
-            user_name=session_data.get('username', 'unknown')
-        )
-
-        return {'status': 'ok', 'updated': updated_count, 'total_found': len(systems)}
-
-    except Exception as e:
-        logger.error(f"Hub tag migration error: {e}")
-        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
-
-
-# Lightweight endpoint for the Keeper bot to post discoveries
 @app.get('/api/discoveries')
 async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
     """List or search discoveries, optionally filtered by user_id"""
@@ -11300,22 +11183,7 @@ async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
             discoveries = query_discoveries_from_db(q=q)
             return {'results': discoveries}
 
-        data = load_data_json()
-        discoveries = data.get('discoveries', [])
-        # Filter by search query if provided
-        if q:
-            q_lower = q.lower()
-            discoveries = [
-                d for d in discoveries
-                if (q_lower in str(d.get('description', '')).lower() or
-                    q_lower in str(d.get('discovery_name', '')).lower() or
-                    q_lower in str(d.get('location_name', '')).lower())
-            ]
-        # Filter by user_id if provided
-        if user_id:
-            discoveries = [d for d in discoveries if str(d.get('discord_user_id', '')) == user_id]
-            discoveries = discoveries[:limit]
-        return {'results': discoveries}
+        return {'results': []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -11417,6 +11285,7 @@ async def create_discovery(payload: dict):
 
 @app.post('/discoveries')
 async def legacy_discoveries(payload: dict):
+    """Legacy endpoint redirect for Keeper bot compatibility."""
     # Return the same 201 created response as /api/discoveries
     result = await create_discovery(payload)
     if isinstance(result, JSONResponse):
@@ -11689,13 +11558,7 @@ async def get_discovery(discovery_id: int):
                     pass
             return discovery
 
-        data = load_data_json()
-        discoveries = data.get('discoveries', [])
-
-        if discovery_id < 1 or discovery_id > len(discoveries):
-            raise HTTPException(status_code=404, detail='Discovery not found')
-
-        return discoveries[discovery_id - 1]
+        raise HTTPException(status_code=404, detail='Discovery not found')
     except HTTPException:
         raise
     except IndexError:
@@ -12106,7 +11969,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
         if submission['status'] != 'pending':
             raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
 
-        # Self-approval blocking for sub-admins only (partners are trusted)
+        # Self-approval blocking: sub-admins cannot approve their own submissions.
+        # Matches by account_id (reliable) or normalized username (legacy fallback).
         if current_user_type not in ('super_admin', 'partner'):
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
@@ -12264,7 +12128,7 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
         if submission['status'] != 'pending':
             raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
 
-        # Self-rejection blocking for non-super-admins
+        # Self-rejection blocking: same rules as system rejection
         if current_user_type != 'super_admin':
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
@@ -12339,9 +12203,13 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
             conn.close()
 
 
-# Simple WebSocket endpoints for logs and RT-AI
+# =============================================================================
+# WEBSOCKET - Real-time log streaming
+# =============================================================================
+
 @app.websocket('/ws/logs')
 async def ws_logs(ws: WebSocket):
+    """Stream last 1000 chars of web log file to connected clients every 1s."""
     await ws.accept()
     logpath = LOGS_DIR / 'control-room-web.log'
     try:
@@ -12366,32 +12234,6 @@ async def ws_logs(ws: WebSocket):
             await ws.close()
         except:
             pass
-
-@app.websocket('/ws/rtai')
-async def ws_rtai(ws: WebSocket):
-    await ws.accept()
-    if not HAVE_RTAI or rtai_instance is None:
-        await ws.send_text('RT-AI not available')
-        await ws.close()
-        return
-    await ws.send_text('RT-AI connected')
-    try:
-        while True:
-            await asyncio.sleep(3)
-            await ws.send_text('RT-AI heartbeat')
-    except WebSocketDisconnect:
-        pass
-
-# Allow external init of the RT-AI from other modules
-def init_rtai(haven_ui_path: str):
-    global rtai_instance
-    if not HAVE_RTAI:
-        logger.info('Roundtable AI not installed - skipping init')
-        return None
-    haven_ui_root = Path(haven_ui_path)
-    rtai_instance = get_round_table_ai(haven_ui_root)
-    return rtai_instance
-
 
 # ============================================================================
 # SYSTEM APPROVALS QUEUE - API Endpoints
@@ -12570,9 +12412,10 @@ async def submit_system(
                 detail=f"A pending submission for system '{system_name}' already exists"
             )
 
-        # Check if a system with matching glyph coordinates already exists
-        # Match on last 11 characters of glyph (ignoring planet index) + galaxy + reality
-        # This ensures we detect the same system even if the portal destination differs
+        # Coordinate-based duplicate detection: match on last 11 chars of glyph
+        # (ignoring planet index prefix) + galaxy + reality.
+        # Two portals on different planets in the same system share coordinates.
+        # If found, this submission becomes an edit of the existing system.
         glyph_code = payload.get('glyph_code')
         system_reality = payload.get('reality', 'Normal')
         existing_glyph_system = None
@@ -13106,9 +12949,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 detail=f"Submission already {submission['status']}"
             )
 
-        # SELF-APPROVAL BLOCKING
-        # Super admin and partners can approve anything (trusted roles)
-        # Sub-admins cannot approve their own submissions
+        # SELF-APPROVAL BLOCKING: prevents users from reviewing their own submissions.
+        # Super admin and partners are exempt (trusted community leaders).
+        # Sub-admins are blocked. Matches by account_id first, then normalized username.
         if current_user_type not in ('super_admin', 'partner'):
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
@@ -13255,8 +13098,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         if region_z is not None:
             system_data['region_z'] = region_z
 
-        # Check if this is an edit of an existing system (has an id)
-        # Priority: 1) system_data JSON 'id' field, 2) edit_system_id column from pending_systems row
+        # Determine if this is a new system or an edit of an existing one.
+        # Priority: 1) system_data JSON 'id' field (set by frontend edits),
+        #           2) edit_system_id column (set by extraction duplicate detection)
         existing_system_id = system_data.get('id')
         if not existing_system_id:
             existing_system_id = submission.get('edit_system_id')
@@ -13296,9 +13140,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             else:
                 logger.info(f"Submission {submission_id} has ID {existing_system_id} but system not found in DB - treating as NEW")
 
-        # If not already an edit, check if a system with matching glyph coordinates exists
-        # Match on last 11 characters (ignoring planet index) + galaxy + reality
-        # This handles the case where someone submits a system that's already in the DB
+        # Coordinate-based fallback: if no explicit system_id, check if a system with
+        # matching glyph coordinates exists (last 11 chars + galaxy + reality).
+        # This catches re-submissions of existing systems via different portal planets.
         submission_galaxy = system_data.get('galaxy', 'Euclid')
         submission_reality = system_data.get('reality', 'Normal')
         existing_system_row = None
@@ -13809,8 +13653,8 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
                 detail=f"Submission already {submission['status']}"
             )
 
-        # SELF-REJECTION BLOCKING (same logic as approval)
-        # Super admin can reject anything (trusted role)
+        # SELF-REJECTION BLOCKING: same identity matching as approval.
+        # Super admin is exempt. Partners and sub-admins are blocked.
         if current_user_type != 'super_admin':
             submitter_account_id = submission.get('submitter_account_id')
             submitter_account_type = submission.get('submitter_account_type')
@@ -13968,7 +13812,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     })
                     continue
 
-                # Self-approval check (only block sub-admins, not partners)
+                # Self-approval check: self-submissions are skipped (not failed)
+                # so the batch continues processing remaining items.
                 if not is_super and current_user_type != 'partner':
                     submitter_account_id = submission.get('submitter_account_id')
                     submitter_account_type = submission.get('submitter_account_type')
@@ -14101,9 +13946,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             'glyph_solar_system': existing_row[3]
                         }
 
+                # Coordinate-based duplicate detection (same as single approve):
+                # last 11 glyph chars + galaxy + reality identifies the same NMS system.
                 if not is_edit and system_data.get('glyph_code'):
-                    # Use coordinate-based matching (last 11 chars + galaxy + reality)
-                    # to detect same system even with different planet index
                     existing_glyph_row = find_matching_system(
                         cursor, system_data['glyph_code'],
                         system_data.get('galaxy', 'Euclid'),
@@ -14613,6 +14458,8 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
 # HAVEN EXTRACTOR API ENDPOINTS
 # =============================================================================
 
+# --- Glyph Duplicate Checking ---
+
 @app.post('/api/check_glyph_codes')
 async def check_glyph_codes(
     payload: dict,
@@ -14742,6 +14589,11 @@ async def check_glyph_codes(
         if conn:
             conn.close()
 
+
+# NOTE: INTENTIONAL DESIGN:
+# - The extraction endpoint uses API key auth, not session auth
+# - It routes to pending_systems queue (same as public submissions), not direct save
+# - Duplicate glyph_codes update the existing pending row rather than creating a new one
 
 @app.post('/api/extraction')
 async def receive_extraction(
@@ -15073,7 +14925,9 @@ async def receive_extraction(
 # =============================================================================
 # WAR ROOM API ENDPOINTS
 # =============================================================================
-# Territorial conflict tracking system for enrolled civilizations
+# War Room territorial conflict system -- enrollment, claims, conflicts, peace
+# treaties, news, media, territory mapping. All endpoints require war room access
+# (enrolled partner, super admin, or correspondent).
 # =============================================================================
 
 
@@ -15420,9 +15274,7 @@ async def set_home_region(partner_id: int, request: Request, session: Optional[s
 
 @app.post('/api/warroom/enrollment/{partner_id}/sync-territory')
 async def sync_territory(partner_id: int, session: Optional[str] = Cookie(None)):
-    """Sync territory claims for an enrolled civilization based on their discord_tag.
-    This adds any new systems with their discord_tag that aren't already claimed.
-    Super admin only."""
+    """Sync new unclaimed systems with this civ's discord_tag into territorial_claims. Super admin only."""
     session_data = get_session(session)
     if not session_data or session_data.get('user_type') != 'super_admin':
         raise HTTPException(status_code=403, detail="Super admin access required")
@@ -18350,7 +18202,9 @@ async def update_news_article(news_id: int, request: Request, session: Optional[
 
 
 # =============================================================================
-# WAR ROOM V3 - TERRITORY INTEGRATION & PEACE TREATY SYSTEM
+# WAR ROOM V3 - Territory Integration & Peace Treaty System
+# Territory ownership via discord_tag (>50% rule), peace proposals with
+# counter-offer limits (2 per side), and system/region transfers on acceptance.
 # =============================================================================
 
 def create_auto_news(conn, event_type: str, headline: str, body: str, reference_id: int = None, reference_type: str = None, conflict_id: int = None):
@@ -18699,7 +18553,7 @@ async def get_region_ownership_summary(galaxy: str = 'Euclid', session: Optional
         conn.close()
 
 
-# Peace Treaty Endpoints
+# --- Peace Treaty Endpoints ---
 
 @app.post('/api/warroom/conflicts/{conflict_id}/propose-peace')
 async def propose_peace_treaty(conflict_id: int, request: Request, session: Optional[str] = Cookie(None)):

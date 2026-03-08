@@ -2077,6 +2077,7 @@ def migration_1_32_0_filter_indexes(conn: sqlite3.Connection):
         logger.info("Updated _metadata version to 1.32.0")
 
 
+# Add discord_tag to discoveries (backfilled from systems) and event_type to events.
 @register_migration("1.33.0", "Discovery community tagging and event types")
 def migration_1_33_0_discovery_tags_event_types(conn: sqlite3.Connection):
     """
@@ -2137,6 +2138,7 @@ def migration_1_33_0_discovery_tags_event_types(conn: sqlite3.Connection):
         logger.info("Updated _metadata version to 1.33.0")
 
 
+# Add is_stub to systems, type_metadata to discoveries, create pending_discoveries table.
 @register_migration("1.34.0", "Discovery system linking, stub systems, pending discoveries approval")
 def migration_1_34_0_discovery_system_linking(conn: sqlite3.Connection):
     """
@@ -2230,6 +2232,7 @@ def migration_1_34_0_discovery_system_linking(conn: sqlite3.Connection):
         logger.info("Updated _metadata version to 1.34.0")
 
 
+# Repurpose is_complete from boolean to 0-100 score; backfill all systems with v1 scoring.
 @register_migration("1.35.0", "Backfill completeness scores for all systems")
 def migrate_1_35_0(conn):
     """Repurpose is_complete from boolean (0/1) to score (0-100) and backfill all systems.
@@ -2352,6 +2355,7 @@ def migrate_1_35_0(conn):
         logger.info("Updated _metadata version to 1.35.0")
 
 
+# Re-score all systems with v2 scoring: fairer weights, sentinel='None' valid, no detail penalty.
 @register_migration("1.36.0", "Re-score completeness with corrected criteria")
 def migrate_1_36_0(conn):
     """Re-backfill completeness scores with fairer scoring criteria.
@@ -2480,6 +2484,7 @@ def migrate_1_36_0(conn):
         logger.info("Updated _metadata version to 1.36.0")
 
 
+# Data fix: populate empty contributors arrays from the discovered_by field.
 @register_migration("1.37.0", "Backfill NULL contributors from discovered_by")
 def migrate_1_37_0(conn):
     """Fix systems with NULL contributors by populating from discovered_by field."""
@@ -2521,6 +2526,7 @@ def migrate_1_37_0(conn):
         logger.info("Updated _metadata version to 1.37.0")
 
 
+# Data fix: fill remaining empty contributors by looking up original submitter in pending_systems.
 @register_migration("1.38.0", "Backfill contributors from pending_systems discord username")
 def migrate_1_38_0(conn):
     """Fix systems still missing contributors by looking up the original submitter's
@@ -2570,6 +2576,7 @@ def migrate_1_38_0(conn):
         logger.info("Updated _metadata version to 1.38.0")
 
 
+# Data fix: fix discovered_by from pending_systems; convert contributors from ["name"] to [{name, action, date}].
 @register_migration("1.39.0", "Fix discovered_by and convert contributors to object format")
 def migrate_1_39_0(conn):
     """Fix discovered_by from pending_systems.personal_discord_username and convert
@@ -2679,6 +2686,7 @@ def migrate_1_39_0(conn):
         logger.info("Updated _metadata version to 1.39.0")
 
 
+# Add 13 planet columns (rings, dissonant, bones, etc.); re-score with v3 (abandoned + dynamic life).
 @register_migration("1.40.0", "Planet attributes, valuable resources, dynamic scoring with materials fix")
 def migrate_1_40_0(conn):
     """Add planet attribute and valuable resource columns, re-score with fixed logic.
@@ -2873,6 +2881,7 @@ def migrate_1_40_0(conn):
         logger.info("Updated _metadata version to 1.40.0")
 
 
+# Fix for partial v1.40.0: ensure all planet/moon attribute columns exist after schema rename.
 @register_migration("1.41.0", "Ensure planet attribute columns exist and re-score")
 def migrate_1_41_0(conn):
     """Fix for v1.40.0 rewrite: ensure all planet/moon attribute columns exist.
@@ -3078,6 +3087,7 @@ def migrate_1_41_0(conn):
         logger.info("Updated _metadata version to 1.41.0")
 
 
+# Data fix: recover star_type from pending_systems JSON where star_color/star_type mismatch lost it.
 @register_migration("1.42.0", "Backfill star_type from extractor pending_systems JSON")
 def migrate_1_42_0(conn):
     """Backfill star_type for approved systems where it was lost due to field name mismatch.
@@ -3156,6 +3166,7 @@ def migrate_1_42_0(conn):
         logger.info("Updated _metadata version to 1.42.0")
 
 
+# Add key_type, discord_username, submission stats to api_keys for per-user extractor tracking.
 @register_migration("1.43.0", "Per-user extractor API keys with self-service registration")
 def migrate_1_43_0(conn):
     """Per-user API keys for Haven Extractor.
@@ -3239,6 +3250,7 @@ def migrate_1_43_0(conn):
         logger.info("Updated _metadata version to 1.43.0")
 
 
+# Data fix: replace 0-indexed Galaxy_N fallback names with proper NMS galaxy names from embedded lookup.
 @register_migration("1.44.0", "Fix Galaxy_N naming - merge into proper galaxy names")
 def migrate_1_44_0(conn):
     """Fix galaxy names from extractor off-by-one bug.
@@ -3405,6 +3417,7 @@ def migrate_1_44_0(conn):
         logger.info("Updated _metadata version to 1.44.0")
 
 
+# Retry of v1.44.0 galaxy fix: v1.44.0 failed on production due to wrong file path for galaxies.json.
 @register_migration("1.45.0", "Fix Galaxy_N naming - retry with embedded data")
 def migrate_1_45_0(conn):
     """Re-run galaxy name fix with embedded lookup data.
@@ -3564,6 +3577,7 @@ def migrate_1_45_0(conn):
         logger.info("Updated _metadata version to 1.45.0")
 
 
+# Data fix: resolve "Unknown(N)" star_type values caused by wrong STAR_TYPES enum ordering.
 @register_migration("1.47.0", "Fix Unknown(N) star colors from wrong STAR_TYPES enum mapping")
 def migrate_1_46_0(conn):
     """Fix star_type values corrupted by the wrong STAR_TYPES enum mapping.

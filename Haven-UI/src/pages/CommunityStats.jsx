@@ -1,43 +1,30 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import StatCard from '../components/StatCard'
+import { getTagColorStyle as getTagColors } from '../utils/tagColors'
+import { TYPE_INFO } from '../data/discoveryTypes'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell
 } from 'recharts'
 
-// Discovery type display info (shared with PartnerAnalytics)
-const TYPE_INFO = {
-  fauna: { label: 'Fauna', emoji: '\ud83e\udd97', color: '#22c55e' },
-  flora: { label: 'Flora', emoji: '\ud83c\udf3f', color: '#10b981' },
-  mineral: { label: 'Mineral', emoji: '\ud83d\udc8e', color: '#6366f1' },
-  ancient: { label: 'Ancient', emoji: '\ud83c\udfdb\ufe0f', color: '#f59e0b' },
-  history: { label: 'History', emoji: '\ud83d\udcdc', color: '#eab308' },
-  bones: { label: 'Bones', emoji: '\ud83e\uddb4', color: '#a3a3a3' },
-  alien: { label: 'Alien', emoji: '\ud83d\udc7d', color: '#8b5cf6' },
-  starship: { label: 'Starship', emoji: '\ud83d\ude80', color: '#3b82f6' },
-  multitool: { label: 'Multi-tool', emoji: '\u2699\ufe0f', color: '#64748b' },
-  lore: { label: 'Lore', emoji: '\ud83d\udcd6', color: '#d946ef' },
-  base: { label: 'Base', emoji: '\ud83c\udfe0', color: '#f97316' },
-  other: { label: 'Other', emoji: '\ud83c\udd95', color: '#737373' }
-}
-
-// Community tag colors (shared with LeaderboardTable)
-const tagColors = {
-  'Haven': { bg: 'rgba(6, 182, 212, 0.15)', border: 'rgba(6, 182, 212, 0.3)', text: '#06b6d4' },
-  'IEA': { bg: 'rgba(34, 197, 94, 0.15)', border: 'rgba(34, 197, 94, 0.3)', text: '#22c55e' },
-  'B.E.S': { bg: 'rgba(249, 115, 22, 0.15)', border: 'rgba(249, 115, 22, 0.3)', text: '#f97316' },
-  'ARCH': { bg: 'rgba(168, 85, 247, 0.15)', border: 'rgba(168, 85, 247, 0.3)', text: '#a855f7' },
-  'TBH': { bg: 'rgba(234, 179, 8, 0.15)', border: 'rgba(234, 179, 8, 0.3)', text: '#eab308' },
-  'EVRN': { bg: 'rgba(236, 72, 153, 0.15)', border: 'rgba(236, 72, 153, 0.3)', text: '#ec4899' },
-  'Personal': { bg: 'rgba(107, 114, 128, 0.15)', border: 'rgba(107, 114, 128, 0.3)', text: '#6b7280' },
-}
-
-const defaultTagColor = { bg: 'rgba(20, 184, 166, 0.15)', border: 'rgba(20, 184, 166, 0.3)', text: '#14b8a6' }
-
-function getTagColors(tag) {
-  return tagColors[tag] || defaultTagColor
-}
+/**
+ * Community Stats Overview — Route: /community-stats
+ * Auth: Public (no login required).
+ *
+ * Showcases all Discord communities' contributions. Sections:
+ *   - Grand total stat cards (systems, discoveries, communities, contributors)
+ *   - Clickable community cards with manual/extractor upload split bars
+ *   - Activity timeline (area chart: manual, extractor, discoveries over time)
+ *   - Discovery type breakdown (bar chart + type cards with percentages)
+ *   - Side-by-side contributor leaderboards (manual vs extractor) with community tags
+ *
+ * API endpoints (all public, no auth):
+ *   GET /api/public/community-overview     — per-community stats + grand totals
+ *   GET /api/public/contributors           — ranked contributor list with upload method
+ *   GET /api/public/activity-timeline      — combined systems + discoveries timeline
+ *   GET /api/public/discovery-breakdown    — discovery counts by type
+ */
 
 // Rank badge colors
 const rankStyles = {
@@ -69,7 +56,9 @@ export default function CommunityStats() {
   const [timeline, setTimeline] = useState([])
   const [typeBreakdown, setTypeBreakdown] = useState([])
 
-  // Fetch all data on mount — each fetch handles errors independently
+  // Fetch all four data sources in parallel on mount.
+  // safeFetch returns fallback on HTTP error or network failure, so one
+  // broken endpoint doesn't prevent the rest of the page from rendering.
   useEffect(() => {
     const safeFetch = (url, fallback = {}) =>
       fetch(url).then(r => r.ok ? r.json() : fallback).catch(() => fallback)

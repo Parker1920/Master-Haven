@@ -1,4 +1,5 @@
 import React, { createContext, useEffect } from 'react'
+import { setApiTagColors } from '../utils/tagColors'
 
 export const ThemeContext = createContext(null)
 
@@ -6,8 +7,17 @@ function setVar(name, value){
   try{ document.documentElement.style.setProperty(name, value) }catch(e){}
 }
 
+/**
+ * Fetches theme colors from /api/settings on mount and applies them as CSS custom properties on :root.
+ * Also fetches discord_tag_colors from the API and populates the tagColors module cache.
+ */
 export default function ThemeProvider({ children }){
   useEffect(()=>{
+    // Fetch discord tag colors from API and populate the tagColors cache
+    fetch('/api/discord_tag_colors').then(r=>r.json()).then(data=>{
+      setApiTagColors(data)
+    }).catch(()=>{})
+
     // Fetch settings and apply theme CSS variables to :root
     fetch('/api/settings').then(r=>r.json()).then(j=>{
       const s = (j && j.theme) || j || {}

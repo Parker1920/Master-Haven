@@ -13,6 +13,28 @@ import {
   ExclamationCircleIcon
 } from '@heroicons/react/24/outline'
 
+/**
+ * Dashboard (Landing Page) — Route: /
+ * Auth: Public (no login required). Eagerly loaded (not lazy).
+ *
+ * Displays a hero header with animated stat counters (systems, planets, moons,
+ * regions, discoveries) and 24-hour change deltas. Below that:
+ *   - Embedded 3D galaxy map iframe (Planet Atlas)
+ *   - Pending approval counts (systems + regions)
+ *   - Top 5 regions by system count
+ *   - Recent systems list
+ *   - Live activity log (polled every 60s, pauses on user inactivity)
+ *
+ * API endpoints:
+ *   GET /api/stats                         — total system count
+ *   GET /api/db_stats                      — table-level counts
+ *   GET /api/stats/daily_changes           — 24h change deltas
+ *   GET /api/regions/grouped               — top regions (limited, no system data)
+ *   GET /api/systems/recent                — last 10 systems added
+ *   GET /api/pending_systems/count         — pending approval counts
+ *   GET /api/activity_logs                 — recent activity events
+ */
+
 // Event type icons and colors for activity logs
 const EVENT_CONFIG = {
   system_submitted: { icon: '📤', color: '#00C2B3', label: 'Submitted' },

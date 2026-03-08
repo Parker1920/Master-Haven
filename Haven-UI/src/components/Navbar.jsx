@@ -6,6 +6,11 @@ import { AuthContext, FEATURES } from '../utils/AuthContext'
 import { useInactivityAware } from '../hooks/useInactivityAware'
 import axios from 'axios'
 
+/**
+ * Top navigation bar with auth-aware links, pending count badges, and dropdown menus.
+ * IMPORTANT: Desktop nav (lg:flex) and Mobile nav (lg:hidden) sections must be kept in sync
+ * when adding or removing links.
+ */
 export default function Navbar() {
   const auth = useContext(AuthContext)
   const [showLogin, setShowLogin] = useState(false)

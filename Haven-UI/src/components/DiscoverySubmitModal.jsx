@@ -2,25 +2,17 @@ import React, { useState, useEffect, useRef } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 import FormField from './FormField'
+import { TYPE_INFO } from '../data/discoveryTypes'
 
-// Discovery types with emojis (matching VH-System-View.html / Keeper bot)
+// Build dropdown options from the canonical TYPE_INFO.
+// value = emoji (used as discovery_type in the API), label = "emoji Label" for display.
 const DISCOVERY_TYPES = [
   { value: '', label: 'Select type...' },
-  { value: '🦗', label: '🦗 Fauna' },
-  { value: '🌿', label: '🌿 Flora' },
-  { value: '💎', label: '💎 Mineral' },
-  { value: '🏛️', label: '🏛️ Ancient' },
-  { value: '📜', label: '📜 History' },
-  { value: '🦴', label: '🦴 Bones' },
-  { value: '👽', label: '👽 Alien' },
-  { value: '🚀', label: '🚀 Starship' },
-  { value: '⚙️', label: '⚙️ Multi-tool' },
-  { value: '📖', label: '📖 Lore' },
-  { value: '🏠', label: '🏠 Custom Base' },
-  { value: '🆕', label: '🆕 Other' }
+  ...Object.values(TYPE_INFO).map(t => ({ value: t.emoji, label: `${t.emoji} ${t.label}` }))
 ]
 
-// Simplified type-specific fields (2-3 per type, matching backend DISCOVERY_TYPE_FIELDS)
+// Type-specific metadata fields (2-3 per type). Must stay in sync with
+// backend DISCOVERY_TYPE_FIELDS dict in control_room_api.py.
 const TYPE_FIELDS = {
   '🦗': [
     { key: 'species_name', label: 'Species Name', placeholder: 'Proc-gen name from scanner' },
@@ -67,12 +59,17 @@ const TYPE_FIELDS = {
   '🆕': [],
 }
 
-// Galaxy options for stub creation
+// Subset of galaxies for stub creation dropdown (most commonly visited)
 const GALAXIES = [
   'Euclid', 'Hilbert Dimension', 'Calypso', 'Hesperius Dimension', 'Hyades',
   'Ickjamatew', 'Budullangr', 'Kikolgallr', 'Eltiensleen', 'Eissentam'
 ]
 
+/**
+ * Renders a multi-section modal for public discovery submissions with system search,
+ * inline stub creation, photo upload, and type-specific metadata fields.
+ * Props: isOpen, onClose, onSuccess.
+ */
 export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
   const [form, setForm] = useState({
     discovery_name: '',
@@ -145,7 +142,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     }
   }, [isOpen])
 
-  // Search systems as user types
+  // Debounced system search - waits 300ms after typing stops before calling API
   useEffect(() => {
     if (!systemSearch || systemSearch.length < 2) {
       setSystems([])
@@ -388,10 +385,11 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     }
   }
 
+  // Derive planet/moon lists from the selected system's detail response
   const planets = (selectedSystem?.planets || []).filter(p => !p.is_moon)
   const allPlanetsIncludingMoons = selectedSystem?.planets || []
   const selectedPlanet = allPlanetsIncludingMoons.find(p => p.id === parseInt(form.planet_id))
-  // Flatten all moons across all planets for the moon dropdown
+  // Flatten all moons across all planets for the moon dropdown, tagging each with parent planet name
   const allMoons = planets.flatMap(p => (p.moons || []).map(m => ({ ...m, parentPlanetName: p.name })))
   const typeFields = TYPE_FIELDS[form.discovery_type] || []
 

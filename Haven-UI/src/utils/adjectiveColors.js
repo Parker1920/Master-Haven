@@ -1,5 +1,14 @@
 // Adjective tier color mappings for fauna, flora, and sentinel values.
 // Tiers sourced from NMS-Haven-Extractor RARITY_*/SENTINEL_* maps (authoritative game data).
+//
+// Tier system (fauna/flora): HIGH > MID > LOW > NONE > WEIRD
+//   - HIGH: plentiful life (yellow for fauna, green for flora)
+//   - MID: average presence (blue)
+//   - LOW: scarce (orange)
+//   - NONE: absent/devoid (gray)
+//   - WEIRD: displaced/infected anomalies (purple)
+//
+// Sentinel tiers: AGGRESSIVE > DEFAULT > LOW > NONE, plus CORRUPT (dissonant worlds)
 
 // --- Fauna / Flora tiers (identical adjective sets) ---
 
@@ -60,8 +69,9 @@ const SENTINEL_CORRUPT = new Set([
   'Sharded from the Atlas', 'Dissonant', 'De-Harmonised',
 ]);
 
-// --- Color getters ---
+// --- Color getters: return Tailwind text color classes ---
 
+/** Returns a Tailwind text color class for a fauna adjective based on its tier. */
 export function getFaunaColor(value) {
   if (!value) return 'text-gray-500';
   if (HIGH.has(value) || FAUNA_EXTRA.has(value)) return 'text-yellow-400';
@@ -72,6 +82,7 @@ export function getFaunaColor(value) {
   return 'text-gray-300';
 }
 
+/** Returns a Tailwind text color class for a flora adjective based on its tier. */
 export function getFloraColor(value) {
   if (!value) return 'text-gray-500';
   if (HIGH.has(value)) return 'text-green-400';
@@ -82,6 +93,7 @@ export function getFloraColor(value) {
   return 'text-gray-300';
 }
 
+/** Returns a Tailwind text color class for a sentinel adjective based on its tier. */
 export function getSentinelColor(value) {
   if (!value) return 'text-gray-500';
   if (SENTINEL_AGGRESSIVE.has(value)) return 'text-red-400';

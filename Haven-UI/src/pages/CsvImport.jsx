@@ -3,6 +3,18 @@ import { AuthContext } from '../utils/AuthContext'
 import Card from '../components/Card'
 import Button from '../components/Button'
 
+/**
+ * CSV Import — Route: /csv-import
+ * Auth: Feature-gated (requires csv_import feature flag on the partner/sub-admin account).
+ *
+ * Uploads a Google Sheets-exported CSV to bulk-import star systems.
+ * CSV format: row 1 = region name, row 2 = headers, row 3+ = data.
+ * Imported systems are tagged with the logged-in user's discord_tag
+ * and bypass the approval queue (direct insert).
+ *
+ * API endpoint:
+ *   POST /api/import_csv — multipart form upload, returns imported/skipped counts
+ */
 export default function CsvImport() {
   const auth = useContext(AuthContext)
   const { isSuperAdmin, isPartner, user } = auth || {}

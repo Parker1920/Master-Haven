@@ -10,6 +10,22 @@ import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, X
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
 import { getThumbnailUrl } from '../utils/api'
 
+/**
+ * Region Detail Page
+ * Route: /regions/:rx/:ry/:rz
+ * Auth: Public (edit actions require admin)
+ *
+ * Shows all systems within a specific galactic region (identified by signed hex
+ * coordinates rx/ry/rz). Supports search, biome category aggregation, sort, and
+ * pagination. Admins can propose or edit the region's display name.
+ *
+ * Key APIs:
+ *   GET  /api/regions/:rx/:ry/:rz         (region detail + systems list)
+ *   GET  /api/regions/:rx/:ry/:rz/systems (paginated, filtered, sorted)
+ *   POST /api/regions/:rx/:ry/:rz/name    (propose region name -- queued for approval)
+ *   PUT  /api/regions/:rx/:ry/:rz/name    (admin: update region name directly)
+ */
+
 // Custom debounce hook
 function useDebounce(value, delay) {
   const [debouncedValue, setDebouncedValue] = useState(value)

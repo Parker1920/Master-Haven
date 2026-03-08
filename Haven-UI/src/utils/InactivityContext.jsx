@@ -1,5 +1,9 @@
+// Inactivity detection context. After a configurable timeout with no user interaction,
+// triggers cleanup on all registered connections (e.g. WebSockets, polling intervals).
+// Components register via useInactivityAware() hook. Reconnects on any user activity.
 import React, { createContext, useState, useEffect, useRef, useCallback } from 'react'
 
+// DOM events treated as user activity
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 const DEBOUNCE_MS = 1000
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000 // 1 hour

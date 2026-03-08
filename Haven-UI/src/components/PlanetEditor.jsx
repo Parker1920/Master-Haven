@@ -23,6 +23,7 @@ const faunaOptions = toSelectOptions(faunaAdjectives)
 const resourcesOptions = toSelectOptions(resourcesList)
 const exoticTrophyOptions = toSelectOptions(exoticTrophyList)
 
+/** Form editor for a planet and its moons. Handles biome/weather/resource fields, photo uploads, and special feature toggles. Props: planet, index, onChange, onRemove, onSave. */
 export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }){
   const [uploading, setUploading] = useState(false)
   const [moonModalOpen, setMoonModalOpen] = useState(false)
@@ -248,6 +249,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           <div className="space-y-5 pb-48">
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Planet Specials</h3>
+              {/* Special feature toggle buttons - stored as 0/1 integers in the DB. Affects completeness scoring for biome-aware grading. */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {[
                   { key: 'has_rings', label: 'Has Rings', icon: 'ring' },

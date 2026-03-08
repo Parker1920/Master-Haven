@@ -1,3 +1,7 @@
+/**
+ * Application entry point. Mounts React app under /haven-ui base path.
+ * Provider order: BrowserRouter -> ThemeProvider (CSS vars) -> InactivityProvider (1hr timeout) -> App.
+ */
 import React from 'react'
 import axios from 'axios'
 import { createRoot } from 'react-dom/client'
