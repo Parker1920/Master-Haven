@@ -30,7 +30,7 @@ RUN npm run build
 # ============================================================
 # STAGE 2: Production Image
 # ============================================================
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # --- METADATA ---
 LABEL maintainer="Parker1920"
