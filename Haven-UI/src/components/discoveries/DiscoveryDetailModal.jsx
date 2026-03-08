@@ -3,28 +3,7 @@ import { Link } from 'react-router-dom'
 import { XMarkIcon, StarIcon, MapPinIcon, CalendarIcon, UserIcon } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import { AuthContext } from '../../utils/AuthContext'
-
-/**
- * DiscoveryDetailModal - Enhanced modal for viewing discovery details
- *
- * Features:
- * - Full-width hero image
- * - Photo gallery with thumbnails
- * - Discovery info and description
- * - Location with system/planet links
- * - Evidence section
- * - Feature toggle for admins
- */
-
-// Normalize photo URLs
-function getPhotoUrl(photo) {
-  if (!photo) return null
-  if (photo.startsWith('http')) return photo
-  const normalized = photo.replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  const filename = parts[parts.length - 1]
-  return `/haven-ui-photos/${encodeURIComponent(filename)}`
-}
+import { getPhotoUrl, getThumbnailUrl } from '../../utils/api'
 
 // Parse evidence URLs (comma-separated or array)
 function parseEvidenceUrls(evidence) {
@@ -163,7 +142,7 @@ export default function DiscoveryDetailModal({
                   ${selectedImage === photo ? 'border-cyan-500' : 'border-transparent opacity-60 hover:opacity-100'}
                 `}
               >
-                <img src={photo} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                <img src={getThumbnailUrl(photo)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
               </button>
             ))}
           </div>

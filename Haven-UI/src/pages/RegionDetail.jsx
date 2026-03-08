@@ -8,6 +8,7 @@ import DiscordTagBadge from '../components/DiscordTagBadge'
 import { AuthContext } from '../utils/AuthContext'
 import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
+import { getThumbnailUrl } from '../utils/api'
 
 // Custom debounce hook
 function useDebounce(value, delay) {
@@ -19,15 +20,6 @@ function useDebounce(value, delay) {
   return debouncedValue
 }
 
-// Helper to normalize photo paths
-function getPhotoUrl(photo) {
-  if (!photo) return null
-  if (photo.startsWith('http')) return photo
-  const normalized = photo.replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  const filename = parts[parts.length - 1]
-  return `/haven-ui-photos/${encodeURIComponent(filename)}`
-}
 
 // Star type colors
 function getStarTypeBadge(starType) {
@@ -50,7 +42,7 @@ function getStarTypeBadge(starType) {
 
 // System Card Component
 function SystemCard({ system, isSelected, onSelect, showCheckbox, onClick }) {
-  const photoUrl = getPhotoUrl(system.photo || (system.planets?.[0]?.photo))
+  const photoUrl = getThumbnailUrl(system.photo || (system.planets?.[0]?.photo))
 
   return (
     <div

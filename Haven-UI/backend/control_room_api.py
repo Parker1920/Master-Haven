@@ -53,6 +53,9 @@ from glyph_decoder import (
 # Import Planet Atlas wrapper for 3D planet visualization (now in same folder)
 from planet_atlas_wrapper import generate_planet_html
 
+# Import image processor for upload compression
+from image_processor import process_image
+
 app = FastAPI()
 logger = logging.getLogger('control.room')
 
@@ -1290,7 +1293,7 @@ async def spa_haven_war_room_admin():
 
 @app.get('/api/status')
 async def api_status():
-    return {'status': 'ok', 'version': '1.41.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.42.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -10462,19 +10465,50 @@ async def run_test(payload: dict):
 @app.post('/api/photos')
 async def upload_photo(file: UploadFile = File(...)):
     filename = file.filename or 'photo'
-    dest = PHOTOS_DIR / filename
-    # avoid overwriting by renaming
-    if dest.exists():
-        base = dest.stem
-        suffix = dest.suffix
+    raw_bytes = await file.read()
+
+    # Process image: resize + compress to WebP + generate thumbnail
+    try:
+        result = process_image(raw_bytes, filename)
+    except Exception as e:
+        logger.warning(f"Image processing failed for {filename}, saving raw: {e}")
+        # Fallback: save raw file if processing fails (e.g. corrupt image)
+        dest = PHOTOS_DIR / filename
+        if dest.exists():
+            base, suffix = dest.stem, dest.suffix
+            i = 1
+            while (PHOTOS_DIR / f"{base}-{i}{suffix}").exists():
+                i += 1
+            dest = PHOTOS_DIR / f"{base}-{i}{suffix}"
+        with dest.open('wb') as f:
+            f.write(raw_bytes)
+        path = str(dest.relative_to(HAVEN_UI_DIR))
+        return JSONResponse({'path': path})
+
+    # Avoid overwriting by renaming
+    full_dest = PHOTOS_DIR / result['full_filename']
+    thumb_dest = PHOTOS_DIR / result['thumb_filename']
+    if full_dest.exists():
+        stem = Path(filename).stem
         i = 1
-        while (PHOTOS_DIR / f"{base}-{i}{suffix}").exists():
+        while (PHOTOS_DIR / f"{stem}-{i}.webp").exists():
             i += 1
-        dest = PHOTOS_DIR / f"{base}-{i}{suffix}"
-    with dest.open('wb') as f:
-        f.write(await file.read())
-    path = str(dest.relative_to(HAVEN_UI_DIR))
-    return JSONResponse({'path': path})
+        full_dest = PHOTOS_DIR / f"{stem}-{i}.webp"
+        thumb_dest = PHOTOS_DIR / f"{stem}-{i}_thumb.webp"
+
+    with full_dest.open('wb') as f:
+        f.write(result['full_bytes'])
+    with thumb_dest.open('wb') as f:
+        f.write(result['thumb_bytes'])
+
+    path = str(full_dest.relative_to(HAVEN_UI_DIR))
+    return JSONResponse({
+        'path': path,
+        'filename': full_dest.name,
+        'thumbnail': thumb_dest.name,
+        'original_size': result['original_size'],
+        'compressed_size': result['compressed_size'],
+    })
 
 @app.get('/map/latest')
 async def get_map():
@@ -17787,19 +17821,32 @@ async def upload_war_media(
 
     # Generate unique filename
     unique_id = secrets.token_hex(8)
-    new_filename = f"{unique_id}{ext}"
-    file_path = MEDIA_UPLOAD_DIR / new_filename
 
-    # Save file
-    with open(file_path, 'wb') as f:
-        f.write(content)
+    # Process image: resize + compress to WebP + generate thumbnail
+    try:
+        result = process_image(content, f"{unique_id}{ext}")
+        new_filename = f"{unique_id}.webp"
+        thumb_filename = f"{unique_id}_thumb.webp"
 
-    # Get mime type
-    mime_types = {
-        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-        '.gif': 'image/gif', '.webp': 'image/webp'
-    }
-    mime_type = mime_types.get(ext, 'application/octet-stream')
+        with open(MEDIA_UPLOAD_DIR / new_filename, 'wb') as f:
+            f.write(result['full_bytes'])
+        with open(MEDIA_UPLOAD_DIR / thumb_filename, 'wb') as f:
+            f.write(result['thumb_bytes'])
+
+        saved_size = result['compressed_size']
+        mime_type = 'image/webp'
+    except Exception as e:
+        logger.warning(f"War media image processing failed, saving raw: {e}")
+        new_filename = f"{unique_id}{ext}"
+        with open(MEDIA_UPLOAD_DIR / new_filename, 'wb') as f:
+            f.write(content)
+        thumb_filename = None
+        saved_size = len(content)
+        mime_types = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+            '.gif': 'image/gif', '.webp': 'image/webp'
+        }
+        mime_type = mime_types.get(ext, 'application/octet-stream')
 
     # Save to database
     conn = get_db_connection()
@@ -17810,17 +17857,20 @@ async def upload_war_media(
             (filename, original_filename, file_path, file_size, mime_type,
              uploaded_by_id, uploaded_by_username, uploaded_by_type, caption, related_conflict_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (new_filename, file.filename, f'/war-media/{new_filename}', len(content),
+        ''', (new_filename, file.filename, f'/war-media/{new_filename}', saved_size,
               mime_type, uploader_id, username, user_type, caption, conflict_id))
         conn.commit()
         media_id = cursor.lastrowid
 
-        return {
+        response = {
             'status': 'uploaded',
             'media_id': media_id,
             'filename': new_filename,
             'url': f'/war-media/{new_filename}'
         }
+        if thumb_filename:
+            response['thumbnail_url'] = f'/war-media/{thumb_filename}'
+        return response
     finally:
         conn.close()
 

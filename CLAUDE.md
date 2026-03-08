@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.42.0 | 2026-03-05 | Community detail drill-down page |
-| Haven-UI | 1.41.0 | 2026-03-05 | Community detail drill-down page |
-| Backend API | 1.41.0 | 2026-03-05 | Community regions endpoint |
+| **Master Haven** | 1.43.0 | 2026-03-07 | Image compression and thumbnails |
+| Haven-UI | 1.42.0 | 2026-03-07 | Image compression and thumbnails |
+| Backend API | 1.42.0 | 2026-03-07 | Image compression and thumbnails |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,25 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.43.0 (2026-03-07) - Image Compression & Thumbnails
+Automatic WebP compression and thumbnail generation for all photo uploads, reducing storage ~80% and speeding up page loads.
+
+**Haven-UI 1.42.0**
+- New shared `getPhotoUrl()` and `getThumbnailUrl()` utilities in `api.js` — removed 4 duplicate function definitions
+- Card/grid views (DiscoveryCard, RegionDetail, PendingApprovals list) now load 300px WebP thumbnails (~7KB each)
+- Detail views (SystemDetail, DiscoveryDetailModal hero, PendingApprovals modal) load full 1920px WebP images
+- PlanetEditor and MoonEditor use shared `getPhotoUrl()` instead of inline URL construction
+
+**Backend API 1.42.0**
+- New `image_processor.py` module: Pillow-based resize + WebP compression pipeline
+- `POST /api/photos`: uploads now auto-compressed to WebP (quality 80, max 1920px) with 300px thumbnail
+- `POST /api/warroom/media/upload`: same compression pipeline for war room images
+- Response includes `thumbnail` filename, `original_size`, and `compressed_size` for transparency
+- Graceful fallback: if Pillow processing fails, raw file saved as before
+- Pillow added to `requirements.txt`
+
+---
 
 #### Master Haven 1.42.0 (2026-03-05) - Community Detail Drill-Down
 Click into any community card to see a dedicated detail page with member stats, regions, and direct system navigation.

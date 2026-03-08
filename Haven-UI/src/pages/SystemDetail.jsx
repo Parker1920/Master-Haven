@@ -8,16 +8,7 @@ import { AuthContext } from '../utils/AuthContext'
 import { getTradeGoodById } from '../utils/economyTradeGoods'
 import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjectiveColors'
 
-// Helper to normalize photo paths - handles "photos\file.jpg", "photos/file.jpg", or just "file.jpg"
-function getPhotoUrl(photo) {
-  if (!photo) return null
-  if (photo.startsWith('http')) return photo
-  // Normalize backslashes to forward slashes first, then extract just the filename
-  const normalized = photo.replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  const filename = parts[parts.length - 1]
-  return `/haven-ui-photos/${encodeURIComponent(filename)}`
-}
+import { getPhotoUrl } from '../utils/api'
 
 // Format date for display
 function formatDate(dateStr) {

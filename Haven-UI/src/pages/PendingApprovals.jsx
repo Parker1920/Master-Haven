@@ -7,6 +7,7 @@ import Modal from '../components/Modal'
 import GlyphDisplay from '../components/GlyphDisplay'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
 import { usePersonalColor } from '../utils/usePersonalColor'
+import { getPhotoUrl, getThumbnailUrl } from '../utils/api'
 
 export default function PendingApprovals() {
   const navigate = useNavigate()
@@ -1038,7 +1039,7 @@ export default function PendingApprovals() {
                       {submission.photo_url && (
                         <div className="flex-shrink-0 w-16 h-16 rounded overflow-hidden bg-gray-800">
                           <img
-                            src={submission.photo_url.startsWith('http') ? submission.photo_url : `/haven-ui-photos/${encodeURIComponent(submission.photo_url.split(/[/\\]/).pop())}`}
+                            src={getThumbnailUrl(submission.photo_url)}
                             alt=""
                             className="w-full h-full object-cover"
                           />
@@ -2196,7 +2197,7 @@ export default function PendingApprovals() {
               {selectedDiscoveryApproval.photo_url && (
                 <div className="aspect-video rounded overflow-hidden bg-gray-800">
                   <img
-                    src={selectedDiscoveryApproval.photo_url.startsWith('http') ? selectedDiscoveryApproval.photo_url : `/haven-ui-photos/${encodeURIComponent(selectedDiscoveryApproval.photo_url.split(/[/\\]/).pop())}`}
+                    src={getPhotoUrl(selectedDiscoveryApproval.photo_url)}
                     alt={selectedDiscoveryApproval.discovery_name}
                     className="w-full h-full object-contain"
                   />

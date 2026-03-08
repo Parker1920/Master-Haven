@@ -1,28 +1,6 @@
 import React from 'react'
 import { StarIcon } from '@heroicons/react/24/solid'
-
-/**
- * DiscoveryCard - Photo-focused showcase card for discoveries
- *
- * Features:
- * - Large 16:9 image with lazy loading
- * - Type badge overlay
- * - Featured star badge
- * - Discoverer credit
- * - System/location info
- * - Hover zoom effect
- */
-
-// Normalize photo URLs for display
-function getPhotoUrl(photo) {
-  if (!photo) return null
-  if (photo.startsWith('http')) return photo
-  // Normalize backslashes to forward slashes
-  const normalized = photo.replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  const filename = parts[parts.length - 1]
-  return `/haven-ui-photos/${encodeURIComponent(filename)}`
-}
+import { getThumbnailUrl } from '../../utils/api'
 
 // Placeholder gradient backgrounds when no photo
 const TYPE_PLACEHOLDERS = {
@@ -63,7 +41,7 @@ export default function DiscoveryCard({
   } = discovery
 
   const slug = type_slug || 'other'
-  const photoSrc = getPhotoUrl(photo_url)
+  const photoSrc = getThumbnailUrl(photo_url)
   const placeholderBg = TYPE_PLACEHOLDERS[slug] || TYPE_PLACEHOLDERS.other
   const emoji = type_info?.emoji || discovery_type || '?'
   const typeLabel = type_info?.label || slug

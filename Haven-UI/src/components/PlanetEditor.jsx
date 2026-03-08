@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import MoonEditor from './MoonEditor'
-import { uploadPhoto } from '../utils/api'
+import { uploadPhoto, getPhotoUrl } from '../utils/api'
 import Modal from './Modal'
 import SearchableSelect from './SearchableSelect'
 import {
@@ -190,7 +190,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           {!uploading && planet.photo && (
             <div className="mt-2 relative inline-block group">
               <img
-                src={planet.photo.startsWith('http') ? planet.photo : `/haven-ui-photos/${planet.photo.replace(/^photos[\\/]/, '').split(/[\\/]/).pop()}`}
+                src={getPhotoUrl(planet.photo)}
                 alt="Planet photo"
                 className="max-w-full sm:max-w-xs max-h-32 rounded border border-gray-600"
               />
