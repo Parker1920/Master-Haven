@@ -2,8 +2,8 @@
 One-time migration script: Convert all existing photos to WebP with thumbnails.
 
 Processes:
-  1. Haven-UI/photos/ → planets.photo, moons.photo, discoveries.photo_url, discoveries.evidence_url
-  2. Haven-UI/public/war-media/ → war_media.filename, war_media.file_path, war_media.mime_type
+  1. photos dir → planets.photo, moons.photo, discoveries.photo_url, discoveries.evidence_url
+  2. war-media dir → war_media.filename, war_media.file_path, war_media.mime_type
 
 For each non-WebP image:
   - Converts to WebP (max 1920px, quality 80)
@@ -12,10 +12,14 @@ For each non-WebP image:
   - Updates all DB references
 
 Usage:
-  cd Master-Haven
+  # Local (auto-detects paths):
   python Haven-UI/backend/migrate_photos_to_webp.py
+
+  # Docker Pi (explicit paths):
+  python Haven-UI/backend/migrate_photos_to_webp.py --db ~/haven-data/haven_ui.db --photos ~/haven-photos
 """
 
+import argparse
 import sqlite3
 import sys
 import shutil
@@ -25,25 +29,36 @@ from datetime import datetime
 # Add backend to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 from image_processor import process_image
-from paths import haven_paths
 
-# Use centralized path config (respects HAVEN_UI_DIR / HAVEN_DB_PATH env overrides on Pi)
-HAVEN_UI_DIR = haven_paths.haven_ui_dir
-PHOTOS_DIR = HAVEN_UI_DIR / "photos"
-WAR_MEDIA_DIR = HAVEN_UI_DIR / "public" / "war-media"
-DB_PATH = haven_paths.haven_db or (HAVEN_UI_DIR / "data" / "haven_ui.db")
-BACKUP_DIR = HAVEN_UI_DIR / "data" / "backups"
+
+def resolve_paths(args):
+    """Resolve DB, photos, and war-media paths from CLI args or haven_paths defaults."""
+    if args.db or args.photos:
+        # Explicit paths provided (Docker / Pi usage)
+        db = Path(args.db).expanduser() if args.db else None
+        photos = Path(args.photos).expanduser() if args.photos else None
+        war_media = Path(args.war_media).expanduser() if args.war_media else None
+    else:
+        # Auto-detect from haven_paths (local dev)
+        from paths import haven_paths
+        haven_ui = haven_paths.haven_ui_dir
+        db = haven_paths.haven_db or (haven_ui / "data" / "haven_ui.db")
+        photos = haven_ui / "photos"
+        war_media = haven_ui / "public" / "war-media"
+
+    return db, photos, war_media
 
 # Image extensions to convert (skip .webp)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif"}
 
 
-def backup_database():
+def backup_database(db_path):
     """Create a timestamped DB backup before migration."""
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup_dir = db_path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = BACKUP_DIR / f"haven_ui_pre_webp_migration_{timestamp}.db"
-    shutil.copy2(DB_PATH, backup_path)
+    backup_path = backup_dir / f"haven_ui_pre_webp_migration_{timestamp}.db"
+    shutil.copy2(db_path, backup_path)
     print(f"  Database backed up to: {backup_path}")
     return backup_path
 
@@ -82,15 +97,15 @@ def convert_file(file_path: Path) -> dict | None:
         return None
 
 
-def migrate_photos_dir(conn):
-    """Convert all images in Haven-UI/photos/ and update DB references."""
-    if not PHOTOS_DIR.exists():
+def migrate_photos_dir(conn, photos_dir):
+    """Convert all images in photos dir and update DB references."""
+    if not photos_dir or not photos_dir.exists():
         print("  photos/ directory not found, skipping.")
         return 0, 0, 0, 0
 
     # Collect all non-webp image files (skip thumbs)
     files = [
-        f for f in PHOTOS_DIR.iterdir()
+        f for f in photos_dir.iterdir()
         if f.is_file()
         and f.suffix.lower() in IMAGE_EXTENSIONS
         and not f.stem.endswith("_thumb")
@@ -159,9 +174,9 @@ def migrate_photos_dir(conn):
     return converted, failed, total_original, total_compressed
 
 
-def migrate_war_media(conn):
-    """Convert all images in Haven-UI/public/war-media/ and update war_media table."""
-    if not WAR_MEDIA_DIR.exists():
+def migrate_war_media(conn, war_media_dir):
+    """Convert all images in war-media dir and update war_media table."""
+    if not war_media_dir or not war_media_dir.exists():
         print("  war-media/ directory not found, skipping.")
         return 0, 0, 0, 0
 
@@ -172,7 +187,7 @@ def migrate_war_media(conn):
     # Filter to non-webp files that exist on disk
     to_convert = []
     for row_id, filename in rows:
-        file_path = WAR_MEDIA_DIR / filename
+        file_path = war_media_dir / filename
         if file_path.exists() and file_path.suffix.lower() in IMAGE_EXTENSIONS:
             to_convert.append((row_id, filename, file_path))
 
@@ -210,30 +225,42 @@ def migrate_war_media(conn):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Convert Haven photos to WebP with thumbnails")
+    parser.add_argument("--db", help="Path to haven_ui.db (e.g. ~/haven-data/haven_ui.db)")
+    parser.add_argument("--photos", help="Path to photos directory (e.g. ~/haven-photos)")
+    parser.add_argument("--war-media", help="Path to war-media directory (optional)", default=None)
+    args = parser.parse_args()
+
+    db_path, photos_dir, war_media_dir = resolve_paths(args)
+
     print("=" * 60)
     print("  Haven Photo Migration: Convert to WebP + Thumbnails")
     print("=" * 60)
+    print(f"  DB:        {db_path}")
+    print(f"  Photos:    {photos_dir}")
+    print(f"  War media: {war_media_dir}")
     print()
 
-    if not DB_PATH.exists():
-        print(f"ERROR: Database not found at {DB_PATH}")
+    if not db_path or not db_path.exists():
+        print(f"ERROR: Database not found at {db_path}")
+        print("  Hint: use --db and --photos to specify paths on Docker/Pi")
         sys.exit(1)
 
     # Backup
     print("[1/3] Backing up database...")
-    backup_database()
+    backup_database(db_path)
     print()
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(db_path))
 
     # Migrate photos/
     print("[2/3] Converting photos/...")
-    p_conv, p_fail, p_orig, p_comp = migrate_photos_dir(conn)
+    p_conv, p_fail, p_orig, p_comp = migrate_photos_dir(conn, photos_dir)
     print()
 
     # Migrate war-media/
     print("[3/3] Converting war-media/...")
-    w_conv, w_fail, w_orig, w_comp = migrate_war_media(conn)
+    w_conv, w_fail, w_orig, w_comp = migrate_war_media(conn, war_media_dir)
     print()
 
     conn.close()
