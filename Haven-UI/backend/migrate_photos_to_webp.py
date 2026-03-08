@@ -224,6 +224,60 @@ def migrate_war_media(conn, war_media_dir):
     return converted, failed, total_original, total_compressed
 
 
+def repair_db_references(conn):
+    """Fix any remaining non-WebP references in DB (handles comma-separated evidence_url, etc.)."""
+    cursor = conn.cursor()
+    fixed = 0
+    ext_pattern = "|".join(ext.lstrip(".") for ext in IMAGE_EXTENSIONS)
+
+    # Fix comma-separated evidence_url fields
+    cursor.execute(
+        "SELECT id, evidence_url FROM discoveries "
+        "WHERE evidence_url IS NOT NULL AND evidence_url != ''"
+    )
+    for row_id, evidence_url in cursor.fetchall():
+        parts = [p.strip() for p in evidence_url.split(",") if p.strip()]
+        new_parts = []
+        changed = False
+        for part in parts:
+            p = Path(part)
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                new_parts.append(str(p.parent / (p.stem + ".webp")))
+                changed = True
+            else:
+                new_parts.append(part)
+        if changed:
+            new_val = ",".join(new_parts)
+            cursor.execute(
+                "UPDATE discoveries SET evidence_url = ? WHERE id = ?",
+                (new_val, row_id),
+            )
+            fixed += 1
+
+    # Fix any single-value photo columns that still have old extensions
+    for table, col in [
+        ("planets", "photo"),
+        ("moons", "photo"),
+        ("discoveries", "photo_url"),
+    ]:
+        cursor.execute(
+            f"SELECT id, {col} FROM {table} "
+            f"WHERE {col} IS NOT NULL AND {col} != '' AND {col} NOT LIKE '%.webp'"
+        )
+        for row_id, val in cursor.fetchall():
+            p = Path(val)
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                new_val = str(p.parent / (p.stem + ".webp"))
+                cursor.execute(
+                    f"UPDATE {table} SET {col} = ? WHERE id = ?",
+                    (new_val, row_id),
+                )
+                fixed += 1
+
+    conn.commit()
+    return fixed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Convert Haven photos to WebP with thumbnails")
     parser.add_argument("--db", help="Path to haven_ui.db (e.g. ~/haven-data/haven_ui.db)")
@@ -247,20 +301,26 @@ def main():
         sys.exit(1)
 
     # Backup
-    print("[1/3] Backing up database...")
+    print("[1/4] Backing up database...")
     backup_database(db_path)
     print()
 
     conn = sqlite3.connect(str(db_path))
 
     # Migrate photos/
-    print("[2/3] Converting photos/...")
+    print("[2/4] Converting photos/...")
     p_conv, p_fail, p_orig, p_comp = migrate_photos_dir(conn, photos_dir)
     print()
 
     # Migrate war-media/
-    print("[3/3] Converting war-media/...")
+    print("[3/4] Converting war-media/...")
     w_conv, w_fail, w_orig, w_comp = migrate_war_media(conn, war_media_dir)
+    print()
+
+    # Repair any missed DB references (comma-separated evidence_url, etc.)
+    print("[4/4] Repairing DB references...")
+    repaired = repair_db_references(conn)
+    print(f"  Fixed {repaired} stale references")
     print()
 
     conn.close()
