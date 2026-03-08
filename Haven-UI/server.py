@@ -28,7 +28,7 @@ try:
     from fastapi.staticfiles import StaticFiles
     # Importing control_room_api can execute initialization logic. Wrap it so we
     # provide an actionable error message if an import-time exception occurs
-    from control_room_api import app, init_rtai
+    from control_room_api import app
 except Exception as exc:
     print("ERROR: Failed to import critical server modules. This often means there\n      "
           "was a startup-time failure (missing dependency, corrupted DB, or bad paths).\n      "
@@ -44,10 +44,5 @@ except Exception as exc:
 
 if __name__ == '__main__':
     import uvicorn
-    try:
-        # Attempt to init RT-AI if available. Keep it optional.
-        init_rtai(str(HAVEN_UI_DIR))
-    except Exception:
-        pass
     print("Starting Haven Control Room Web Server on 0.0.0.0:8005")
     uvicorn.run(app, host='0.0.0.0', port=8005, log_level='info')
