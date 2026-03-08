@@ -1294,7 +1294,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.42.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.42.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -17707,10 +17707,10 @@ async def upload_war_media(
         cursor.execute('''
             INSERT INTO war_media
             (filename, original_filename, file_path, file_size, mime_type,
-             uploaded_by_id, uploaded_by_username, uploaded_by_type, caption, related_conflict_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             uploaded_by_id, uploaded_by_username, uploaded_by_type, caption, related_conflict_id, thumbnail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (new_filename, file.filename, f'/war-media/{new_filename}', saved_size,
-              mime_type, uploader_id, username, user_type, caption, conflict_id))
+              mime_type, uploader_id, username, user_type, caption, conflict_id, thumb_filename))
         conn.commit()
         media_id = cursor.lastrowid
 
@@ -17744,7 +17744,7 @@ async def list_war_media(
     try:
         query = '''
             SELECT id, filename, original_filename, file_path, file_size, mime_type,
-                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id
+                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id, thumbnail
             FROM war_media
             WHERE is_active = 1
         '''
@@ -17769,7 +17769,8 @@ async def list_war_media(
             'uploaded_by_type': r[7],
             'uploaded_at': r[8],
             'caption': r[9],
-            'conflict_id': r[10]
+            'conflict_id': r[10],
+            'thumbnail_url': f'/war-media/{r[11]}' if r[11] else None
         } for r in rows]
     finally:
         conn.close()
@@ -17787,7 +17788,7 @@ async def get_war_media(media_id: int, session: Optional[str] = Cookie(None)):
     try:
         cursor.execute('''
             SELECT id, filename, original_filename, file_path, file_size, mime_type,
-                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id
+                   uploaded_by_username, uploaded_by_type, uploaded_at, caption, related_conflict_id, thumbnail
             FROM war_media WHERE id = ? AND is_active = 1
         ''', (media_id,))
         r = cursor.fetchone()
@@ -17805,7 +17806,8 @@ async def get_war_media(media_id: int, session: Optional[str] = Cookie(None)):
             'uploaded_by_type': r[7],
             'uploaded_at': r[8],
             'caption': r[9],
-            'conflict_id': r[10]
+            'conflict_id': r[10],
+            'thumbnail_url': f'/war-media/{r[11]}' if r[11] else None
         }
     finally:
         conn.close()
@@ -18124,7 +18126,7 @@ async def get_news_article(news_id: int, session: Optional[str] = Cookie(None)):
 
         # Get attached media
         cursor.execute('''
-            SELECT id, filename, file_path, caption FROM war_media
+            SELECT id, filename, file_path, caption, thumbnail FROM war_media
             WHERE related_news_id = ? AND is_active = 1
         ''', (news_id,))
         media = cursor.fetchall()
@@ -18148,7 +18150,8 @@ async def get_news_article(news_id: int, session: Optional[str] = Cookie(None)):
                 'id': m[0],
                 'filename': m[1],
                 'url': m[2],
-                'caption': m[3]
+                'caption': m[3],
+                'thumbnail_url': f'/war-media/{m[4]}' if m[4] else None
             } for m in media]
         }
     finally:

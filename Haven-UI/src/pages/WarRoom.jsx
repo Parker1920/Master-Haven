@@ -1867,7 +1867,7 @@ function MediaUploadPanel({ onUpload }) {
                   title={m.caption || 'War screenshot'}
                 >
                   <img
-                    src={m.url}
+                    src={m.thumbnail_url || m.url}
                     alt={m.caption || 'War media'}
                     className="w-full h-full object-cover"
                     onError={(e) => { e.target.style.display = 'none' }}

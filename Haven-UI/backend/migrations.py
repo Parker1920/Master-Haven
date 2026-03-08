@@ -3673,3 +3673,39 @@ def migrate_1_46_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.47.0")
+
+
+@register_migration("1.48.0", "Add thumbnail column to war_media for WebP thumbnail persistence")
+def migration_1_48_0(conn):
+    cursor = conn.cursor()
+
+    # Add thumbnail column
+    cursor.execute("PRAGMA table_info(war_media)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'thumbnail' not in columns:
+        cursor.execute("ALTER TABLE war_media ADD COLUMN thumbnail TEXT")
+        logger.info("Added thumbnail column to war_media")
+
+    # Backfill: any existing .webp entries should have a _thumb.webp on disk
+    cursor.execute("SELECT id, filename FROM war_media WHERE filename LIKE '%.webp' AND thumbnail IS NULL")
+    rows = cursor.fetchall()
+    updated = 0
+    for row in rows:
+        stem = row[1].replace('.webp', '')
+        thumb = f"{stem}_thumb.webp"
+        cursor.execute("UPDATE war_media SET thumbnail = ? WHERE id = ?", (thumb, row[0]))
+        updated += 1
+    if updated:
+        conn.commit()
+        logger.info(f"Backfilled thumbnail for {updated} existing war_media entries")
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.48.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.48.0")

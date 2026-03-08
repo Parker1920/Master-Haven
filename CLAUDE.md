@@ -23,8 +23,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.43.0 | 2026-03-07 | Image compression and thumbnails |
-| Haven-UI | 1.42.0 | 2026-03-07 | Image compression and thumbnails |
-| Backend API | 1.42.0 | 2026-03-07 | Image compression and thumbnails |
+| Haven-UI | 1.42.1 | 2026-03-08 | War media thumbnail persistence fix |
+| Backend API | 1.42.1 | 2026-03-08 | War media thumbnail persistence fix |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,20 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven-UI 1.42.1 + Backend API 1.42.1 (2026-03-08) - War Media Thumbnail Persistence
+Fix war room media thumbnails not being persisted or served after the v1.42.0 image compression feature.
+
+**Backend API 1.42.1**
+- Added `thumbnail` column to `war_media` table (migration v1.48.0) to persist thumbnail filenames
+- Upload INSERT now stores `thumb_filename` in the new column
+- `list_war_media`, `get_war_media`, and news article media endpoints now return `thumbnail_url`
+- Migration backfills thumbnail filenames for existing `.webp` war media entries
+
+**Haven-UI 1.42.1**
+- War media grid now loads 300px WebP thumbnails (`m.thumbnail_url`) instead of full-size images, falling back to `m.url` for legacy entries
+
+---
 
 #### Master Haven 1.43.0 (2026-03-07) - Image Compression & Thumbnails
 Automatic WebP compression and thumbnail generation for all photo uploads, reducing storage ~80% and speeding up page loads.
