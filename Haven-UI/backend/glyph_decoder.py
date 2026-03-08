@@ -50,22 +50,22 @@ HEX_TO_GLYPH = {v: k for k, v in GLYPH_TO_HEX.items()}
 
 # Glyph photo filenames
 GLYPH_IMAGES = {
-    '0': 'IMG_9202.jpg',
-    '1': 'IMG_9203.jpg',
-    '2': 'IMG_9204.jpg',
-    '3': 'IMG_9205.jpg',
-    '4': 'IMG_9206.jpg',
-    '5': 'IMG_9207.jpg',
-    '6': 'IMG_9208.png',
-    '7': 'IMG_9209.jpg',
-    '8': 'IMG_9210.jpg',
-    '9': 'IMG_9211.jpg',
-    'A': 'IMG_9212.jpg',
-    'B': 'IMG_9213.jpg',
-    'C': 'IMG_9214.jpg',
-    'D': 'IMG_9215.jpg',
-    'E': 'IMG_9216.jpg',
-    'F': 'IMG_9217.jpg',
+    '0': 'IMG_9202.webp',
+    '1': 'IMG_9203.webp',
+    '2': 'IMG_9204.webp',
+    '3': 'IMG_9205.webp',
+    '4': 'IMG_9206.webp',
+    '5': 'IMG_9207.webp',
+    '6': 'IMG_9208.webp',
+    '7': 'IMG_9209.webp',
+    '8': 'IMG_9210.webp',
+    '9': 'IMG_9211.webp',
+    'A': 'IMG_9212.webp',
+    'B': 'IMG_9213.webp',
+    'C': 'IMG_9214.webp',
+    'D': 'IMG_9215.webp',
+    'E': 'IMG_9216.webp',
+    'F': 'IMG_9217.webp',
 }
 
 # Coordinate ranges (NMS full in-game range)

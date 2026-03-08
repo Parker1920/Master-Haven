@@ -1002,25 +1002,16 @@
             scene.add(stars);
         }
 
-        // Glyph image filenames mapping (hex digit -> image file)
-        const GLYPH_IMAGES = {
-            '0': 'IMG_9202.webp',
-            '1': 'IMG_9203.webp',
-            '2': 'IMG_9204.webp',
-            '3': 'IMG_9205.webp',
-            '4': 'IMG_9206.webp',
-            '5': 'IMG_9207.webp',
-            '6': 'IMG_9208.webp',
-            '7': 'IMG_9209.webp',
-            '8': 'IMG_9210.webp',
-            '9': 'IMG_9211.webp',
-            'A': 'IMG_9212.webp',
-            'B': 'IMG_9213.webp',
-            'C': 'IMG_9214.webp',
-            'D': 'IMG_9215.webp',
-            'E': 'IMG_9216.webp',
-            'F': 'IMG_9217.webp'
-        };
+        // Glyph image filenames — fetched from /api/glyph_images (single source of truth in glyph_decoder.py)
+        let GLYPH_IMAGES = {};
+        fetch('/api/glyph_images')
+            .then(r => r.json())
+            .then(data => {
+                GLYPH_IMAGES = data;
+                // Re-render glyphs if system data already loaded
+                if (window.SYSTEM_DATA) renderGlyphDisplay(window.SYSTEM_DATA.glyph_code);
+            })
+            .catch(err => console.error('Failed to load glyph images:', err));
 
         function updateInfoPanel() {
             const system = window.SYSTEM_DATA;
