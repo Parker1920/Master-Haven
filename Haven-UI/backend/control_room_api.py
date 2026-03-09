@@ -17621,7 +17621,7 @@ async def agree_resolution(conflict_id: int, session: Optional[str] = Cookie(Non
 
 # --- Media Upload Endpoints ---
 
-MEDIA_UPLOAD_DIR = Path(__file__).parent.parent / 'Haven-UI' / 'public' / 'war-media'
+MEDIA_UPLOAD_DIR = HAVEN_UI_DIR / 'public' / 'war-media'
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
