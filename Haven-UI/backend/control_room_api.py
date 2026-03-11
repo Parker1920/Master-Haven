@@ -9325,13 +9325,15 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
             conn.commit()
             raise HTTPException(status_code=409, detail='Region name was already taken by another region')
 
-        # Insert or update the region name
+        # Insert or update the region name (scoped by reality+galaxy)
+        reality = submission.get('reality') or 'Normal'
+        galaxy = submission.get('galaxy') or 'Euclid'
         cursor.execute('''
-            INSERT INTO regions (region_x, region_y, region_z, custom_name, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(region_x, region_y, region_z)
+            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
             DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
-        ''', (rx, ry, rz, proposed_name))
+        ''', (rx, ry, rz, proposed_name, reality, galaxy))
 
         # Mark submission as approved
         cursor.execute('''
@@ -11067,13 +11069,15 @@ async def import_csv(file: UploadFile = File(...), session: Optional[str] = Cook
             # Use the region coords from the first imported system
             conn = get_db_connection()
             cursor = conn.cursor()
-            # Update or insert region name
+            # Update or insert region name (scoped by reality+galaxy)
+            import_reality = imported_region_coords.get('reality') or 'Normal'
+            import_galaxy = imported_region_coords.get('galaxy') or 'Euclid'
             cursor.execute('''
-                INSERT INTO regions (region_x, region_y, region_z, custom_name)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(region_x, region_y, region_z)
+                INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
                 DO UPDATE SET custom_name = excluded.custom_name
-            ''', (imported_region_coords['region_x'], imported_region_coords['region_y'], imported_region_coords['region_z'], region_name))
+            ''', (imported_region_coords['region_x'], imported_region_coords['region_y'], imported_region_coords['region_z'], region_name, import_reality, import_galaxy))
             conn.commit()
             conn.close()
 
