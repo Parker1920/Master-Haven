@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.43.0 | 2026-03-07 | Image compression and thumbnails |
-| Haven-UI | 1.42.1 | 2026-03-08 | War media thumbnail persistence fix |
-| Backend API | 1.42.1 | 2026-03-08 | War media thumbnail persistence fix |
+| **Master Haven** | 1.44.0 | 2026-03-10 | Region naming in wizard with reality/galaxy scoping |
+| Haven-UI | 1.43.1 | 2026-03-10 | Remove inactivity overlay and rate limiting |
+| Backend API | 1.43.1 | 2026-03-10 | Remove API rate limiting (self-hosted) |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,44 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven-UI 1.43.1 + Backend API 1.43.1 (2026-03-10) - Remove Inactivity Overlay & Rate Limiting
+Remove ngrok-era API rate limiting and inactivity session pausing since Haven is now self-hosted.
+
+**Haven-UI 1.43.1**
+- Removed InactivityOverlay component (full-screen "Session Paused" / "Reconnect" modal)
+- Removed InactivityContext provider and useInactivityAware hook
+- Removed InactivityProvider wrapper from main.jsx
+- Simplified Dashboard, Navbar, Logs, TerminalViewer — polling and WebSockets no longer pause on idle
+
+**Backend API 1.43.1**
+- Removed `check_rate_limit()` (IP-based 60/hr limit on submissions)
+- Removed `check_api_key_rate_limit()` (per-key 200/hr limit on extractor submissions)
+- Removed rate limit enforcement from `/api/save_system`, `/api/submit_discovery`, `/api/extraction`, `/api/check_duplicate`
+- Removed in-memory registration rate limiter from `/api/extractor/register`
+
+---
+
+#### Master Haven 1.44.0 (2026-03-10) - Region Naming in Wizard with Reality/Galaxy Scoping
+Region info section in the system submission wizard and reality/galaxy-aware region naming.
+
+**Haven-UI 1.43.0**
+- New "Region Information" section in Wizard between Reality/Galaxy selectors and System Attributes
+- Auto-lookups region name when glyphs + reality + galaxy are all set
+- Named regions display with green badge and system count
+- Unnamed regions show inline name proposal form
+- Pending region names displayed with submitter info to prevent duplicates
+- Named regions offer "Propose Name Change" button for rename submissions
+- Success/error feedback shown inline after submission
+
+**Backend API 1.43.0**
+- `GET /api/regions/{rx}/{ry}/{rz}`: Added `reality` and `galaxy` query params, all queries now scoped by 5 keys
+- `POST /api/regions/{rx}/{ry}/{rz}/submit`: Duplicate checks now include `reality` and `galaxy`; INSERT includes both columns
+- `PUT /api/regions/{rx}/{ry}/{rz}`: Scoped by `reality`/`galaxy` from payload; ON CONFLICT uses new composite key
+- Migration v1.49.0: Rebuilds `regions` table UNIQUE constraint from `(region_x, region_y, region_z)` to `(reality, galaxy, region_x, region_y, region_z)` for multi-dimension support
+- Added scoped indexes on both `regions` and `pending_region_names` tables
+
+---
 
 #### Haven-UI 1.42.1 + Backend API 1.42.1 (2026-03-08) - War Media Thumbnail Persistence
 Fix war room media thumbnails not being persisted or served after the v1.42.0 image compression feature.

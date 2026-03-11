@@ -1,13 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useInactivityAware } from '../hooks/useInactivityAware'
 
-/** Live log viewer via WebSocket (/ws/logs). Auto-scrolls to newest entries, supports pause/clear. Disconnects on user inactivity. */
+/** Live log viewer via WebSocket (/ws/logs). Auto-scrolls to newest entries, supports pause/clear. */
 export default function TerminalViewer({ lines = 400 }) {
   const [rows, setRows] = useState([])
   const [paused, setPaused] = useState(false)
   const containerRef = useRef(null)
   const wsRef = useRef(null)
-  const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
 
   const connectWebSocket = useCallback(() => {
     try {
@@ -36,35 +34,16 @@ export default function TerminalViewer({ lines = 400 }) {
   }, [lines, paused])
 
   useEffect(() => {
-    // Don't connect if disconnected due to inactivity
-    if (isDisconnected) return
-
     const ws = connectWebSocket()
 
-    // Register with inactivity system
-    registerConnection('terminal-viewer-websocket', {
-      cleanup: () => {
-        if (wsRef.current) {
-          try {
-            wsRef.current.close()
-          } catch (_) {}
-          wsRef.current = null
-        }
-      },
-      restore: () => {
-        connectWebSocket()
-      }
-    })
-
     return () => {
-      unregisterConnection('terminal-viewer-websocket')
       if (ws) {
         try {
           ws.close()
         } catch (_) {}
       }
     }
-  }, [isDisconnected, connectWebSocket, registerConnection, unregisterConnection])
+  }, [connectWebSocket])
 
   useEffect(() => {
     if (!paused && containerRef.current) {

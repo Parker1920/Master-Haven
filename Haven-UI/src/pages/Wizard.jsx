@@ -58,6 +58,13 @@ export default function Wizard(){
   const [personalDiscordUsername, setPersonalDiscordUsername] = useState('')
   const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
   const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
+  // Region info state
+  const [regionInfo, setRegionInfo] = useState(null)
+  const [regionLoading, setRegionLoading] = useState(false)
+  const [proposedRegionName, setProposedRegionName] = useState('')
+  const [regionSubmitting, setRegionSubmitting] = useState(false)
+  const [regionSubmitResult, setRegionSubmitResult] = useState(null)
+  const [showRegionRename, setShowRegionRename] = useState(false)
 
   // Fetch available discord tags for dropdown (all users can assign tags)
   useEffect(() => {
@@ -74,6 +81,63 @@ export default function Wizard(){
       }).catch(()=>{})
     }
   }, [edit])
+
+  // Auto-lookup region info when glyphs are decoded and reality/galaxy are set
+  useEffect(() => {
+    if (system.region_x === null || system.region_y === null || system.region_z === null) {
+      setRegionInfo(null)
+      return
+    }
+    const reality = system.reality || 'Normal'
+    const galaxy = system.galaxy || 'Euclid'
+
+    setRegionLoading(true)
+    setRegionSubmitResult(null)
+    setShowRegionRename(false)
+    setProposedRegionName('')
+    axios.get(`/api/regions/${system.region_x}/${system.region_y}/${system.region_z}`, {
+      params: { reality, galaxy }
+    })
+      .then(r => setRegionInfo(r.data))
+      .catch(() => setRegionInfo(null))
+      .finally(() => setRegionLoading(false))
+  }, [system.region_x, system.region_y, system.region_z, system.reality, system.galaxy])
+
+  // Submit a proposed region name
+  async function submitRegionName() {
+    if (!proposedRegionName.trim()) return
+    setRegionSubmitting(true)
+    setRegionSubmitResult(null)
+    try {
+      const submitted_by = isAdmin
+        ? (user?.display_name || user?.discord_tag || 'admin')
+        : (submitterDiscordUsername.trim() || 'anonymous')
+      await axios.post(
+        `/api/regions/${system.region_x}/${system.region_y}/${system.region_z}/submit`,
+        {
+          proposed_name: proposedRegionName.trim(),
+          submitted_by,
+          discord_tag: system.discord_tag || null,
+          personal_discord_username: system.discord_tag === 'personal' ? personalDiscordUsername : null,
+          reality: system.reality || 'Normal',
+          galaxy: system.galaxy || 'Euclid'
+        }
+      )
+      setRegionSubmitResult({ success: true, message: 'Region name submitted for approval!' })
+      setProposedRegionName('')
+      setShowRegionRename(false)
+      // Refresh region info to show the new pending name
+      const r = await axios.get(`/api/regions/${system.region_x}/${system.region_y}/${system.region_z}`, {
+        params: { reality: system.reality || 'Normal', galaxy: system.galaxy || 'Euclid' }
+      })
+      setRegionInfo(r.data)
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Failed to submit region name'
+      setRegionSubmitResult({ success: false, message: msg })
+    } finally {
+      setRegionSubmitting(false)
+    }
+  }
 
   const explicitSubmitRef = useRef(false);
 
@@ -358,6 +422,134 @@ export default function Wizard(){
             </p>
           </div>
         </div>
+
+        {/* Region Information - shown when glyphs decoded + reality/galaxy set */}
+        {system.region_x !== null && system.region_y !== null && system.region_z !== null && (
+          <div className="mt-4 p-4 bg-gray-800/50 rounded border border-gray-700">
+            <h3 className="text-lg font-semibold mb-3 text-purple-300">Region Information</h3>
+
+            {regionLoading ? (
+              <div className="text-sm text-gray-400">Looking up region...</div>
+            ) : regionInfo ? (
+              <div>
+                {/* Coordinates always shown */}
+                <div className="text-sm text-gray-400 mb-2">
+                  Coordinates: <span className="font-mono text-purple-300">[{regionInfo.region_x}, {regionInfo.region_y}, {regionInfo.region_z}]</span>
+                  <span className="ml-2 text-gray-500">({regionInfo.reality} / {regionInfo.galaxy})</span>
+                  {regionInfo.system_count > 0 && (
+                    <span className="ml-2 text-gray-500">{regionInfo.system_count} system{regionInfo.system_count !== 1 ? 's' : ''} mapped</span>
+                  )}
+                </div>
+
+                {/* Case 1: Region has an approved name */}
+                {regionInfo.custom_name && (
+                  <div className="p-3 bg-green-900/30 border border-green-700 rounded">
+                    <div className="flex items-center justify-between">
+                      <span className="text-green-300 font-semibold text-lg">{regionInfo.custom_name}</span>
+                      {!showRegionRename && !regionInfo.pending_name && (
+                        <button
+                          type="button"
+                          onClick={() => setShowRegionRename(true)}
+                          className="text-xs px-2 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+                        >
+                          Propose Name Change
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Pending rename for a named region */}
+                    {regionInfo.pending_name && (
+                      <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700 rounded text-sm">
+                        <span className="text-yellow-300">Pending rename: </span>
+                        <span className="text-yellow-200 font-semibold">{regionInfo.pending_name.proposed_name}</span>
+                        <span className="text-gray-500 ml-2">by {regionInfo.pending_name.submitted_by}</span>
+                      </div>
+                    )}
+
+                    {/* Inline rename form */}
+                    {showRegionRename && !regionInfo.pending_name && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={proposedRegionName}
+                          onChange={e => setProposedRegionName(e.target.value)}
+                          placeholder="New region name..."
+                          className="flex-1 p-2 border rounded bg-gray-700 border-gray-600 text-sm"
+                          maxLength={50}
+                        />
+                        <button
+                          type="button"
+                          onClick={submitRegionName}
+                          disabled={regionSubmitting || !proposedRegionName.trim()}
+                          className="px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-500 disabled:opacity-50"
+                        >
+                          {regionSubmitting ? 'Submitting...' : 'Submit'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShowRegionRename(false); setProposedRegionName('') }}
+                          className="px-3 py-2 bg-gray-600 text-white rounded text-sm hover:bg-gray-500"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Case 2: No name, has pending submission */}
+                {!regionInfo.custom_name && regionInfo.pending_name && (
+                  <div className="p-3 bg-yellow-900/30 border border-yellow-700 rounded">
+                    <div className="text-yellow-300 text-sm mb-1">Pending region name:</div>
+                    <div className="text-yellow-200 font-semibold text-lg">{regionInfo.pending_name.proposed_name}</div>
+                    <div className="text-gray-500 text-xs mt-1">
+                      Submitted by {regionInfo.pending_name.submitted_by}
+                      {regionInfo.pending_name.submission_date && ` on ${new Date(regionInfo.pending_name.submission_date).toLocaleDateString()}`}
+                    </div>
+                  </div>
+                )}
+
+                {/* Case 3: No name, no pending - allow proposal */}
+                {!regionInfo.custom_name && !regionInfo.pending_name && (
+                  <div className="p-3 bg-gray-800 border border-gray-600 rounded">
+                    <div className="text-gray-400 text-sm mb-2">This region has no name yet. Would you like to propose one?</div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={proposedRegionName}
+                        onChange={e => setProposedRegionName(e.target.value)}
+                        placeholder="Proposed region name..."
+                        className="flex-1 p-2 border rounded bg-gray-700 border-gray-600 text-sm"
+                        maxLength={50}
+                      />
+                      <button
+                        type="button"
+                        onClick={submitRegionName}
+                        disabled={regionSubmitting || !proposedRegionName.trim()}
+                        className="px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-500 disabled:opacity-50"
+                      >
+                        {regionSubmitting ? 'Submitting...' : 'Submit'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Success/error feedback */}
+                {regionSubmitResult && (
+                  <div className={`mt-2 p-2 rounded text-sm ${
+                    regionSubmitResult.success
+                      ? 'bg-green-900/30 border border-green-700 text-green-300'
+                      : 'bg-red-900/30 border border-red-700 text-red-300'
+                  }`}>
+                    {regionSubmitResult.message}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">Unable to load region information.</div>
+            )}
+          </div>
+        )}
 
         {/* System Attributes - Required */}
         <div className="mt-4 p-4 bg-gray-800/50 rounded border border-gray-700">

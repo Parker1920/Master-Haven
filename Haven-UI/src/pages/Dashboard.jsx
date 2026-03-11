@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import AnimatedCounter from '../components/AnimatedCounter'
-import { useInactivityAware } from '../hooks/useInactivityAware'
 import {
   GlobeAltIcon,
   PlusIcon,
@@ -63,8 +62,6 @@ export default function Dashboard() {
   const [logsPaused, setLogsPaused] = useState(false)
   const logsRef = useRef(null)
   const pollIntervalRef = useRef(null)
-  const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
-
   useEffect(() => {
     // Fetch all stats - OPTIMIZED: use lightweight endpoints, no full data loading
     const fetchData = async () => {
@@ -128,43 +125,21 @@ export default function Dashboard() {
       }
     }
 
-    // Don't start polling if disconnected due to inactivity
-    if (isDisconnected) return
-
     fetchActivityLogs()
 
-    // Start polling function
-    const startPolling = () => {
-      pollIntervalRef.current = setInterval(() => {
-        if (!logsPaused) {
-          fetchActivityLogs()
-        }
-      }, 60000)
-    }
-
-    startPolling()
-
-    // Register with inactivity system
-    registerConnection('dashboard-activity-polling', {
-      cleanup: () => {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current)
-          pollIntervalRef.current = null
-        }
-      },
-      restore: () => {
+    // Poll activity logs every 60 seconds
+    pollIntervalRef.current = setInterval(() => {
+      if (!logsPaused) {
         fetchActivityLogs()
-        startPolling()
       }
-    })
+    }, 60000)
 
     return () => {
-      unregisterConnection('dashboard-activity-polling')
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
       }
     }
-  }, [logsPaused, isDisconnected, registerConnection, unregisterConnection])
+  }, [logsPaused])
 
   useEffect(() => {
     if (!logsPaused && logsRef.current) {

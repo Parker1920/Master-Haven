@@ -3709,3 +3709,105 @@ def migration_1_48_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.48.0")
+
+
+@register_migration("1.49.0", "Rebuild regions UNIQUE constraint to include reality+galaxy for multi-dimension scoping")
+def migration_1_49_0(conn):
+    """
+    The regions table had UNIQUE(region_x, region_y, region_z) which doesn't account
+    for different realities/galaxies sharing the same XYZ coordinates. Rebuild to
+    UNIQUE(reality, galaxy, region_x, region_y, region_z).
+
+    Also add a unique partial index on pending_region_names to prevent duplicate
+    pending submissions per reality+galaxy+region combo.
+    """
+    cursor = conn.cursor()
+
+    # --- Rebuild regions table with new UNIQUE constraint ---
+    # SQLite doesn't support ALTER CONSTRAINT, so we rebuild the table
+    logger.info("Rebuilding regions table with reality+galaxy in UNIQUE constraint...")
+
+    # Clean up any leftover regions_new from a previous failed attempt
+    cursor.execute("DROP TABLE IF EXISTS regions_new")
+
+    # 1. Create new table with correct constraint
+    # Dynamically detect columns to handle both local dev and production Pi schemas
+    cursor.execute("PRAGMA table_info(regions)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS regions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            region_x INTEGER NOT NULL,
+            region_y INTEGER NOT NULL,
+            region_z INTEGER NOT NULL,
+            custom_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            discord_tag TEXT,
+            reality TEXT DEFAULT 'Normal',
+            galaxy TEXT DEFAULT 'Euclid',
+            UNIQUE(reality, galaxy, region_x, region_y, region_z),
+            UNIQUE(custom_name)
+        )
+    ''')
+
+    # 2. Copy data from old table (only columns that exist in both tables)
+    copy_cols = ['id', 'region_x', 'region_y', 'region_z', 'custom_name',
+                 'created_at', 'updated_at', 'discord_tag']
+    select_exprs = list(copy_cols)
+    # reality and galaxy may have NULL defaults, coalesce them
+    if 'reality' in existing_cols:
+        copy_cols.append('reality')
+        select_exprs.append("COALESCE(reality, 'Normal')")
+    else:
+        copy_cols.append('reality')
+        select_exprs.append("'Normal'")
+    if 'galaxy' in existing_cols:
+        copy_cols.append('galaxy')
+        select_exprs.append("COALESCE(galaxy, 'Euclid')")
+    else:
+        copy_cols.append('galaxy')
+        select_exprs.append("'Euclid'")
+
+    cols_str = ', '.join(copy_cols)
+    select_str = ', '.join(select_exprs)
+    cursor.execute(f'''
+        INSERT OR IGNORE INTO regions_new ({cols_str})
+        SELECT {select_str} FROM regions
+    ''')
+    cursor.execute('SELECT COUNT(*) FROM regions_new')
+    count = cursor.fetchone()[0]
+    logger.info(f"Copied {count} regions to new table")
+
+    # 3. Drop old table and rename
+    cursor.execute('DROP TABLE regions')
+    cursor.execute('ALTER TABLE regions_new RENAME TO regions')
+    logger.info("Rebuilt regions table with UNIQUE(reality, galaxy, region_x, region_y, region_z)")
+
+    # --- Add index on pending_region_names for reality+galaxy scoped lookups ---
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_pending_region_names_scoped
+        ON pending_region_names(region_x, region_y, region_z, reality, galaxy, status)
+    ''')
+    logger.info("Added scoped index on pending_region_names")
+
+    # --- Add index on regions for fast lookups ---
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_regions_coords_scoped
+        ON regions(region_x, region_y, region_z, reality, galaxy)
+    ''')
+    logger.info("Added scoped index on regions")
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.49.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.49.0")

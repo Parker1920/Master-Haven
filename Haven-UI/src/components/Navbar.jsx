@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { SparklesIcon, Bars3Icon, XMarkIcon, ChevronDownIcon } from '@heroicons/react/24/solid'
 import AdminLoginModal from './AdminLoginModal'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
-import { useInactivityAware } from '../hooks/useInactivityAware'
 import axios from 'axios'
 
 /**
@@ -21,8 +20,6 @@ export default function Navbar() {
   const intervalRef = useRef(null)
   const warIntervalRef = useRef(null)
   const dropdownRef = useRef(null)
-  const { isDisconnected, registerConnection, unregisterConnection } = useInactivityAware()
-
   const { isAdmin, isSuperAdmin, isPartner, isSubAdmin, isCorrespondent, user, canAccess } = auth
 
   // Close dropdown on click outside
@@ -43,8 +40,6 @@ export default function Navbar() {
       return
     }
 
-    if (isDisconnected) return
-
     const fetchCount = async () => {
       try {
         const response = await axios.get('/api/pending_systems/count')
@@ -54,33 +49,15 @@ export default function Navbar() {
       }
     }
 
-    const startPolling = () => {
-      intervalRef.current = setInterval(fetchCount, 60000)
-    }
-
     fetchCount()
-    startPolling()
-
-    registerConnection('navbar-pending-polling', {
-      cleanup: () => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
-        }
-      },
-      restore: () => {
-        fetchCount()
-        startPolling()
-      }
-    })
+    intervalRef.current = setInterval(fetchCount, 60000)
 
     return () => {
-      unregisterConnection('navbar-pending-polling')
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
     }
-  }, [isAdmin, isDisconnected, registerConnection, unregisterConnection])
+  }, [isAdmin])
 
   // Fetch active conflict count for War Room badge
   useEffect(() => {
@@ -90,8 +67,6 @@ export default function Navbar() {
       setActiveConflictCount(0)
       return
     }
-
-    if (isDisconnected) return
 
     const fetchConflictCount = async () => {
       try {
@@ -110,7 +85,7 @@ export default function Navbar() {
         clearInterval(warIntervalRef.current)
       }
     }
-  }, [canAccess, isCorrespondent, isDisconnected])
+  }, [canAccess, isCorrespondent])
 
   const closeMenu = () => setMobileMenuOpen(false)
 

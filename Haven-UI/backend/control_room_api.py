@@ -1294,7 +1294,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.42.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.43.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -2341,29 +2341,6 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
         result.append(filtered_system)
 
     return result
-
-def check_rate_limit(client_ip: str, limit: int = 60, window_hours: int = 1) -> tuple:
-    """
-    Check if IP has exceeded rate limit for system submissions.
-    Returns (is_allowed, remaining_requests).
-    """
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        window_start = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
-        cursor.execute('''
-            SELECT COUNT(*) FROM pending_systems
-            WHERE submitted_by_ip = ? AND submission_date >= ?
-        ''', (client_ip, window_start))
-        count = cursor.fetchone()[0]
-        return (count < limit, max(0, limit - count))
-    except Exception as e:
-        logger.warning(f"Rate limit check failed: {e}")
-        return (True, limit)  # Fail open
-    finally:
-        if conn:
-            conn.close()
 
 @app.get('/api/admin/status')
 async def admin_status(session: Optional[str] = Cookie(None)):
@@ -6159,33 +6136,6 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
             conn.close()
 
 
-def check_api_key_rate_limit(key_id: int, limit: int = 200, window_hours: int = 1) -> tuple:
-    """
-    Check if API key has exceeded rate limit for system submissions.
-    Returns (is_allowed, remaining_requests).
-    """
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        window_start = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
-
-        # Count submissions from this API key in the time window
-        cursor.execute('''
-            SELECT COUNT(*) FROM pending_systems
-            WHERE api_key_name = (SELECT name FROM api_keys WHERE id = ?)
-            AND submission_date >= ?
-        ''', (key_id, window_start))
-        count = cursor.fetchone()[0]
-        return (count < limit, max(0, limit - count))
-    except Exception as e:
-        logger.warning(f"API key rate limit check failed: {e}")
-        return (True, limit)  # Fail open
-    finally:
-        if conn:
-            conn.close()
-
-
 # ============================================================================
 # API Key Management Endpoints
 # ============================================================================
@@ -6423,9 +6373,6 @@ def _normalize_discord_username(username: str) -> str:
     return normalized.lower()
 
 
-# In-memory rate limiter for extractor registration (separate from submission rate limits)
-_registration_attempts = {}  # {ip: [timestamp, ...]}
-
 @app.post('/api/extractor/register')
 async def register_extractor(request: Request):
     """
@@ -6434,23 +6381,6 @@ async def register_extractor(request: Request):
     Returns the key ONCE — it cannot be retrieved later.
     No authentication required (public endpoint).
     """
-    # Get real client IP (handles reverse proxy / Docker)
-    client_ip = (
-        request.headers.get('x-forwarded-for', '').split(',')[0].strip()
-        or request.headers.get('x-real-ip', '')
-        or (request.client.host if request.client else 'unknown')
-    )
-
-    # Rate limit: max 10 registrations per IP per hour (in-memory, not DB-based)
-    now = time.time()
-    window = 3600  # 1 hour
-    attempts = _registration_attempts.get(client_ip, [])
-    attempts = [t for t in attempts if now - t < window]  # Prune old entries
-    if len(attempts) >= 10:
-        raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
-    attempts.append(now)
-    _registration_attempts[client_ip] = attempts
-
     body = await request.json()
     discord_username = (body.get('discord_username') or '').strip()
 
@@ -8441,8 +8371,11 @@ async def api_list_regions():
 
 
 @app.get('/api/regions/{rx}/{ry}/{rz}')
-async def api_get_region(rx: int, ry: int, rz: int, session: Optional[str] = Cookie(None)):
+async def api_get_region(rx: int, ry: int, rz: int,
+                         reality: str = 'Normal', galaxy: str = 'Euclid',
+                         session: Optional[str] = Cookie(None)):
     """Get region info including custom name if set and any pending submissions.
+    Scoped by reality and galaxy (same XYZ can exist in different dimensions).
     System count respects data restrictions (hidden systems are not counted for public).
     """
     session_data = get_session(session)
@@ -8455,6 +8388,8 @@ async def api_get_region(rx: int, ry: int, rz: int, session: Optional[str] = Coo
                 'region_x': rx,
                 'region_y': ry,
                 'region_z': rz,
+                'reality': reality,
+                'galaxy': galaxy,
                 'custom_name': None,
                 'system_count': 0,
                 'pending_name': None
@@ -8463,31 +8398,35 @@ async def api_get_region(rx: int, ry: int, rz: int, session: Optional[str] = Coo
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get custom name if exists
+        # Get custom name if exists (scoped by reality + galaxy)
         cursor.execute('''
             SELECT custom_name FROM regions
             WHERE region_x = ? AND region_y = ? AND region_z = ?
-        ''', (rx, ry, rz))
+              AND reality = ? AND galaxy = ?
+        ''', (rx, ry, rz, reality, galaxy))
         row = cursor.fetchone()
         custom_name = row['custom_name'] if row else None
 
-        # Get systems in this region and apply data restrictions for accurate count
+        # Get systems in this region (scoped by reality + galaxy) and apply data restrictions
         cursor.execute('''
             SELECT id, discord_tag FROM systems
             WHERE region_x = ? AND region_y = ? AND region_z = ?
-        ''', (rx, ry, rz))
+              AND reality = ? AND galaxy = ?
+        ''', (rx, ry, rz, reality, galaxy))
         systems = [dict(row) for row in cursor.fetchall()]
 
         # Apply data restrictions to get accurate visible count
         visible_systems = apply_data_restrictions(systems, session_data)
         system_count = len(visible_systems)
 
-        # Check for pending name submission
+        # Check for pending name submission (scoped by reality + galaxy)
         cursor.execute('''
             SELECT proposed_name, submitted_by, submission_date FROM pending_region_names
-            WHERE region_x = ? AND region_y = ? AND region_z = ? AND status = 'pending'
+            WHERE region_x = ? AND region_y = ? AND region_z = ?
+              AND reality = ? AND galaxy = ?
+              AND status = 'pending'
             ORDER BY submission_date DESC LIMIT 1
-        ''', (rx, ry, rz))
+        ''', (rx, ry, rz, reality, galaxy))
         pending_row = cursor.fetchone()
         pending_name = dict(pending_row) if pending_row else None
 
@@ -8495,6 +8434,8 @@ async def api_get_region(rx: int, ry: int, rz: int, session: Optional[str] = Coo
             'region_x': rx,
             'region_y': ry,
             'region_z': rz,
+            'reality': reality,
+            'galaxy': galaxy,
             'custom_name': custom_name,
             'system_count': system_count,
             'pending_name': pending_name
@@ -9020,7 +8961,7 @@ async def get_planet_3d_map(planet_id: int, session: Optional[str] = Cookie(None
 
 @app.put('/api/regions/{rx}/{ry}/{rz}')
 async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Update/set custom region name. Admin only."""
+    """Update/set custom region name. Admin only. Scoped by reality+galaxy."""
     # Check admin authentication
     if not verify_session(session):
         raise HTTPException(status_code=401, detail='Admin authentication required')
@@ -9028,6 +8969,9 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
     custom_name = payload.get('custom_name', '').strip()
     if not custom_name:
         raise HTTPException(status_code=400, detail='Custom name is required')
+
+    reality = payload.get('reality', 'Normal')
+    galaxy = payload.get('galaxy', 'Euclid')
 
     conn = None
     try:
@@ -9038,11 +8982,12 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if name already exists for a different region
+        # Check if name already exists for a different region (globally unique names)
         cursor.execute('''
             SELECT region_x, region_y, region_z FROM regions
-            WHERE custom_name = ? AND NOT (region_x = ? AND region_y = ? AND region_z = ?)
-        ''', (custom_name, rx, ry, rz))
+            WHERE custom_name = ? AND NOT (region_x = ? AND region_y = ? AND region_z = ?
+              AND reality = ? AND galaxy = ?)
+        ''', (custom_name, rx, ry, rz, reality, galaxy))
         existing = cursor.fetchone()
         if existing:
             raise HTTPException(
@@ -9050,13 +8995,13 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
                 detail=f'Region name "{custom_name}" is already used by region [{existing["region_x"]}, {existing["region_y"]}, {existing["region_z"]}]'
             )
 
-        # Insert or update the region name
+        # Insert or update the region name (scoped by reality+galaxy)
         cursor.execute('''
-            INSERT INTO regions (region_x, region_y, region_z, custom_name, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(region_x, region_y, region_z)
+            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
             DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
-        ''', (rx, ry, rz, custom_name))
+        ''', (rx, ry, rz, custom_name, reality, galaxy))
 
         conn.commit()
 
@@ -9117,7 +9062,8 @@ async def api_delete_region_name(rx: int, ry: int, rz: int, session: Optional[st
 
 @app.post('/api/regions/{rx}/{ry}/{rz}/submit')
 async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, request: Request):
-    """Submit a proposed region name for approval. Public, no auth required."""
+    """Submit a proposed region name for approval. Public, no auth required.
+    Scoped by reality and galaxy from payload."""
     from datetime import datetime, timezone
 
     # Debug logging for region name submissions
@@ -9127,7 +9073,9 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
     proposed_name = payload.get('proposed_name', '').strip()
     submitted_by = payload.get('submitted_by', 'anonymous').strip() or 'anonymous'
     discord_tag = payload.get('discord_tag')  # Community tag for routing
-    personal_discord_username = payload.get('personal_discord_username', '').strip() or None  # Discord username for contact
+    personal_discord_username = (payload.get('personal_discord_username') or '').strip() or None  # Discord username for contact
+    reality = payload.get('reality', 'Normal')
+    galaxy = payload.get('galaxy', 'Euclid')
 
     if not proposed_name:
         logger.warning(f"Region name submission rejected - empty proposed_name. Full payload: {payload}")
@@ -9148,7 +9096,7 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if this name is already used by an approved region
+        # Check if this name is already used by an approved region (globally unique names)
         cursor.execute('SELECT region_x, region_y, region_z FROM regions WHERE custom_name = ?', (proposed_name,))
         existing = cursor.fetchone()
         if existing:
@@ -9157,11 +9105,13 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
                 detail=f'Region name "{proposed_name}" is already used by region [{existing["region_x"]}, {existing["region_y"]}, {existing["region_z"]}]'
             )
 
-        # Check if there's already a pending submission for this region
+        # Check if there's already a pending submission for this region+reality+galaxy
         cursor.execute('''
             SELECT id FROM pending_region_names
-            WHERE region_x = ? AND region_y = ? AND region_z = ? AND status = 'pending'
-        ''', (rx, ry, rz))
+            WHERE region_x = ? AND region_y = ? AND region_z = ?
+              AND reality = ? AND galaxy = ?
+              AND status = 'pending'
+        ''', (rx, ry, rz, reality, galaxy))
         pending = cursor.fetchone()
         if pending:
             raise HTTPException(
@@ -9181,12 +9131,15 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
                 detail=f'Region name "{proposed_name}" is already pending approval for another region'
             )
 
-        # Insert the submission
+        # Insert the submission with reality and galaxy
         cursor.execute('''
             INSERT INTO pending_region_names
-            (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip, submission_date, status, discord_tag, personal_discord_username)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-        ''', (rx, ry, rz, proposed_name, submitted_by, client_ip, datetime.now(timezone.utc).isoformat(), discord_tag, personal_discord_username))
+            (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
+             submission_date, status, discord_tag, personal_discord_username, reality, galaxy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        ''', (rx, ry, rz, proposed_name, submitted_by, client_ip,
+              datetime.now(timezone.utc).isoformat(), discord_tag, personal_discord_username,
+              reality, galaxy))
 
         conn.commit()
 
@@ -9194,7 +9147,7 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
         add_activity_log(
             'region_submitted',
             f"Region name '{proposed_name}' submitted for approval",
-            details=f"Region: [{rx}, {ry}, {rz}]",
+            details=f"Region: [{rx}, {ry}, {rz}] ({reality}/{galaxy})",
             user_name=submitted_by
         )
 
@@ -9625,7 +9578,7 @@ async def legacy_systems_search(q: str = ''):
 async def create_system_stub(payload: dict, request: Request):
     """
     Create a minimal system stub for discovery linking.
-    No auth required. Rate-limited by IP (60/hr).
+    No auth required.
 
     Required: name
     Optional: galaxy (default Euclid), glyph_code, reality (default Normal), discord_tag
@@ -9644,12 +9597,6 @@ async def create_system_stub(payload: dict, request: Request):
     reality = payload.get('reality', 'Normal') or 'Normal'
     glyph_code = (payload.get('glyph_code') or '').strip() or None
     discord_tag = payload.get('discord_tag')
-
-    # Rate limit by IP
-    client_ip = request.client.host if request.client else 'unknown'
-    is_allowed, remaining = check_rate_limit(client_ip, 60, 1)
-    if not is_allowed:
-        raise HTTPException(status_code=429, detail='Rate limit exceeded. Please try again later.')
 
     # Validate galaxy
     if galaxy and not validate_galaxy(galaxy):
@@ -11671,14 +11618,8 @@ async def increment_discovery_view(discovery_id: int):
 async def submit_discovery(payload: dict, request: Request, session: Optional[str] = Cookie(None)):
     """
     Submit a discovery for approval. Goes to pending_discoveries queue.
-    No auth required (rate-limited), but accepts session for logged-in users.
+    No auth required, but accepts session for logged-in users.
     """
-    # Rate limit by IP
-    client_ip = request.client.host if request.client else 'unknown'
-    is_allowed, remaining = check_rate_limit(client_ip, 60, 1)
-    if not is_allowed:
-        raise HTTPException(status_code=429, detail='Rate limit exceeded. Please try again later.')
-
     # Validate required fields
     discovery_name = (payload.get('discovery_name') or '').strip()
     if not discovery_name:
@@ -12314,32 +12255,6 @@ async def submit_system(
     else:
         source = 'manual'
         api_key_name = None
-
-    # Apply rate limiting based on auth method
-    if is_admin:
-        # Admin is exempt from rate limiting
-        pass
-    elif api_key_info:
-        # Check API key rate limit
-        rate_limit = api_key_info.get('rate_limit', 200)
-        is_allowed, remaining = check_api_key_rate_limit(api_key_info['id'], rate_limit)
-        if not is_allowed:
-            logger.info(f"API key rate limit exceeded for {api_key_info['name']}")
-            raise HTTPException(
-                status_code=429,
-                detail=f"Rate limit exceeded. Maximum {rate_limit} submissions per hour for this API key.",
-                headers={"Retry-After": "3600"}
-            )
-    else:
-        # IP-based rate limiting for anonymous users
-        is_allowed, remaining = check_rate_limit(client_ip)
-        if not is_allowed:
-            logger.info(f"Rate limit exceeded for IP {client_ip}")
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded. Maximum 60 submissions per hour. Please try again later.",
-                headers={"Retry-After": "3600"}
-            )
 
     # Validate system data
     is_valid, error_msg = validate_system_data(payload)
@@ -14645,30 +14560,8 @@ async def receive_extraction(
         ]
     }
     """
-    client_ip = request.client.host if request.client else "unknown"
-
     # Validate API key if provided
     api_key_info = verify_api_key(x_api_key) if x_api_key else None
-
-    # Apply rate limiting
-    if api_key_info:
-        rate_limit = api_key_info.get('rate_limit', 200)
-        is_allowed, remaining = check_api_key_rate_limit(api_key_info['id'], rate_limit)
-        if not is_allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Rate limit exceeded",
-                headers={"Retry-After": "3600"}
-            )
-    else:
-        # IP-based rate limiting for unauthenticated requests
-        is_allowed, remaining = check_rate_limit(client_ip)
-        if not is_allowed:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded",
-                headers={"Retry-After": "3600"}
-            )
 
     # Extract required fields
     glyph_code = payload.get('glyph_code')

@@ -4,7 +4,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 // Eagerly load components needed for initial render (Dashboard is the landing page)
 import Dashboard from './pages/Dashboard'
 import Navbar from './components/Navbar'
-import InactivityOverlay from './components/InactivityOverlay'
 import { AuthProvider, AuthContext, FEATURES } from './utils/AuthContext'
 
 // Lazy load all other pages - they're only loaded when the user navigates to them
@@ -148,7 +147,6 @@ export default function App() {
             </Routes>
           </Suspense>
         </main>
-        <InactivityOverlay />
       </div>
     </AuthProvider>
   )
