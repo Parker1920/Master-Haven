@@ -87,6 +87,51 @@
     </div>
 </div>
 
+{% if gdp_breakdown %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>GDP Breakdown</h3>
+        {% set gdp_val = nation.gdp_multiplier / 100 %}
+        <span class="gdp-badge {% if gdp_val >= 1.5 %}gdp-strong{% elif gdp_val >= 1.0 %}gdp-moderate{% else %}gdp-weak{% endif %}">
+            {{ '%.2f' | format(gdp_val) }}x
+        </span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted" style="margin-bottom: var(--space-md); font-size: 0.8125rem;">
+            Each pillar is scored 0–100 (normalized against all nations). Composite = average of all four. Multiplier maps 0→0.50x, 100→2.00x.
+        </p>
+
+        {% set pillars = [
+            ('Treasury Health', gdp_breakdown.treasury_score, 'Balance per capita', gdp_breakdown.raw.per_capita | round(2)),
+            ('Transaction Volume', gdp_breakdown.activity_score, '30-day transactions', gdp_breakdown.raw.tx_count),
+            ('Business Revenue', gdp_breakdown.revenue_score, '30-day shop revenue', gdp_breakdown.raw.revenue | round(2)),
+            ('Active Citizens', gdp_breakdown.citizens_score, 'Active ratio (30d)', (gdp_breakdown.raw.active_ratio * 100) | round(1) ~ '%'),
+        ] %}
+
+        {% for label, score, desc, raw_val in pillars %}
+        <div style="margin-bottom: var(--space-md);">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25rem;">
+                <span style="font-weight: 600; font-size: 0.875rem;">{{ label }}</span>
+                <span style="font-family: var(--font-mono); font-size: 0.875rem; {% if score >= 75 %}color: #4ade80;{% elif score >= 40 %}color: #facc15;{% else %}color: #f87171;{% endif %}">{{ score }}/100</span>
+            </div>
+            <div style="background: rgba(255,255,255,0.05); border-radius: var(--radius-sm); height: 6px; overflow: hidden;">
+                <div style="width: {{ score }}%; height: 100%; border-radius: var(--radius-sm); {% if score >= 75 %}background: #4ade80;{% elif score >= 40 %}background: #facc15;{% else %}background: #f87171;{% endif %}"></div>
+            </div>
+            <div class="text-muted" style="font-size: 0.75rem; margin-top: 0.25rem;">{{ desc }}: <span style="font-family: var(--font-mono);">{{ raw_val }}</span></div>
+        </div>
+        {% endfor %}
+
+        <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: var(--space-md); margin-top: var(--space-sm); display: flex; justify-content: space-between; align-items: baseline;">
+            <span style="font-weight: 600;">Composite Score</span>
+            <span style="font-family: var(--font-mono); font-size: 1.125rem;">{{ gdp_breakdown.composite_score }}/100</span>
+        </div>
+        <div class="text-muted" style="font-size: 0.75rem; margin-top: 0.25rem;">
+            Members: {{ gdp_breakdown.raw.member_count }} · Last calculated: {{ nation.gdp_last_calculated.strftime('%Y-%m-%d %H:%M') if nation.gdp_last_calculated else '—' }}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% if nation.description or is_leader %}
 <div class="card mb-xl">
     <div class="card-header">

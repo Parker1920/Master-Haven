@@ -41,7 +41,14 @@ from app.models import (
     Transaction,
     User,
 )
-from app.gdp import format_currency, maybe_recalculate_gdp, recalculate_all_gdp, tc_to_national
+from app.gdp import (
+    _calculate_nation_gdp,
+    _gather_gdp_maxes,
+    format_currency,
+    maybe_recalculate_gdp,
+    recalculate_all_gdp,
+    tc_to_national,
+)
 from app.valuation import (
     _stock_lock,
     create_business_stock,
@@ -486,6 +493,15 @@ def nation_detail_page(
     if user is not None and user.id == nation.leader_id:
         is_leader = True
 
+    # Compute GDP pillar breakdown for audit display
+    gdp_breakdown = None
+    if nation.status == "approved" and nation.gdp_multiplier:
+        try:
+            maxes = _gather_gdp_maxes(db)
+            gdp_breakdown = _calculate_nation_gdp(db, nation, maxes)
+        except Exception:
+            pass  # Non-critical — page still renders without breakdown
+
     ctx = _base_context(
         request,
         user,
@@ -497,6 +513,7 @@ def nation_detail_page(
         can_join=can_join,
         can_leave=can_leave,
         is_leader=is_leader,
+        gdp_breakdown=gdp_breakdown,
     )
     return templates.TemplateResponse("nation_detail.html", ctx)
 
