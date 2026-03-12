@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Wallet Search — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Wallet Search</h1>
+    <p class="page-subtitle">Find wallets by username, display name, or address</p>
+</div>
+
+<div class="card mb-lg">
+    <div class="card-body">
+        <form method="GET" action="/wallet/search" style="display: flex; gap: var(--space-sm); align-items: flex-end;">
+            <div class="form-group" style="flex: 1; margin: 0;">
+                <label for="search-q">Search</label>
+                <input type="text" id="search-q" name="q" value="{{ q }}" placeholder="Username, display name, or wallet address..." autofocus>
+            </div>
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+    </div>
+</div>
+
+{% if q %}
+    {% if results %}
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>Type</th>
+                    <th>Balance</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr>
+                    <td style="font-weight: 600;">{{ r.display_name }}</td>
+                    <td>
+                        <a href="/wallet/{{ r.address }}" class="tx-hash mono" title="{{ r.address }}">
+                            {{ r.address[:16] }}...
+                        </a>
+                    </td>
+                    <td>
+                        {% if r.type == 'nation_treasury' %}
+                            <span class="badge badge-mint">Treasury</span>
+                        {% else %}
+                            <span class="badge badge-transfer">User</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.balance | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                    <td>
+                        {% if user and r.type == 'user' %}
+                            <a href="/send?to={{ r.address }}" class="btn btn-sm btn-secondary">Send</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#128269;</div>
+        <h3>No results found</h3>
+        <p>No wallets or nations match "{{ q }}".</p>
+    </div>
+    {% endif %}
+{% endif %}
+{% endblock %}

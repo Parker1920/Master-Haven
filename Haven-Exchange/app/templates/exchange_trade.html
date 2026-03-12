@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Trade {{ stock.ticker }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        Trade {{ stock.ticker }}
+        <span class="badge badge-{{ stock.stock_type }}" style="vertical-align: middle; font-size: 0.5em;">{{ stock.stock_type }}</span>
+    </h1>
+    <p class="page-subtitle">{{ stock.name }}</p>
+</div>
+
+<!-- Price Info -->
+<div class="stats-grid mb-lg">
+    <div class="stat-card">
+        <div class="stat-value">{{ stock.current_price | format_number }}</div>
+        <div class="stat-label">Price per Share ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stock.available_shares | format_number }}</div>
+        <div class="stat-label">Available Shares</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ user.balance | format_number }}</div>
+        <div class="stat-label">Your Balance ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ user_holding.shares | format_number if user_holding else 0 }}</div>
+        <div class="stat-label">Shares You Hold</div>
+    </div>
+</div>
+
+<div class="two-col">
+    <!-- Buy Form -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Buy Shares</h3>
+        </div>
+        <div class="card-body">
+            {% if can_buy %}
+            <form method="post" action="/exchange/{{ stock.ticker }}/buy" id="buy-form">
+                <div class="form-group">
+                    <label for="buy-shares">Number of Shares</label>
+                    <input type="number" id="buy-shares" name="shares" min="1" max="{{ stock.available_shares }}" value="1" required
+                        data-price="{{ stock.current_price }}" data-action="buy">
+                </div>
+                <div class="trade-summary">
+                    <div class="trade-row">
+                        <span>Price per share</span>
+                        <span class="mono">{{ stock.current_price | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                    </div>
+                    <div class="trade-row trade-total">
+                        <span>Total Cost</span>
+                        <span class="mono" id="buy-total">{{ stock.current_price | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: var(--space-md);">Buy Shares</button>
+            </form>
+            {% else %}
+            <div class="empty-state" style="padding: var(--space-lg) 0;">
+                <p>{{ buy_blocked_reason }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sell Form -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Sell Shares</h3>
+        </div>
+        <div class="card-body">
+            {% if user_holding and user_holding.shares > 0 %}
+            <form method="post" action="/exchange/{{ stock.ticker }}/sell" id="sell-form">
+                <div class="form-group">
+                    <label for="sell-shares">Number of Shares</label>
+                    <input type="number" id="sell-shares" name="shares" min="1" max="{{ user_holding.shares }}" value="1" required
+                        data-price="{{ stock.current_price }}" data-action="sell">
+                </div>
+                <div class="trade-summary">
+                    <div class="trade-row">
+                        <span>Price per share</span>
+                        <span class="mono">{{ stock.current_price | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                    </div>
+                    <div class="trade-row trade-total">
+                        <span>Total Proceeds</span>
+                        <span class="mono" id="sell-total">{{ stock.current_price | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-secondary" style="width: 100%; margin-top: var(--space-md);">Sell Shares</button>
+            </form>
+            {% else %}
+            <div class="empty-state" style="padding: var(--space-lg) 0;">
+                <p>You don't hold any shares of {{ stock.ticker }} to sell.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="btn-group" style="margin-top: var(--space-lg);">
+    <a href="/exchange/{{ stock.ticker }}" class="btn btn-secondary">Back to {{ stock.ticker }}</a>
+    <a href="/exchange" class="btn btn-secondary">Back to Exchange</a>
+</div>
+{% endblock %}

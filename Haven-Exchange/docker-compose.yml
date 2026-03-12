@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  haven-economy:
+    build: .
+    container_name: economy
+    volumes:
+      - ./data:/app/data
+    # In production behind NPM (Nginx Proxy Manager), change "ports" to
+    # "expose" so the service is only reachable through the reverse proxy:
+    #   expose:
+    #     - "8010"
+    ports:
+      - '8010:8010'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped

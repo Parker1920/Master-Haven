@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}{{ nation.name }} Treasury — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ nation.name }} — Treasury</h1>
+    <p class="page-subtitle">Manage your nation's treasury and distributions</p>
+</div>
+
+<!-- Treasury Overview -->
+<div class="treasury-overview mb-xl">
+    <div class="stat-card">
+        <div class="stat-value">{{ nation.treasury_balance | format_number }}</div>
+        <div class="stat-label">Treasury Balance ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Treasury Address</h3>
+        </div>
+        <div class="card-body">
+            <div class="wallet-address">
+                <span>{{ nation.treasury_address }}</span>
+                <button class="copy-btn" onclick="copyToClipboard('{{ nation.treasury_address }}', this)">Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-value">{{ nation.member_count }}</div>
+        <div class="stat-label">Members</div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="btn-group mb-xl">
+    <a href="/nation/distribute" class="btn btn-primary">Distribute {{ settings.CURRENCY_SHORT }}</a>
+    <a href="/nation/members" class="btn btn-secondary">Manage Members</a>
+    <a href="/nations/{{ nation.id }}" class="btn btn-secondary">Public Nation Page</a>
+    <a href="/wallet/{{ nation.treasury_address }}" class="btn btn-secondary">Public Treasury</a>
+</div>
+
+<div class="two-col">
+    <!-- Recent Distribution Transactions -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Transactions</h3>
+        </div>
+        <div class="card-body">
+            {% if recent_distributions %}
+            <div class="table-wrapper" style="border: none; border-radius: 0;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>From / To</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tx in recent_distributions %}
+                        <tr>
+                            <td>
+                                <span class="badge badge-{{ tx.tx_type | lower }}">{{ tx.tx_type }}</span>
+                            </td>
+                            <td>
+                                {% if tx.from_address == nation.treasury_address %}
+                                    <a href="/wallet/{{ tx.to_address }}" class="tx-hash">
+                                        <span class="truncate" title="{{ tx.to_address }}">{{ tx.to_address }}</span>
+                                    </a>
+                                {% else %}
+                                    <a href="/wallet/{{ tx.from_address }}" class="tx-hash">
+                                        <span class="truncate" title="{{ tx.from_address }}">{{ tx.from_address }}</span>
+                                    </a>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if tx.to_address == nation.treasury_address %}
+                                    <span class="amount-received">+{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                                {% else %}
+                                    <span class="amount-sent">-{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="/tx/{{ tx.tx_hash }}" class="tx-hash">
+                                    {{ tx.created_at.strftime('%m-%d %H:%M') if tx.created_at else '—' }}
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state" style="padding: var(--space-lg) 0;">
+                <p class="text-muted mb-0">No treasury transactions yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Allocation History -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Allocation History</h3>
+        </div>
+        <div class="card-body">
+            {% if allocations %}
+            <div class="table-wrapper" style="border: none; border-radius: 0;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Period</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alloc in allocations %}
+                        <tr>
+                            <td>{{ alloc.period }}</td>
+                            <td>
+                                <span class="balance-inline">
+                                    {{ (alloc.approved_amount or alloc.calculated_amount) | format_number }}
+                                </span>
+                                <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                            </td>
+                            <td>
+                                <span class="badge badge-{{ 'confirmed' if alloc.status == 'distributed' else ('confirmed' if alloc.status == 'approved' else 'pending') }}">
+                                    {{ alloc.status }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if alloc.distributed_at %}
+                                    {{ alloc.distributed_at.strftime('%Y-%m-%d') }}
+                                {% elif alloc.approved_at %}
+                                    {{ alloc.approved_at.strftime('%Y-%m-%d') }}
+                                {% else %}
+                                    {{ alloc.created_at.strftime('%Y-%m-%d') if alloc.created_at else '—' }}
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state" style="padding: var(--space-lg) 0;">
+                <p class="text-muted mb-0">No allocations yet. The World Mint calculates allocations monthly.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

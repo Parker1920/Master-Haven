@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Portfolio — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Your Portfolio</h1>
+    <p class="page-subtitle">Track your stock investments</p>
+</div>
+
+<!-- Portfolio Summary -->
+<div class="stats-grid mb-lg">
+    <div class="stat-card">
+        <div class="stat-value">{{ total_value | format_number }}</div>
+        <div class="stat-label">Total Value ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_invested | format_number }}</div>
+        <div class="stat-label">Total Invested ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value {% if total_gain_loss >= 0 %}text-success{% else %}text-error{% endif %}">
+            {% if total_gain_loss >= 0 %}+{% endif %}{{ total_gain_loss | format_number }}
+        </div>
+        <div class="stat-label">Total Gain / Loss</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ portfolio_items | length }}</div>
+        <div class="stat-label">Holdings</div>
+    </div>
+</div>
+
+<!-- Holdings -->
+{% if portfolio_items %}
+<div class="card">
+    <div class="card-header">
+        <h3>Holdings</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stock</th>
+                        <th>Type</th>
+                        <th>Shares</th>
+                        <th>Avg Buy Price</th>
+                        <th>Current Price</th>
+                        <th>Value</th>
+                        <th>Gain / Loss</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in portfolio_items %}
+                    <tr>
+                        <td>
+                            <a href="/exchange/{{ item.stock.ticker }}" style="font-weight: 700;">{{ item.stock.ticker }}</a>
+                            <div class="text-muted" style="font-size: 0.8125rem;">{{ item.stock.name }}</div>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ item.stock.stock_type }}">{{ item.stock.stock_type }}</span>
+                        </td>
+                        <td class="mono">{{ item.holding.shares | format_number }}</td>
+                        <td class="mono">{{ item.holding.avg_buy_price | format_number }}</td>
+                        <td class="mono">{{ item.stock.current_price | format_number }}</td>
+                        <td class="mono">{{ item.current_value | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td class="mono {% if item.gain_loss >= 0 %}text-success{% else %}text-error{% endif %}">
+                            {% if item.gain_loss >= 0 %}+{% endif %}{{ item.gain_loss | format_number }}
+                        </td>
+                        <td>
+                            <a href="/exchange/{{ item.stock.ticker }}/trade" class="btn btn-primary btn-sm">Trade</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">&#128188;</div>
+    <h3>No holdings yet</h3>
+    <p>Visit the exchange to start investing in nation and business stocks.</p>
+    <a href="/exchange" class="btn btn-primary">Browse Exchange</a>
+</div>
+{% endif %}
+{% endblock %}

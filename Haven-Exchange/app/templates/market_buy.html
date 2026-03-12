@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm Purchase — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Confirm Purchase</h1>
+    <p class="page-subtitle">Review your purchase before confirming</p>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-header">
+        <h3>{{ listing.title }}</h3>
+    </div>
+    <div class="card-body">
+        {% if listing.description %}
+        <p style="margin-bottom: var(--space-lg); color: var(--text-secondary);">{{ listing.description }}</p>
+        {% endif %}
+
+        <p style="margin-bottom: var(--space-md);">
+            <span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span>
+            &middot; from <strong>{{ shop.name }}</strong> ({{ owner_name }})
+        </p>
+
+        <div class="purchase-summary">
+            <div class="summary-row">
+                <span>Your Balance</span>
+                <span class="mono">{{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+            </div>
+            <div class="summary-row">
+                <span>Listing Price</span>
+                <span class="mono">- {{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+            </div>
+            <div class="summary-row total">
+                <span>Balance After</span>
+                <span class="mono" {% if balance_after < 0 %}style="color: var(--error);"{% endif %}>{{ balance_after | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+            </div>
+        </div>
+
+        {% if balance_after < 0 %}
+        <div class="alert alert-error" style="margin-bottom: var(--space-lg);">
+            <span>Insufficient balance. You need {{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }} but only have {{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}.</span>
+        </div>
+        {% endif %}
+
+        <div style="display: flex; gap: var(--space-md);">
+            {% if balance_after >= 0 %}
+            <form method="POST" action="/market/{{ shop.id }}/buy/{{ listing.id }}" data-confirm="Purchase {{ listing.title }} for {{ listing.price }} {{ settings.CURRENCY_SHORT }}?">
+                <button type="submit" class="btn btn-primary">Confirm Purchase</button>
+            </form>
+            {% else %}
+            <button type="button" class="btn btn-primary" disabled>Insufficient Balance</button>
+            {% endif %}
+            <a href="/market/{{ shop.id }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

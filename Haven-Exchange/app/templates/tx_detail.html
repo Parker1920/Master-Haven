@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Transaction {{ tx.tx_hash[:12] }}... — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Transaction Detail</h1>
+    <p class="page-subtitle">Block #{{ block_number }}</p>
+</div>
+
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>
+            <span class="badge badge-{{ tx.tx_type | lower }}">{{ tx.tx_type }}</span>
+            Transaction
+        </h3>
+        <span class="badge badge-{{ tx.status }}">{{ tx.status }}</span>
+    </div>
+    <div class="card-body">
+        <div class="tx-detail-grid">
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">TX Hash</div>
+                <div class="tx-detail-value">
+                    <div class="wallet-address" style="display: inline-flex;">
+                        <span class="mono" style="font-size: 0.8125rem;">{{ tx.tx_hash }}</span>
+                        <button class="copy-btn" onclick="copyToClipboard('{{ tx.tx_hash }}', this)">Copy</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Previous Hash</div>
+                <div class="tx-detail-value">
+                    {% if tx.prev_hash == '0' * 64 %}
+                        <span class="text-muted mono" style="font-size: 0.8125rem;">Genesis ({{ tx.prev_hash[:16] }}...)</span>
+                    {% else %}
+                        <a href="/tx/{{ tx.prev_hash }}" class="tx-hash mono" style="font-size: 0.8125rem;">{{ tx.prev_hash[:24] }}...</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Block #</div>
+                <div class="tx-detail-value">{{ block_number }}</div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Type</div>
+                <div class="tx-detail-value">
+                    <span class="badge badge-{{ tx.tx_type | lower }}">{{ tx.tx_type }}</span>
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">From</div>
+                <div class="tx-detail-value">
+                    {% if tx.from_address == 'SYSTEM' %}
+                        <span class="text-muted">SYSTEM</span>
+                    {% else %}
+                        {% set from_name = name_map.get(tx.from_address) %}
+                        {% if from_name %}
+                            <span style="font-weight: 600;">{{ from_name }}</span>
+                            <a href="/wallet/{{ tx.from_address }}" class="mono text-muted" style="font-size: 0.8rem; margin-left: 6px;">{{ tx.from_address }}</a>
+                        {% else %}
+                            <a href="/wallet/{{ tx.from_address }}" class="mono" style="color: var(--text-link);">{{ tx.from_address }}</a>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">To</div>
+                <div class="tx-detail-value">
+                    {% if tx.to_address == 'SYSTEM' %}
+                        <span class="text-muted">SYSTEM</span>
+                    {% else %}
+                        {% set to_name = name_map.get(tx.to_address) %}
+                        {% if to_name %}
+                            <span style="font-weight: 600;">{{ to_name }}</span>
+                            <a href="/wallet/{{ tx.to_address }}" class="mono text-muted" style="font-size: 0.8rem; margin-left: 6px;">{{ tx.to_address }}</a>
+                        {% else %}
+                            <a href="/wallet/{{ tx.to_address }}" class="mono" style="color: var(--text-link);">{{ tx.to_address }}</a>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Amount</div>
+                <div class="tx-detail-value">
+                    <span class="balance-inline" style="font-size: 1.25rem;">{{ tx.amount | format_number }}</span>
+                    <span class="text-muted">{{ settings.CURRENCY_SHORT }}</span>
+                </div>
+            </div>
+
+            {% if tx.memo %}
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Memo</div>
+                <div class="tx-detail-value">{{ tx.memo }}</div>
+            </div>
+            {% endif %}
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Status</div>
+                <div class="tx-detail-value">
+                    <span class="badge badge-{{ tx.status }}">{{ tx.status }}</span>
+                </div>
+            </div>
+
+            <div class="tx-detail-row">
+                <div class="tx-detail-label">Timestamp</div>
+                <div class="tx-detail-value">
+                    {{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if tx.created_at else '—' }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chain Link Visual -->
+<div class="card">
+    <div class="card-header">
+        <h3>Chain Position</h3>
+    </div>
+    <div class="card-body">
+        <div class="chain-link">
+            <div class="chain-block">
+                <div class="chain-block-label">Previous Block</div>
+                {% if tx.prev_hash == '0' * 64 %}
+                    {{ tx.prev_hash[:12] }}...
+                {% else %}
+                    <a href="/tx/{{ tx.prev_hash }}" style="color: inherit;">{{ tx.prev_hash[:12] }}...</a>
+                {% endif %}
+            </div>
+            <span class="chain-arrow">&rarr;</span>
+            <div class="chain-block current">
+                <div class="chain-block-label">Block #{{ block_number }}</div>
+                {{ tx.tx_hash[:12] }}...
+            </div>
+            <span class="chain-arrow">&rarr;</span>
+            <div class="chain-block">
+                <div class="chain-block-label">Next Block</div>
+                {% if next_tx %}
+                    <a href="/tx/{{ next_tx.tx_hash }}" style="color: inherit;">{{ next_tx.tx_hash[:12] }}...</a>
+                {% else %}
+                    <span style="color: var(--text-muted);">Latest</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-lg" style="display: flex; gap: var(--space-sm);">
+    <a href="/ledger" class="btn btn-secondary">Back to Ledger</a>
+    {% if user and tx.to_address != 'SYSTEM' and tx.from_address != 'SYSTEM' %}
+        {% if tx.from_address != user.wallet_address and tx.from_address != settings.WORLD_MINT_ADDRESS %}
+            <a href="/send?to={{ tx.from_address }}" class="btn btn-secondary">Send to {{ name_map.get(tx.from_address, tx.from_address[:12] + '...') }}</a>
+        {% endif %}
+        {% if tx.to_address != user.wallet_address %}
+            <a href="/send?to={{ tx.to_address }}" class="btn btn-secondary">Send to {{ name_map.get(tx.to_address, tx.to_address[:12] + '...') }}</a>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

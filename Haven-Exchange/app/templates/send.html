@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Send {{ settings.CURRENCY_SHORT }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="container-narrow" style="padding-top: var(--space-xl);">
+    <div class="card">
+        <div class="card-header">
+            <h2>Send {{ settings.CURRENCY_NAME }}</h2>
+        </div>
+
+        <div class="balance-display" style="padding: var(--space-md) 0 var(--space-lg);">
+            <div class="balance-label">Your Balance</div>
+            <div class="balance-value">{{ user.balance | format_number }}<span class="balance-currency">{{ settings.CURRENCY_SHORT }}</span></div>
+        </div>
+
+        <form action="/send" method="POST" data-confirm="Are you sure you want to send this transfer? This action cannot be undone.">
+            <div class="form-group">
+                <label for="to_address">Recipient Address</label>
+                <input type="text" id="to_address" name="to_address" required
+                       placeholder="HVN-xxxxxxxx" style="font-family: var(--font-mono);"
+                       {% if prefill_address %}value="{{ prefill_address }}"{% endif %}>
+                <span class="form-hint">Enter a wallet address or search by username</span>
+                <div id="recipient-name-hint" style="min-height: 1.4em; margin-top: 4px; font-size: 0.875rem;"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="amount">Amount ({{ settings.CURRENCY_SHORT }})</label>
+                <input type="number" id="amount" name="amount" required min="1" max="{{ user.balance }}" step="1"
+                       placeholder="0">
+                <span class="form-hint">Whole numbers only. Maximum: {{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+            </div>
+
+            <div class="form-group">
+                <label for="memo">Memo (optional)</label>
+                <textarea id="memo" name="memo" rows="2" placeholder="What is this transfer for?"></textarea>
+            </div>
+
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">Send {{ settings.CURRENCY_SHORT }}</button>
+                <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+
+{% block title %}{{ stock.ticker }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        {{ stock.ticker }}
+        <span class="badge badge-{{ stock.stock_type }}" style="vertical-align: middle; font-size: 0.5em;">{{ stock.stock_type }}</span>
+    </h1>
+    <p class="page-subtitle">{{ stock.name }}</p>
+</div>
+
+<!-- Price Overview -->
+<div class="stats-grid mb-lg">
+    <div class="stat-card">
+        <div class="stat-value">{{ stock.current_price | format_number }}</div>
+        <div class="stat-label">Current Price ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        {% set change = stock.current_price - stock.previous_price %}
+        {% set change_pct = ((change / stock.previous_price * 100) | round | int) if stock.previous_price > 0 else 0 %}
+        <div class="stat-value {% if change > 0 %}text-success{% elif change < 0 %}text-error{% endif %}">
+            {% if change > 0 %}+{% endif %}{{ change }}
+            ({{ change_pct }}%)
+        </div>
+        <div class="stat-label">Price Change</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ market_cap | format_number }}</div>
+        <div class="stat-label">Market Cap ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ shares_outstanding | format_number }}</div>
+        <div class="stat-label">Shares Outstanding</div>
+    </div>
+</div>
+
+<!-- Trade Button -->
+<div class="btn-group mb-lg">
+    {% if user %}
+        <a href="/exchange/{{ stock.ticker }}/trade" class="btn btn-primary">Trade {{ stock.ticker }}</a>
+    {% else %}
+        <a href="/login" class="btn btn-primary">Login to Trade</a>
+    {% endif %}
+    <a href="/exchange" class="btn btn-secondary">Back to Exchange</a>
+</div>
+
+<div class="two-col">
+    <!-- Valuation Breakdown -->
+    {% if latest_val %}
+    <div class="card">
+        <div class="card-header">
+            <h3>Valuation Breakdown</h3>
+        </div>
+        <div class="card-body">
+            <div class="pillar-list">
+                <div class="pillar-row">
+                    <span class="pillar-label">{% if stock.stock_type == 'nation' %}Population{% else %}Customers{% endif %}</span>
+                    <div class="pillar-bar-track">
+                        <div class="pillar-bar-fill" style="width: {{ latest_val.population_score }}%;"></div>
+                    </div>
+                    <span class="pillar-score">{{ latest_val.population_score }}</span>
+                </div>
+                <div class="pillar-row">
+                    <span class="pillar-label">Activity</span>
+                    <div class="pillar-bar-track">
+                        <div class="pillar-bar-fill" style="width: {{ latest_val.activity_score }}%;"></div>
+                    </div>
+                    <span class="pillar-score">{{ latest_val.activity_score }}</span>
+                </div>
+                <div class="pillar-row">
+                    <span class="pillar-label">Cash Flow</span>
+                    <div class="pillar-bar-track">
+                        <div class="pillar-bar-fill" style="width: {{ latest_val.cashflow_score }}%;"></div>
+                    </div>
+                    <span class="pillar-score">{{ latest_val.cashflow_score }}</span>
+                </div>
+                <div class="pillar-row" style="border-top: 1px solid var(--border-primary); padding-top: var(--space-md); margin-top: var(--space-sm);">
+                    <span class="pillar-label" style="font-weight: 700;">Composite</span>
+                    <div class="pillar-bar-track">
+                        <div class="pillar-bar-fill composite" style="width: {{ latest_val.composite_score }}%;"></div>
+                    </div>
+                    <span class="pillar-score" style="font-weight: 700;">{{ latest_val.composite_score }}</span>
+                </div>
+            </div>
+            {% if latest_val.snapshot_date %}
+            <p class="text-muted" style="margin-top: var(--space-md); font-size: 0.8125rem;">Last calculated: {{ latest_val.snapshot_date }}</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Entity Info -->
+    {% if entity_info %}
+    <div class="card">
+        <div class="card-header">
+            <h3>{% if stock.stock_type == 'nation' %}Nation Info{% else %}Business Info{% endif %}</h3>
+        </div>
+        <div class="card-body">
+            {% if stock.stock_type == 'nation' %}
+                <div class="info-row">
+                    <span class="info-label">Nation</span>
+                    <span class="info-value">{{ entity_info.name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Members</span>
+                    <span class="info-value">{{ entity_info.member_count }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Treasury</span>
+                    <span class="info-value">{{ entity_info.treasury_balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                </div>
+                {% if entity_info.game %}
+                <div class="info-row">
+                    <span class="info-label">Game</span>
+                    <span class="info-value">{{ entity_info.game }}</span>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="info-row">
+                    <span class="info-label">Shop</span>
+                    <span class="info-value">{{ entity_info.name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Owner</span>
+                    <span class="info-value">{{ entity_info.owner_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Total Sales</span>
+                    <span class="info-value">{{ entity_info.total_sales }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Revenue</span>
+                    <span class="info-value">{{ entity_info.total_revenue | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Your Holding -->
+{% if user and user_holding %}
+<div class="card mb-lg" style="margin-top: var(--space-lg);">
+    <div class="card-header">
+        <h3>Your Holding</h3>
+    </div>
+    <div class="card-body">
+        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value">{{ user_holding.shares | format_number }}</div>
+                <div class="stat-label">Shares</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ user_holding.avg_buy_price | format_number }}</div>
+                <div class="stat-label">Avg Buy Price</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ (user_holding.shares * stock.current_price) | format_number }}</div>
+                <div class="stat-label">Current Value</div>
+            </div>
+            {% set gl = (user_holding.shares * stock.current_price) - (user_holding.shares * user_holding.avg_buy_price) %}
+            <div class="stat-card">
+                <div class="stat-value {% if gl >= 0 %}text-success{% else %}text-error{% endif %}">
+                    {% if gl >= 0 %}+{% endif %}{{ gl | format_number }}
+                </div>
+                <div class="stat-label">Gain / Loss</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Price History -->
+{% if price_history %}
+<div class="card mb-lg" style="margin-top: var(--space-lg);">
+    <div class="card-header">
+        <h3>Price History</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Price</th>
+                        <th>Pop Score</th>
+                        <th>Activity</th>
+                        <th>Cash Flow</th>
+                        <th>Composite</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in price_history %}
+                    <tr>
+                        <td>{{ v.snapshot_date }}</td>
+                        <td class="mono">{{ v.calculated_price | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>{{ v.population_score }}</td>
+                        <td>{{ v.activity_score }}</td>
+                        <td>{{ v.cashflow_score }}</td>
+                        <td><strong>{{ v.composite_score }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent Trades -->
+{% if recent_trades %}
+<div class="card" style="margin-top: var(--space-lg);">
+    <div class="card-header">
+        <h3>Recent Trades</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Shares</th>
+                        <th>Price/Share</th>
+                        <th>Total</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in recent_trades %}
+                    <tr>
+                        <td>
+                            <span class="badge {% if t.tx_type == 'BUY' %}badge-stock_buy{% elif t.tx_type == 'SELL' %}badge-stock_sell{% else %}badge-other{% endif %}">
+                                {{ t.tx_type }}
+                            </span>
+                        </td>
+                        <td class="mono">{{ t.shares | format_number }}</td>
+                        <td class="mono">{{ t.price_per_share | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td class="mono">{{ t.total_cost | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

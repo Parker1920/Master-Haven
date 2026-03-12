@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ shop.name }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ shop.name }}</h1>
+    <p class="page-subtitle">
+        Owned by <strong>{{ owner_name }}</strong>
+        {% if nation %} &middot; <a href="/nations/{{ nation.id }}">{{ nation.name }}</a>{% endif %}
+    </p>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" style="margin-bottom: var(--space-xl);">
+    <div class="stat-card">
+        <div class="stat-value">{{ shop.total_sales | format_number }}</div>
+        <div class="stat-label">Total Sales</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ shop.total_revenue | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        <div class="stat-label">Total Revenue</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ listings | length }}</div>
+        <div class="stat-label">Listings</div>
+    </div>
+</div>
+
+{% if shop.description %}
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-body">
+        <p>{{ shop.description }}</p>
+    </div>
+</div>
+{% endif %}
+
+<!-- Listings -->
+<div class="card">
+    <div class="card-header">
+        <h3>Listings</h3>
+    </div>
+    <div class="card-body">
+        {% if listings %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for listing in listings %}
+                    <tr>
+                        <td><strong>{{ listing.title }}</strong></td>
+                        <td>{{ (listing.description or '')[:80] }}{% if listing.description and listing.description|length > 80 %}...{% endif %}</td>
+                        <td><span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span></td>
+                        <td class="mono">{{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>
+                            {% if user and user.id != shop.owner_id %}
+                            <a href="/market/{{ shop.id }}/buy/{{ listing.id }}" class="btn btn-primary btn-sm">Buy</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No listings available.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div style="margin-top: var(--space-lg); display: flex; gap: var(--space-md);">
+    <a href="/market" class="btn btn-secondary">&larr; Back to Marketplace</a>
+    {% if is_owner %}
+    <a href="/shop/manage" class="btn btn-primary">Manage Shop</a>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}{{ nation.name }} Members — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ nation.name }} — Members</h1>
+    <p class="page-subtitle">{{ members | length }} member{{ 's' if members | length != 1 else '' }} in your nation</p>
+</div>
+
+<!-- Quick Stats -->
+<div class="stats-grid mb-xl">
+    <div class="stat-card">
+        <div class="stat-value">{{ nation.member_count }}</div>
+        <div class="stat-label">Total Members</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ nation.treasury_balance | format_number }}</div>
+        <div class="stat-label">Treasury ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+</div>
+
+<!-- Members Table -->
+<div class="card">
+    <div class="card-header">
+        <h3>All Members</h3>
+        <a href="/nation/distribute" class="btn btn-sm btn-primary">Distribute Funds</a>
+    </div>
+    <div class="card-body">
+        {% if members %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Display Name</th>
+                        <th>Wallet Address</th>
+                        <th>Balance ({{ settings.CURRENCY_SHORT }})</th>
+                        <th>Last Active</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in members %}
+                    <tr>
+                        <td>
+                            {{ member.username }}
+                            {% if member.id == nation.leader_id %}
+                                <span class="badge badge-confirmed" style="margin-left: var(--space-xs);">Leader</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ member.display_name or '—' }}</td>
+                        <td>
+                            <a href="/wallet/{{ member.wallet_address }}" class="tx-hash">
+                                <span class="truncate" title="{{ member.wallet_address }}">{{ member.wallet_address }}</span>
+                            </a>
+                        </td>
+                        <td>
+                            <span class="balance-inline">{{ member.balance | format_number }}</span>
+                        </td>
+                        <td>
+                            {% if member.last_active %}
+                                {{ member.last_active.strftime('%Y-%m-%d') }}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="/nation/distribute?to={{ member.wallet_address }}"
+                               class="btn btn-sm btn-secondary">Send</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: var(--space-lg) 0;">
+            <p class="text-muted mb-0">No members in your nation yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="mt-lg btn-group">
+    <a href="/nation/treasury" class="btn btn-secondary">Back to Treasury</a>
+    <a href="/nations/{{ nation.id }}" class="btn btn-secondary">Public Nation Page</a>
+</div>
+{% endblock %}

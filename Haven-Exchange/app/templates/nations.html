@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Nations — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md);">
+    <div>
+        <h1>Nation Directory</h1>
+        <p class="page-subtitle">Communities participating in the Haven Exchange economy</p>
+    </div>
+    {% if user %}
+    <a href="/nations/apply" class="btn btn-primary">Create a Nation</a>
+    {% endif %}
+</div>
+
+{% if nations %}
+<div class="nations-grid">
+    {% for nation in nations %}
+    <a href="/nations/{{ nation.id }}" class="nation-card">
+        <h3>{{ nation.name }}</h3>
+        {% if nation.game %}
+            <div class="nation-game">{{ nation.game }}</div>
+        {% endif %}
+        {% if nation.description %}
+            <div class="nation-desc">{{ nation.description }}</div>
+        {% endif %}
+        <div class="nation-meta">
+            <span>{{ nation.member_count }} member{{ 's' if nation.member_count != 1 else '' }}</span>
+            <span>Treasury: {{ nation.treasury_balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">&#9873;</div>
+    <h3>No nations yet</h3>
+    <p>There are no approved nations at this time. Check back later!</p>
+</div>
+{% endif %}
+{% endblock %}

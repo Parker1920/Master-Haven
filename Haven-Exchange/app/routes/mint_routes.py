@@ -1,0 +1,556 @@
+"""
+Haven Economy — World Mint Admin Routes
+
+Provides the administrative endpoints for the World Mint operator:
+global economy stats, minting execution, allocation management, and
+nation approval/suspension.
+
+ALL endpoints require the ``world_mint`` role.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.auth import require_role
+from app.blockchain import create_transaction, verify_chain
+from app.config import settings
+from app.database import get_db
+from app.models import MintAllocation, Nation, Transaction, User
+
+router = APIRouter(prefix="/api/mint", tags=["mint"])
+
+# Common dependency — every endpoint in this router requires world_mint role
+_require_world_mint = require_role("world_mint")
+
+
+# ---------------------------------------------------------------------------
+# Request schemas
+# ---------------------------------------------------------------------------
+class MintExecuteRequest(BaseModel):
+    to_address: str
+    amount: int
+    memo: str | None = None
+
+
+class AllocationApproveRequest(BaseModel):
+    approved_amount: int | None = None
+
+
+class CalculateAllocationsRequest(BaseModel):
+    period: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# GET /api/mint/stats
+# ---------------------------------------------------------------------------
+@router.get("/stats")
+def mint_stats(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Return global economy statistics for the World Mint dashboard."""
+
+    # Sum of all user balances (excluding the world_mint admin)
+    total_user_balances = (
+        db.execute(
+            select(func.coalesce(func.sum(User.balance), 0)).where(
+                User.role != "world_mint"
+            )
+        ).scalar()
+        or 0
+    )
+
+    # Sum of all nation treasury balances
+    total_nation_balances = (
+        db.execute(
+            select(func.coalesce(func.sum(Nation.treasury_balance), 0))
+        ).scalar()
+        or 0
+    )
+
+    total_supply = total_user_balances + total_nation_balances
+
+    # Total transaction count
+    total_transactions = (
+        db.execute(select(func.count(Transaction.id))).scalar() or 0
+    )
+
+    # Total users excluding the world_mint admin
+    total_users = (
+        db.execute(
+            select(func.count(User.id)).where(User.role != "world_mint")
+        ).scalar()
+        or 0
+    )
+
+    # Total approved nations
+    total_nations = (
+        db.execute(
+            select(func.count(Nation.id)).where(Nation.status == "approved")
+        ).scalar()
+        or 0
+    )
+
+    # Active users in the last 30 days
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    active_users_30d = (
+        db.execute(
+            select(func.count(User.id)).where(
+                User.last_active >= thirty_days_ago
+            )
+        ).scalar()
+        or 0
+    )
+
+    # Chain validity
+    chain_result = verify_chain(db)
+    chain_valid = chain_result["valid"]
+
+    return {
+        "total_supply": total_supply,
+        "total_transactions": total_transactions,
+        "total_users": total_users,
+        "total_nations": total_nations,
+        "active_users_30d": active_users_30d,
+        "chain_valid": chain_valid,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/execute
+# ---------------------------------------------------------------------------
+@router.post("/execute")
+def mint_execute(
+    payload: MintExecuteRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Mint new currency and send it to a user wallet or nation treasury."""
+
+    # Validate amount
+    if payload.amount <= 0:
+        return {"success": False, "error": "Amount must be greater than zero."}
+
+    # Validate that the target address exists
+    if payload.to_address.startswith(settings.NATION_WALLET_PREFIX):
+        recipient = db.execute(
+            select(Nation).where(Nation.treasury_address == payload.to_address)
+        ).scalar_one_or_none()
+        if recipient is None:
+            return {
+                "success": False,
+                "error": f"Nation treasury '{payload.to_address}' not found.",
+            }
+    else:
+        recipient = db.execute(
+            select(User).where(User.wallet_address == payload.to_address)
+        ).scalar_one_or_none()
+        if recipient is None:
+            return {
+                "success": False,
+                "error": f"Wallet '{payload.to_address}' not found.",
+            }
+
+    try:
+        tx = create_transaction(
+            db,
+            tx_type="MINT",
+            from_address=settings.WORLD_MINT_ADDRESS,
+            to_address=payload.to_address,
+            amount=payload.amount,
+            memo=payload.memo,
+        )
+        return {
+            "success": True,
+            "tx_hash": f"tx_{tx.tx_hash[:12]}",
+            "amount": payload.amount,
+            "to_address": payload.to_address,
+        }
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/mint/allocations
+# ---------------------------------------------------------------------------
+@router.get("/allocations")
+def list_allocations(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Return all mint allocations with nation names."""
+
+    stmt = (
+        select(MintAllocation, Nation.name.label("nation_name"))
+        .join(Nation, MintAllocation.nation_id == Nation.id)
+        .order_by(MintAllocation.created_at.desc())
+    )
+    rows = db.execute(stmt).all()
+
+    allocations = []
+    for allocation, nation_name in rows:
+        allocations.append(
+            {
+                "id": allocation.id,
+                "nation_id": allocation.nation_id,
+                "nation_name": nation_name,
+                "period": allocation.period,
+                "member_count": allocation.member_count,
+                "base_rate": allocation.base_rate,
+                "calculated_amount": allocation.calculated_amount,
+                "approved_amount": allocation.approved_amount,
+                "status": allocation.status,
+                "approved_at": (
+                    allocation.approved_at.isoformat()
+                    if allocation.approved_at
+                    else None
+                ),
+                "distributed_at": (
+                    allocation.distributed_at.isoformat()
+                    if allocation.distributed_at
+                    else None
+                ),
+                "created_at": (
+                    allocation.created_at.isoformat()
+                    if allocation.created_at
+                    else None
+                ),
+            }
+        )
+
+    return {"allocations": allocations}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/allocations/{allocation_id}/approve
+# ---------------------------------------------------------------------------
+@router.post("/allocations/{allocation_id}/approve")
+def approve_allocation(
+    allocation_id: int,
+    payload: AllocationApproveRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Approve a pending mint allocation."""
+
+    allocation = db.execute(
+        select(MintAllocation).where(MintAllocation.id == allocation_id)
+    ).scalar_one_or_none()
+
+    if allocation is None:
+        raise HTTPException(status_code=404, detail="Allocation not found.")
+
+    if allocation.status == "approved":
+        raise HTTPException(
+            status_code=400, detail="Allocation is already approved."
+        )
+
+    # Use provided approved_amount or fall back to calculated_amount
+    approved_amount = (
+        payload.approved_amount
+        if payload.approved_amount is not None
+        else allocation.calculated_amount
+    )
+
+    allocation.status = "approved"
+    allocation.approved_amount = approved_amount
+    allocation.approved_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "allocation_id": allocation.id,
+        "approved_amount": approved_amount,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/nations/{nation_id}/approve
+# ---------------------------------------------------------------------------
+@router.post("/nations/{nation_id}/approve")
+def approve_nation(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Approve a pending nation application."""
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    if nation.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nation is not pending (current status: {nation.status}).",
+        )
+
+    nation.status = "approved"
+    nation.approved_at = datetime.now(timezone.utc)
+
+    # Promote the nation leader: set their role and add them as a member
+    leader = db.execute(
+        select(User).where(User.id == nation.leader_id)
+    ).scalar_one_or_none()
+    if leader is not None:
+        if leader.role != "world_mint":
+            leader.role = "nation_leader"
+        leader.nation_id = nation.id
+        nation.member_count += 1
+
+    db.commit()
+
+    return {
+        "success": True,
+        "nation_id": nation.id,
+        "nation_name": nation.name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/nations/{nation_id}/suspend
+# ---------------------------------------------------------------------------
+@router.post("/nations/{nation_id}/suspend")
+def suspend_nation(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Suspend an approved nation."""
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    nation.status = "suspended"
+    db.commit()
+
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/calculate-allocations
+# ---------------------------------------------------------------------------
+@router.post("/calculate-allocations")
+def calculate_allocations(
+    payload: CalculateAllocationsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Calculate monthly mint allocations for all approved nations.
+
+    For each approved nation, creates a pending MintAllocation row based on
+    the nation's member_count and the configured BASE_RATE.  Skips nations
+    that already have an allocation for the target period (idempotent).
+    """
+
+    # Determine the target period (default: next month in "YYYY-MM" format)
+    if payload.period:
+        period = payload.period
+    else:
+        now = datetime.now(timezone.utc)
+        # Advance to the first day of next month
+        next_month = now.replace(day=1) + timedelta(days=32)
+        period = next_month.strftime("%Y-%m")
+
+    # Fetch all approved nations
+    nations = list(
+        db.execute(
+            select(Nation).where(Nation.status == "approved")
+        ).scalars().all()
+    )
+
+    allocations_created = 0
+    total_calculated = 0
+
+    for nation in nations:
+        # Skip if an allocation already exists for this nation + period
+        existing = db.execute(
+            select(MintAllocation).where(
+                MintAllocation.nation_id == nation.id,
+                MintAllocation.period == period,
+            )
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            continue
+
+        calculated_amount = nation.member_count * settings.BASE_RATE
+
+        allocation = MintAllocation(
+            nation_id=nation.id,
+            period=period,
+            member_count=nation.member_count,
+            base_rate=settings.BASE_RATE,
+            calculated_amount=calculated_amount,
+            status="pending",
+        )
+        db.add(allocation)
+        allocations_created += 1
+        total_calculated += calculated_amount
+
+    db.commit()
+
+    return {
+        "success": True,
+        "allocations_created": allocations_created,
+        "total_calculated": total_calculated,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/allocations/{allocation_id}/execute
+# ---------------------------------------------------------------------------
+@router.post("/allocations/{allocation_id}/execute")
+def execute_allocation(
+    allocation_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Execute a single approved allocation by minting currency to the nation's treasury."""
+
+    allocation = db.execute(
+        select(MintAllocation).where(MintAllocation.id == allocation_id)
+    ).scalar_one_or_none()
+
+    if allocation is None:
+        raise HTTPException(status_code=404, detail="Allocation not found.")
+
+    if allocation.status == "distributed":
+        raise HTTPException(
+            status_code=400, detail="Allocation has already been distributed."
+        )
+
+    if allocation.status != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Allocation must be approved before execution (current status: {allocation.status}).",
+        )
+
+    # Look up the nation to get its treasury address and name
+    nation = db.execute(
+        select(Nation).where(Nation.id == allocation.nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found for this allocation.")
+
+    try:
+        tx = create_transaction(
+            db,
+            tx_type="MINT",
+            from_address=settings.WORLD_MINT_ADDRESS,
+            to_address=nation.treasury_address,
+            amount=allocation.approved_amount,
+            memo=f"Mint allocation for period {allocation.period}",
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+    allocation.status = "distributed"
+    allocation.distributed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "tx_hash": f"tx_{tx.tx_hash[:12]}",
+        "amount": allocation.approved_amount,
+        "nation_name": nation.name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/execute-all-approved
+# ---------------------------------------------------------------------------
+@router.post("/execute-all-approved")
+def execute_all_approved(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Execute all approved (not yet distributed) allocations in one batch."""
+
+    allocations = list(
+        db.execute(
+            select(MintAllocation).where(MintAllocation.status == "approved")
+        ).scalars().all()
+    )
+
+    if not allocations:
+        return {
+            "success": True,
+            "executed": 0,
+            "total_minted": 0,
+            "details": [],
+        }
+
+    executed = 0
+    total_minted = 0
+    details = []
+
+    for allocation in allocations:
+        nation = db.execute(
+            select(Nation).where(Nation.id == allocation.nation_id)
+        ).scalar_one_or_none()
+
+        if nation is None:
+            details.append(
+                {
+                    "allocation_id": allocation.id,
+                    "success": False,
+                    "error": "Nation not found.",
+                }
+            )
+            continue
+
+        try:
+            tx = create_transaction(
+                db,
+                tx_type="MINT",
+                from_address=settings.WORLD_MINT_ADDRESS,
+                to_address=nation.treasury_address,
+                amount=allocation.approved_amount,
+                memo=f"Mint allocation for period {allocation.period}",
+            )
+        except ValueError as exc:
+            details.append(
+                {
+                    "allocation_id": allocation.id,
+                    "nation_name": nation.name,
+                    "success": False,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        allocation.status = "distributed"
+        allocation.distributed_at = datetime.now(timezone.utc)
+        db.commit()
+
+        executed += 1
+        total_minted += allocation.approved_amount
+        details.append(
+            {
+                "allocation_id": allocation.id,
+                "nation_name": nation.name,
+                "tx_hash": f"tx_{tx.tx_hash[:12]}",
+                "amount": allocation.approved_amount,
+                "success": True,
+            }
+        )
+
+    return {
+        "success": True,
+        "executed": executed,
+        "total_minted": total_minted,
+        "details": details,
+    }

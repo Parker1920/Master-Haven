@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Public Ledger — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Public Ledger</h1>
+        <p class="page-subtitle">
+            {{ total_tx_count | format_number }} total transactions
+            &nbsp;
+            {% if chain_valid %}
+                <span style="color: var(--success);">&#10003; Chain Valid</span>
+            {% else %}
+                <span style="color: var(--error);">&#9888; Chain Error</span>
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-lg">
+    <div class="card-body">
+        <form method="GET" action="/ledger" style="display: flex; gap: var(--space-sm); flex-wrap: wrap; align-items: flex-end;">
+            <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.8rem;">Type</label>
+                <select name="tx_type" style="padding: 6px 10px;">
+                    <option value="">All Types</option>
+                    {% for t in tx_types %}
+                    <option value="{{ t }}" {% if tx_type == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.8rem;">Address</label>
+                <input type="text" name="address" value="{{ address_filter }}" placeholder="HVN-..." style="padding: 6px 10px; font-family: var(--font-mono); width: 200px;">
+            </div>
+            <button type="submit" class="btn btn-secondary btn-sm">Filter</button>
+            <a href="/ledger" class="btn btn-secondary btn-sm" style="text-decoration: none;">Clear</a>
+        </form>
+    </div>
+</div>
+
+{% if transactions %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>TX Hash</th>
+                <th>Type</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Amount</th>
+                <th>Memo</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in transactions %}
+            <tr>
+                <td>
+                    <a href="/tx/{{ tx.tx_hash }}" class="tx-hash" title="{{ tx.tx_hash }}">
+                        {{ tx.tx_hash[:12] }}...
+                    </a>
+                </td>
+                <td>
+                    <span class="badge badge-{{ tx.tx_type | lower }}">{{ tx.tx_type }}</span>
+                </td>
+                <td>
+                    {% if tx.from_address == 'SYSTEM' %}
+                        <span class="text-muted">SYSTEM</span>
+                    {% else %}
+                        <a href="/wallet/{{ tx.from_address }}" class="tx-hash" title="{{ tx.from_address }}">
+                            {{ name_map.get(tx.from_address, tx.from_address[:16] + '...') }}
+                        </a>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tx.to_address == 'SYSTEM' %}
+                        <span class="text-muted">SYSTEM</span>
+                    {% else %}
+                        <a href="/wallet/{{ tx.to_address }}" class="tx-hash" title="{{ tx.to_address }}">
+                            {{ name_map.get(tx.to_address, tx.to_address[:16] + '...') }}
+                        </a>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="balance-inline">{{ tx.amount | format_number }}</span>
+                    <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                </td>
+                <td>
+                    {% if tx.memo %}
+                        <span class="truncate" title="{{ tx.memo }}" style="max-width: 100px;">{{ tx.memo[:30] }}{% if tx.memo|length > 30 %}...{% endif %}</span>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>{{ tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if has_prev %}
+        <a href="/ledger?page={{ page - 1 }}&tx_type={{ tx_type }}&address={{ address_filter }}">Previous</a>
+    {% else %}
+        <span class="disabled">Previous</span>
+    {% endif %}
+
+    <span class="current-page">Page {{ page }} of {{ total_pages }}</span>
+
+    {% if has_next %}
+        <a href="/ledger?page={{ page + 1 }}&tx_type={{ tx_type }}&address={{ address_filter }}">Next</a>
+    {% else %}
+        <span class="disabled">Next</span>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">&#9741;</div>
+    <h3>No transactions found</h3>
+    <p>
+        {% if tx_type or address_filter %}
+            No transactions match your filters. <a href="/ledger">Clear filters</a>
+        {% else %}
+            The ledger is empty. Transactions will appear here as they are confirmed.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% endblock %}

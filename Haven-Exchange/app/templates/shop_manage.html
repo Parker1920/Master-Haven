@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}My Shop — Haven Exchange{% endblock %}
+
+{% block content %}
+{% if not shop %}
+<div class="page-header">
+    <h1>My Shop</h1>
+    <p class="page-subtitle">You don't have a shop yet</p>
+</div>
+<div class="empty-state">
+    <div class="empty-icon">&#128722;</div>
+    <h3>Open a Shop</h3>
+    <p>Create a shop to start selling services, items, and more to the Haven community.</p>
+    <a href="/shop/create" class="btn btn-primary">Create Shop</a>
+</div>
+{% else %}
+<div class="page-header">
+    <h1>{{ shop.name }}</h1>
+    <p class="page-subtitle">Shop Management</p>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" style="margin-bottom: var(--space-xl);">
+    <div class="stat-card">
+        <div class="stat-value">{{ shop.total_sales | format_number }}</div>
+        <div class="stat-label">Total Sales</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ shop.total_revenue | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        <div class="stat-label">Total Revenue</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ unique_customers }}</div>
+        <div class="stat-label">Unique Customers</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ listings | length }}</div>
+        <div class="stat-label">Listings</div>
+    </div>
+</div>
+
+<!-- Add Listing Form -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3>Add New Listing</h3>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="/shop/listings/create">
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" class="form-control" required placeholder="e.g. Base Building Service">
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" class="form-control" rows="3" placeholder="Describe what you're offering..."></textarea>
+            </div>
+            <div style="display: flex; gap: var(--space-md);">
+                <div class="form-group" style="flex: 1;">
+                    <label for="price">Price ({{ settings.CURRENCY_SHORT }})</label>
+                    <input type="number" id="price" name="price" class="form-control" required min="1" placeholder="100">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label for="category">Category</label>
+                    <select id="category" name="category" class="form-control">
+                        <option value="service">Service</option>
+                        <option value="coordinates">Coordinates</option>
+                        <option value="item">Item</option>
+                        <option value="other" selected>Other</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Listing</button>
+        </form>
+    </div>
+</div>
+
+<!-- Existing Listings -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3>Your Listings</h3>
+    </div>
+    <div class="card-body">
+        {% if listings %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for listing in listings %}
+                    <tr>
+                        <td><strong>{{ listing.title }}</strong></td>
+                        <td><span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span></td>
+                        <td class="mono">{{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>
+                            {% if listing.is_available %}
+                            <span class="badge" style="background: rgba(46, 160, 67, 0.15); color: #2ea043;">Active</span>
+                            {% else %}
+                            <span class="badge" style="background: rgba(139, 148, 158, 0.15); color: #8b949e;">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" action="/shop/listings/{{ listing.id }}/toggle" style="display: inline;">
+                                <button type="submit" class="btn btn-secondary btn-sm">
+                                    {% if listing.is_available %}Deactivate{% else %}Activate{% endif %}
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No listings yet. Add your first listing above!</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recent Sales -->
+{% if recent_sales %}
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3>Recent Sales</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Buyer</th>
+                        <th>Amount</th>
+                        <th>Memo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in recent_sales %}
+                    <tr>
+                        <td>{{ tx.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <a href="/wallet/{{ tx.from_address }}">
+                                {{ name_map.get(tx.from_address, tx.from_address[:12] + '...') }}
+                            </a>
+                        </td>
+                        <td class="mono amount-received">+{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>{{ (tx.memo or '')[:50] }}{% if tx.memo and tx.memo|length > 50 %}...{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div style="display: flex; gap: var(--space-md);">
+    <a href="/market/{{ shop.id }}" class="btn btn-secondary">View Public Shop Page</a>
+    <a href="/shop/ipo" class="btn btn-secondary">IPO / Stock Listing</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}IPO — {{ shop.name }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>IPO — {{ shop.name }}</h1>
+    <p class="page-subtitle">List your business on the Haven Exchange</p>
+</div>
+
+{% if eligible %}
+<div class="card">
+    <div class="card-header">
+        <h3>Create Stock Listing</h3>
+    </div>
+    <div class="card-body">
+        <p style="margin-bottom: var(--space-lg);">
+            Issuing stock for <strong>{{ shop.name }}</strong> will allow other players in your nation
+            to invest in your business. The proceeds from share sales go directly to you.
+        </p>
+
+        <div class="stats-grid mb-lg" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value">{{ shop.total_sales }}</div>
+                <div class="stat-label">Total Sales</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ shop.total_revenue | format_number }}</div>
+                <div class="stat-label">Revenue ({{ settings.CURRENCY_SHORT }})</div>
+            </div>
+        </div>
+
+        <form method="post" action="/shop/ipo">
+            <div class="form-group">
+                <label for="num_shares">Number of Shares to Issue</label>
+                <input type="number" id="num_shares" name="num_shares" min="100" max="1000" value="100" required>
+                <p class="text-muted" style="font-size: 0.8125rem; margin-top: var(--space-xs);">
+                    Choose between 100 and 1,000 shares. Base price: 5 {{ settings.CURRENCY_SHORT }} per share.
+                </p>
+            </div>
+            <div class="trade-summary">
+                <div class="trade-row">
+                    <span>Base price per share</span>
+                    <span class="mono">5 {{ settings.CURRENCY_SHORT }}</span>
+                </div>
+                <div class="trade-row trade-total">
+                    <span>Total Stock Value (at base)</span>
+                    <span class="mono" id="ipo-total">500 {{ settings.CURRENCY_SHORT }}</span>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: var(--space-md);">Launch IPO</button>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-header">
+        <h3>Not Eligible Yet</h3>
+    </div>
+    <div class="card-body">
+        <p>Your shop doesn't meet the requirements for an IPO yet:</p>
+        <ul style="margin: var(--space-md) 0; padding-left: var(--space-lg);">
+            {% for reason in reasons %}
+            <li style="margin-bottom: var(--space-sm);">{{ reason }}</li>
+            {% endfor %}
+        </ul>
+        <p class="text-muted">Keep growing your shop and come back when you meet all requirements.</p>
+    </div>
+</div>
+{% endif %}
+
+<div class="btn-group" style="margin-top: var(--space-lg);">
+    <a href="/shop/manage" class="btn btn-secondary">Back to Shop</a>
+    <a href="/exchange" class="btn btn-secondary">View Exchange</a>
+</div>
+{% endblock %}

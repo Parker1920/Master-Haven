@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Haven Exchange — Universal Gaming Economy{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Haven Exchange</h1>
+    <p class="tagline">A universal gaming economy that exists outside any single game. Trade, earn, and manage currency across worlds.</p>
+    <div class="hero-cta">
+        {% if user %}
+            <a href="/dashboard" class="btn btn-primary btn-lg">Go to Dashboard</a>
+            <a href="/ledger" class="btn btn-secondary btn-lg">View Ledger</a>
+        {% else %}
+            <a href="/register" class="btn btn-primary btn-lg">Create Your Wallet</a>
+            <a href="/ledger" class="btn btn-secondary btn-lg">Explore the Ledger</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="features-grid">
+    <div class="feature-card">
+        <span class="feature-icon">&#9733;</span>
+        <h3>Cross-Game Currency</h3>
+        <p>{{ settings.CURRENCY_NAME }} ({{ settings.CURRENCY_SHORT }}) works across every participating game and community. One wallet, many worlds.</p>
+    </div>
+    <div class="feature-card">
+        <span class="feature-icon">&#9741;</span>
+        <h3>Simulated Blockchain</h3>
+        <p>Every transaction is hash-chained into an immutable ledger. Full transparency with verifiable history for every coin.</p>
+    </div>
+    <div class="feature-card">
+        <span class="feature-icon">&#9873;</span>
+        <h3>Community Nations</h3>
+        <p>Join or lead a Nation. Each receives monthly currency allocations from the World Mint based on active membership.</p>
+    </div>
+</section>
+
+<section class="hierarchy-section">
+    <h2>How It Works</h2>
+    <div class="hierarchy-flow">
+        <div class="hierarchy-node highlight">World Mint</div>
+        <span class="hierarchy-arrow">&rarr;</span>
+        <div class="hierarchy-node">Nations</div>
+        <span class="hierarchy-arrow">&rarr;</span>
+        <div class="hierarchy-node">Citizens</div>
+    </div>
+    <p class="text-muted" style="max-width: 600px; margin: 0 auto;">
+        The World Mint creates {{ settings.CURRENCY_SHORT }} and distributes it to approved Nations based on their active member count.
+        Nation leaders distribute funds to their citizens. Citizens trade freely with each other.
+    </p>
+</section>
+
+{% if stats %}
+<section style="margin-top: var(--space-2xl);">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_users | format_number }}</div>
+            <div class="stat-label">Registered Users</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_transactions | format_number }}</div>
+            <div class="stat-label">Transactions</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_nations | format_number }}</div>
+            <div class="stat-label">Active Nations</div>
+        </div>
+    </div>
+</section>
+{% endif %}
+{% endblock %}

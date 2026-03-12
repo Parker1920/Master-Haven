@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Welcome, {{ user.display_name or user.username }}</h1>
+    <p class="page-subtitle">Your Haven Exchange dashboard</p>
+</div>
+
+<!-- Balance & Wallet Info -->
+<div class="dashboard-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ user.balance | format_number }}</div>
+        <div class="stat-label">{{ settings.CURRENCY_SHORT }} Balance</div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Wallet Address</h3>
+        </div>
+        <div class="card-body">
+            <div class="wallet-address">
+                <span>{{ user.wallet_address }}</span>
+                <button class="copy-btn" onclick="copyToClipboard('{{ user.wallet_address }}', this)">Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Nation</h3>
+        </div>
+        <div class="card-body">
+            {% if led_nation %}
+                <p style="margin-bottom: var(--space-sm);">
+                    <a href="/nations/{{ led_nation.id }}" style="font-weight: 600;">{{ led_nation.name }}</a>
+                    <span class="badge badge-confirmed" style="margin-left: var(--space-xs);">Leader</span>
+                </p>
+                {% if led_nation.game %}
+                    <small class="text-muted">Game: {{ led_nation.game }}</small>
+                {% endif %}
+                <div class="btn-group" style="margin-top: var(--space-md);">
+                    <a href="/nation/treasury" class="btn btn-sm btn-primary">Treasury</a>
+                    <a href="/nation/distribute" class="btn btn-sm btn-secondary">Distribute</a>
+                    <a href="/nation/members" class="btn btn-sm btn-secondary">Members</a>
+                </div>
+            {% elif nation %}
+                <p style="margin-bottom: var(--space-sm);">
+                    <a href="/nations/{{ nation.id }}" style="font-weight: 600;">{{ nation.name }}</a>
+                    <span class="text-muted" style="margin-left: var(--space-xs);">Member</span>
+                </p>
+                {% if nation.game %}
+                    <small class="text-muted">Game: {{ nation.game }}</small>
+                {% endif %}
+            {% elif pending_nation %}
+                <p style="margin-bottom: var(--space-sm);">
+                    <strong>{{ pending_nation.name }}</strong>
+                    <span class="badge badge-pending" style="margin-left: var(--space-xs);">Pending Approval</span>
+                </p>
+                <small class="text-muted">Your nation application is being reviewed by the World Mint.</small>
+            {% else %}
+                <p class="text-muted" style="margin-bottom: var(--space-sm);">Not a member of any nation yet.</p>
+                <div class="btn-group">
+                    <a href="/nations" class="btn btn-sm btn-secondary">Browse Nations</a>
+                    <a href="/nations/apply" class="btn btn-sm btn-primary">Create a Nation</a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if portfolio_stats %}
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Stock Portfolio</h3>
+        <a href="/portfolio" class="btn btn-sm btn-secondary">View Portfolio</a>
+    </div>
+    <div class="card-body">
+        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value">{{ portfolio_stats.total_value | format_number }}</div>
+                <div class="stat-label">Portfolio Value ({{ settings.CURRENCY_SHORT }})</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value {% if portfolio_stats.gain_loss >= 0 %}text-success{% else %}text-error{% endif %}">
+                    {% if portfolio_stats.gain_loss >= 0 %}+{% endif %}{{ portfolio_stats.gain_loss | format_number }}
+                </div>
+                <div class="stat-label">Gain / Loss</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ portfolio_stats.stock_count }}</div>
+                <div class="stat-label">Holdings</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Quick Actions -->
+<div class="btn-group mb-xl">
+    <a href="/send" class="btn btn-primary">Send {{ settings.CURRENCY_SHORT }}</a>
+    <a href="/history" class="btn btn-secondary">Full History</a>
+    <a href="/wallet/{{ user.wallet_address }}" class="btn btn-secondary">Public Wallet</a>
+    {% if user_shop %}
+        <a href="/shop/manage" class="btn btn-secondary">Manage Shop</a>
+    {% else %}
+        <a href="/shop/create" class="btn btn-secondary">Open a Shop</a>
+    {% endif %}
+    <a href="/exchange" class="btn btn-secondary">Exchange</a>
+</div>
+
+<!-- Recent Transactions -->
+<div class="card">
+    <div class="card-header">
+        <h3>Recent Transactions</h3>
+        <a href="/history" class="btn btn-sm btn-secondary">View All</a>
+    </div>
+    <div class="card-body">
+        {% if recent_transactions %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Amount</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in recent_transactions %}
+                    <tr>
+                        <td>
+                            <span class="badge badge-{{ tx.tx_type | lower }}">{{ tx.tx_type }}</span>
+                        </td>
+                        <td>
+                            {% if tx.from_address == user.wallet_address %}
+                                <span class="text-muted">You</span>
+                            {% else %}
+                                <a href="/wallet/{{ tx.from_address }}" class="tx-hash" title="{{ tx.from_address }}">
+                                    {{ name_map.get(tx.from_address, tx.from_address) }}
+                                </a>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if tx.to_address == user.wallet_address %}
+                                <span class="text-muted">You</span>
+                            {% else %}
+                                <a href="/wallet/{{ tx.to_address }}" class="tx-hash" title="{{ tx.to_address }}">
+                                    {{ name_map.get(tx.to_address, tx.to_address) }}
+                                </a>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if tx.to_address == user.wallet_address %}
+                                <span class="amount-received">+{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                            {% elif tx.from_address == user.wallet_address %}
+                                <span class="amount-sent">-{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                            {% else %}
+                                <span>{{ tx.amount | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="/tx/{{ tx.tx_hash }}" class="tx-hash" title="{{ tx.created_at }}">
+                                {{ tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else '—' }}
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">&#9744;</div>
+            <h3>No transactions yet</h3>
+            <p>Your transaction history will appear here once you send or receive {{ settings.CURRENCY_SHORT }}.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

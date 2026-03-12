@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Stock Exchange — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Stock Exchange</h1>
+    <p class="page-subtitle">Trade nation and business stocks with Haven Marks</p>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid mb-lg">
+    <div class="stat-card">
+        <div class="stat-value">{{ total_stocks }}</div>
+        <div class="stat-label">Listed Stocks</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_market_cap | format_number }}</div>
+        <div class="stat-label">Total Market Cap ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-lg">
+    <div class="card-body">
+        <form method="get" action="/exchange" class="market-filters">
+            <div class="form-group">
+                <label for="stock_type">Type</label>
+                <select name="stock_type" id="stock_type">
+                    <option value="">All</option>
+                    <option value="nation" {% if stock_type == 'nation' %}selected{% endif %}>Nation</option>
+                    <option value="business" {% if stock_type == 'business' %}selected{% endif %}>Business</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sort_by">Sort By</label>
+                <select name="sort_by" id="sort_by">
+                    <option value="ticker" {% if sort_by == 'ticker' %}selected{% endif %}>Ticker</option>
+                    <option value="price" {% if sort_by == 'price' %}selected{% endif %}>Price</option>
+                    <option value="change" {% if sort_by == 'change' %}selected{% endif %}>Change</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Stock List -->
+{% if stocks %}
+<div class="exchange-grid">
+    {% for stock in stocks %}
+    <a href="/exchange/{{ stock.ticker }}" class="stock-card">
+        <div class="stock-card-header">
+            <span class="stock-ticker">{{ stock.ticker }}</span>
+            <span class="badge badge-{{ stock.stock_type }}">{{ stock.stock_type }}</span>
+        </div>
+        <div class="stock-name">{{ stock.name }}</div>
+        <div class="stock-price">{{ stock.current_price | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        {% set change = stock.current_price - stock.previous_price %}
+        {% set change_pct = ((change / stock.previous_price * 100) | round | int) if stock.previous_price > 0 else 0 %}
+        <div class="stock-change {% if change > 0 %}price-up{% elif change < 0 %}price-down{% else %}price-neutral{% endif %}">
+            {% if change > 0 %}&#9650; +{{ change }}{% elif change < 0 %}&#9660; {{ change }}{% else %}&#9644; 0{% endif %}
+            ({{ change_pct }}%)
+        </div>
+        <div class="stock-meta">
+            {{ stock.available_shares | format_number }} / {{ stock.total_shares | format_number }} available
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">&#128200;</div>
+    <h3>No stocks listed yet</h3>
+    <p>Stocks are created automatically when nations are approved, and businesses can issue stock via IPO.</p>
+</div>
+{% endif %}
+{% endblock %}

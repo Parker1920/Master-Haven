@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block title %}World Mint — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="mint-header">
+    <div>
+        <h1>World Mint Control Panel</h1>
+        <p class="page-subtitle">Economy management and currency minting</p>
+    </div>
+    {% if chain_valid is not none %}
+    <div class="chain-status {{ 'valid' if chain_valid else 'invalid' }}">
+        <span class="chain-status-dot"></span>
+        Chain {{ 'Valid' if chain_valid else 'Invalid' }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ total_supply | format_number }}</div>
+        <div class="stat-label">Total Supply ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_transactions | format_number }}</div>
+        <div class="stat-label">Total Transactions</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_users | format_number }}</div>
+        <div class="stat-label">Registered Users</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_nations | format_number }}</div>
+        <div class="stat-label">Active Nations</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ active_users_30d | format_number }}</div>
+        <div class="stat-label">Active (30 days)</div>
+    </div>
+</div>
+
+<!-- Pending Nations -->
+{% if pending_nations %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>Pending Nation Applications ({{ pending_nations | length }})</h3>
+    </div>
+    <div class="card-body">
+        <div class="pending-nations-grid">
+            {% for nation in pending_nations %}
+            <div class="pending-nation-card">
+                <div class="pending-nation-info">
+                    <h4>{{ nation.name }}</h4>
+                    {% if nation.game %}
+                        <span class="nation-game-tag" style="font-size: 0.75rem;">{{ nation.game }}</span>
+                    {% endif %}
+                    {% if nation.description %}
+                        <p class="text-muted" style="font-size: 0.875rem; margin-top: var(--space-sm); margin-bottom: var(--space-sm);">
+                            {{ nation.description[:120] }}{{ '...' if nation.description | length > 120 else '' }}
+                        </p>
+                    {% endif %}
+                    <small class="text-muted">
+                        Applied: {{ nation.created_at.strftime('%Y-%m-%d') if nation.created_at else '—' }}
+                    </small>
+                </div>
+                <div class="pending-nation-actions">
+                    <form action="/mint/nations/{{ nation.id }}/approve" method="POST" style="display: inline;"
+                          data-confirm="Approve nation '{{ nation.name }}'? This will promote the leader to nation_leader role.">
+                        <button type="submit" class="btn btn-sm btn-primary">Approve</button>
+                    </form>
+                    <form action="/mint/nations/{{ nation.id }}/reject" method="POST" style="display: inline;"
+                          data-confirm="Reject nation '{{ nation.name }}'? This cannot be undone.">
+                        <button type="submit" class="btn btn-sm btn-danger">Reject</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Monthly Allocations -->
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>Monthly Allocations</h3>
+        <form action="/mint/calculate-allocations" method="POST" style="display: inline;"
+              data-confirm="Calculate monthly allocations for all approved nations?">
+            <button type="submit" class="btn btn-sm btn-primary">Calculate Allocations</button>
+        </form>
+    </div>
+    <div class="card-body">
+        {% if pending_allocations %}
+        <h4 style="margin-bottom: var(--space-md); color: var(--warning);">Pending Approval</h4>
+        <div class="table-wrapper mb-lg" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nation</th>
+                        <th>Period</th>
+                        <th>Members</th>
+                        <th>Calculated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for alloc, nation_name in pending_allocations %}
+                    <tr>
+                        <td>{{ nation_name }}</td>
+                        <td>{{ alloc.period }}</td>
+                        <td>{{ alloc.member_count }}</td>
+                        <td>
+                            <span class="balance-inline">{{ alloc.calculated_amount | format_number }}</span>
+                            <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                        </td>
+                        <td>
+                            <form action="/mint/allocations/{{ alloc.id }}/approve" method="POST" style="display: inline;"
+                                  data-confirm="Approve this allocation of {{ alloc.calculated_amount | format_number }} {{ settings.CURRENCY_SHORT }}?">
+                                <button type="submit" class="btn btn-sm btn-primary">Approve</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if approved_allocations %}
+        <h4 style="margin-bottom: var(--space-md); color: var(--success);">Ready to Execute</h4>
+        <div class="table-wrapper mb-lg" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nation</th>
+                        <th>Period</th>
+                        <th>Approved Amount</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for alloc, nation_name in approved_allocations %}
+                    <tr>
+                        <td>{{ nation_name }}</td>
+                        <td>{{ alloc.period }}</td>
+                        <td>
+                            <span class="balance-inline">{{ alloc.approved_amount | format_number }}</span>
+                            <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                        </td>
+                        <td>
+                            <form action="/mint/allocations/{{ alloc.id }}/execute" method="POST" style="display: inline;"
+                                  data-confirm="Execute this allocation? This will mint {{ alloc.approved_amount | format_number }} {{ settings.CURRENCY_SHORT }} to the nation treasury.">
+                                <button type="submit" class="btn btn-sm btn-primary">Execute</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if recent_allocations %}
+        <h4 style="margin-bottom: var(--space-md); color: var(--text-secondary);">Recently Distributed</h4>
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nation</th>
+                        <th>Period</th>
+                        <th>Amount</th>
+                        <th>Distributed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for alloc, nation_name in recent_allocations %}
+                    <tr>
+                        <td>{{ nation_name }}</td>
+                        <td>{{ alloc.period }}</td>
+                        <td>
+                            <span class="balance-inline">{{ alloc.approved_amount | format_number }}</span>
+                            <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                        </td>
+                        <td>{{ alloc.distributed_at.strftime('%Y-%m-%d %H:%M') if alloc.distributed_at else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if not pending_allocations and not approved_allocations and not recent_allocations %}
+        <div class="empty-state" style="padding: var(--space-lg) 0;">
+            <p class="text-muted mb-0">No allocations yet. Click "Calculate Allocations" to generate monthly allocations for approved nations.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    <!-- Quick Mint Form -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Mint Currency</h3>
+        </div>
+        <div class="card-body">
+            <form action="/mint/execute" method="POST" data-confirm="Are you sure you want to mint these funds? This will create new currency.">
+                <div class="form-group">
+                    <label for="to_address">Target Address</label>
+                    <input type="text" id="to_address" name="to_address" required
+                           placeholder="HVN-xxxxxxxx" style="font-family: var(--font-mono);">
+                    <span class="form-hint">Wallet or nation treasury address to receive minted funds</span>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount ({{ settings.CURRENCY_SHORT }})</label>
+                    <input type="number" id="amount" name="amount" required min="1" step="1"
+                           placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label for="memo">Memo</label>
+                    <textarea id="memo" name="memo" rows="2" placeholder="Reason for minting"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Mint {{ settings.CURRENCY_SHORT }}</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Recent Mint Transactions -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Mint Transactions</h3>
+            <a href="/mint/stats" class="btn btn-sm btn-secondary">Detailed Stats</a>
+        </div>
+        <div class="card-body">
+            {% if recent_mints %}
+            <div class="table-wrapper" style="border: none; border-radius: 0;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>To</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tx in recent_mints %}
+                        <tr>
+                            <td>
+                                <a href="/wallet/{{ tx.to_address }}" class="tx-hash">
+                                    <span class="truncate" title="{{ tx.to_address }}">{{ tx.to_address }}</span>
+                                </a>
+                            </td>
+                            <td>
+                                <span class="balance-inline">{{ tx.amount | format_number }}</span>
+                                <small class="text-muted">{{ settings.CURRENCY_SHORT }}</small>
+                            </td>
+                            <td>
+                                <a href="/tx/{{ tx.tx_hash }}" class="tx-hash">
+                                    {{ tx.created_at.strftime('%m-%d %H:%M') if tx.created_at else '—' }}
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state" style="padding: var(--space-lg) 0;">
+                <p class="text-muted mb-0">No mint transactions yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

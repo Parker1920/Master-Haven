@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Create a Nation — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create a Nation</h1>
+    <p class="page-subtitle">Apply to establish a new nation in the Haven Exchange economy</p>
+</div>
+
+{% if existing_nation %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state" style="padding: var(--space-xl) 0;">
+            <h3>You already lead a nation</h3>
+            <p>You are the leader of <strong>{{ existing_nation.name }}</strong>
+                (Status: <span class="badge badge-{{ 'confirmed' if existing_nation.status == 'approved' else 'pending' }}">{{ existing_nation.status }}</span>).
+                A user can only lead one nation.
+            </p>
+            <div class="btn-group" style="justify-content: center; margin-top: var(--space-lg);">
+                <a href="/nations/{{ existing_nation.id }}" class="btn btn-primary">View Your Nation</a>
+                <a href="/nations" class="btn btn-secondary">Browse Nations</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card" style="max-width: 640px;">
+    <div class="card-header">
+        <h3>Nation Application</h3>
+    </div>
+    <div class="card-body">
+        <form action="/nations/apply" method="POST">
+            <div class="form-group">
+                <label for="name">Nation Name <span class="text-error">*</span></label>
+                <input type="text" id="name" name="name" required
+                       placeholder="e.g. Galactic Federation" maxlength="100">
+                <span class="form-hint">Choose a unique name for your nation</span>
+            </div>
+
+            <div class="form-group">
+                <label for="game">Game</label>
+                <select id="game" name="game">
+                    <option value="">Select a game (optional)</option>
+                    <option value="NMS">No Man's Sky</option>
+                    <option value="Minecraft">Minecraft</option>
+                    <option value="Multi">Multi-Game</option>
+                    <option value="Other">Other</option>
+                </select>
+                <span class="form-hint">The primary game your nation is associated with</span>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="4"
+                          placeholder="Tell us about your nation, its goals, and what makes it unique..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="discord_invite">Discord Invite Link</label>
+                <input type="text" id="discord_invite" name="discord_invite"
+                       placeholder="https://discord.gg/...">
+                <span class="form-hint">Optional — provide a Discord invite so members can find your community</span>
+            </div>
+
+            <div class="form-note mb-lg">
+                <p class="text-muted" style="font-size: 0.875rem;">
+                    Your application will be reviewed by the World Mint. Once approved, you will
+                    become the nation leader and receive a treasury wallet for managing your
+                    nation's funds.
+                </p>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Submit Application</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-lg">
+    <a href="/nations" class="btn btn-secondary">Back to Nations</a>
+</div>
+{% endblock %}

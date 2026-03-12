@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Economy Statistics — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Economy Statistics</h1>
+    <p class="page-subtitle">Detailed breakdown of the Haven Exchange economy</p>
+</div>
+
+<!-- Chain Status -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Blockchain Status</h3>
+        <div class="chain-status {{ 'valid' if chain_valid else 'invalid' }}">
+            <span class="chain-status-dot"></span>
+            Chain {{ 'Valid' if chain_valid else 'Invalid' }}
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="stats-grid" style="margin-bottom: 0;">
+            <div class="stat-card">
+                <div class="stat-value">{{ total_transactions | format_number }}</div>
+                <div class="stat-label">Total Blocks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ chain_errors }}</div>
+                <div class="stat-label">Chain Errors</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Supply Info -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Currency Supply</h3>
+    </div>
+    <div class="card-body">
+        <div class="stats-grid" style="margin-bottom: 0;">
+            <div class="stat-card">
+                <div class="stat-value">{{ total_supply | format_number }}</div>
+                <div class="stat-label">In Circulation ({{ settings.CURRENCY_SHORT }})</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ total_minted | format_number }}</div>
+                <div class="stat-label">Total Ever Minted</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Transactions by Type -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Transactions by Type</h3>
+    </div>
+    <div class="card-body">
+        {% if tx_by_type %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Count</th>
+                        <th>Total Volume ({{ settings.CURRENCY_SHORT }})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tx_by_type %}
+                    <tr>
+                        <td><span class="badge badge-{{ row.type | lower }}">{{ row.type }}</span></td>
+                        <td>{{ row.count | format_number }}</td>
+                        <td><span class="balance-inline">{{ row.volume | format_number }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No transaction data available.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Top Wallets -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Top Wallets by Balance</h3>
+    </div>
+    <div class="card-body">
+        {% if top_wallets %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Address</th>
+                        <th>Balance ({{ settings.CURRENCY_SHORT }})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wallet in top_wallets %}
+                    <tr>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td>{{ wallet.name }}</td>
+                        <td>
+                            <a href="/wallet/{{ wallet.address }}" class="tx-hash">
+                                {{ wallet.address }}
+                            </a>
+                        </td>
+                        <td><span class="balance-inline">{{ wallet.balance | format_number }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No wallets with balances yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Nation Treasuries -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h3>Nation Treasury Balances</h3>
+    </div>
+    <div class="card-body">
+        {% if nation_treasuries %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nation</th>
+                        <th>Treasury Address</th>
+                        <th>Balance ({{ settings.CURRENCY_SHORT }})</th>
+                        <th>Members</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for n in nation_treasuries %}
+                    <tr>
+                        <td><a href="/nations/{{ n.id }}">{{ n.name }}</a></td>
+                        <td>
+                            <a href="/wallet/{{ n.treasury_address }}" class="tx-hash">
+                                <span class="truncate" title="{{ n.treasury_address }}">{{ n.treasury_address }}</span>
+                            </a>
+                        </td>
+                        <td><span class="balance-inline">{{ n.treasury_balance | format_number }}</span></td>
+                        <td>{{ n.member_count }}</td>
+                        <td><span class="badge badge-{{ 'confirmed' if n.status == 'approved' else 'pending' }}">{{ n.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No nations registered yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="mt-lg">
+    <a href="/mint" class="btn btn-secondary">Back to Mint Dashboard</a>
+</div>
+{% endblock %}

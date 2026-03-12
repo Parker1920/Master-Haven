@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}{{ nation.name }} — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="nation-header">
+    <h1>{{ nation.name }}</h1>
+    {% if nation.game %}
+        <span class="nation-game-tag">{{ nation.game }}</span>
+    {% endif %}
+    <p class="page-subtitle">
+        Status: <span class="badge badge-{{ 'confirmed' if nation.status == 'approved' else 'pending' }}">{{ nation.status }}</span>
+    </p>
+</div>
+
+<div class="two-col mb-xl">
+    <div class="card">
+        <div class="card-header">
+            <h3>Nation Info</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-row">
+                <span class="info-label">Leader</span>
+                <span class="info-value">{{ leader_name or '—' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Members</span>
+                <span class="info-value">{{ nation.member_count }}</span>
+            </div>
+            {% if nation.approved_at %}
+            <div class="info-row">
+                <span class="info-label">Approved</span>
+                <span class="info-value">{{ nation.approved_at.strftime('%Y-%m-%d') if nation.approved_at else '—' }}</span>
+            </div>
+            {% endif %}
+            <div class="info-row">
+                <span class="info-label">Created</span>
+                <span class="info-value">{{ nation.created_at.strftime('%Y-%m-%d') if nation.created_at else '—' }}</span>
+            </div>
+            {% if nation.discord_invite %}
+            <div class="info-row">
+                <span class="info-label">Discord</span>
+                <span class="info-value">
+                    <a href="{{ nation.discord_invite }}" target="_blank" rel="noopener noreferrer">Join Server</a>
+                </span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Treasury</h3>
+        </div>
+        <div class="card-body">
+            <div class="balance-display" style="padding: var(--space-md) 0;">
+                <div class="balance-label">Treasury Balance</div>
+                <div class="balance-value">{{ nation.treasury_balance | format_number }}<span class="balance-currency">{{ settings.CURRENCY_SHORT }}</span></div>
+            </div>
+            <div class="wallet-address" style="margin-top: var(--space-md); justify-content: center;">
+                <span>{{ nation.treasury_address }}</span>
+                <button class="copy-btn" onclick="copyToClipboard('{{ nation.treasury_address }}', this)">Copy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if nation.description %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>About</h3>
+    </div>
+    <div class="card-body">
+        <p style="white-space: pre-wrap; margin-bottom: 0;">{{ nation.description }}</p>
+    </div>
+</div>
+{% endif %}
+
+{% if members %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>Members ({{ members | length }})</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Wallet</th>
+                        <th>Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in members %}
+                    <tr>
+                        <td>{{ member.display_name or member.username }}</td>
+                        <td>
+                            <a href="/wallet/{{ member.wallet_address }}" class="tx-hash">
+                                {{ member.wallet_address }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if member.id == nation.leader_id %}
+                                <span class="text-accent">Leader</span>
+                            {% else %}
+                                <span class="text-muted">Citizen</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Join / Leave Actions -->
+{% if can_join %}
+<div class="card nation-action-card mb-xl">
+    <div class="card-body" style="text-align: center; padding: var(--space-xl);">
+        <h3 style="margin-bottom: var(--space-sm);">Want to join {{ nation.name }}?</h3>
+        <p class="text-muted" style="margin-bottom: var(--space-lg);">Become a member and participate in the nation's economy.</p>
+        <form action="/nations/{{ nation.id }}/join" method="POST"
+              data-confirm="Are you sure you want to join {{ nation.name }}?">
+            <button type="submit" class="btn btn-primary btn-lg">Join this Nation</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if can_leave %}
+<div class="card nation-action-card mb-xl">
+    <div class="card-body" style="text-align: center; padding: var(--space-xl);">
+        <p class="text-muted" style="margin-bottom: var(--space-md);">You are currently a member of this nation.</p>
+        <form action="/nations/{{ nation.id }}/leave" method="POST"
+              data-confirm="Are you sure you want to leave {{ nation.name }}? You can rejoin later.">
+            <button type="submit" class="btn btn-danger">Leave Nation</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-lg">
+    <a href="/nations" class="btn btn-secondary">Back to Nations</a>
+</div>
+{% endblock %}

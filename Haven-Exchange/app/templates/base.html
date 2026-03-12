@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Haven Exchange{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <span class="brand-icon">&#9670;</span> Haven Exchange
+            </a>
+
+            <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
+
+            <div class="nav-links">
+                <a href="/ledger" {% if active_page == 'ledger' %}class="active"{% endif %}>Ledger</a>
+                <a href="/nations" {% if active_page == 'nations' %}class="active"{% endif %}>Nations</a>
+                <a href="/wallet/search" {% if active_page == 'search' %}class="active"{% endif %}>Search</a>
+                <a href="/market" {% if active_page == 'market' %}class="active"{% endif %}>Market</a>
+                <a href="/exchange" {% if active_page == 'exchange' %}class="active"{% endif %}>Exchange</a>
+
+                {% if user %}
+                    <span class="nav-divider"></span>
+                    <a href="/dashboard" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+                    <a href="/send" {% if active_page == 'send' %}class="active"{% endif %}>Send</a>
+                    <a href="/history" {% if active_page == 'history' %}class="active"{% endif %}>History</a>
+                    <a href="/shop/manage" {% if active_page == 'shop' %}class="active"{% endif %}>My Shop</a>
+                    <a href="/portfolio" {% if active_page == 'portfolio' %}class="active"{% endif %}>Portfolio</a>
+                    <a href="/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
+
+                    {% if user.role == 'nation_leader' %}
+                        <span class="nav-divider"></span>
+                        <a href="/nation/treasury" {% if active_page == 'treasury' %}class="active"{% endif %}>Treasury</a>
+                        <a href="/nation/members" {% if active_page == 'members' %}class="active"{% endif %}>Members</a>
+                    {% endif %}
+
+                    {% if user.role == 'world_mint' %}
+                        <span class="nav-divider"></span>
+                        <a href="/mint" {% if active_page == 'mint' %}class="active"{% endif %}>Mint</a>
+                    {% endif %}
+
+                    <span class="nav-divider"></span>
+                    <button class="nav-logout logout-btn">Logout</button>
+                {% else %}
+                    <span class="nav-divider"></span>
+                    <a href="/login" {% if active_page == 'login' %}class="active"{% endif %}>Login</a>
+                    <a href="/register" {% if active_page == 'register' %}class="active"{% endif %}>Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    <div class="page-content">
+        <div class="container">
+            <div id="flash-container">
+                {% if flash_success %}
+                <div class="alert alert-success" data-auto-dismiss="true">
+                    <span>{{ flash_success }}</span>
+                    <button class="alert-close" aria-label="Close">&times;</button>
+                </div>
+                {% endif %}
+                {% if flash_error %}
+                <div class="alert alert-error" data-auto-dismiss="true">
+                    <span>{{ flash_error }}</span>
+                    <button class="alert-close" aria-label="Close">&times;</button>
+                </div>
+                {% endif %}
+                {% if flash_info %}
+                <div class="alert alert-info" data-auto-dismiss="true">
+                    <span>{{ flash_info }}</span>
+                    <button class="alert-close" aria-label="Close">&times;</button>
+                </div>
+                {% endif %}
+            </div>
+
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            Haven Exchange &mdash; Currency: {{ settings.CURRENCY_NAME }} ({{ settings.CURRENCY_SHORT }}) &mdash; &copy; 2026
+        </div>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

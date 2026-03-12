@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Register — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+    <div class="auth-card card">
+
+        <!-- Registration Form -->
+        <div id="register-form-section">
+            <h1>Create Account</h1>
+            <p class="auth-subtitle">Get your {{ settings.CURRENCY_SHORT }} wallet and join the economy</p>
+
+            <div id="register-error" class="alert alert-error form-error">
+                <!-- JS will populate this -->
+            </div>
+
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Choose a username">
+                </div>
+
+                <div class="form-group">
+                    <label for="display_name">Display Name</label>
+                    <input type="text" id="display_name" name="display_name" autocomplete="name" placeholder="How others see you (optional)">
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" autocomplete="email" placeholder="Optional — for account recovery">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Minimum 8 characters">
+                    <span class="form-hint">Must be at least 8 characters</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirm_password">Confirm Password *</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password" placeholder="Re-enter your password">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+            </form>
+
+            <div class="auth-footer">
+                Already have an account? <a href="/login">Sign in</a>
+            </div>
+        </div>
+
+        <!-- Success / Wallet Reveal -->
+        <div id="register-success" class="hidden">
+            <div class="wallet-reveal">
+                <h2>Account Created!</h2>
+                <p>Your wallet address has been generated. Save it somewhere safe:</p>
+
+                <div class="wallet-address wallet-address-lg" style="justify-content: center; margin-bottom: var(--space-lg);">
+                    <span id="new-wallet-address"></span>
+                    <button class="copy-btn" onclick="copyToClipboard(document.getElementById('new-wallet-address').textContent, this)">Copy</button>
+                </div>
+
+                <p class="text-muted">Redirecting to your dashboard in 5 seconds...</p>
+                <a href="/dashboard" class="btn btn-primary">Go to Dashboard Now</a>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

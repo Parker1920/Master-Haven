@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Marketplace — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Marketplace</h1>
+    <p class="page-subtitle">Browse shops and listings across all nations</p>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-body">
+        <form method="GET" action="/market" class="market-filters">
+            <div class="form-group">
+                <label for="nation_id">Nation</label>
+                <select name="nation_id" id="nation_id" class="form-control">
+                    <option value="">All Nations</option>
+                    {% for n in nations %}
+                    <option value="{{ n.id }}" {% if nation_id == n.id %}selected{% endif %}>{{ n.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="category">Category</label>
+                <select name="category" id="category" class="form-control">
+                    <option value="">All Categories</option>
+                    <option value="service" {% if category == 'service' %}selected{% endif %}>Service</option>
+                    <option value="coordinates" {% if category == 'coordinates' %}selected{% endif %}>Coordinates</option>
+                    <option value="item" {% if category == 'item' %}selected{% endif %}>Item</option>
+                    <option value="other" {% if category == 'other' %}selected{% endif %}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="min_price">Min Price</label>
+                <input type="number" name="min_price" id="min_price" class="form-control" value="{{ min_price or '' }}" min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="max_price">Max Price</label>
+                <input type="number" name="max_price" id="max_price" class="form-control" value="{{ max_price or '' }}" min="0" placeholder="Any">
+            </div>
+            <div class="form-group">
+                <label for="q">Search</label>
+                <input type="text" name="q" id="q" class="form-control" value="{{ q }}" placeholder="Search listings...">
+            </div>
+            <div class="form-group" style="align-self: flex-end;">
+                <button type="submit" class="btn btn-primary">Filter</button>
+                {% if nation_id or category or min_price or max_price or q %}
+                <a href="/market" class="btn btn-secondary" style="margin-left: var(--space-sm);">Clear</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Listings -->
+{% if listings %}
+<div class="listings-grid">
+    {% for listing, shop in listings %}
+    <a href="/market/{{ shop.id }}" class="listing-card" style="text-decoration: none;">
+        <div class="listing-title">{{ listing.title }}</div>
+        {% if listing.description %}
+        <div class="listing-desc">{{ listing.description }}</div>
+        {% endif %}
+        <div class="listing-price">{{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        <div class="listing-meta">
+            <span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span>
+            <span>{{ shop.name }}</span>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination" style="margin-top: var(--space-xl);">
+    {% if has_prev %}
+    <a href="/market?page={{ page - 1 }}&nation_id={{ nation_id or '' }}&category={{ category }}&min_price={{ min_price or '' }}&max_price={{ max_price or '' }}&q={{ q }}" class="btn btn-secondary">Previous</a>
+    {% endif %}
+    <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+    {% if has_next %}
+    <a href="/market?page={{ page + 1 }}&nation_id={{ nation_id or '' }}&category={{ category }}&min_price={{ min_price or '' }}&max_price={{ max_price or '' }}&q={{ q }}" class="btn btn-secondary">Next</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">&#128722;</div>
+    <h3>No listings found</h3>
+    {% if nation_id or category or min_price or max_price or q %}
+    <p>Try adjusting your filters.</p>
+    <a href="/market" class="btn btn-secondary">Clear Filters</a>
+    {% else %}
+    <p>No shops have listed anything for sale yet.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Login — Haven Exchange{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+    <div class="auth-card card">
+        {% if user %}
+        <div class="alert alert-info" style="margin-bottom: 1rem;">
+            You're currently logged in as <strong>{{ user.username }}</strong>.
+            <a href="/dashboard">Go to Dashboard</a> or sign in below to switch accounts.
+        </div>
+        {% endif %}
+
+        <h1>Sign In</h1>
+        <p class="auth-subtitle">Welcome back to Haven Exchange</p>
+
+        <div id="login-error" class="alert alert-error form-error">
+            <!-- JS will populate this -->
+        </div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter your username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+        </form>
+
+        <div class="auth-footer">
+            Don't have an account? <a href="/register">Create one</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
