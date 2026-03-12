@@ -291,6 +291,7 @@ export default function Wizard(){
       salvageable_scrap: 0,
       storm_crystals: 0,
       gravitino_balls: 0,
+      is_gas_giant: 0,
       exotic_trophy: ''
     })
     setPlanetModalOpen(true)
@@ -657,6 +658,7 @@ export default function Wizard(){
                 <option value="Low">🔥 Low</option>
                 <option value="Medium">🔥🔥 Medium</option>
                 <option value="High">🔥🔥🔥 High</option>
+                <option value="Pirate">☠️ Pirate</option>
                 <option value="None">⭕ None</option>
               </select>
             </div>

@@ -258,6 +258,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
                   { key: 'extreme_weather', label: 'Extreme Weather', icon: 'bolt' },
                   { key: 'water_world', label: 'Water World', icon: 'water' },
                   { key: 'vile_brood', label: 'Vile Brood', icon: 'skull' },
+                  { key: 'is_gas_giant', label: 'Gas Giant', icon: 'globe' },
                 ].map(({ key, label, icon }) => {
                   const active = !!planet[key]
                   return (
@@ -278,6 +279,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
                         {icon === 'bolt' && '\u{26A1}'}
                         {icon === 'water' && '\u{1F30A}'}
                         {icon === 'skull' && '\u{1F480}'}
+                        {icon === 'globe' && '\u{1F310}'}
                       </span>
                       {label}
                     </button>

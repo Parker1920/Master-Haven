@@ -499,8 +499,9 @@ export default function SystemDetail() {
                 <div className="text-xs text-gray-400">Conflict</div>
                 <div className={
                   system.conflict_level === 'High' ? 'text-red-400' :
-                  system.conflict_level === 'Medium' ? 'text-orange-400' : 'text-green-400'
-                }>{system.conflict_level}</div>
+                  system.conflict_level === 'Medium' ? 'text-orange-400' :
+                  system.conflict_level === 'Pirate' ? 'text-purple-400' : 'text-green-400'
+                }>{system.conflict_level === 'Pirate' ? '☠️ Pirate' : system.conflict_level}</div>
               </div>
             )}
             {system.dominant_lifeform && (
@@ -835,6 +836,7 @@ export default function SystemDetail() {
                         { key: 'salvageable_scrap', label: 'Salvageable Scrap', icon: '\u{2699}' },
                         { key: 'storm_crystals', label: 'Storm Crystals', icon: '\u{1F48E}' },
                         { key: 'gravitino_balls', label: 'Gravitino Balls', icon: '\u{1F7E3}' },
+                        { key: 'is_gas_giant', label: 'Gas Giant', icon: '\u{1F310}' },
                       ].filter(a => planet[a.key])
                       const hasExoticTrophy = planet.exotic_trophy && planet.exotic_trophy.trim()
                       if (attrs.length === 0 && !hasExoticTrophy) return null

@@ -3811,3 +3811,115 @@ def migration_1_49_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.49.0")
+
+
+@register_migration("1.50.0", "Add is_gas_giant column to planets and moons tables")
+def migration_1_50_0(conn):
+    """
+    Add is_gas_giant INTEGER column (0/1) to planets and moons tables.
+    Gas Giant is a special planet attribute like has_rings or is_dissonant.
+    """
+    cursor = conn.cursor()
+
+    # Add to planets
+    cursor.execute("PRAGMA table_info(planets)")
+    planet_cols = {row[1] for row in cursor.fetchall()}
+    if 'is_gas_giant' not in planet_cols:
+        cursor.execute("ALTER TABLE planets ADD COLUMN is_gas_giant INTEGER DEFAULT 0")
+        logger.info("Added is_gas_giant column to planets table")
+    else:
+        logger.info("is_gas_giant already exists on planets table")
+
+    # Add to moons
+    cursor.execute("PRAGMA table_info(moons)")
+    moon_cols = {row[1] for row in cursor.fetchall()}
+    if 'is_gas_giant' not in moon_cols:
+        cursor.execute("ALTER TABLE moons ADD COLUMN is_gas_giant INTEGER DEFAULT 0")
+        logger.info("Added is_gas_giant column to moons table")
+    else:
+        logger.info("is_gas_giant already exists on moons table")
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.50.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.50.0")
+
+
+@register_migration("1.51.0", "Backfill created_at on systems for Travelers Collective incremental sync")
+def migration_1_51_0(conn):
+    """
+    The Collective's sync uses updated_since which filters on created_at/last_updated_at.
+    Most systems have NULL created_at because the approve_system INSERT never set it explicitly
+    and the DEFAULT CURRENT_TIMESTAMP was lost during table rebuilds.
+
+    Backfill using: discovered_at (most accurate) → submission_date from audit log → NOW().
+    """
+    cursor = conn.cursor()
+
+    # Count how many need backfill
+    cursor.execute("SELECT COUNT(*) FROM systems WHERE created_at IS NULL")
+    null_count = cursor.fetchone()[0]
+    logger.info(f"Systems with NULL created_at: {null_count}")
+
+    if null_count == 0:
+        logger.info("No systems need created_at backfill — skipping")
+    else:
+        # Layer 1: Use discovered_at where available
+        cursor.execute("""
+            UPDATE systems SET created_at = discovered_at
+            WHERE created_at IS NULL AND discovered_at IS NOT NULL
+        """)
+        layer1 = cursor.rowcount
+        logger.info(f"Backfilled {layer1} systems from discovered_at")
+
+        # Layer 2: Use approval_audit_log timestamp for remaining
+        cursor.execute("""
+            UPDATE systems SET created_at = (
+                SELECT MIN(a.action_timestamp)
+                FROM approval_audit_log a
+                WHERE a.system_id = systems.id AND a.action = 'approve'
+            )
+            WHERE created_at IS NULL AND EXISTS (
+                SELECT 1 FROM approval_audit_log a
+                WHERE a.system_id = systems.id AND a.action = 'approve'
+            )
+        """)
+        layer2 = cursor.rowcount
+        logger.info(f"Backfilled {layer2} systems from approval_audit_log")
+
+        # Layer 3: Fallback to NOW() for any remaining
+        cursor.execute("""
+            UPDATE systems SET created_at = ?
+            WHERE created_at IS NULL
+        """, (datetime.now().isoformat(),))
+        layer3 = cursor.rowcount
+        logger.info(f"Backfilled {layer3} systems with current timestamp (fallback)")
+
+        conn.commit()
+        logger.info(f"Total backfilled: {layer1 + layer2 + layer3} systems")
+
+    # Also add index on created_at for efficient updated_since queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_systems_created_at ON systems(created_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_systems_last_updated_at ON systems(last_updated_at DESC)")
+    logger.info("Ensured indexes on systems.created_at and systems.last_updated_at")
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.51.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.51.0")

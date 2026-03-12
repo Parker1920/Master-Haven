@@ -1189,15 +1189,16 @@ export default function PendingApprovals() {
                       <label className="block"><span className="text-gray-400">Economy Type:</span>
                         <select value={editData.economy_type || ''} onChange={e => updateEditField('economy_type', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
                           <option value="">Unknown</option>
-                          {['Trading','Scientific','Industrial','Technology','Mining','Power Generation','Manufacturing','None'].map(v => <option key={v} value={v}>{v}</option>)}
+                          {['Trading','Scientific','Mining','Technology','Manufacturing','Power Generation','Mass Production','Advanced Materials','Pirate','None','Abandoned'].map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
                       </label>
                       <label className="block"><span className="text-gray-400">Economy Level:</span>
                         <select value={editData.economy_level || ''} onChange={e => updateEditField('economy_level', e.target.value)} className="w-full mt-0.5 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm">
                           <option value="">Unknown</option>
-                          <option value="Low">Low</option>
-                          <option value="Medium">Medium</option>
-                          <option value="High">High</option>
+                          <option value="T1">T1 (Low)</option>
+                          <option value="T2">T2 (Medium)</option>
+                          <option value="T3">T3 (High)</option>
+                          <option value="T4">T4 (Pirate)</option>
                           <option value="None">None</option>
                         </select>
                       </label>
@@ -1207,6 +1208,7 @@ export default function PendingApprovals() {
                           <option value="Low">Low</option>
                           <option value="Medium">Medium</option>
                           <option value="High">High</option>
+                          <option value="Pirate">☠️ Pirate</option>
                           <option value="None">None</option>
                         </select>
                       </label>
@@ -1305,7 +1307,7 @@ export default function PendingApprovals() {
               {(() => {
                 const planetsData = editMode && editData ? editData.planets : selectedSubmission.system_data?.planets;
                 if (!planetsData || planetsData.length === 0) return null;
-                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava'];
+                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava','Marsh','Volcanic','Infested','Desolate','Exotic','Airless','Gas Giant'];
                 const sizeOptions = ['Large','Medium','Small'];
                 const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
                 const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
@@ -1494,7 +1496,7 @@ export default function PendingApprovals() {
               {(() => {
                 const moonsData = editMode && editData ? editData.moons : selectedSubmission.system_data?.moons;
                 if (!moonsData || moonsData.length === 0) return null;
-                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava'];
+                const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava','Marsh','Volcanic','Infested','Desolate','Exotic','Airless','Gas Giant'];
                 const sizeOptions = ['Large','Medium','Small'];
                 const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
                 const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";

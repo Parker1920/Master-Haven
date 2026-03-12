@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.44.0 | 2026-03-10 | Region naming in wizard with reality/galaxy scoping |
-| Haven-UI | 1.43.1 | 2026-03-10 | Remove inactivity overlay and rate limiting |
-| Backend API | 1.43.1 | 2026-03-10 | Remove API rate limiting (self-hosted) |
+| **Master Haven** | 1.45.0 | 2026-03-12 | Dynamic CSV import, Pirate conflict, Gas Giant attribute |
+| Haven-UI | 1.44.0 | 2026-03-12 | Dynamic CSV import with column mapping preview |
+| Backend API | 1.44.0 | 2026-03-12 | Dynamic CSV import, Pirate conflict, Gas Giant column |
 | Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,42 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.45.0 (2026-03-12) - Dynamic CSV Import, Pirate Conflict, Gas Giant Attribute
+Dynamic CSV importer supporting multiple community formats, Pirate conflict level, Gas Giant planet attribute.
+
+**Haven-UI 1.44.0**
+- CSV Import page redesigned with two-step flow: Analyze CSV → Review column mapping → Import
+- Column mapping preview shows detected fields with dropdown overrides for each CSV column
+- Data preview table shows first 5 rows mapped to Haven fields
+- Validation warnings for missing coordinate or system name columns
+- Import results show systems grouped, rows processed, and per-row errors
+- Supports portal glyphs, galactic coordinates, and NMSPortals links automatically
+- Added "Pirate" option to conflict level dropdowns (Wizard, PendingApprovals) with skull icon
+- SystemDetail: Pirate conflict level displays in purple with skull emoji
+- PendingApprovals: Fixed economy type dropdown (added Pirate, Advanced Materials, Mass Production, Abandoned)
+- PendingApprovals: Fixed economy level dropdown (now uses T1/T2/T3/T4 matching Wizard)
+- PendingApprovals: Expanded biome dropdown (added Marsh, Volcanic, Infested, Desolate, Exotic, Airless, Gas Giant)
+- Added "Gas Giant" planet attribute checkbox in PlanetEditor alongside existing special features
+- SystemDetail: Gas Giant badge displayed in Special Attributes section
+- Wizard: Gas Giant included in planet defaults
+
+**Backend API 1.44.0**
+- New `POST /api/csv_preview`: Analyzes CSV file, returns detected column mappings and preview data without importing
+- Reworked `POST /api/import_csv`: Dynamic header-driven CSV parser supporting multiple formats
+- Auto-detects GHUB format (row 0=region, row 1=headers) vs dynamic format (row 0=headers)
+- Groups planet-level CSV rows into systems by glyph coordinates (first char = planet index)
+- Galaxy resolution via `galaxies.json` — supports all 256 NMS galaxies, not just Euclid
+- Notes/resources parsing: extracts special features (Dissonant System, Vile Brood, Ancient Bones, etc.) into proper boolean columns
+- Normalizes conflict level values (Outlaw → Pirate, '-Data Unavailable- → None)
+- Normalizes economy type and dominant lifeform values from various CSV formats
+- Extracts glyphs from NMSPortals links as coordinate fallback
+- Per-system region name insertion from CSV region column
+- Completeness score auto-calculated for imported systems
+- Added `is_gas_giant` column to all 3 planet INSERT statements and all 4 moon INSERT statements
+- Migration v1.50.0: Adds `is_gas_giant` INTEGER column to planets and moons tables
+
+---
 
 #### Haven-UI 1.43.1 + Backend API 1.43.1 (2026-03-10) - Remove Inactivity Overlay & Rate Limiting
 Remove ngrok-era API rate limiting and inactivity session pausing since Haven is now self-hosted.
