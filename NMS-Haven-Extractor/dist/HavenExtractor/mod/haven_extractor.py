@@ -2309,44 +2309,64 @@ class HavenExtractorMod(Mod):
     def _warp_debug_generate_caller(self, this, lbUseSettingsFile, lSeed):
         """Trace WHO calls SolarSystem.Generate during a warp."""
         try:
+            import ctypes
             base = _internal.BASE_ADDRESS
-            caller = self._warp_debug_generate_caller.caller_address()
-            offset = caller - base
-            logger.info(f"[WARP-RE] cGcSolarSystem.Generate CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
-            # Also log mLocation at this moment
+            caller_raw = self._warp_debug_generate_caller.caller_address()
+            # caller_address() may return signed or truncated — get full 64-bit
+            caller = ctypes.c_uint64(caller_raw).value
+            base_val = ctypes.c_uint64(base).value if base else 0
+            offset = caller - base_val if base_val else caller
+            this_addr = get_addressof(this) if this else 0
+            logger.info(f"[WARP-RE] === SolarSystem.Generate ===")
+            logger.info(f"[WARP-RE]   caller_raw=0x{caller:016X}  base=0x{base_val:016X}  offset=0x{offset:X}")
+            logger.info(f"[WARP-RE]   this(SolarSystem)=0x{this_addr:X}")
+            logger.info(f"[WARP-RE]   lbUseSettingsFile={lbUseSettingsFile}")
+            # Log mLocation
             player_state = gameData.player_state
             if player_state:
                 ga = player_state.mLocation.GalacticAddress
                 logger.info(
-                    f"[WARP-RE]   mLocation at Generate time: "
-                    f"SSI={ga.SolarSystemIndex}, X={ga.VoxelX}, Y={ga.VoxelY}, Z={ga.VoxelZ}"
+                    f"[WARP-RE]   mLocation: SSI={ga.SolarSystemIndex}, X={ga.VoxelX}, "
+                    f"Y={ga.VoxelY}, Z={ga.VoxelZ}, Planet={ga.PlanetIndex}"
+                )
+                prev = player_state.mPrevLocation.GalacticAddress
+                logger.info(
+                    f"[WARP-RE]   mPrevLocation: SSI={prev.SolarSystemIndex}, X={prev.VoxelX}, "
+                    f"Y={prev.VoxelY}, Z={prev.VoxelZ}"
                 )
         except Exception as e:
-            logger.debug(f"[WARP-RE] Generate caller trace failed: {e}")
+            logger.info(f"[WARP-RE] Generate caller trace failed: {e}")
+            import traceback; logger.info(traceback.format_exc())
 
     @get_caller
     @nms.cGcSolarSystem.Construct.before
     def _warp_debug_construct_caller(self, this):
         """Trace WHO calls SolarSystem.Construct during a warp."""
         try:
-            base = _internal.BASE_ADDRESS
-            caller = self._warp_debug_construct_caller.caller_address()
-            offset = caller - base
-            logger.info(f"[WARP-RE] cGcSolarSystem.Construct CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
+            import ctypes
+            caller_raw = self._warp_debug_construct_caller.caller_address()
+            caller = ctypes.c_uint64(caller_raw).value
+            base_val = ctypes.c_uint64(_internal.BASE_ADDRESS).value if _internal.BASE_ADDRESS else 0
+            offset = caller - base_val if base_val else caller
+            logger.info(f"[WARP-RE] === SolarSystem.Construct ===")
+            logger.info(f"[WARP-RE]   caller=0x{caller:016X}  offset=0x{offset:X}")
         except Exception as e:
-            logger.debug(f"[WARP-RE] Construct caller trace failed: {e}")
+            logger.info(f"[WARP-RE] Construct caller trace failed: {e}")
 
     @get_caller
     @nms.cGcApplicationLocalLoadState.GetRespawnReason.before
     def _warp_debug_respawn_caller(self, this):
         """Trace WHO calls GetRespawnReason."""
         try:
-            base = _internal.BASE_ADDRESS
-            caller = self._warp_debug_respawn_caller.caller_address()
-            offset = caller - base
-            logger.info(f"[WARP-RE] GetRespawnReason CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
+            import ctypes
+            caller_raw = self._warp_debug_respawn_caller.caller_address()
+            caller = ctypes.c_uint64(caller_raw).value
+            base_val = ctypes.c_uint64(_internal.BASE_ADDRESS).value if _internal.BASE_ADDRESS else 0
+            offset = caller - base_val if base_val else caller
+            logger.info(f"[WARP-RE] === GetRespawnReason ===")
+            logger.info(f"[WARP-RE]   caller=0x{caller:016X}  offset=0x{offset:X}")
         except Exception as e:
-            logger.debug(f"[WARP-RE] GetRespawnReason caller trace failed: {e}")
+            logger.info(f"[WARP-RE] GetRespawnReason caller trace failed: {e}")
 
     @nms.cGcApplicationLocalLoadState.GetRespawnReason.after
     def _warp_debug_respawn_result(self, this, _result_):

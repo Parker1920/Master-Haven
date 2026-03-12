@@ -55,6 +55,40 @@ app.include_router(page_router)
 
 
 # ---------------------------------------------------------------------------
+# Schema migrations  (idempotent — safe to re-run on every startup)
+# ---------------------------------------------------------------------------
+def _run_schema_migrations() -> None:
+    """Add columns introduced after initial create_all.
+
+    SQLAlchemy's create_all only creates missing *tables*, not missing columns.
+    Each statement uses 'ADD COLUMN' which SQLite will reject with
+    'duplicate column name' if it already exists — we catch and ignore that.
+    """
+    import sqlite3
+
+    db_path = os.path.join("data", "economy.db")
+    if not os.path.exists(db_path):
+        return  # fresh DB, create_all handled everything
+
+    conn = sqlite3.connect(db_path)
+    migrations = [
+        # Nation currency & GDP columns (Phase 1)
+        "ALTER TABLE nations ADD COLUMN currency_name TEXT",
+        "ALTER TABLE nations ADD COLUMN currency_code TEXT",
+        "ALTER TABLE nations ADD COLUMN gdp_score INTEGER DEFAULT 50",
+        "ALTER TABLE nations ADD COLUMN gdp_multiplier INTEGER DEFAULT 100",
+        "ALTER TABLE nations ADD COLUMN gdp_last_calculated DATETIME",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Startup event
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
@@ -66,6 +100,10 @@ def on_startup() -> None:
 
     # 2. Create all database tables
     init_db()
+
+    # 2b. Lightweight schema migration — add columns that create_all won't add
+    #     to existing tables.  Each ALTER is idempotent (duplicate column is ignored).
+    _run_schema_migrations()
 
     # 3. Seed the World Mint admin user if it does not already exist
     db = SessionLocal()
