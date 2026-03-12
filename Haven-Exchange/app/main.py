@@ -108,11 +108,19 @@ def on_startup() -> None:
     # 3. Seed the World Mint admin user if it does not already exist
     db = SessionLocal()
     try:
+        # Check by username first (handles rename from HVN- to TRV- prefix)
         existing_admin = (
             db.query(User)
-            .filter(User.wallet_address == settings.WORLD_MINT_ADDRESS)
+            .filter(
+                (User.wallet_address == settings.WORLD_MINT_ADDRESS)
+                | (User.username == "admin")
+            )
             .first()
         )
+        # If admin exists but has old wallet prefix, update it
+        if existing_admin and existing_admin.wallet_address != settings.WORLD_MINT_ADDRESS:
+            existing_admin.wallet_address = settings.WORLD_MINT_ADDRESS
+            db.commit()
         if existing_admin is None:
             hashed_pw = bcrypt.hashpw("changeme".encode(), bcrypt.gensalt()).decode()
             admin_user = User(

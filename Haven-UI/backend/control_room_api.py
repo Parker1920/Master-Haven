@@ -11733,6 +11733,9 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
     if not discord_tag:
         raise HTTPException(status_code=400, detail='Community (discord tag) is required')
 
+    # Get client IP for tracking
+    client_ip = request.client.host if request.client else "unknown"
+
     # Compute type slug
     discovery_type = payload.get('discovery_type') or 'Unknown'
     type_slug = get_discovery_type_slug(discovery_type)
@@ -14663,6 +14666,9 @@ async def receive_extraction(
     """
     # Validate API key if provided
     api_key_info = verify_api_key(x_api_key) if x_api_key else None
+
+    # Get client IP for tracking
+    client_ip = request.client.host if request.client else "unknown"
 
     # Extract required fields
     glyph_code = payload.get('glyph_code')
