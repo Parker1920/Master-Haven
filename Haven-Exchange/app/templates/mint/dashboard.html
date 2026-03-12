@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}World Mint — Haven Exchange{% endblock %}
+{% block title %}World Mint — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="mint-header">
@@ -80,6 +80,52 @@
     </div>
 </div>
 {% endif %}
+
+<!-- GDP Overview -->
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>GDP Overview</h3>
+        <form action="/mint/recalculate-gdp" method="POST" style="display: inline;"
+              data-confirm="Recalculate GDP scores for all nations?">
+            <button type="submit" class="btn btn-sm btn-primary">Recalculate GDP</button>
+        </form>
+    </div>
+    <div class="card-body">
+        {% if gdp_nations %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nation</th>
+                        <th>Currency</th>
+                        <th>GDP Score</th>
+                        <th>Multiplier</th>
+                        <th>Members</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for n in gdp_nations %}
+                    {% set gdp_val = (n.gdp_multiplier or 100) / 100 %}
+                    <tr>
+                        <td><a href="/nations/{{ n.id }}">{{ n.name }}</a></td>
+                        <td>{{ n.currency_code or 'TC' }}</td>
+                        <td>{{ n.gdp_score or 50 }}</td>
+                        <td>
+                            <span class="gdp-badge {% if gdp_val >= 1.5 %}gdp-strong{% elif gdp_val >= 1.0 %}gdp-moderate{% else %}gdp-weak{% endif %}">
+                                {{ '%.2f' | format(gdp_val) }}x
+                            </span>
+                        </td>
+                        <td>{{ n.member_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No approved nations yet.</p>
+        {% endif %}
+    </div>
+</div>
 
 <!-- Monthly Allocations -->
 <div class="card mb-xl">
@@ -209,7 +255,7 @@
                 <div class="form-group">
                     <label for="to_address">Target Address</label>
                     <input type="text" id="to_address" name="to_address" required
-                           placeholder="HVN-xxxxxxxx" style="font-family: var(--font-mono);">
+                           placeholder="TRV-xxxxxxxx" style="font-family: var(--font-mono);">
                     <span class="form-hint">Wallet or nation treasury address to receive minted funds</span>
                 </div>
                 <div class="form-group">

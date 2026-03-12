@@ -1,5 +1,5 @@
 """
-Haven Economy — World Mint Admin Routes
+Travelers Exchange — World Mint Admin Routes
 
 Provides the administrative endpoints for the World Mint operator:
 global economy stats, minting execution, allocation management, and
@@ -19,7 +19,8 @@ from app.auth import require_role
 from app.blockchain import create_transaction, verify_chain
 from app.config import settings
 from app.database import get_db
-from app.models import MintAllocation, Nation, Transaction, User
+from app.gdp import recalculate_all_gdp
+from app.models import GdpSnapshot, MintAllocation, Nation, Transaction, User
 
 router = APIRouter(prefix="/api/mint", tags=["mint"])
 
@@ -110,6 +111,29 @@ def mint_stats(
     chain_result = verify_chain(db)
     chain_valid = chain_result["valid"]
 
+    # GDP overview — per-nation scores
+    gdp_nations = list(
+        db.execute(
+            select(Nation).where(Nation.status == "approved")
+            .order_by(Nation.gdp_multiplier.desc())
+        ).scalars().all()
+    )
+    gdp_overview = [
+        {
+            "name": n.name,
+            "currency_code": n.currency_code or "TC",
+            "gdp_score": n.gdp_score,
+            "gdp_multiplier": n.gdp_multiplier,
+            "gdp_display": round(n.gdp_multiplier / 100, 2),
+            "member_count": n.member_count,
+        }
+        for n in gdp_nations
+    ]
+    avg_gdp = (
+        round(sum(n.gdp_multiplier for n in gdp_nations) / len(gdp_nations) / 100, 2)
+        if gdp_nations else 1.0
+    )
+
     return {
         "total_supply": total_supply,
         "total_transactions": total_transactions,
@@ -117,6 +141,8 @@ def mint_stats(
         "total_nations": total_nations,
         "active_users_30d": active_users_30d,
         "chain_valid": chain_valid,
+        "gdp_overview": gdp_overview,
+        "avg_gdp_multiplier": avg_gdp,
     }
 
 
@@ -553,4 +579,52 @@ def execute_all_approved(
         "executed": executed,
         "total_minted": total_minted,
         "details": details,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/recalculate-gdp
+# ---------------------------------------------------------------------------
+@router.post("/recalculate-gdp")
+def recalculate_gdp(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Force a GDP recalculation for all approved nations."""
+    count = recalculate_all_gdp(db)
+    return {"success": True, "nations_recalculated": count}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/mint/gdp-history
+# ---------------------------------------------------------------------------
+@router.get("/gdp-history")
+def gdp_history(
+    nation_id: int | None = None,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Return GDP snapshot history for chart display."""
+    stmt = select(GdpSnapshot).order_by(GdpSnapshot.created_at.desc()).limit(limit)
+    if nation_id is not None:
+        stmt = stmt.where(GdpSnapshot.nation_id == nation_id)
+
+    snapshots = list(db.execute(stmt).scalars().all())
+
+    return {
+        "snapshots": [
+            {
+                "nation_id": s.nation_id,
+                "snapshot_date": s.snapshot_date,
+                "treasury_score": s.treasury_score,
+                "activity_score": s.activity_score,
+                "revenue_score": s.revenue_score,
+                "citizens_score": s.citizens_score,
+                "composite_score": s.composite_score,
+                "gdp_multiplier": s.gdp_multiplier,
+                "gdp_display": round(s.gdp_multiplier / 100, 2),
+            }
+            for s in snapshots
+        ]
     }

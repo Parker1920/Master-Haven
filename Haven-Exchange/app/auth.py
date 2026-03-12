@@ -1,5 +1,5 @@
 """
-Haven Economy — Authentication Helpers & FastAPI Dependencies
+Travelers Exchange — Authentication Helpers & FastAPI Dependencies
 
 Provides password hashing, session management, and dependency injection
 functions for protecting routes.

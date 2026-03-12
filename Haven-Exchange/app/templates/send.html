@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Send {{ settings.CURRENCY_SHORT }} — Haven Exchange{% endblock %}
+{% block title %}Send {{ settings.CURRENCY_SHORT }} — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="container-narrow" style="padding-top: var(--space-xl);">
@@ -18,7 +18,7 @@
             <div class="form-group">
                 <label for="to_address">Recipient Address</label>
                 <input type="text" id="to_address" name="to_address" required
-                       placeholder="HVN-xxxxxxxx" style="font-family: var(--font-mono);"
+                       placeholder="TRV-xxxxxxxx" style="font-family: var(--font-mono);"
                        {% if prefill_address %}value="{{ prefill_address }}"{% endif %}>
                 <span class="form-hint">Enter a wallet address or search by username</span>
                 <div id="recipient-name-hint" style="min-height: 1.4em; margin-top: 4px; font-size: 0.875rem;"></div>

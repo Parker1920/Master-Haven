@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Marketplace — Haven Exchange{% endblock %}
+{% block title %}Marketplace — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -62,7 +62,10 @@
         {% if listing.description %}
         <div class="listing-desc">{{ listing.description }}</div>
         {% endif %}
-        <div class="listing-price">{{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        <div class="listing-price">{{ listing.price | format_number }} TC</div>
+        {% if user_currency and user_currency.code != 'TC' and user_currency.gdp_multiplier %}
+        <div class="listing-price-local">{{ tc_to_national(listing.price, user_currency.gdp_multiplier) | format_number }} {{ user_currency.code }} for you</div>
+        {% endif %}
         <div class="listing-meta">
             <span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span>
             <span>{{ shop.name }}</span>

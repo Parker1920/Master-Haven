@@ -1,5 +1,5 @@
 """
-Haven Economy — Wallet Routes
+Travelers Exchange — Wallet Routes
 
 Endpoints for viewing wallet information and per-address transaction
 history.

@@ -1,5 +1,5 @@
 """
-Haven Economy — Authentication Routes
+Travelers Exchange — Authentication Routes
 
 Provides registration, login, and logout endpoints under ``/api/auth``.
 """

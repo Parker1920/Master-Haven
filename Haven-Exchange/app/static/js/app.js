@@ -1,5 +1,5 @@
 /* =========================================================================
-   Haven Economy — Frontend JavaScript
+   Travelers Exchange — Frontend JavaScript
    ========================================================================= */
 
 (function () {
@@ -395,8 +395,8 @@
             dropdown.innerHTML = "";
             currentFocus = -1;
 
-            // Only search if it looks like a username (not a full HVN- address)
-            if (q.length < 2 || q.startsWith("HVN-")) return;
+            // Only search if it looks like a username (not a full TRV- address)
+            if (q.length < 2 || q.startsWith("TRV-")) return;
 
             debounceTimer = setTimeout(function () {
                 fetch("/api/wallet/search?q=" + encodeURIComponent(q))

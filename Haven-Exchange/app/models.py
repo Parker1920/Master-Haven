@@ -1,5 +1,5 @@
 """
-Haven Economy — SQLAlchemy ORM Models
+Travelers Exchange — SQLAlchemy ORM Models
 
 Defines all core tables:
   - Users
@@ -12,6 +12,7 @@ Defines all core tables:
   - StockHoldings
   - StockTransactions
   - StockValuations
+  - GdpSnapshots
   - Sessions
 """
 
@@ -82,6 +83,15 @@ class Nation(Base):
         insert_default=func.current_timestamp()
     )
 
+    # National currency
+    currency_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # "Voyager Credits"
+    currency_code: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # "VGC"
+
+    # GDP — drives exchange rate multiplier
+    gdp_score: Mapped[int] = mapped_column(Integer, default=50)           # composite 0-100
+    gdp_multiplier: Mapped[int] = mapped_column(Integer, default=100)     # stored as int x100 (100 = 1.00x)
+    gdp_last_calculated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
     # Relationships
     leader: Mapped["User"] = relationship(
         "User",
@@ -95,6 +105,9 @@ class Nation(Base):
     )
     mint_allocations: Mapped[List["MintAllocation"]] = relationship(
         "MintAllocation", back_populates="nation", cascade="all, delete-orphan"
+    )
+    gdp_snapshots: Mapped[List["GdpSnapshot"]] = relationship(
+        "GdpSnapshot", back_populates="nation", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -343,6 +356,36 @@ class StockValuation(Base):
         return (
             f"<StockValuation(stock_id={self.stock_id}, date='{self.snapshot_date}', "
             f"price={self.calculated_price})>"
+        )
+
+
+class GdpSnapshot(Base):
+    """A daily snapshot of a nation's GDP pillar scores and multiplier."""
+
+    __tablename__ = "gdp_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=False
+    )
+    treasury_score: Mapped[int] = mapped_column(Integer, default=0)
+    activity_score: Mapped[int] = mapped_column(Integer, default=0)
+    revenue_score: Mapped[int] = mapped_column(Integer, default=0)
+    citizens_score: Mapped[int] = mapped_column(Integer, default=0)
+    composite_score: Mapped[int] = mapped_column(Integer, default=0)
+    gdp_multiplier: Mapped[int] = mapped_column(Integer, default=100)  # x100
+    snapshot_date: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+
+    # Relationships
+    nation: Mapped["Nation"] = relationship("Nation", back_populates="gdp_snapshots")
+
+    def __repr__(self) -> str:
+        return (
+            f"<GdpSnapshot(nation_id={self.nation_id}, date='{self.snapshot_date}', "
+            f"multiplier={self.gdp_multiplier})>"
         )
 
 

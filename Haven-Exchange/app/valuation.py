@@ -1,5 +1,5 @@
 """
-Haven Economy — Stock Valuation Engine
+Travelers Exchange — Stock Valuation Engine
 
 Handles stock creation, ticker generation, and the three-pillar valuation
 system that drives stock prices based on real performance metrics.
@@ -26,8 +26,8 @@ from app.models import (
 _stock_lock = threading.Lock()
 
 # Base prices for new stocks
-NATION_BASE_PRICE = 10   # HM per share
-BUSINESS_BASE_PRICE = 5  # HM per share
+NATION_BASE_PRICE = 10   # TC per share
+BUSINESS_BASE_PRICE = 5  # TC per share
 NATION_TOTAL_SHARES = 10_000
 BUSINESS_MIN_SHARES = 100
 BUSINESS_MAX_SHARES = 1_000
@@ -251,7 +251,7 @@ def _score_nation_stock(db, stock: Stock, all_nation_metrics: dict) -> dict:
 
     activity_metric = active_members + tx_count
 
-    # Pillar 3: Cash Flow — HM flowing through nation (not treasury balance)
+    # Pillar 3: Cash Flow — TC flowing through nation (not treasury balance)
     cashflow = 0
     all_addrs = list(member_addresses)
     if treasury_addr:

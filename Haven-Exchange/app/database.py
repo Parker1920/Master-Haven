@@ -1,5 +1,5 @@
 """
-Haven Economy — Database Engine & Session Management
+Travelers Exchange — Database Engine & Session Management
 """
 
 import os

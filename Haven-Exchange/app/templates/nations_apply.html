@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Create a Nation — Haven Exchange{% endblock %}
+{% block title %}Create a Nation — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1>Create a Nation</h1>
-    <p class="page-subtitle">Apply to establish a new nation in the Haven Exchange economy</p>
+    <p class="page-subtitle">Apply to establish a new nation in the Travelers Exchange economy</p>
 </div>
 
 {% if existing_nation %}
@@ -61,6 +61,27 @@
                 <input type="text" id="discord_invite" name="discord_invite"
                        placeholder="https://discord.gg/...">
                 <span class="form-hint">Optional — provide a Discord invite so members can find your community</span>
+            </div>
+
+            <hr style="border-color: var(--border); margin: var(--space-lg) 0;">
+            <h4 style="margin-bottom: var(--space-md);">National Currency</h4>
+            <p class="text-muted" style="font-size: 0.875rem; margin-bottom: var(--space-md);">
+                Your nation can have its own named currency. Its value relative to Travelers Coin (TC)
+                is determined by your nation's GDP strength (0.5x &ndash; 2.0x).
+            </p>
+
+            <div class="form-group">
+                <label for="currency_name">Currency Name</label>
+                <input type="text" id="currency_name" name="currency_name"
+                       placeholder="e.g. Voyager Credits" maxlength="50">
+                <span class="form-hint">A display name for your national currency</span>
+            </div>
+
+            <div class="form-group">
+                <label for="currency_code">Currency Code</label>
+                <input type="text" id="currency_code" name="currency_code"
+                       placeholder="e.g. VGC" maxlength="5" style="text-transform: uppercase;">
+                <span class="form-hint">2&ndash;5 uppercase letters (e.g. VGC, CRED). Must be unique.</span>
             </div>
 
             <div class="form-note mb-lg">

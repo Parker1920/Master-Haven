@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Nations — Haven Exchange{% endblock %}
+{% block title %}Nations — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header" style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md);">
     <div>
         <h1>Nation Directory</h1>
-        <p class="page-subtitle">Communities participating in the Haven Exchange economy</p>
+        <p class="page-subtitle">Communities participating in the Travelers Exchange economy</p>
     </div>
     {% if user %}
     <a href="/nations/apply" class="btn btn-primary">Create a Nation</a>
@@ -24,9 +24,20 @@
         {% if nation.description %}
             <div class="nation-desc">{{ nation.description }}</div>
         {% endif %}
+        {% if nation.currency_code %}
+        <div class="nation-currency">
+            {{ nation.currency_name or nation.currency_code }} ({{ nation.currency_code }})
+        </div>
+        {% endif %}
         <div class="nation-meta">
             <span>{{ nation.member_count }} member{{ 's' if nation.member_count != 1 else '' }}</span>
-            <span>Treasury: {{ nation.treasury_balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+            <span>Treasury: {{ nation.treasury_balance | format_number }} TC</span>
+            {% if nation.gdp_multiplier is defined and nation.gdp_multiplier %}
+            {% set gdp_val = nation.gdp_multiplier / 100 %}
+            <span class="gdp-badge {% if gdp_val >= 1.5 %}gdp-strong{% elif gdp_val >= 1.0 %}gdp-moderate{% else %}gdp-weak{% endif %}">
+                GDP {{ '%.2f' | format(gdp_val) }}x
+            </span>
+            {% endif %}
         </div>
     </a>
     {% endfor %}

@@ -1,5 +1,5 @@
 """
-Haven Economy — Page Routes (HTML Templates)
+Travelers Exchange — Page Routes (HTML Templates)
 
 Serves all user-facing HTML pages via Jinja2 templates.
 """
@@ -41,6 +41,7 @@ from app.models import (
     Transaction,
     User,
 )
+from app.gdp import format_currency, maybe_recalculate_gdp, recalculate_all_gdp, tc_to_national
 from app.valuation import (
     _stock_lock,
     create_business_stock,
@@ -75,13 +76,39 @@ templates.env.filters["format_number"] = format_number
 PER_PAGE = 25
 
 
-def _base_context(request: Request, user: Optional[User], **kwargs) -> dict:
-    """Build the base template context that every page needs."""
+def _base_context(request: Request, user: Optional[User], db: Session = None, **kwargs) -> dict:
+    """Build the base template context that every page needs.
+
+    Includes the user's nation currency info for balance display conversion.
+    """
+    # Resolve user's nation for currency context
+    user_nation = None
+    if user and user.nation_id and db:
+        user_nation = db.execute(
+            select(Nation).where(Nation.id == user.nation_id)
+        ).scalar_one_or_none()
+
+    user_currency = {
+        "code": user_nation.currency_code if user_nation and user_nation.currency_code else "TC",
+        "name": user_nation.currency_name if user_nation and user_nation.currency_name else "Travelers Coin",
+        "gdp": round((user_nation.gdp_multiplier or 100) / 100, 2) if user_nation else 1.0,
+        "gdp_multiplier": user_nation.gdp_multiplier if user_nation else 100,
+    }
+
+    # Convert user balance to national coin
+    user_balance_national = None
+    if user and user_nation and user_nation.gdp_multiplier:
+        user_balance_national = tc_to_national(user.balance, user_nation.gdp_multiplier)
+
     ctx = {
         "request": request,
         "user": user,
+        "user_nation": user_nation,
+        "user_currency": user_currency,
+        "user_balance_national": user_balance_national,
         "settings": settings,
         "active_page": kwargs.pop("active_page", ""),
+        "tc_to_national": tc_to_national,
     }
     ctx.update(kwargs)
     return ctx
@@ -155,7 +182,7 @@ def landing_page(
         "total_nations": total_nations,
     }
 
-    ctx = _base_context(request, user, active_page="home", stats=stats)
+    ctx = _base_context(request, user, db=db, active_page="home", stats=stats)
     return templates.TemplateResponse("landing.html", ctx)
 
 
@@ -166,9 +193,10 @@ def landing_page(
 def login_page(
     request: Request,
     user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     # Don't auto-redirect — let users switch accounts from the login page
-    ctx = _base_context(request, user, active_page="login")
+    ctx = _base_context(request, user, db=db, active_page="login")
     return templates.TemplateResponse("login.html", ctx)
 
 
@@ -179,10 +207,11 @@ def login_page(
 def register_page(
     request: Request,
     user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     if user is not None:
         return RedirectResponse(url="/dashboard", status_code=303)
-    ctx = _base_context(request, user, active_page="register")
+    ctx = _base_context(request, user, db=db, active_page="register")
     return templates.TemplateResponse("register.html", ctx)
 
 
@@ -238,6 +267,7 @@ def ledger_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="ledger",
         transactions=transactions,
         name_map=name_map,
@@ -279,7 +309,7 @@ def tx_detail_page(
     ).scalar_one_or_none()
 
     name_map = _build_name_map(db)
-    ctx = _base_context(request, user, active_page="ledger", tx=tx, next_tx=next_tx, name_map=name_map, block_number=tx.id)
+    ctx = _base_context(request, user, db=db, active_page="ledger", tx=tx, next_tx=next_tx, name_map=name_map, block_number=tx.id)
     return templates.TemplateResponse("tx_detail.html", ctx)
 
 
@@ -302,7 +332,7 @@ def nations_page(
         .all()
     )
 
-    ctx = _base_context(request, user, active_page="nations", nations=nations)
+    ctx = _base_context(request, user, db=db, active_page="nations", nations=nations)
     return templates.TemplateResponse("nations.html", ctx)
 
 
@@ -323,6 +353,7 @@ def nations_apply_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="nations",
         existing_nation=existing_nation,
     )
@@ -339,6 +370,8 @@ def nations_apply_post(
     description: str = Form(""),
     game: str = Form(""),
     discord_invite: str = Form(""),
+    currency_name: str = Form(""),
+    currency_code: str = Form(""),
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
@@ -362,6 +395,25 @@ def nations_apply_post(
             status_code=303,
         )
 
+    # Validate currency code if provided
+    import re
+    cc = currency_code.strip().upper() if currency_code else ""
+    cn = currency_name.strip() if currency_name else ""
+    if cc:
+        if not re.match(r"^[A-Z]{2,5}$", cc):
+            return RedirectResponse(
+                url="/nations/apply?error=Currency+code+must+be+2-5+uppercase+letters",
+                status_code=303,
+            )
+        code_taken = db.execute(
+            select(Nation).where(Nation.currency_code == cc)
+        ).scalar_one_or_none()
+        if code_taken is not None:
+            return RedirectResponse(
+                url=f"/nations/apply?error=Currency+code+{cc}+is+already+in+use",
+                status_code=303,
+            )
+
     # Create the nation with placeholder address, flush to get ID
     nation = Nation(
         name=name.strip(),
@@ -370,6 +422,8 @@ def nations_apply_post(
         description=description.strip() or None,
         discord_invite=discord_invite.strip() or None,
         game=game.strip() or None,
+        currency_name=cn or None,
+        currency_code=cc or None,
         status="pending",
         member_count=0,
     )
@@ -423,21 +477,26 @@ def nation_detail_page(
     # Determine if the viewing user can join or leave this nation
     can_join = False
     can_leave = False
+    is_leader = False
     if user is not None and nation.status == "approved":
         if user.nation_id is None:
             can_join = True
         elif user.nation_id == nation.id and user.id != nation.leader_id:
             can_leave = True
+    if user is not None and user.id == nation.leader_id:
+        is_leader = True
 
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="nations",
         nation=nation,
         leader_name=leader_name,
         members=members,
         can_join=can_join,
         can_leave=can_leave,
+        is_leader=is_leader,
     )
     return templates.TemplateResponse("nation_detail.html", ctx)
 
@@ -525,6 +584,39 @@ def nation_leave_post(
 
 
 # ---------------------------------------------------------------------------
+# POST /nations/{nation_id}/edit-description — Leader edits nation description
+# ---------------------------------------------------------------------------
+@router.post("/nations/{nation_id}/edit-description")
+def nation_edit_description_post(
+    nation_id: int,
+    request: Request,
+    description: str = Form(""),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        return RedirectResponse(url="/nations?error=Nation+not+found", status_code=303)
+
+    if user.id != nation.leader_id:
+        return RedirectResponse(
+            url=f"/nations/{nation_id}?error=Only+the+nation+leader+can+edit+the+description",
+            status_code=303,
+        )
+
+    nation.description = description.strip()
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/nations/{nation_id}?success=Description+updated",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /nation/treasury — Nation leader treasury dashboard
 # ---------------------------------------------------------------------------
 @router.get("/nation/treasury")
@@ -568,6 +660,7 @@ def nation_treasury_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="treasury",
         nation=nation,
         recent_distributions=recent_distributions,
@@ -614,6 +707,7 @@ def nation_distribute_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="treasury",
         nation=nation,
         members=members,
@@ -782,6 +876,7 @@ def nation_members_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="members",
         nation=nation,
         members=members,
@@ -848,6 +943,7 @@ def market_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="market",
         listings=rows,
         nations=nations_list,
@@ -893,6 +989,7 @@ def market_shop_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="market",
         shop=shop,
         listings=listings,
@@ -933,6 +1030,7 @@ def market_buy_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="market",
         shop=shop,
         listing=listing,
@@ -1047,6 +1145,7 @@ def wallet_search_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="",
         q=q,
         results=results,
@@ -1121,6 +1220,7 @@ def wallet_lookup_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="",
         address=address,
         balance=balance,
@@ -1204,6 +1304,7 @@ def dashboard_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="dashboard",
         nation=nation,
         led_nation=led_nation,
@@ -1226,10 +1327,12 @@ def send_page(
     error: str = Query(None),
     success: str = Query(None),
     user: User = Depends(require_login),
+    db: Session = Depends(get_db),
 ):
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="send",
         prefill_address=to,
         flash_error=error,
@@ -1345,6 +1448,7 @@ def history_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="history",
         transactions=transactions,
         name_map=name_map,
@@ -1413,6 +1517,7 @@ def shop_manage_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="shop",
         shop=shop,
         listings=listings,
@@ -1449,6 +1554,7 @@ def shop_create_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="shop",
         nation_name=nation.name,
         flash_error=error if error else None,
@@ -1575,7 +1681,7 @@ def settings_page(
             select(Nation).where(Nation.id == user.nation_id)
         ).scalar_one_or_none()
 
-    ctx = _base_context(request, user, active_page="settings", nation=nation)
+    ctx = _base_context(request, user, db=db, active_page="settings", nation=nation)
     return templates.TemplateResponse("settings.html", ctx)
 
 
@@ -1757,9 +1863,21 @@ def mint_dashboard_page(
         .all()
     )
 
+    # GDP nations for overview
+    gdp_nations = list(
+        db.execute(
+            select(Nation)
+            .where(Nation.status == "approved")
+            .order_by(Nation.name)
+        )
+        .scalars()
+        .all()
+    )
+
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="mint",
         total_supply=total_supply,
         total_transactions=total_transactions,
@@ -1772,6 +1890,7 @@ def mint_dashboard_page(
         pending_allocations=pending_allocations,
         approved_allocations=approved_allocations,
         recent_allocations=recent_allocations,
+        gdp_nations=gdp_nations,
     )
     return templates.TemplateResponse("mint/dashboard.html", ctx)
 
@@ -1881,6 +2000,7 @@ def mint_stats_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="mint",
         chain_valid=chain_valid,
         chain_errors=chain_errors,
@@ -2167,6 +2287,19 @@ def mint_execute_allocation_post(
 # ---------------------------------------------------------------------------
 # POST /mint/recalculate-stocks — Recalculate all stock prices
 # ---------------------------------------------------------------------------
+@router.post("/mint/recalculate-gdp")
+def mint_recalculate_gdp_post(
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    count = recalculate_all_gdp(db)
+    return RedirectResponse(
+        url=f"/mint?success=Recalculated+GDP+for+{count}+nations",
+        status_code=303,
+    )
+
+
 @router.post("/mint/recalculate-stocks")
 def mint_recalculate_stocks_post(
     request: Request,
@@ -2222,6 +2355,7 @@ def exchange_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="exchange",
         stocks=stocks,
         stock_type=stock_type,
@@ -2323,6 +2457,7 @@ def exchange_detail_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="exchange",
         stock=stock,
         latest_val=latest_val,
@@ -2374,6 +2509,7 @@ def exchange_trade_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="exchange",
         stock=stock,
         user_holding=user_holding,
@@ -2641,6 +2777,7 @@ def portfolio_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="portfolio",
         portfolio_items=portfolio_items,
         total_value=total_value,
@@ -2691,6 +2828,7 @@ def shop_ipo_page(
     ctx = _base_context(
         request,
         user,
+        db=db,
         active_page="shop",
         shop=shop,
         eligible=eligible,

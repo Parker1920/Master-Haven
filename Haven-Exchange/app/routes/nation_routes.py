@@ -1,5 +1,5 @@
 """
-Haven Economy — Nation Management Routes
+Travelers Exchange — Nation Management Routes
 
 Provides endpoints for nation application, membership (join/leave),
 member listing, and treasury distribution by nation leaders.
@@ -30,6 +30,8 @@ class NationApplyRequest(BaseModel):
     description: str | None = None
     discord_invite: str | None = None
     game: str | None = None
+    currency_name: str | None = None   # e.g. "Voyager Credits"
+    currency_code: str | None = None   # e.g. "VGC" (2-5 uppercase alpha)
 
 
 class JoinNationRequest(BaseModel):
@@ -93,6 +95,26 @@ def apply_nation(
             detail=f"A nation with the name '{payload.name.strip()}' already exists.",
         )
 
+    # Validate currency code (2-5 uppercase alpha)
+    import re
+    currency_code = (payload.currency_code or "").strip().upper()
+    currency_name = (payload.currency_name or "").strip()
+    if currency_code:
+        if not re.match(r"^[A-Z]{2,5}$", currency_code):
+            raise HTTPException(
+                status_code=400,
+                detail="Currency code must be 2-5 uppercase letters (e.g., VGC).",
+            )
+        # Ensure currency code is unique
+        code_taken = db.execute(
+            select(Nation).where(Nation.currency_code == currency_code)
+        ).scalar_one_or_none()
+        if code_taken is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Currency code '{currency_code}' is already in use.",
+            )
+
     # Create the Nation with a placeholder treasury address, flush to get ID
     nation = Nation(
         name=payload.name.strip(),
@@ -101,6 +123,8 @@ def apply_nation(
         description=payload.description,
         discord_invite=payload.discord_invite,
         game=payload.game,
+        currency_name=currency_name or None,
+        currency_code=currency_code or None,
         status="pending",
         member_count=0,
     )
@@ -118,6 +142,35 @@ def apply_nation(
         "nation_id": nation.id,
         "name": nation.name,
         "status": "pending",
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/nations — list all approved nations
+# ---------------------------------------------------------------------------
+@router.get("")
+def list_nations(db: Session = Depends(get_db)):
+    """Return all approved nations with GDP info."""
+    nations = list(
+        db.execute(
+            select(Nation).where(Nation.status == "approved")
+            .order_by(Nation.name)
+        ).scalars().all()
+    )
+    return {
+        "nations": [
+            {
+                "id": n.id,
+                "name": n.name,
+                "member_count": n.member_count,
+                "currency_name": n.currency_name,
+                "currency_code": n.currency_code,
+                "gdp_score": n.gdp_score,
+                "gdp_multiplier": n.gdp_multiplier,
+                "gdp_display": round(n.gdp_multiplier / 100, 2),
+            }
+            for n in nations
+        ]
     }
 
 

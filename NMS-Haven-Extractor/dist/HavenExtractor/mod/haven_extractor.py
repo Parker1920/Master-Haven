@@ -45,12 +45,15 @@ from typing import Optional, Set, List, Dict
 
 from pymhf import Mod
 from pymhf.core.memutils import map_struct, get_addressof
+from pymhf.core.hooking import get_caller
 from pymhf.gui.decorators import gui_button, gui_variable
+import pymhf.core._internal as _internal
 import nmspy.data.types as nms
 import nmspy.data.exported_types as nmse
 from nmspy.decorators import on_state_change
 from nmspy.common import gameData
-from ctypes import c_uint64, pointer, sizeof
+from ctypes import c_uint64, c_int64, c_void_p, pointer, sizeof
+import nmspy.data.basic_types as basic
 
 # NMS procedural name generation (ported from nms_namegen)
 try:
@@ -2294,6 +2297,86 @@ class HavenExtractorMod(Mod):
             logger.error(f"GenerateCreatureRoles capture failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+    # =========================================================================
+    # WARP DEBUG - Reverse engineering the galaxy map warp call chain
+    # Uses @get_caller to trace which functions call Generate, Construct, etc.
+    # Remove this section once warp-to-glyphs implementation is confirmed
+    # =========================================================================
+
+    @get_caller
+    @nms.cGcSolarSystem.Generate.before
+    def _warp_debug_generate_caller(self, this, lbUseSettingsFile, lSeed):
+        """Trace WHO calls SolarSystem.Generate during a warp."""
+        try:
+            base = _internal.BASE_ADDRESS
+            caller = self._warp_debug_generate_caller.caller_address()
+            offset = caller - base
+            logger.info(f"[WARP-RE] cGcSolarSystem.Generate CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
+            # Also log mLocation at this moment
+            player_state = gameData.player_state
+            if player_state:
+                ga = player_state.mLocation.GalacticAddress
+                logger.info(
+                    f"[WARP-RE]   mLocation at Generate time: "
+                    f"SSI={ga.SolarSystemIndex}, X={ga.VoxelX}, Y={ga.VoxelY}, Z={ga.VoxelZ}"
+                )
+        except Exception as e:
+            logger.debug(f"[WARP-RE] Generate caller trace failed: {e}")
+
+    @get_caller
+    @nms.cGcSolarSystem.Construct.before
+    def _warp_debug_construct_caller(self, this):
+        """Trace WHO calls SolarSystem.Construct during a warp."""
+        try:
+            base = _internal.BASE_ADDRESS
+            caller = self._warp_debug_construct_caller.caller_address()
+            offset = caller - base
+            logger.info(f"[WARP-RE] cGcSolarSystem.Construct CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
+        except Exception as e:
+            logger.debug(f"[WARP-RE] Construct caller trace failed: {e}")
+
+    @get_caller
+    @nms.cGcApplicationLocalLoadState.GetRespawnReason.before
+    def _warp_debug_respawn_caller(self, this):
+        """Trace WHO calls GetRespawnReason."""
+        try:
+            base = _internal.BASE_ADDRESS
+            caller = self._warp_debug_respawn_caller.caller_address()
+            offset = caller - base
+            logger.info(f"[WARP-RE] GetRespawnReason CALLED FROM: 0x{caller:X} (base+0x{offset:X})")
+        except Exception as e:
+            logger.debug(f"[WARP-RE] GetRespawnReason caller trace failed: {e}")
+
+    @nms.cGcApplicationLocalLoadState.GetRespawnReason.after
+    def _warp_debug_respawn_result(self, this, _result_):
+        """Log the respawn reason result."""
+        try:
+            REASON_NAMES = {
+                0x0: "FreshStart", 0x1: "LoadSave", 0x2: "LoadToLocation",
+                0x3: "RestorePreviousSave", 0x9: "WarpInShip", 0xA: "Teleport",
+                0xB: "Portal", 0xF: "WarpInFreighter",
+            }
+            reason_name = REASON_NAMES.get(_result_, f"Unknown(0x{_result_:X})")
+            logger.info(f"[WARP-RE] GetRespawnReason → 0x{_result_:X} ({reason_name})")
+        except Exception as e:
+            logger.debug(f"[WARP-RE] GetRespawnReason result log failed: {e}")
+
+    @nms.cTkFSMState.StateChange.after
+    def _warp_debug_state_change(
+        self,
+        this,
+        lNewStateID: "_Pointer[basic.cTkFixedString[0x10]]",
+        lpUserData: c_void_p,
+        lbForceRestart,
+    ):
+        """Log FSM state transitions."""
+        try:
+            state_name = str(lNewStateID.contents)
+            ud_val = lpUserData or 0
+            logger.info(f"[WARP-RE] StateChange → {state_name}, userData=0x{ud_val:X}")
+        except Exception as e:
+            logger.debug(f"[WARP-RE] StateChange log failed: {e}")
 
     # =========================================================================
     # APPVIEW - Marks system ready for extraction

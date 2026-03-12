@@ -1,5 +1,5 @@
 """
-Haven Economy — FastAPI Application Entry Point
+Travelers Exchange — FastAPI Application Entry Point
 
 Initialises the database, seeds the World Mint admin user, and mounts
 static files + Jinja2 templates.  Route modules are included as they
@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from app.blockchain import create_genesis_block
 from app.config import settings
 from app.database import SessionLocal, init_db
-from app.models import User  # noqa: F401  — ensures models are registered with Base
+from app.models import GdpSnapshot, User  # noqa: F401  — ensures models are registered with Base
 from app.routes.mint_routes import router as mint_router
 from app.routes.nation_routes import router as nation_router
 from app.routes.page_routes import router as page_router
@@ -26,7 +26,7 @@ from app.routes.wallet_routes import router as wallet_router
 # ---------------------------------------------------------------------------
 # Application instance
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Haven Economy")
+app = FastAPI(title="Travelers Exchange")
 
 # ---------------------------------------------------------------------------
 # Static files & templates
@@ -101,4 +101,4 @@ def on_startup() -> None:
 @app.get("/health")
 def health_check() -> dict:
     """Simple health-check endpoint."""
-    return {"status": "ok", "service": "Haven Economy"}
+    return {"status": "ok", "service": "Travelers Exchange"}

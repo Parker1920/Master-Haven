@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ shop.name }} — Haven Exchange{% endblock %}
+{% block title %}{{ shop.name }} — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -18,7 +18,7 @@
         <div class="stat-label">Total Sales</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{ shop.total_revenue | format_number }} {{ settings.CURRENCY_SHORT }}</div>
+        <div class="stat-value">{{ shop.total_revenue | format_number }} TC</div>
         <div class="stat-label">Total Revenue</div>
     </div>
     <div class="stat-card">
@@ -59,7 +59,12 @@
                         <td><strong>{{ listing.title }}</strong></td>
                         <td>{{ (listing.description or '')[:80] }}{% if listing.description and listing.description|length > 80 %}...{% endif %}</td>
                         <td><span class="badge badge-{{ listing.category }}">{{ listing.category | capitalize }}</span></td>
-                        <td class="mono">{{ listing.price | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td class="mono">
+                            {{ listing.price | format_number }} TC
+                            {% if user_currency and user_currency.code != 'TC' and user_currency.gdp_multiplier %}
+                            <div class="price-local">{{ tc_to_national(listing.price, user_currency.gdp_multiplier) | format_number }} {{ user_currency.code }}</div>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if user and user.id != shop.owner_id %}
                             <a href="/market/{{ shop.id }}/buy/{{ listing.id }}" class="btn btn-primary btn-sm">Buy</a>

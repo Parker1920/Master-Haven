@@ -1,9 +1,9 @@
 """
-Haven Economy — Simulated Blockchain Engine
+Travelers Exchange — Simulated Blockchain Engine
 
 Provides the core transaction engine: hash chaining, balance management,
 chain verification, and all ledger operations.  Every currency movement
-in the Haven Economy flows through create_transaction().
+in the Travelers Exchange flows through create_transaction().
 """
 
 import hashlib
@@ -71,7 +71,7 @@ def create_genesis_block(db) -> None:
         to_address="SYSTEM",
         amount=0,
         fee=0,
-        memo="Genesis block \u2014 Haven Economy initialized",
+        memo="Genesis block \u2014 Travelers Exchange initialized",
         nonce="genesis",
         status="confirmed",
     )

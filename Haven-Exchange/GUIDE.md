@@ -1,9 +1,9 @@
-# Haven Economy — How to Use
+# Travelers Exchange — How to Use
 
 ## Getting Started
 
 1. **Register** an account at `/register`
-2. You start with **0 Haven Marks (HM)** — currency comes from nation treasuries
+2. You start with **0 Travelers Coin (TC)** — currency comes from nation treasuries
 3. Join a nation to start participating in the economy
 
 ---
@@ -15,8 +15,9 @@
 - Click **Join** — you can only belong to one nation at a time
 
 ### Receive Currency
-- Your nation leader distributes HM from the treasury to members
+- Your nation leader distributes TC from the treasury to members
 - Check your balance on `/dashboard`
+- Your balance is displayed in your nation's currency (converted from TC via GDP multiplier)
 
 ### Send Currency
 - Go to `/send`, enter a wallet address and amount
@@ -26,11 +27,12 @@
 - Browse `/market` to see listings from all shops
 - Filter by nation, category, or price range
 - Click **Buy** on any listing you can afford
+- Cross-nation purchases show dual pricing (seller's coin + your coin equivalent)
 
 ### Trade Stocks
 - Browse the exchange at `/exchange`
 - Click any stock to see its detail page, then **Trade**
-- **Buy** shares if you have the HM (business stocks require same-nation membership)
+- **Buy** shares if you have the TC (business stocks require same-nation membership)
 - **Sell** shares back at the current market price
 - Track your holdings at `/portfolio`
 
@@ -46,15 +48,16 @@ Everything above, plus:
 
 ### Treasury
 - Go to `/nation/treasury` to see your nation's balance
-- The World Mint allocates HM to your treasury based on member count
+- The World Mint allocates TC to your treasury based on member count
 
 ### Distribute Funds
-- `/nation/distribute` — send HM to a single member
+- `/nation/distribute` — send TC to a single member
 - **Bulk distribute** — split an amount equally across all members
 
 ### Grow Your Nation
 - More members = larger monthly allocation from the World Mint
 - Your nation's stock price rises with population, activity, and cash flow
+- Your GDP multiplier (0.5x–2.0x) determines your currency's buying power
 
 ---
 
@@ -72,7 +75,7 @@ Everything above, plus:
 
 ### Launch an IPO
 - Once your shop has **10+ sales** and is **30+ days old**, go to `/shop/ipo`
-- Issue 100–1,000 shares at 5 HM base price
+- Issue 100–1,000 shares at 5 TC base price
 - Members of your nation can then invest in your business on the exchange
 
 ---
@@ -85,12 +88,37 @@ Everything above, plus:
 - Approving a nation auto-creates its stock on the exchange
 
 ### Currency Supply
-- **Direct mint** — send HM to any address
+- **Direct mint** — send TC to any address
 - **Calculate allocations** — generate monthly allocations (member count x base rate)
 - **Approve & execute** allocations to fund nation treasuries
 
+### GDP Management
+- View per-nation GDP scores and multipliers
+- **Recalculate GDP** — triggers the GDP engine to re-score all nations
+- GDP recalculates automatically every 24 hours
+
 ### Stock Management
 - **Recalculate stock prices** — triggers the valuation engine to re-score all stocks
+
+---
+
+## How GDP & Exchange Rates Work
+
+Each nation has a **GDP multiplier** (0.5x–2.0x) based on four economic pillars:
+
+| Pillar | Weight | Metric |
+|--------|--------|--------|
+| **Treasury Health** | 25% | Treasury balance per capita |
+| **Transaction Volume** | 25% | Transactions in last 30 days |
+| **Business Revenue** | 25% | Shop revenue in last 30 days |
+| **Active Citizens** | 25% | % of members active in last 30 days |
+
+**Exchange rates**: 1 NationCoin = (GDP multiplier) TC
+
+- **Same-nation trades**: 1:1 (no conversion)
+- **Cross-nation trades**: Buyer pays less if their GDP is higher
+  - Example: Nation A (1.8x) buying 100 Bcoin item from Nation B (1.0x)
+  - Buyer pays 55.6 Acoin, Seller receives 100 Bcoin
 
 ---
 
@@ -110,7 +138,7 @@ Scores are normalized against all stocks of the same type. The composite score (
 price = base_price x composite_score / 50
 ```
 
-A score of 50 = base price. Higher = more expensive. Minimum price is always 1 HM.
+A score of 50 = base price. Higher = more expensive. Minimum price is always 1 TC.
 
 ---
 
@@ -120,7 +148,7 @@ A score of 50 = base price. Higher = more expensive. Minimum price is always 1 H
 |--------|-------|
 | Register | `/register` |
 | Dashboard | `/dashboard` |
-| Send HM | `/send` |
+| Send TC | `/send` |
 | Transaction history | `/history` |
 | Browse nations | `/nations` |
 | Apply to create nation | `/nations/apply` |

@@ -1,5 +1,5 @@
 """
-Haven Economy — Transaction Routes
+Travelers Exchange — Transaction Routes
 
 Endpoints for creating transfers, viewing individual transactions, and
 browsing the public ledger.
@@ -11,6 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.config import settings
 from app.blockchain import (
     create_transaction,
     get_all_transactions,
@@ -46,7 +47,7 @@ def transfer(
         return {"success": False, "error": "Amount must be greater than zero."}
 
     # Validate destination exists (user wallet or nation treasury)
-    if payload.to_address.startswith("HVN-NATION-"):
+    if payload.to_address.startswith(settings.NATION_WALLET_PREFIX):
         recipient = db.execute(
             select(Nation).where(Nation.treasury_address == payload.to_address)
         ).scalar_one_or_none()

@@ -1,5 +1,5 @@
 """
-Haven Economy — Stock Market API Routes
+Travelers Exchange — Stock Market API Routes
 
 Provides API endpoints for stock listing, trading, portfolio, and rankings.
 """

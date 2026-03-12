@@ -1,18 +1,24 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard — Haven Exchange{% endblock %}
+{% block title %}Dashboard — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1>Welcome, {{ user.display_name or user.username }}</h1>
-    <p class="page-subtitle">Your Haven Exchange dashboard</p>
+    <p class="page-subtitle">Your Travelers Exchange dashboard</p>
 </div>
 
 <!-- Balance & Wallet Info -->
 <div class="dashboard-grid">
     <div class="stat-card">
+        {% if user_balance_national is not none and user_currency.code != 'TC' %}
+        <div class="stat-value">{{ user_balance_national | format_number }}</div>
+        <div class="stat-label">{{ user_currency.code }} Balance</div>
+        <div class="stat-sub">({{ user.balance | format_number }} TC)</div>
+        {% else %}
         <div class="stat-value">{{ user.balance | format_number }}</div>
         <div class="stat-label">{{ settings.CURRENCY_SHORT }} Balance</div>
+        {% endif %}
     </div>
 
     <div class="card">

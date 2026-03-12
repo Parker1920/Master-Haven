@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ nation.name }} — Haven Exchange{% endblock %}
+{% block title %}{{ nation.name }} — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="nation-header">
@@ -33,6 +33,23 @@
                 <span class="info-value">{{ nation.approved_at.strftime('%Y-%m-%d') if nation.approved_at else '—' }}</span>
             </div>
             {% endif %}
+            {% if nation.currency_code %}
+            <div class="info-row">
+                <span class="info-label">Currency</span>
+                <span class="info-value">{{ nation.currency_name or nation.currency_code }} ({{ nation.currency_code }})</span>
+            </div>
+            {% endif %}
+            {% if nation.gdp_multiplier %}
+            {% set gdp_val = nation.gdp_multiplier / 100 %}
+            <div class="info-row">
+                <span class="info-label">GDP Multiplier</span>
+                <span class="info-value">
+                    <span class="gdp-badge {% if gdp_val >= 1.5 %}gdp-strong{% elif gdp_val >= 1.0 %}gdp-moderate{% else %}gdp-weak{% endif %}">
+                        {{ '%.2f' | format(gdp_val) }}x
+                    </span>
+                </span>
+            </div>
+            {% endif %}
             <div class="info-row">
                 <span class="info-label">Created</span>
                 <span class="info-value">{{ nation.created_at.strftime('%Y-%m-%d') if nation.created_at else '—' }}</span>
@@ -55,7 +72,12 @@
         <div class="card-body">
             <div class="balance-display" style="padding: var(--space-md) 0;">
                 <div class="balance-label">Treasury Balance</div>
-                <div class="balance-value">{{ nation.treasury_balance | format_number }}<span class="balance-currency">{{ settings.CURRENCY_SHORT }}</span></div>
+                {% if nation.currency_code and nation.gdp_multiplier %}
+                <div class="balance-value">{{ tc_to_national(nation.treasury_balance, nation.gdp_multiplier) | format_number }}<span class="balance-currency">{{ nation.currency_code }}</span></div>
+                <div class="stat-sub">({{ nation.treasury_balance | format_number }} TC)</div>
+                {% else %}
+                <div class="balance-value">{{ nation.treasury_balance | format_number }}<span class="balance-currency">TC</span></div>
+                {% endif %}
             </div>
             <div class="wallet-address" style="margin-top: var(--space-md); justify-content: center;">
                 <span>{{ nation.treasury_address }}</span>
@@ -65,13 +87,33 @@
     </div>
 </div>
 
-{% if nation.description %}
+{% if nation.description or is_leader %}
 <div class="card mb-xl">
     <div class="card-header">
         <h3>About</h3>
+        {% if is_leader %}
+        <button type="button" class="btn btn-sm btn-secondary" onclick="toggleEditDescription()">Edit</button>
+        {% endif %}
     </div>
     <div class="card-body">
-        <p style="white-space: pre-wrap; margin-bottom: 0;">{{ nation.description }}</p>
+        <div id="description-display" {% if is_leader %}style="cursor: pointer;"{% endif %}>
+            {% if nation.description %}
+            <p style="white-space: pre-wrap; margin-bottom: 0;">{{ nation.description }}</p>
+            {% else %}
+            <p class="text-muted" style="margin-bottom: 0;">No description yet. Click Edit to add one.</p>
+            {% endif %}
+        </div>
+        {% if is_leader %}
+        <form id="description-edit" action="/nations/{{ nation.id }}/edit-description" method="POST" style="display: none;">
+            <div class="form-group" style="margin-bottom: var(--space-md);">
+                <textarea name="description" rows="5" style="width: 100%;" placeholder="Describe your nation...">{{ nation.description or '' }}</textarea>
+            </div>
+            <div style="display: flex; gap: var(--space-sm);">
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDescription()">Cancel</button>
+            </div>
+        </form>
+        {% endif %}
     </div>
 </div>
 {% endif %}
@@ -145,4 +187,20 @@
 <div class="mt-lg">
     <a href="/nations" class="btn btn-secondary">Back to Nations</a>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEditDescription() {
+    var display = document.getElementById('description-display');
+    var edit = document.getElementById('description-edit');
+    if (edit.style.display === 'none') {
+        edit.style.display = 'block';
+        display.style.display = 'none';
+    } else {
+        edit.style.display = 'none';
+        display.style.display = 'block';
+    }
+}
+</script>
 {% endblock %}

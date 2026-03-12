@@ -1,5 +1,5 @@
 """
-Haven Economy — Marketplace & Shop Routes
+Travelers Exchange — Marketplace & Shop Routes
 
 Provides API endpoints for shop management, listing CRUD, and purchases.
 """
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_login
 from app.blockchain import create_transaction
 from app.database import get_db
+from app.gdp import tc_to_national
 from app.models import Nation, Shop, ShopListing, User
 
 router = APIRouter(prefix="/api/shops", tags=["shops"])
@@ -128,6 +129,10 @@ def get_shop(
         .all()
     )
 
+    # Currency info for display conversion
+    gdp_mult = nation.gdp_multiplier if nation and nation.gdp_multiplier else 100
+    currency_code = nation.currency_code if nation else "TC"
+
     return {
         "id": shop.id,
         "name": shop.name,
@@ -135,6 +140,8 @@ def get_shop(
         "owner_name": owner.display_name or owner.username if owner else "Unknown",
         "nation_id": shop.nation_id,
         "nation_name": nation.name if nation else "Unknown",
+        "currency_code": currency_code,
+        "gdp_multiplier": gdp_mult,
         "total_sales": shop.total_sales,
         "total_revenue": shop.total_revenue,
         "is_active": shop.is_active,
@@ -144,7 +151,9 @@ def get_shop(
                 "id": l.id,
                 "title": l.title,
                 "description": l.description,
-                "price": l.price,
+                "price_tc": l.price,
+                "price_national": tc_to_national(l.price, gdp_mult),
+                "currency_code": currency_code,
                 "category": l.category,
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
@@ -226,11 +235,21 @@ def create_listing(
     if not title:
         raise HTTPException(status_code=400, detail="Title cannot be empty")
 
+    # Convert national coin price to TC for storage
+    # Seller enters price in their national coin; stored as TC internally
+    nation = db.execute(
+        select(Nation).where(Nation.id == shop.nation_id)
+    ).scalar_one_or_none()
+    gdp_mult = nation.gdp_multiplier if nation and nation.gdp_multiplier else 100
+    tc_price = round(payload.price * gdp_mult / 100)
+    if tc_price <= 0:
+        tc_price = payload.price  # fallback to raw price if conversion fails
+
     listing = ShopListing(
         shop_id=shop.id,
         title=title,
         description=payload.description.strip() if payload.description else None,
-        price=payload.price,
+        price=tc_price,
         category=payload.category,
     )
     db.add(listing)
@@ -292,7 +311,26 @@ def buy_listing(
     shop.total_revenue += listing.price
     db.commit()
 
-    return {"success": True, "tx_hash": tx.tx_hash, "amount": listing.price}
+    # Cross-nation conversion info
+    seller_nation = db.execute(
+        select(Nation).where(Nation.id == shop.nation_id)
+    ).scalar_one_or_none()
+    buyer_nation = db.execute(
+        select(Nation).where(Nation.id == current_user.nation_id)
+    ).scalar_one_or_none() if current_user.nation_id else None
+
+    seller_gdp = seller_nation.gdp_multiplier if seller_nation and seller_nation.gdp_multiplier else 100
+    buyer_gdp = buyer_nation.gdp_multiplier if buyer_nation and buyer_nation.gdp_multiplier else 100
+
+    return {
+        "success": True,
+        "tx_hash": tx.tx_hash,
+        "amount_tc": listing.price,
+        "seller_price": tc_to_national(listing.price, seller_gdp),
+        "seller_currency": seller_nation.currency_code if seller_nation else "TC",
+        "buyer_cost": tc_to_national(listing.price, buyer_gdp),
+        "buyer_currency": buyer_nation.currency_code if buyer_nation else "TC",
+    }
 
 
 # ---------------------------------------------------------------------------
