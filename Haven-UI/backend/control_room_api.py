@@ -13653,8 +13653,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                    contributors)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contributors, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -13683,7 +13683,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 submission.get('discord_tag'),
                 submission.get('personal_discord_username'),
                 system_data.get('stellar_classification'),
-                json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}])
+                json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
+                now_iso,
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -14430,8 +14431,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                            contributors)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            contributors, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -14458,7 +14459,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         submission.get('discord_tag'),
                         submission.get('personal_discord_username'),
                         system_data.get('stellar_classification'),
-                        json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}])
+                        json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
+                        now_iso,
                     ))
 
                 # Insert planets
