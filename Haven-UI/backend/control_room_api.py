@@ -7574,6 +7574,7 @@ async def api_systems(
     min_planets: int = None,
     max_planets: int = None,
     is_complete: bool = None,
+    updated_since: str = None,
     session: Optional[str] = Cookie(None)
 ):
     """Return paginated systems with optional hierarchy filtering.
@@ -7602,7 +7603,7 @@ async def api_systems(
         }
     """
     session_data = get_session(session)
-    limit = min(limit, 100)  # Cap at 100
+    limit = min(limit, 500)  # Cap at 500 (raised from 100 for sync use)
 
     conn = None
     try:
@@ -7616,6 +7617,13 @@ async def api_systems(
         # Build filter clauses
         where_clauses = []
         params = []
+
+        # Incremental sync: only return systems created or updated since timestamp
+        if updated_since:
+            where_clauses.append(
+                "(s.created_at >= ? OR s.last_updated_at >= ?)"
+            )
+            params.extend([updated_since, updated_since])
 
         if reality:
             where_clauses.append("COALESCE(s.reality, 'Normal') = ?")
@@ -9425,6 +9433,90 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
     except Exception as e:
         logger.error(f"Error rejecting region name: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/systems/bulk')
+async def get_systems_bulk(request: Request):
+    """Return full detail for multiple systems by ID in one request.
+
+    Body: {"ids": ["id1", "id2", ...]}
+    Returns: {"systems": [...], "not_found": [...]}
+    Max 100 IDs per request.
+    """
+    conn = None
+    try:
+        body = await request.json()
+        ids = body.get('ids', [])
+        if not ids or not isinstance(ids, list):
+            raise HTTPException(400, "Request body must contain 'ids' array")
+        ids = ids[:100]  # Cap at 100
+
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(404, "Database not found")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        systems = []
+        not_found = []
+
+        # Batch-fetch all systems
+        placeholders = ','.join(['?'] * len(ids))
+        cursor.execute(f'SELECT * FROM systems WHERE id IN ({placeholders})', ids)
+        system_rows = {str(dict(r)['id']): dict(r) for r in cursor.fetchall()}
+
+        # Batch-fetch all planets for these systems
+        found_ids = list(system_rows.keys())
+        if found_ids:
+            ph = ','.join(['?'] * len(found_ids))
+            cursor.execute(f'SELECT * FROM planets WHERE system_id IN ({ph}) ORDER BY system_id, name', found_ids)
+            all_planets = [dict(r) for r in cursor.fetchall()]
+
+            # Batch-fetch all moons
+            planet_ids = [p['id'] for p in all_planets]
+            all_moons = []
+            if planet_ids:
+                ph2 = ','.join(['?'] * len(planet_ids))
+                cursor.execute(f'SELECT * FROM moons WHERE planet_id IN ({ph2}) ORDER BY planet_id, name', planet_ids)
+                all_moons = [dict(m) for m in cursor.fetchall()]
+
+            # Index moons by planet_id
+            moons_by_planet = {}
+            for m in all_moons:
+                moons_by_planet.setdefault(m['planet_id'], []).append(m)
+
+            # Index planets by system_id, attach moons
+            planets_by_system = {}
+            for p in all_planets:
+                p['moons'] = moons_by_planet.get(p['id'], [])
+                planets_by_system.setdefault(p['system_id'], []).append(p)
+
+            # Batch-fetch space stations
+            cursor.execute(f'SELECT * FROM space_stations WHERE system_id IN ({ph})', found_ids)
+            stations_by_system = {}
+            for row in cursor.fetchall():
+                stations_by_system[str(dict(row)['system_id'])] = parse_station_data(row)
+
+        for sid in ids:
+            if str(sid) in system_rows:
+                system = system_rows[str(sid)]
+                system['planets'] = planets_by_system.get(str(sid), [])
+                system['space_station'] = stations_by_system.get(str(sid))
+                systems.append(system)
+            else:
+                not_found.append(sid)
+
+        return {"systems": systems, "not_found": not_found}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in bulk system fetch: {e}")
+        raise HTTPException(500, str(e))
     finally:
         if conn:
             conn.close()
@@ -12193,6 +12285,11 @@ def validate_system_data(system: dict) -> tuple[bool, str]:
     # Name length
     if len(system['name']) > 100:
         return False, "System name must be 100 characters or less"
+
+    # Glyph code is required and must be exactly 12 hex characters
+    glyph = system.get('glyph_code', '')
+    if not glyph or not isinstance(glyph, str) or not re.match(r'^[0-9A-Fa-f]{12}$', glyph):
+        return False, "Portal glyph code is required (exactly 12 hex characters)"
 
     # Sanitize and validate planets
     if 'planets' in system and system['planets']:

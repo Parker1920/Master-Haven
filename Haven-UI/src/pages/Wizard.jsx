@@ -152,6 +152,7 @@ export default function Wizard(){
     explicitSubmitRef.current = false;
     // Client-side validation for nested planets & moons
     if(!system.name || !system.name.trim()) { alert('System name is required'); return; }
+    if(!system.glyph_code || system.glyph_code.length !== 12 || !/^[0-9A-Fa-f]{12}$/.test(system.glyph_code)) { alert('Portal Glyph Code is required and must be exactly 12 hex characters (0-9, A-F)'); return; }
     if(!system.star_type) { alert('Star Color is required'); return; }
     if(!system.economy_type) { alert('Economy Type is required'); return; }
     const isAbandoned = system.economy_type === 'None' || system.economy_type === 'Abandoned';
@@ -365,7 +366,7 @@ export default function Wizard(){
         <label className="block mb-2">System Name <input placeholder="Name" aria-label="Name" className="w-full mt-1" value={system.name || ''} onChange={e=>setField('name', e.target.value)} required/></label>
 
         <div className="mt-4">
-          <h3 className="text-lg font-semibold mb-2 text-purple-300">Portal Glyph Coordinates</h3>
+          <h3 className="text-lg font-semibold mb-2 text-purple-300">Portal Glyph Coordinates <span className="text-red-400 text-sm">*</span></h3>
           <GlyphPicker
             value={system.glyph_code}
             onChange={(code) => setField('glyph_code', code)}
