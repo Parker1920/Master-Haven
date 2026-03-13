@@ -1635,6 +1635,17 @@ export default function PendingApprovals() {
                     'bg-gray-600 text-white'
                   }`}>{selectedSubmission.source === 'haven_extractor' ? 'Haven Extractor' : selectedSubmission.source}</span></p>
                 )}
+                {/* Game mode indicator */}
+                {selectedSubmission.game_mode && (
+                  <p><strong>Game Mode:</strong> <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    selectedSubmission.game_mode === 'Normal' ? 'bg-gray-600 text-white' :
+                    selectedSubmission.game_mode === 'Survival' ? 'bg-orange-600 text-white' :
+                    selectedSubmission.game_mode === 'Permadeath' ? 'bg-red-600 text-white' :
+                    selectedSubmission.game_mode === 'Creative' ? 'bg-cyan-600 text-white' :
+                    selectedSubmission.game_mode === 'Relaxed' ? 'bg-green-600 text-white' :
+                    'bg-purple-600 text-white'
+                  }`}>{selectedSubmission.game_mode}</span></p>
+                )}
                 {/* API key name if applicable */}
                 {selectedSubmission.api_key_name && (
                   <p><strong>API Key:</strong> {selectedSubmission.api_key_name}</p>

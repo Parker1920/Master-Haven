@@ -514,6 +514,18 @@ export default function SystemDetail() {
                 }>{system.dominant_lifeform}</div>
               </div>
             )}
+            {system.game_mode && (
+              <div>
+                <div className="text-xs text-gray-400">Game Mode</div>
+                <div className={
+                  system.game_mode === 'Survival' ? 'text-orange-400' :
+                  system.game_mode === 'Permadeath' ? 'text-red-400' :
+                  system.game_mode === 'Creative' ? 'text-cyan-400' :
+                  system.game_mode === 'Relaxed' ? 'text-green-400' :
+                  system.game_mode === 'Custom' ? 'text-purple-400' : 'text-gray-300'
+                }>{system.game_mode}</div>
+              </div>
+            )}
           </div>
         )}
 

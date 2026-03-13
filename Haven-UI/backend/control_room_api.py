@@ -17,6 +17,11 @@ import time
 import csv
 import io
 from fastapi.staticfiles import StaticFiles
+import mimetypes
+
+# Register WebP MIME type - not in all systems' MIME databases (e.g. Raspberry Pi OS)
+# Without this, StaticFiles serves .webp as text/plain, showing raw binary in browser
+mimetypes.add_type('image/webp', '.webp')
 
 # Path setup for Haven-UI self-contained structure
 # backend/ is inside Haven-UI/, which is inside Master-Haven/
@@ -1294,7 +1299,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.44.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.45.1', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -13653,8 +13658,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                    contributors, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contributors, created_at, game_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -13685,6 +13690,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 system_data.get('stellar_classification'),
                 json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
                 now_iso,
+                system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -14431,8 +14437,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                            contributors, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            contributors, created_at, game_mode)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -14461,6 +14467,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         system_data.get('stellar_classification'),
                         json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
                         now_iso,
+                        system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
                     ))
 
                 # Insert planets
@@ -15063,6 +15070,7 @@ async def receive_extraction(
     personal_id = payload.get('personal_id', '')
     discord_tag = payload.get('discord_tag', 'personal')  # Default to personal if not specified
     reality = payload.get('reality', 'Normal')
+    game_mode = payload.get('game_mode', 'Normal')  # v1.6.8: difficulty preset tracking
 
     # Accept both star_color (v10+) and star_type (legacy)
     star_color = payload.get('star_color') or payload.get('star_type', 'Unknown')
@@ -15089,6 +15097,7 @@ async def receive_extraction(
         'discovered_at': payload.get('extraction_time'),
         'source': 'haven_extractor',
         'extractor_version': payload.get('extractor_version', 'unknown'),
+        'game_mode': game_mode,
     }
 
     # Convert planets array
@@ -15234,8 +15243,8 @@ async def receive_extraction(
                 region_x, region_y, region_z,
                 submitter_name, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
-                submitted_by_ip, api_key_name, edit_system_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                submitted_by_ip, api_key_name, edit_system_id, game_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -15259,7 +15268,8 @@ async def receive_extraction(
             personal_id if personal_id else None,
             client_ip,
             api_key_name,
-            edit_system_id
+            edit_system_id,
+            game_mode
         ))
         conn.commit()
         submission_id = cursor.lastrowid

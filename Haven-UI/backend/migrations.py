@@ -3923,3 +3923,50 @@ def migration_1_51_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.51.0")
+
+
+# =============================================================================
+# v1.52.0 - Add game_mode column to track difficulty preset for adjective context
+# =============================================================================
+@register_migration("1.52.0", "Add game_mode column to systems and pending_systems for difficulty tracking")
+def migration_1_52_0(conn):
+    """
+    Track which game mode (Normal, Creative, Relaxed, Survival, Permadeath, Custom)
+    produced the adjective data (biome, weather, sentinel). Sentinel adjectives
+    change per difficulty, and the game writes different values into biome/weather
+    fields depending on the active mode.
+    """
+    cursor = conn.cursor()
+
+    # Add game_mode to systems table
+    try:
+        cursor.execute("ALTER TABLE systems ADD COLUMN game_mode TEXT DEFAULT 'Normal'")
+        logger.info("Added game_mode column to systems table")
+    except Exception as e:
+        if "duplicate column" in str(e).lower():
+            logger.info("game_mode column already exists in systems")
+        else:
+            raise
+
+    # Add game_mode to pending_systems table
+    try:
+        cursor.execute("ALTER TABLE pending_systems ADD COLUMN game_mode TEXT DEFAULT 'Normal'")
+        logger.info("Added game_mode column to pending_systems table")
+    except Exception as e:
+        if "duplicate column" in str(e).lower():
+            logger.info("game_mode column already exists in pending_systems")
+        else:
+            raise
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.52.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.52.0")

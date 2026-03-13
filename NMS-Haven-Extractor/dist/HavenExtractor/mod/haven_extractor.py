@@ -576,6 +576,14 @@ BIOME_PLANT_RESOURCE = {
     "Lush": "Star Bulb",
     "Swamp": "Faecium",
     "Lava": "Solanium",
+    "Waterworld": "Kelp Sac",
+}
+
+# v1.6.8: Biome subtypes that override the main biome's plant resource
+# e.g., a Lush planet with Swamp subtype should get Faecium, not Star Bulb
+BIOME_SUBTYPE_PLANT_OVERRIDE = {
+    "Swamp": "Faecium",
+    "Lava": "Solanium",
 }
 
 # v1.4.5: Internal substance IDs that don't appear on the discovery screen
@@ -770,11 +778,33 @@ class RealityMode(Enum):
     Normal = "Normal"
     Permadeath = "Permadeath"
 
+# v1.6.8: Game mode / difficulty preset enum (cGcDifficultyPresetType)
+# Read from memory at runtime to track which mode produced the adjective data
+GAME_MODE_PRESETS = {
+    0: "Invalid",
+    1: "Custom",
+    2: "Normal",
+    3: "Creative",
+    4: "Relaxed",
+    5: "Survival",
+    6: "Permadeath",
+}
+
+# Map game mode preset to SentinelsPerDifficulty array index
+GAME_MODE_TO_DIFFICULTY_INDEX = {
+    "Creative": 0,    # Casual
+    "Relaxed": 1,     # Relaxed
+    "Normal": 2,      # Normal
+    "Custom": 2,      # Custom defaults to Normal index
+    "Survival": 3,    # Survival/Permadeath
+    "Permadeath": 3,  # Survival/Permadeath
+}
+
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.6.7"
-    __description__ = "Batch mode planet data extraction - game-data-driven adjective resolution"
+    __version__ = "1.6.8"
+    __description__ = "Batch mode planet data extraction - game mode tracking & biome subtype plant fix"
 
     # ==========================================================================
     # VALID ADJECTIVE LISTS FROM adjectives.js
@@ -983,6 +1013,7 @@ class HavenExtractorMod(Mod):
         self._personal_id = USER_PERSONAL_ID  # Discord snowflake ID for tracking
         self._discord_tag = USER_DISCORD_TAG
         self._reality = USER_REALITY
+        self._game_mode = "Normal"  # Auto-detected from memory at extraction time
         self._manual_system_name = ''  # For manual system name input
 
         self._pending_extraction = False
@@ -2299,216 +2330,6 @@ class HavenExtractorMod(Mod):
             logger.error(traceback.format_exc())
 
     # =========================================================================
-    # WARP TO GLYPHS - Teleport to any system by portal glyph code
-    # Two methods attempted: direct Generate call, then FSM state transition
-    # =========================================================================
-
-    @property
-    @gui_variable.STRING(label="Warp Glyphs")
-    def warp_glyph_input(self) -> str:
-        return getattr(self, '_warp_glyph_input', '')
-
-    @warp_glyph_input.setter
-    def warp_glyph_input(self, value: str):
-        self._warp_glyph_input = value
-
-    @gui_button("Warp to Glyphs")
-    def warp_to_glyphs(self):
-        """Parse glyph code and warp to that system."""
-        glyph = getattr(self, '_warp_glyph_input', '').strip().upper()
-        if not glyph or len(glyph) != 12:
-            logger.error("[WARP] Glyph code must be exactly 12 hex characters")
-            return
-        if not all(c in '0123456789ABCDEF' for c in glyph):
-            logger.error("[WARP] Glyph code must contain only hex characters (0-9, A-F)")
-            return
-        try:
-            coords = self._parse_glyph_to_coords(glyph)
-            logger.info(f"[WARP] Target glyph: {glyph}")
-            logger.info(f"[WARP]   SSI={coords['ssi']}, X={coords['vx']}, Y={coords['vy']}, Z={coords['vz']}, Planet={coords['planet']}")
-            self._execute_warp(coords)
-        except Exception as e:
-            logger.error(f"[WARP] Failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-    @gui_button("Warp Next SSI")
-    def warp_next_ssi(self):
-        """Warp to the next Solar System Index in the current region (SSI+1)."""
-        try:
-            player_state = gameData.player_state
-            if not player_state:
-                logger.error("[WARP] No player state — are you in-game?")
-                return
-            ga = player_state.mLocation.GalacticAddress
-            new_ssi = ga.SolarSystemIndex + 1
-            if new_ssi > 0x258:
-                logger.warning(f"[WARP] SSI {new_ssi} is in phantom star range (>0x258). Wrapping to 1.")
-                new_ssi = 1
-            logger.info(f"[WARP] Current SSI={ga.SolarSystemIndex}, warping to SSI={new_ssi}")
-            coords = {
-                'planet': 0,
-                'ssi': new_ssi,
-                'vx': ga.VoxelX,
-                'vy': ga.VoxelY,
-                'vz': ga.VoxelZ,
-            }
-            self._execute_warp(coords)
-        except Exception as e:
-            logger.error(f"[WARP] Next SSI failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-    def _parse_glyph_to_coords(self, glyph: str) -> dict:
-        """Convert 12-char glyph code to voxel coordinates.
-
-        Glyph format: P-SSS-YY-ZZZ-XXX
-          [0]    = Planet index (0-F)
-          [1:4]  = Solar System Index (000-FFF)
-          [4:6]  = Y-axis (00-FF)
-          [6:9]  = Z-axis (000-FFF)
-          [9:12] = X-axis (000-FFF)
-
-        Coordinates are two's complement signed:
-          X/Z: 0x000-0x7FF = positive, 0x801-0xFFF = negative (subtract 0x1000)
-          Y:   0x00-0x7F = positive, 0x81-0xFF = negative (subtract 0x100)
-        """
-        planet = int(glyph[0], 16)
-        ssi = int(glyph[1:4], 16)
-        y_hex = int(glyph[4:6], 16)
-        z_hex = int(glyph[6:9], 16)
-        x_hex = int(glyph[9:12], 16)
-
-        vx = x_hex if x_hex <= 0x7FF else x_hex - 0x1000
-        vy = y_hex if y_hex <= 0x7F else y_hex - 0x100
-        vz = z_hex if z_hex <= 0x7FF else z_hex - 0x1000
-
-        return {'planet': planet, 'ssi': ssi, 'vx': vx, 'vy': vy, 'vz': vz}
-
-    def _execute_warp(self, coords: dict):
-        """Try warping to the target coordinates using available methods."""
-        player_state = gameData.player_state
-        if not player_state:
-            logger.error("[WARP] No player state — are you in-game?")
-            return
-
-        # Log current position
-        cur = player_state.mLocation.GalacticAddress
-        logger.info(f"[WARP] Current: SSI={cur.SolarSystemIndex}, X={cur.VoxelX}, Y={cur.VoxelY}, Z={cur.VoxelZ}")
-
-        # Check if already at target
-        if (cur.SolarSystemIndex == coords['ssi'] and cur.VoxelX == coords['vx']
-                and cur.VoxelY == coords['vy'] and cur.VoxelZ == coords['vz']):
-            logger.info("[WARP] Already at target system!")
-            return
-
-        # Try Method 1: Direct mLocation write + SolarSystem.Generate
-        logger.info("[WARP] === Method 1: Direct Generate ===")
-        success = self._warp_method_generate(player_state, coords)
-        if success:
-            return
-
-        # Try Method 2: mLocation write + FSM state transition to force reload
-        logger.info("[WARP] === Method 2: FSM State Transition ===")
-        self._warp_method_fsm(player_state, coords)
-
-    def _write_target_location(self, player_state, coords: dict):
-        """Write target coordinates to mLocation and backup current to mPrevLocation."""
-        # Copy current location to mPrevLocation via raw memory copy
-        loc_addr = get_addressof(pointer(player_state.mLocation))
-        prev_addr = get_addressof(pointer(player_state.mPrevLocation))
-        ctypes.memmove(prev_addr, loc_addr, 0x18)  # cGcUniverseAddressData is 0x18 bytes
-        logger.info("[WARP] Backed up current location to mPrevLocation")
-
-        # Write target to mLocation
-        ga = player_state.mLocation.GalacticAddress
-        ga.PlanetIndex = coords['planet']
-        ga.SolarSystemIndex = coords['ssi']
-        ga.VoxelX = coords['vx']
-        ga.VoxelY = coords['vy']
-        ga.VoxelZ = coords['vz']
-
-        # Verify write
-        ga2 = player_state.mLocation.GalacticAddress
-        logger.info(
-            f"[WARP] mLocation written: SSI={ga2.SolarSystemIndex}, "
-            f"X={ga2.VoxelX}, Y={ga2.VoxelY}, Z={ga2.VoxelZ}, Planet={ga2.PlanetIndex}"
-        )
-
-    def _warp_method_generate(self, player_state, coords: dict) -> bool:
-        """Method 1: Write mLocation then call cGcSolarSystem.Generate directly."""
-        try:
-            simulation = gameData.simulation
-            if not simulation:
-                logger.warning("[WARP] M1: No simulation — skipping")
-                return False
-
-            ss_ptr = simulation.mpSolarSystem
-            if not ss_ptr:
-                logger.warning("[WARP] M1: No SolarSystem pointer — skipping")
-                return False
-
-            ss_addr = get_addressof(ss_ptr)
-            if ss_addr == 0:
-                logger.warning("[WARP] M1: SolarSystem is NULL — skipping")
-                return False
-
-            # Write target coordinates
-            self._write_target_location(player_state, coords)
-
-            # Create a seed with UseSeedValue=False so the game derives the seed from the address
-            seed = basic.GcSeed()
-            seed.Seed = 0
-            seed.UseSeedValue = 0
-
-            logger.info(f"[WARP] M1: Calling Generate(this=0x{ss_addr:X}, useSettings=False, seed={{0, false}})")
-            nms.cGcSolarSystem.Generate(ss_ptr, False, pointer(seed))
-            logger.info("[WARP] M1: Generate returned — check if system changed!")
-
-            # Verify new location
-            ga = player_state.mLocation.GalacticAddress
-            logger.info(
-                f"[WARP] M1: Post-Generate mLocation: SSI={ga.SolarSystemIndex}, "
-                f"X={ga.VoxelX}, Y={ga.VoxelY}, Z={ga.VoxelZ}"
-            )
-            return True
-
-        except Exception as e:
-            logger.warning(f"[WARP] M1 failed: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
-            return False
-
-    def _warp_method_fsm(self, player_state, coords: dict):
-        """Method 2: Write mLocation then force FSM transition to trigger system reload."""
-        try:
-            app = gameData.GcApplication
-            if not app:
-                logger.warning("[WARP] M2: No GcApplication — skipping")
-                return
-
-            # Write target coordinates
-            self._write_target_location(player_state, coords)
-
-            # Build the state string "APPLOCALLOAD" as a cTkFixedString
-            state_bytes = b"APPLOCALLOAD\x00"
-            state_buf = (ctypes.c_char * 0x10)(*state_bytes.ljust(0x10, b'\x00'))
-
-            logger.info("[WARP] M2: Triggering FSM StateChange → APPLOCALLOAD")
-            nms.cTkFSMState.StateChange(
-                ctypes.cast(pointer(app), ctypes.POINTER(nms.cTkFSMState)),
-                ctypes.cast(ctypes.pointer(state_buf), ctypes.POINTER(basic.cTkFixedString[0x10])),
-                c_void_p(0),  # lpUserData = NULL
-                True,  # lbForceRestart
-            )
-            logger.info("[WARP] M2: StateChange returned — game should be loading target system")
-
-        except Exception as e:
-            logger.warning(f"[WARP] M2 failed: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
-
-    # =========================================================================
     # APPVIEW - Marks system ready for extraction
     # =========================================================================
 
@@ -3086,6 +2907,7 @@ class HavenExtractorMod(Mod):
                 system['personal_id'] = self._personal_id
                 system['discord_tag'] = self._discord_tag
                 system['reality'] = self._reality
+                system['game_mode'] = self._game_mode
 
                 result = self._send_single_system_to_api(system)
                 if result.get('status') == 'ok':
@@ -3230,6 +3052,10 @@ class HavenExtractorMod(Mod):
         # Determine data source based on whether we have captured data
         data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
 
+        # v1.6.8: Auto-detect game mode before extraction
+        self._detect_game_mode()
+        logger.info(f"  Game mode: {self._game_mode}")
+
         extraction = {
             "extraction_time": datetime.now().isoformat(),
             "extractor_version": self.__version__,
@@ -3239,6 +3065,7 @@ class HavenExtractorMod(Mod):
             "captured_planet_count": len(self._captured_planets),
             "discoverer_name": "HavenExtractor",
             "discovery_timestamp": int(datetime.now().timestamp()),
+            "game_mode": self._game_mode,
             **coords,
             **self._extract_system_properties(sys_data),
             "planets": self._extract_planets(solar_system),
@@ -3899,15 +3726,19 @@ class HavenExtractorMod(Mod):
 
             # v1.4.5: Derive plant resource from biome type
             # v1.6.6: Only assign if flora actually exists (flora_raw > 0)
+            # v1.6.8: Check biome subtype first (Swamp/Lava override parent biome)
             biome = result.get("biome", "Unknown")
-            plant_resource = BIOME_PLANT_RESOURCE.get(biome, "")
+            biome_subtype = result.get("biome_subtype", "Unknown")
+            plant_resource = BIOME_SUBTYPE_PLANT_OVERRIDE.get(biome_subtype, "")
+            if not plant_resource:
+                plant_resource = BIOME_PLANT_RESOURCE.get(biome, "")
             if plant_resource:
                 flora_raw_val = captured.get('flora_raw', -1) if index in self._captured_planets else -1
                 if flora_raw_val > 0:
                     result["plant_resource"] = plant_resource
-                    logger.info(f"    [PLANT] {biome} -> {plant_resource} (flora_raw={flora_raw_val})")
+                    logger.info(f"    [PLANT] {biome}/{biome_subtype} -> {plant_resource} (flora_raw={flora_raw_val})")
                 else:
-                    logger.info(f"    [PLANT] Skipped {biome} -> {plant_resource}: flora_raw={flora_raw_val} (no flora)")
+                    logger.info(f"    [PLANT] Skipped {biome}/{biome_subtype} -> {plant_resource}: flora_raw={flora_raw_val} (no flora)")
 
             # v1.4.5: Fix dead/airless moon resources - replace hidden SPACEGUNK
             # with Rusted Metal (what the discovery screen actually shows)
@@ -3953,20 +3784,57 @@ class HavenExtractorMod(Mod):
         except Exception:
             return default
 
+    def _detect_game_mode(self) -> str:
+        """Auto-detect the player's game mode / difficulty preset from memory.
+
+        Reads cGcDifficultySettingPreset from the player state's SeasonData.
+        Path: player_state base + 0xE630 (mPhotoModeSettings/CommonStateData)
+              + 0x50 (SeasonData) + 0x3210 (DifficultySettingPreset)
+        Total offset from player_state: 0x11890
+
+        Returns: "Normal", "Creative", "Relaxed", "Survival", "Permadeath", or "Custom"
+        """
+        try:
+            player_state = gameData.player_state
+            if not player_state:
+                logger.debug("[GAME_MODE] No player_state available")
+                return self._game_mode  # Keep last known
+
+            ps_addr = get_addressof(player_state)
+            if not ps_addr:
+                logger.debug("[GAME_MODE] Could not get player_state address")
+                return self._game_mode
+
+            # Read DifficultySettingPreset enum (uint32)
+            # Offset: 0xE630 (PhotoModeSettings) + 0x50 (SeasonData) + 0x3210 (DifficultySettingPreset)
+            preset_val = self._read_uint32(ps_addr, 0xE630 + 0x50 + 0x3210)
+            mode = GAME_MODE_PRESETS.get(preset_val, "Unknown")
+
+            if mode in ("Invalid", "Unknown"):
+                logger.debug(f"[GAME_MODE] Got preset_val={preset_val} ({mode}), keeping {self._game_mode}")
+                return self._game_mode
+
+            if mode != self._game_mode:
+                logger.info(f"[GAME_MODE] Detected: {mode} (was {self._game_mode})")
+            self._game_mode = mode
+            return mode
+
+        except Exception as e:
+            logger.debug(f"[GAME_MODE] Detection failed: {e}")
+            return self._game_mode
+
     def _get_difficulty_index(self) -> int:
-        """Get the per-difficulty array index for the current reality mode.
+        """Get the per-difficulty array index based on detected game mode.
 
         Post-Worlds Part 1 index mapping:
           [0] = Casual/Creative
           [1] = Relaxed
-          [2] = Normal
+          [2] = Normal (also Custom)
           [3] = Survival/Permadeath
 
         Used for SentinelsPerDifficulty and GroundCombatDataPerDifficulty arrays.
         """
-        if self._reality == "Permadeath":
-            return 3
-        return 2  # Normal (default)
+        return GAME_MODE_TO_DIFFICULTY_INDEX.get(self._game_mode, 2)
 
     def _safe_int(self, val, default: int = 0) -> int:
         """Safely convert value to int."""

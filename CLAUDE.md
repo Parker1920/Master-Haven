@@ -22,10 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.45.0 | 2026-03-12 | Dynamic CSV import, Pirate conflict, Gas Giant attribute |
-| Haven-UI | 1.44.0 | 2026-03-12 | Dynamic CSV import with column mapping preview |
-| Backend API | 1.44.0 | 2026-03-12 | Dynamic CSV import, Pirate conflict, Gas Giant column |
-| Haven Extractor | 1.6.7 | 2026-03-01 | Fix garbage chars in direct memory resource read |
+| **Master Haven** | 1.46.0 | 2026-03-12 | Game mode tracking, biome subtype plant fix |
+| Haven-UI | 1.45.0 | 2026-03-12 | Game mode badges on SystemDetail and PendingApprovals |
+| Backend API | 1.45.1 | 2026-03-13 | Fix WebP MIME type for photo serving |
+| Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -81,6 +81,41 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Backend API 1.45.1 (2026-03-13) - Fix WebP Photo MIME Type
+Fix .webp photos displaying as raw binary text on mobile browsers when opened in a new tab.
+
+**Backend API 1.45.1**
+- Register `image/webp` MIME type at startup via `mimetypes.add_type()` — Python's MIME database doesn't include `.webp` on many systems (Raspberry Pi OS, older Linux/Windows)
+- Without this, Starlette's `StaticFiles` served `.webp` files with `text/plain` Content-Type, causing mobile browsers (which respect Content-Type strictly) to render binary as text
+- Desktop Chrome masked the issue via content sniffing; mobile Safari/Chrome did not
+
+---
+
+#### Master Haven 1.46.0 (2026-03-12) - Game Mode Tracking & Biome Subtype Plant Fix
+Track game mode (Normal/Creative/Relaxed/Survival/Permadeath/Custom) from extractor to detect adjective differences, fix plant resource assignment for biome subtypes.
+
+**Haven Extractor 1.6.8**
+- Auto-detect game mode from memory via `cGcDifficultySettingPreset` enum (offset 0x11890 from player_state)
+- New `_detect_game_mode()` reads difficulty preset at extraction time: Normal, Creative, Relaxed, Survival, Permadeath, Custom
+- `_get_difficulty_index()` now uses detected game mode instead of hardcoded Normal/Permadeath only
+- `game_mode` field added to export payload alongside `reality`
+- Fixed plant resource for biome subtypes: Swamp subtype of Lush now gets Faecium instead of Star Bulb
+- Added `BIOME_SUBTYPE_PLANT_OVERRIDE` dict for subtype-specific plant resource overrides
+- Added Waterworld → Kelp Sac to `BIOME_PLANT_RESOURCE` dict (was missing)
+
+**Backend API 1.45.0**
+- `/api/extraction` accepts `game_mode` field from extractor payload
+- `game_mode` stored in `submission_data` JSON and `pending_systems.game_mode` column
+- `approve_system` and `batch_approve` copy `game_mode` to `systems` table on approval
+- System detail endpoint returns `game_mode` (via SELECT *)
+- Migration v1.52.0: Adds `game_mode TEXT DEFAULT 'Normal'` to `systems` and `pending_systems` tables
+
+**Haven-UI 1.45.0**
+- PendingApprovals review modal: game mode badge with color per mode (Normal=gray, Survival=orange, Permadeath=red, Creative=cyan, Relaxed=green, Custom=purple)
+- SystemDetail page: game mode displayed in system attributes with mode-specific color
+
+---
 
 #### Master Haven 1.45.0 (2026-03-12) - Dynamic CSV Import, Pirate Conflict, Gas Giant Attribute
 Dynamic CSV importer supporting multiple community formats, Pirate conflict level, Gas Giant planet attribute.
