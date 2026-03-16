@@ -24,7 +24,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.46.0 | 2026-03-12 | Game mode tracking, biome subtype plant fix |
 | Haven-UI | 1.45.0 | 2026-03-12 | Game mode badges on SystemDetail and PendingApprovals |
-| Backend API | 1.45.1 | 2026-03-13 | Fix WebP MIME type for photo serving |
+| Backend API | 1.45.2 | 2026-03-16 | Fix advanced filters: sentinel column, garbage resources |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,17 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Backend API 1.45.2 (2026-03-16) - Fix Advanced Filters
+Fix broken advanced filters on Systems page: empty sentinel dropdown, non-functional sentinel filter, garbage symbols in resource dropdown.
+
+**Backend API 1.45.2**
+- Fixed sentinel dropdown empty: `filter-options` endpoint queried non-existent `sentinel_level` column — corrected to `sentinel` (actual column name)
+- Fixed sentinel filter not filtering: `_build_advanced_filter_clauses()` used `p.sentinel_level` in WHERE — corrected to `p.sentinel`
+- Fixed garbage symbols in resource dropdown: `get_distinct_resources()` now validates values are `len >= 2` and start with alpha character (matching `materials` field validation)
+- Migration v1.53.0: Cleans existing garbage resource values (non-alpha starting chars) from `planets` and `moons` tables by setting them to NULL
+
+---
 
 #### Backend API 1.45.1 (2026-03-13) - Fix WebP Photo MIME Type
 Fix .webp photos displaying as raw binary text on mobile browsers when opened in a new tab.

@@ -1299,7 +1299,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.45.1', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.45.2', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -7149,8 +7149,9 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
             for col in ['common_resource', 'uncommon_resource', 'rare_resource']:
                 cursor.execute(f"SELECT DISTINCT p.{col} FROM planets p {planet_join} {planet_where}", planet_params)
                 for row in cursor.fetchall():
-                    if row[0]:
-                        resources.add(row[0])
+                    val = row[0]
+                    if val and isinstance(val, str) and len(val) >= 2 and val[0].isalpha():
+                        resources.add(val)
             return sorted(resources)
 
         return {
@@ -7162,7 +7163,7 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
             'stellar_classifications': get_distinct_system('stellar_classification'),
             'biomes': get_distinct_planet('biome'),
             'weather_types': get_distinct_planet('weather'),
-            'sentinel_levels': get_distinct_planet('sentinel_level'),
+            'sentinel_levels': get_distinct_planet('sentinel'),
             'resources': get_distinct_resources()
         }
     except Exception as e:
@@ -7530,7 +7531,7 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
         where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.weather = ?)")
         params.append(params_dict['weather'])
     if params_dict.get('sentinel_level'):
-        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.sentinel_level = ?)")
+        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.sentinel = ?)")
         params.append(params_dict['sentinel_level'])
     if params_dict.get('resource'):
         where_clauses.append("""EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id

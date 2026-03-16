@@ -3970,3 +3970,48 @@ def migration_1_52_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.52.0")
+
+
+@register_migration("1.53.0", "Clean garbage resource values from planets and moons tables")
+def migration_1_53_0(conn):
+    """
+    Extractor submissions could store raw memory bytes in common_resource,
+    uncommon_resource, rare_resource columns because the extraction endpoint
+    only checked len >= 2 but not that the value was alphabetic. This migration
+    NULLs out any resource values that start with a non-alpha character.
+    """
+    cursor = conn.cursor()
+
+    cleaned = 0
+    for table in ['planets', 'moons']:
+        for col in ['common_resource', 'uncommon_resource', 'rare_resource']:
+            try:
+                cursor.execute(f"""
+                    UPDATE {table} SET {col} = NULL
+                    WHERE {col} IS NOT NULL
+                    AND (LENGTH({col}) < 2 OR SUBSTR({col}, 1, 1) NOT GLOB '[A-Za-z]')
+                """)
+                count = cursor.rowcount
+                if count > 0:
+                    cleaned += count
+                    logger.info(f"Cleaned {count} garbage {col} values from {table}")
+            except Exception as e:
+                logger.warning(f"Could not clean {col} in {table}: {e}")
+
+    if cleaned > 0:
+        logger.info(f"Total garbage resource values cleaned: {cleaned}")
+    else:
+        logger.info("No garbage resource values found")
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.53.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.53.0")
