@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.46.0 | 2026-03-12 | Game mode tracking, biome subtype plant fix |
-| Haven-UI | 1.45.1 | 2026-03-16 | Planet/moon filtering on SystemDetail from advanced filters |
-| Backend API | 1.45.2 | 2026-03-16 | Fix advanced filters: sentinel column, garbage resources |
+| **Master Haven** | 1.47.0 | 2026-03-16 | Advanced filter cascade across all browse levels |
+| Haven-UI | 1.45.2 | 2026-03-16 | Filter cascade: regions, systems, planets/moons |
+| Backend API | 1.45.3 | 2026-03-16 | Region endpoint accepts advanced filters |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,22 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.47.0 (2026-03-16) - Advanced Filter Cascade
+Advanced filters now cascade through all browse hierarchy levels: Galaxies → Regions → Systems → Planets/Moons.
+
+**Haven-UI 1.45.2**
+- RegionBrowser now accepts and passes advanced filters to `/api/regions/grouped`
+- Regions with zero matching systems are excluded when filters are active
+- Page resets to 1 when filters change at the region level
+- Systems.jsx passes `filters` prop to RegionBrowser (was missing)
+
+**Backend API 1.45.3**
+- `/api/regions/grouped` now accepts all 14 advanced filter parameters (star_type, economy_type, biome, weather, sentinel, resource, etc.)
+- Calls shared `_build_advanced_filter_clauses()` helper — same filter logic used by `/api/systems` and `/api/galaxies/summary`
+- Regions aggregation query now filters by system and planet attributes before grouping
+
+---
 
 #### Haven-UI 1.45.1 (2026-03-16) - Planet/Moon Filtering on SystemDetail
 Advanced filters now carry through to SystemDetail page, hiding non-matching planets and moons.

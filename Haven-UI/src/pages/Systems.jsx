@@ -427,6 +427,7 @@ export default function Systems() {
             onSelect={handleRegionSelect}
             selectedRegion={selectedRegion}
             discordTag={filterTag}
+            filters={advancedFilters}
             onViewAllSystems={handleViewAllSystems}
           />
         )}

@@ -13,7 +13,7 @@ import { AuthContext } from '../utils/AuthContext'
  * Each region shows system count and custom name if available.
  * Includes the ability to set/edit region names.
  */
-export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegion, discordTag = 'all', onViewAllSystems }) {
+export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegion, discordTag = 'all', filters = {}, onViewAllSystems }) {
   const auth = useContext(AuthContext)
   const [regions, setRegions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -33,11 +33,16 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
   const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
   const [submittingName, setSubmittingName] = useState(false)
 
+  // Reset to page 0 when filters change
+  useEffect(() => {
+    setPage(0)
+  }, [JSON.stringify(filters)])
+
   useEffect(() => {
     if (reality && galaxy) {
       loadRegions()
     }
-  }, [reality, galaxy, page, discordTag])
+  }, [reality, galaxy, page, discordTag, JSON.stringify(filters)])
 
   // Load discord tags for the modal dropdown
   useEffect(() => {
@@ -59,6 +64,15 @@ export default function RegionBrowser({ reality, galaxy, onSelect, selectedRegio
       })
       if (discordTag && discordTag !== 'all') {
         params.append('discord_tag', discordTag)
+      }
+
+      // Append advanced filter params
+      if (filters) {
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== '' && value !== null && value !== undefined) {
+            params.append(key, value.toString())
+          }
+        })
       }
 
       const res = await axios.get(`/api/regions/grouped?${params.toString()}`)

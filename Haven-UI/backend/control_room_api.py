@@ -1299,7 +1299,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.45.2', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.45.3', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -8050,6 +8050,20 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                                discord_tag: str = None,
                                reality: str = None,
                                galaxy: str = None,
+                               star_type: str = None,
+                               economy_type: str = None,
+                               economy_level: str = None,
+                               conflict_level: str = None,
+                               dominant_lifeform: str = None,
+                               stellar_classification: str = None,
+                               biome: str = None,
+                               weather: str = None,
+                               sentinel_level: str = None,
+                               resource: str = None,
+                               has_moons: bool = None,
+                               min_planets: int = None,
+                               max_planets: int = None,
+                               is_complete: bool = None,
                                session: Optional[str] = Cookie(None)):
     """Return all regions with their systems grouped together.
 
@@ -8102,6 +8116,16 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         if galaxy:
             filter_clauses.append("COALESCE(s.galaxy, 'Euclid') = ?")
             filter_params.append(galaxy)
+
+        # Advanced filters (system-level and planet-level)
+        _build_advanced_filter_clauses({
+            'star_type': star_type, 'economy_type': economy_type,
+            'economy_level': economy_level, 'conflict_level': conflict_level,
+            'dominant_lifeform': dominant_lifeform, 'stellar_classification': stellar_classification,
+            'biome': biome, 'weather': weather, 'sentinel_level': sentinel_level,
+            'resource': resource, 'has_moons': has_moons,
+            'min_planets': min_planets, 'max_planets': max_planets, 'is_complete': is_complete,
+        }, filter_clauses, filter_params)
 
         # Combine filters
         combined_filter = ""
