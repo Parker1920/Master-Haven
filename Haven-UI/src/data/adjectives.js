@@ -745,7 +745,7 @@ export const faunaAdjectives = [
   "Rare",
   "Regular",
   "Rich",
-  "Scarse",
+  "Scarce",
   "Screaming",
   "Sparse",
   "Sporadic",
