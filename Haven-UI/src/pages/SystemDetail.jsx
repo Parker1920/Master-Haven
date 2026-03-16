@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useContext } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import React, { useEffect, useState, useContext, useMemo } from 'react'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import axios from 'axios'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -167,6 +167,7 @@ function ContributorsModal({ system, onClose }) {
 export default function SystemDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const auth = useContext(AuthContext)
   const [system, setSystem] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -174,6 +175,38 @@ export default function SystemDetail() {
   const [expandedPlanets, setExpandedPlanets] = useState({})
   const [showContributors, setShowContributors] = useState(false)
   const [expandedGradeCategory, setExpandedGradeCategory] = useState(null)
+  const [showAllPlanets, setShowAllPlanets] = useState(false)
+
+  // Read planet-level filters from URL query params
+  const planetFilters = useMemo(() => {
+    const f = {}
+    const biome = searchParams.get('biome')
+    const weather = searchParams.get('weather')
+    const sentinel = searchParams.get('sentinel_level')
+    const resource = searchParams.get('resource')
+    if (biome) f.biome = biome
+    if (weather) f.weather = weather
+    if (sentinel) f.sentinel = sentinel
+    if (resource) f.resource = resource
+    return f
+  }, [searchParams])
+
+  const hasActiveFilters = Object.keys(planetFilters).length > 0 && !showAllPlanets
+
+  // Filter planets/moons based on active filters
+  function planetMatchesFilters(planet) {
+    if (!hasActiveFilters) return true
+    if (planetFilters.biome && planet.biome !== planetFilters.biome) return false
+    if (planetFilters.weather && planet.weather !== planetFilters.weather) return false
+    if (planetFilters.sentinel && (planet.sentinel || planet.sentinel_level) !== planetFilters.sentinel) return false
+    if (planetFilters.resource) {
+      const r = planetFilters.resource
+      const hasResource = planet.common_resource === r || planet.uncommon_resource === r || planet.rare_resource === r ||
+        (planet.materials && planet.materials.split(',').map(m => m.trim()).includes(r))
+      if (!hasResource) return false
+    }
+    return true
+  }
 
   useEffect(() => {
     loadSystem()
@@ -589,17 +622,63 @@ export default function SystemDetail() {
 
       {/* Planets Section */}
       <Card>
-        <h2 className="text-2xl font-bold mb-4">
-          Planets ({system.planets?.length || 0})
-        </h2>
+        {(() => {
+          const allPlanets = system.planets || []
+          const filteredPlanets = hasActiveFilters
+            ? allPlanets.filter(p => {
+                // Check planet itself
+                if (planetMatchesFilters(p)) return true
+                // Check its moons
+                if (p.moons && p.moons.some(m => planetMatchesFilters(m))) return true
+                return false
+              })
+            : allPlanets
+          const isFiltered = hasActiveFilters && filteredPlanets.length < allPlanets.length
 
-        {!system.planets || system.planets.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
-            No planets in this system
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {system.planets.map((planet, index) => (
+          return (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">
+                  Planets ({filteredPlanets.length}{isFiltered ? ` of ${allPlanets.length}` : ''})
+                </h2>
+                {Object.keys(planetFilters).length > 0 && (
+                  <div className="flex items-center gap-2">
+                    {isFiltered && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(planetFilters).map(([key, val]) => (
+                          <span key={key} className="text-xs px-2 py-0.5 rounded bg-cyan-600/20 border border-cyan-500/30 text-cyan-300">
+                            {key === 'sentinel_level' ? 'sentinel' : key}: {val}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setShowAllPlanets(prev => !prev)}
+                      className={`text-xs px-3 py-1 rounded transition-colors ${
+                        showAllPlanets
+                          ? 'bg-gray-600 hover:bg-gray-500 text-white'
+                          : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                      }`}
+                    >
+                      {showAllPlanets ? 'Apply Filters' : 'Show All'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {filteredPlanets.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  {allPlanets.length === 0 ? 'No planets in this system' : 'No planets match active filters'}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredPlanets.map((rawPlanet, index) => {
+                    // Filter moons within this planet when filters are active
+                    const filteredMoons = hasActiveFilters && rawPlanet.moons
+                      ? rawPlanet.moons.filter(m => planetMatchesFilters(m))
+                      : (rawPlanet.moons || [])
+                    const planet = { ...rawPlanet, moons: filteredMoons }
+                    return (
               <div key={index} className="border border-gray-700 rounded overflow-hidden">
                 {/* Planet Header */}
                 <div
@@ -1007,9 +1086,13 @@ export default function SystemDetail() {
                   </div>
                 )}
               </div>
-            ))}
-          </div>
-        )}
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )
+        })()}
       </Card>
 
       {/* Contributors Modal */}

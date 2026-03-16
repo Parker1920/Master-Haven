@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react'
 import axios from 'axios'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Card from './Card'
 import { StarIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
@@ -83,6 +83,19 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
       setLoading(false)
     }
   }
+
+  // Build planet-level filter query string for system detail links
+  const planetFilterQuery = useMemo(() => {
+    const planetKeys = ['biome', 'weather', 'sentinel_level', 'resource']
+    const params = new URLSearchParams()
+    if (filters) {
+      planetKeys.forEach(key => {
+        if (filters[key]) params.append(key, filters[key])
+      })
+    }
+    const qs = params.toString()
+    return qs ? `?${qs}` : ''
+  }, [filters])
 
   // Star type colors
   const starColors = {
@@ -313,7 +326,7 @@ export default function SystemsList({ reality, galaxy, region, discordTag = 'all
           return (
             <Link
               key={system.id}
-              to={`/systems/${system.id}`}
+              to={`/systems/${system.id}${planetFilterQuery}`}
               className="block p-4 bg-gray-800 border border-gray-700 rounded-lg hover:border-cyan-500 hover:bg-gray-750 transition-all group"
             >
               <div className="flex items-start justify-between gap-4">

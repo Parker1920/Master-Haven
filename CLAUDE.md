@@ -23,7 +23,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.46.0 | 2026-03-12 | Game mode tracking, biome subtype plant fix |
-| Haven-UI | 1.45.0 | 2026-03-12 | Game mode badges on SystemDetail and PendingApprovals |
+| Haven-UI | 1.45.1 | 2026-03-16 | Planet/moon filtering on SystemDetail from advanced filters |
 | Backend API | 1.45.2 | 2026-03-16 | Fix advanced filters: sentinel column, garbage resources |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
@@ -81,6 +81,18 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven-UI 1.45.1 (2026-03-16) - Planet/Moon Filtering on SystemDetail
+Advanced filters now carry through to SystemDetail page, hiding non-matching planets and moons.
+
+**Haven-UI 1.45.1**
+- SystemsList passes active planet-level filters (biome, weather, sentinel, resource) as URL query params when linking to system detail
+- SystemDetail reads filter params from URL and hides planets/moons that don't match
+- Moons within matching planets also filtered independently
+- Header shows "Planets (2 of 5)" with active filter badges when filtering
+- "Show All" / "Apply Filters" toggle button to quickly switch between filtered and unfiltered views
+
+---
 
 #### Backend API 1.45.2 (2026-03-16) - Fix Advanced Filters
 Fix broken advanced filters on Systems page: empty sentinel dropdown, non-functional sentinel filter, garbage symbols in resource dropdown.
