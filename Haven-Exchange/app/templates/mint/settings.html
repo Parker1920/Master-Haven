@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}World Mint Settings — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>World Mint Settings</h1>
+    <p class="page-subtitle">Global economy configuration</p>
+</div>
+
+<div class="btn-group mb-xl">
+    <a href="/mint" class="btn btn-secondary">Back to Mint Dashboard</a>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-header">
+        <h3>Economy Parameters</h3>
+    </div>
+    <div class="card-body">
+        <!-- Current values display -->
+        <div class="stats-grid mb-lg" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value">{{ burn_rate_pct }}%</div>
+                <div class="stat-label">Current Burn Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ interest_rate_cap_pct }}%</div>
+                <div class="stat-label">Current Interest Cap</div>
+            </div>
+        </div>
+
+        <!-- Edit form -->
+        <form action="/mint/settings" method="POST"
+              data-confirm="Update global economy settings? This will affect all future loan issuances.">
+            <div class="form-group">
+                <label for="burn_rate_bps">Burn Rate (basis points)</label>
+                <input type="number" id="burn_rate_bps" name="burn_rate_bps"
+                       value="{{ gs.burn_rate_bps }}" required min="0" max="10000" step="1">
+                <span class="form-hint">
+                    Percentage of loan repayments destroyed. 1000 = 10%.
+                    Range: 0 (no burn) to 10000 (100%).
+                </span>
+            </div>
+
+            <div class="form-group">
+                <label for="interest_rate_cap_bps">Interest Rate Cap (basis points)</label>
+                <input type="number" id="interest_rate_cap_bps" name="interest_rate_cap_bps"
+                       value="{{ gs.interest_rate_cap_bps }}" required min="0" max="10000" step="1">
+                <span class="form-hint">
+                    Maximum annual interest rate banks can charge. 2000 = 20%.
+                    Range: 0 to 10000 (100%).
+                </span>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Save Settings</button>
+        </form>
+
+        {% if gs.updated_at %}
+        <p class="text-muted" style="margin-top: var(--space-md); font-size: 0.875rem;">
+            Last updated: {{ gs.updated_at.strftime('%Y-%m-%d %H:%M UTC') if gs.updated_at else 'Never' }}
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

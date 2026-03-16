@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}{{ nation_name }} Banks — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ nation_name }} — Banks</h1>
+    <p class="page-subtitle">Financial institutions serving this nation</p>
+</div>
+
+<!-- Create Bank button for Nation Leaders -->
+{% if user and user.role == 'nation_leader' and is_leader %}
+<div class="btn-group mb-xl">
+    <a href="/banks/create" class="btn btn-primary">Create New Bank</a>
+    <a href="/nation/treasury" class="btn btn-secondary">Back to Treasury</a>
+</div>
+{% endif %}
+
+<!-- Bank Cards -->
+{% if banks %}
+<div class="stats-grid">
+    {% for bank in banks %}
+    <div class="card">
+        <div class="card-header">
+            <h3>
+                <a href="/banks/{{ bank.id }}">{{ bank.name }}</a>
+            </h3>
+            {% if bank.is_active %}
+                <span class="badge badge-confirmed">Active</span>
+            {% else %}
+                <span class="badge badge-pending">Inactive</span>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr); gap: var(--space-sm);">
+                <div>
+                    <div class="stat-value" style="font-size: 1.2rem;">{{ bank.balance | format_number }}</div>
+                    <div class="stat-label">Reserves ({{ settings.CURRENCY_SHORT }})</div>
+                </div>
+                <div>
+                    <div class="stat-value" style="font-size: 1.2rem;">{{ bank.active_loans }}</div>
+                    <div class="stat-label">Active Loans</div>
+                </div>
+                <div>
+                    <div class="stat-value" style="font-size: 1.2rem;">{{ bank.total_loaned | format_number }}</div>
+                    <div class="stat-label">Total Loaned</div>
+                </div>
+                <div>
+                    <div class="stat-value" style="font-size: 1.2rem;">{{ bank.total_burned | format_number }}</div>
+                    <div class="stat-label">Total Burned</div>
+                </div>
+            </div>
+            <p class="text-muted" style="margin-top: var(--space-md); font-size: 0.875rem;">
+                Operator: {{ bank.owner_name }}
+            </p>
+            <div class="btn-group" style="margin-top: var(--space-md);">
+                <a href="/banks/{{ bank.id }}" class="btn btn-sm btn-secondary">View Details</a>
+                {% if user and is_leader and bank.is_active %}
+                <form action="/api/banks/{{ bank.id }}/deactivate" method="POST" style="display: inline;"
+                      data-confirm="Deactivate {{ bank.name }}?">
+                    <button type="submit" class="btn btn-sm btn-danger">Deactivate</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#127974;</div>
+            <h3>No Banks Yet</h3>
+            <p>This nation has no banks.
+                {% if user and is_leader %}
+                    Create one to start lending to citizens.
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

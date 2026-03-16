@@ -14,6 +14,10 @@ Defines all core tables:
   - StockValuations
   - GdpSnapshots
   - Sessions
+  - GlobalSettings
+  - Banks
+  - Loans
+  - LoanPayments
 """
 
 from datetime import datetime
@@ -408,3 +412,156 @@ class Session_(Base):
 
     def __repr__(self) -> str:
         return f"<Session(id='{self.id[:12]}...', user_id={self.user_id})>"
+
+
+# ---------------------------------------------------------------------------
+# Global Settings — singleton row for World Mint config
+# ---------------------------------------------------------------------------
+
+class GlobalSettings(Base):
+    """Singleton row storing global economy settings controlled by the World Mint."""
+
+    __tablename__ = "global_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    # Burn rate applied to loan repayments, in basis points (1000 = 10%)
+    burn_rate_bps: Mapped[int] = mapped_column(Integer, default=1000)
+    # Maximum interest rate banks can charge, in basis points (2000 = 20% annual)
+    interest_rate_cap_bps: Mapped[int] = mapped_column(Integer, default=2000)
+    updated_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<GlobalSettings(burn_rate={self.burn_rate_bps}bps, "
+            f"interest_cap={self.interest_rate_cap_bps}bps)>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Banking System — Banks, Loans, Loan Payments
+# ---------------------------------------------------------------------------
+
+class Bank(Base):
+    """A bank within a nation, appointed by the Nation Leader."""
+
+    __tablename__ = "banks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The nation this bank belongs to
+    nation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=False
+    )
+    # The user appointed as bank operator
+    owner_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Bank wallet address (format: TRV-BANK-xxxxxxxx)
+    wallet_address: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    # Current reserves held by the bank
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    # Lifetime total amount loaned out
+    total_loaned: Mapped[int] = mapped_column(Integer, default=0)
+    # Lifetime total amount burned via loan repayments
+    total_burned: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+
+    # Relationships
+    nation: Mapped["Nation"] = relationship(
+        "Nation", foreign_keys=[nation_id], backref="banks"
+    )
+    owner: Mapped["User"] = relationship(
+        "User", foreign_keys=[owner_id], backref="operated_banks"
+    )
+    loans: Mapped[List["Loan"]] = relationship(
+        "Loan", back_populates="bank", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Bank(id={self.id}, name='{self.name}', balance={self.balance})>"
+
+
+class Loan(Base):
+    """A loan issued by a bank to a citizen."""
+
+    __tablename__ = "loans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Which bank issued the loan
+    bank_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("banks.id"), nullable=False
+    )
+    # The citizen who received the loan
+    borrower_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    # Original loan amount
+    principal: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Remaining balance including any accrued interest
+    outstanding: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Interest rate snapshot at loan creation time, in basis points (500 = 5% annual)
+    interest_rate: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Burn rate snapshot at loan creation time, in basis points
+    burn_rate_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Loan lifecycle status: 'active', 'closed', 'defaulted'
+    status: Mapped[str] = mapped_column(Text, default="active")
+    # Borrower's stated purpose for the loan
+    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    # Relationships
+    bank: Mapped["Bank"] = relationship("Bank", back_populates="loans")
+    borrower: Mapped["User"] = relationship(
+        "User", foreign_keys=[borrower_id], backref="loans"
+    )
+    payments: Mapped[List["LoanPayment"]] = relationship(
+        "LoanPayment", back_populates="loan", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<Loan(id={self.id}, principal={self.principal}, "
+            f"outstanding={self.outstanding}, status='{self.status}')>"
+        )
+
+
+class LoanPayment(Base):
+    """A single payment made against a loan, with burn split tracking."""
+
+    __tablename__ = "loan_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The loan this payment applies to
+    loan_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("loans.id"), nullable=False
+    )
+    # Total payment amount (burn_amount + bank_amount)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Portion of the payment that was burned (sent to World Mint)
+    burn_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Portion of the payment returned to the bank's reserves
+    bank_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Outstanding loan balance after this payment
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Links to the main LOAN_PAYMENT transaction on the ledger
+    tx_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+
+    # Relationships
+    loan: Mapped["Loan"] = relationship("Loan", back_populates="payments")
+
+    def __repr__(self) -> str:
+        return (
+            f"<LoanPayment(id={self.id}, loan_id={self.loan_id}, "
+            f"amount={self.amount}, balance_after={self.balance_after})>"
+        )

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ bank.name }} — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ bank.name }}</h1>
+    <p class="page-subtitle">Bank operated by {{ owner_name }} &mdash; {{ nation_name }}</p>
+</div>
+
+<!-- Bank Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ bank.balance | format_number }}</div>
+        <div class="stat-label">Reserves ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ active_loan_count }}</div>
+        <div class="stat-label">Active Loans</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ bank.total_loaned | format_number }}</div>
+        <div class="stat-label">Total Loaned</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ bank.total_burned | format_number }}</div>
+        <div class="stat-label">Total Burned</div>
+    </div>
+</div>
+
+<!-- Bank Wallet -->
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>Bank Wallet</h3>
+    </div>
+    <div class="card-body">
+        <div class="wallet-address">
+            <span>{{ bank.wallet_address }}</span>
+            <button class="copy-btn" onclick="copyToClipboard('{{ bank.wallet_address }}', this)">Copy</button>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions (for bank operator) -->
+{% if user and user.id == bank.owner_id %}
+<div class="btn-group mb-xl">
+    <a href="/banks/nation/{{ bank.nation_id }}" class="btn btn-secondary">All Banks</a>
+</div>
+{% endif %}
+
+<!-- Loan List -->
+<div class="card">
+    <div class="card-header">
+        <h3>Loans</h3>
+    </div>
+    <div class="card-body">
+        {% if loans %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Borrower</th>
+                        <th>Principal</th>
+                        <th>Outstanding</th>
+                        <th>Rate</th>
+                        <th>Status</th>
+                        <th>Opened</th>
+                        {% if is_leader %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for loan in loans %}
+                    <tr>
+                        <td>
+                            <a href="/wallet/{{ loan.borrower_wallet }}" class="tx-hash">
+                                {{ loan.borrower_name }}
+                            </a>
+                        </td>
+                        <td>{{ loan.principal | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>
+                            {% if loan.outstanding > 0 %}
+                                <span class="amount-sent">{{ loan.outstanding | format_number }}</span>
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ '%.1f' | format(loan.interest_rate / 100) }}%</td>
+                        <td>
+                            <span class="badge badge-{{ 'confirmed' if loan.status == 'closed' else ('pending' if loan.status == 'active' else 'error') }}">
+                                {{ loan.status }}
+                            </span>
+                        </td>
+                        <td>{{ loan.opened_at[:10] if loan.opened_at else '—' }}</td>
+                        {% if is_leader %}
+                        <td>
+                            {% if loan.status == 'active' %}
+                            <form action="/api/banks/{{ bank.id }}/loans/{{ loan.id }}/forgive" method="POST" style="display: inline;"
+                                  data-confirm="Forgive this loan of {{ loan.outstanding | format_number }} {{ settings.CURRENCY_SHORT }}? This cannot be undone.">
+                                <button type="submit" class="btn btn-sm btn-danger">Forgive</button>
+                            </form>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">&#128196;</div>
+            <h3>No Loans Yet</h3>
+            <p>This bank has not issued any loans.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

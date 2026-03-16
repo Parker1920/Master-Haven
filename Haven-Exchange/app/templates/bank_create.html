@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Create Bank — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create a Bank</h1>
+    <p class="page-subtitle">Appoint a bank operator for {{ nation.name }}</p>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form action="/banks/create" method="POST" id="create-bank-form">
+            <div class="form-group">
+                <label for="name">Bank Name</label>
+                <input type="text" id="name" name="name" required
+                       placeholder="e.g. First National Bank of {{ nation.name }}">
+            </div>
+
+            <div class="form-group">
+                <label for="owner_user_id">Bank Operator</label>
+                <select id="owner_user_id" name="owner_user_id" required>
+                    <option value="">Select a nation member...</option>
+                    {% for member in members %}
+                    <option value="{{ member.id }}">
+                        {{ member.display_name or member.username }}
+                        ({{ member.wallet_address }})
+                    </option>
+                    {% endfor %}
+                </select>
+                <span class="form-hint">The member who will manage this bank and issue loans (max 4 banks per nation)</span>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Create Bank</button>
+        </form>
+    </div>
+</div>
+
+<div class="btn-group" style="margin-top: var(--space-lg);">
+    <a href="/banks/nation/{{ nation.id }}" class="btn btn-secondary">Back to Banks</a>
+    <a href="/nation/treasury" class="btn btn-secondary">Treasury</a>
+</div>
+{% endblock %}

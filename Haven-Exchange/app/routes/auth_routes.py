@@ -33,7 +33,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,  # TODO: set True in production behind HTTPS
+        secure=True,
         max_age=COOKIE_MAX_AGE,
     )
 
@@ -160,7 +160,7 @@ def logout(
         key=COOKIE_KEY,
         httponly=True,
         samesite="lax",
-        secure=False,  # TODO: set True in production behind HTTPS
+        secure=True,
     )
 
     return {"success": True}

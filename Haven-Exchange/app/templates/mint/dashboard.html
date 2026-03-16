@@ -276,7 +276,10 @@
     <div class="card">
         <div class="card-header">
             <h3>Recent Mint Transactions</h3>
-            <a href="/mint/stats" class="btn btn-sm btn-secondary">Detailed Stats</a>
+            <div class="btn-group">
+                <a href="/mint/settings" class="btn btn-sm btn-secondary">Settings</a>
+                <a href="/mint/stats" class="btn btn-sm btn-secondary">Detailed Stats</a>
+            </div>
         </div>
         <div class="card-body">
             {% if recent_mints %}

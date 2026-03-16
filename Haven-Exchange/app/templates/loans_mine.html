@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}My Loans — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>My Loans</h1>
+    <p class="page-subtitle">Your loan history across all banks</p>
+</div>
+
+<!-- Quick Actions -->
+<div class="btn-group mb-xl">
+    <a href="/loans/apply" class="btn btn-primary">Apply for a Loan</a>
+    <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
+</div>
+
+<!-- Active Loans -->
+{% if active_loans %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>Active Loans ({{ active_loans | length }})</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Bank</th>
+                        <th>Principal</th>
+                        <th>Outstanding</th>
+                        <th>Rate</th>
+                        <th>Burn</th>
+                        <th>Opened</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for loan in active_loans %}
+                    <tr>
+                        <td>{{ loan.bank_name }}</td>
+                        <td>{{ loan.principal | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td><span class="amount-sent">{{ loan.outstanding | format_number }}</span></td>
+                        <td>{{ '%.1f' | format(loan.interest_rate / 100) }}%</td>
+                        <td>{{ '%.1f' | format(loan.burn_rate_snapshot / 100) }}%</td>
+                        <td>{{ loan.opened_at[:10] if loan.opened_at else '—' }}</td>
+                        <td>
+                            <a href="/loans/{{ loan.id }}" class="btn btn-sm btn-primary">Pay / Details</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Closed / Defaulted Loans -->
+{% if closed_loans %}
+<div class="card">
+    <div class="card-header">
+        <h3>Loan History ({{ closed_loans | length }})</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Bank</th>
+                        <th>Principal</th>
+                        <th>Status</th>
+                        <th>Opened</th>
+                        <th>Closed</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for loan in closed_loans %}
+                    <tr>
+                        <td>{{ loan.bank_name }}</td>
+                        <td>{{ loan.principal | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>
+                            <span class="badge badge-{{ 'confirmed' if loan.status == 'closed' else 'error' }}">
+                                {{ loan.status }}
+                            </span>
+                        </td>
+                        <td>{{ loan.opened_at[:10] if loan.opened_at else '—' }}</td>
+                        <td>{{ loan.closed_at[:10] if loan.closed_at else '—' }}</td>
+                        <td>
+                            <a href="/loans/{{ loan.id }}" class="btn btn-sm btn-secondary">Details</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if not active_loans and not closed_loans %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#128196;</div>
+            <h3>No Loans</h3>
+            <p>You don't have any loans yet. Apply for one if you need funds.</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

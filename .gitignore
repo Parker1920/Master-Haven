@@ -11,6 +11,9 @@ keeper-discord-bot-main/
 # Travelers Collective - separate project with its own repo
 Travelers-Collective/
 
+# Haven Trading Engine - BTC trading bot, not part of the Haven platform
+trade-engine/
+
 
 # -----------------
 # ENVIRONMENT & SECRETS

@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 
 from app.config import settings
-from app.models import Nation, Transaction, User
+from app.models import Bank, Nation, Transaction, User
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -24,7 +24,8 @@ GENESIS_HASH: str = "0" * 64  # previous hash for the very first transaction
 _tx_lock = threading.Lock()   # serialises all writes to the ledger
 
 # Valid transaction types
-_VALID_TX_TYPES = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL"}
+# Valid transaction types — includes banking types (LOAN, LOAN_PAYMENT, LOAN_FORGIVE)
+_VALID_TX_TYPES = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL", "LOAN", "LOAN_PAYMENT", "LOAN_FORGIVE"}
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +119,19 @@ def create_transaction(
 
         # -- Balance checks for non-MINT types --------------------------------
         if tx_type not in ("MINT", "GENESIS"):
-            if from_address.startswith(settings.NATION_WALLET_PREFIX):
+            if from_address.startswith("TRV-BANK-"):
+                # Bank wallet
+                bank = db.execute(
+                    select(Bank).where(Bank.wallet_address == from_address)
+                ).scalar_one_or_none()
+                if bank is None:
+                    raise ValueError(f"Bank with wallet address '{from_address}' not found.")
+                if bank.balance < amount:
+                    raise ValueError(
+                        f"Insufficient bank balance. "
+                        f"Available: {bank.balance}, required: {amount}."
+                    )
+            elif from_address.startswith(settings.NATION_WALLET_PREFIX):
                 # Nation treasury
                 nation = db.execute(
                     select(Nation).where(Nation.treasury_address == from_address)
@@ -165,7 +178,13 @@ def create_transaction(
 
         # -- Update cached balances -------------------------------------------
         # Sender side
-        if from_address.startswith(settings.NATION_WALLET_PREFIX):
+        if from_address.startswith("TRV-BANK-"):
+            bank = db.execute(
+                select(Bank).where(Bank.wallet_address == from_address)
+            ).scalar_one_or_none()
+            if bank is not None:
+                bank.balance -= amount
+        elif from_address.startswith(settings.NATION_WALLET_PREFIX):
             nation = db.execute(
                 select(Nation).where(Nation.treasury_address == from_address)
             ).scalar_one_or_none()
@@ -186,7 +205,13 @@ def create_transaction(
             to_address == settings.WORLD_MINT_ADDRESS
             and tx_type == "BURN"
         )
-        if to_address.startswith(settings.NATION_WALLET_PREFIX):
+        if to_address.startswith("TRV-BANK-"):
+            bank = db.execute(
+                select(Bank).where(Bank.wallet_address == to_address)
+            ).scalar_one_or_none()
+            if bank is not None:
+                bank.balance += amount
+        elif to_address.startswith(settings.NATION_WALLET_PREFIX):
             nation = db.execute(
                 select(Nation).where(Nation.treasury_address == to_address)
             ).scalar_one_or_none()

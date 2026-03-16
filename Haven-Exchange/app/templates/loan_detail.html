@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Loan #{{ loan.id }} — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Loan #{{ loan.id }}</h1>
+    <p class="page-subtitle">{{ bank_name }} &mdash;
+        <span class="badge badge-{{ 'confirmed' if loan.status == 'closed' else ('pending' if loan.status == 'active' else 'error') }}">
+            {{ loan.status }}
+        </span>
+    </p>
+</div>
+
+<!-- Loan Overview -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ loan.principal | format_number }}</div>
+        <div class="stat-label">Principal ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value {% if loan.outstanding > 0 %}text-error{% else %}text-success{% endif %}">
+            {{ loan.outstanding | format_number }}
+        </div>
+        <div class="stat-label">Outstanding ({{ settings.CURRENCY_SHORT }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ '%.1f' | format(loan.interest_rate / 100) }}%</div>
+        <div class="stat-label">Interest Rate</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ '%.1f' | format(loan.burn_rate_snapshot / 100) }}%</div>
+        <div class="stat-label">Burn Rate</div>
+    </div>
+</div>
+
+{% if loan.memo %}
+<div class="card mb-xl">
+    <div class="card-header"><h3>Purpose</h3></div>
+    <div class="card-body">
+        <p>{{ loan.memo }}</p>
+    </div>
+</div>
+{% endif %}
+
+<!-- Make Payment Form (only if active and user is borrower) -->
+{% if loan.status == 'active' and user and user.id == loan.borrower_id %}
+<div class="card mb-xl" style="max-width: 500px;">
+    <div class="card-header"><h3>Make a Payment</h3></div>
+    <div class="card-body">
+        <p class="text-muted" style="margin-bottom: var(--space-md);">
+            {{ '%.1f' | format(loan.burn_rate_snapshot / 100) }}% of your payment will be burned.
+            Your balance: {{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}.
+        </p>
+        <form action="/loans/{{ loan.id }}/pay" method="POST"
+              data-confirm="Make this loan payment?">
+            <div class="form-group">
+                <label for="amount">Payment Amount ({{ settings.CURRENCY_SHORT }})</label>
+                <input type="number" id="amount" name="amount" required min="1" step="1"
+                       max="{{ loan.outstanding }}"
+                       placeholder="Max: {{ loan.outstanding | format_number }}">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Pay</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<!-- Payment History -->
+<div class="card">
+    <div class="card-header">
+        <h3>Payment History</h3>
+    </div>
+    <div class="card-body">
+        {% if payments %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Total Paid</th>
+                        <th>To Bank</th>
+                        <th>Burned</th>
+                        <th>Balance After</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in payments %}
+                    <tr>
+                        <td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '—' }}</td>
+                        <td>{{ p.amount | format_number }} {{ settings.CURRENCY_SHORT }}</td>
+                        <td>{{ p.bank_amount | format_number }}</td>
+                        <td>
+                            {% if p.burn_amount > 0 %}
+                                <span class="amount-sent">{{ p.burn_amount | format_number }}</span>
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ p.balance_after | format_number }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: var(--space-lg) 0;">
+            <p class="text-muted mb-0">No payments made yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="btn-group" style="margin-top: var(--space-lg);">
+    <a href="/loans/mine" class="btn btn-secondary">My Loans</a>
+    <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
+</div>
+{% endblock %}

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Apply for a Loan — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Apply for a Loan</h1>
+    <p class="page-subtitle">Request a loan from a bank in your nation</p>
+</div>
+
+{% if not user.nation_id %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#128196;</div>
+            <h3>Join a Nation First</h3>
+            <p>You must be a member of a nation to apply for a loan.</p>
+            <a href="/nations" class="btn btn-primary">Browse Nations</a>
+        </div>
+    </div>
+</div>
+{% elif not banks %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#127974;</div>
+            <h3>No Banks Available</h3>
+            <p>Your nation does not have any active banks yet.</p>
+            <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+{% elif has_active_loan %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#9888;</div>
+            <h3>Active Loan Exists</h3>
+            <p>You already have an active loan. Please repay it before applying for a new one.</p>
+            <a href="/loans/mine" class="btn btn-primary">View My Loans</a>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <p class="text-muted mb-lg">
+            Loan repayments include a burn split: {{ burn_rate_pct }}% of each payment
+            is burned, the rest returns to the bank. Current interest rate cap: {{ interest_rate_cap_pct }}%.
+        </p>
+
+        <form action="/loans/apply" method="POST">
+            <div class="form-group">
+                <label for="bank_id">Select Bank</label>
+                <select id="bank_id" name="bank_id" required>
+                    <option value="">Choose a bank...</option>
+                    {% for bank in banks %}
+                    <option value="{{ bank.id }}">
+                        {{ bank.name }} (Reserves: {{ bank.balance | format_number }} {{ settings.CURRENCY_SHORT }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="amount">Loan Amount ({{ settings.CURRENCY_SHORT }})</label>
+                <input type="number" id="amount" name="amount" required min="1" step="1"
+                       placeholder="0">
+            </div>
+
+            <div class="form-group">
+                <label for="memo">Purpose (optional)</label>
+                <textarea id="memo" name="memo" rows="2"
+                          placeholder="What will you use the loan for?"></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Submit Loan Application</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="btn-group" style="margin-top: var(--space-lg);">
+    <a href="/loans/mine" class="btn btn-secondary">My Loans</a>
+    <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
+</div>
+{% endblock %}

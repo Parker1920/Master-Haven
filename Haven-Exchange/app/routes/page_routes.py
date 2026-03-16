@@ -30,6 +30,10 @@ from app.blockchain import (
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    Bank,
+    GlobalSettings,
+    Loan,
+    LoanPayment,
     MintAllocation,
     Nation,
     Shop,
@@ -2880,3 +2884,650 @@ def shop_ipo_post(
             url=f"/shop/ipo?error={error_msg}",
             status_code=303,
         )
+
+
+# =========================================================================
+# BANKING PAGES
+# =========================================================================
+
+# ---------------------------------------------------------------------------
+# GET /banks/nation/{nation_id} — List banks for a nation
+# ---------------------------------------------------------------------------
+@router.get("/banks/nation/{nation_id}")
+def banks_list_page(
+    request: Request,
+    nation_id: int,
+    user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Display all banks for a given nation."""
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        return RedirectResponse(url="/nations?error=Nation+not+found", status_code=303)
+
+    banks = list(
+        db.execute(
+            select(Bank).where(Bank.nation_id == nation_id)
+            .order_by(Bank.created_at.desc())
+        ).scalars().all()
+    )
+
+    # Build bank data with active loan counts
+    bank_data = []
+    for b in banks:
+        active_loans = db.execute(
+            select(func.count(Loan.id)).where(
+                Loan.bank_id == b.id, Loan.status == "active"
+            )
+        ).scalar() or 0
+        owner = db.execute(select(User).where(User.id == b.owner_id)).scalar_one_or_none()
+        bank_data.append({
+            "id": b.id,
+            "name": b.name,
+            "wallet_address": b.wallet_address,
+            "balance": b.balance,
+            "total_loaned": b.total_loaned,
+            "total_burned": b.total_burned,
+            "is_active": b.is_active,
+            "active_loans": active_loans,
+            "owner_name": owner.display_name or owner.username if owner else "Unknown",
+        })
+
+    # Check if the current user is the nation leader
+    is_leader = user is not None and nation.leader_id == user.id
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="banks",
+        nation_name=nation.name,
+        banks=bank_data,
+        is_leader=is_leader,
+        nation_id=nation_id,
+    )
+    return templates.TemplateResponse("bank_list.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /banks/create — Bank creation form (Nation Leader only)
+# (Must be registered BEFORE /banks/{bank_id} to avoid "create" matching as an ID)
+# ---------------------------------------------------------------------------
+@router.get("/banks/create")
+def bank_create_page(
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Show the bank creation form.  Nation leaders only."""
+    if user.role not in ("nation_leader", "world_mint"):
+        return RedirectResponse(
+            url="/dashboard?error=Only+nation+leaders+can+create+banks",
+            status_code=303,
+        )
+
+    nation = db.execute(
+        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
+    ).scalar_one_or_none()
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=No+approved+nation+found",
+            status_code=303,
+        )
+
+    # Get nation members for the operator dropdown
+    members = list(
+        db.execute(
+            select(User).where(User.nation_id == nation.id)
+        ).scalars().all()
+    )
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="banks",
+        nation=nation,
+        members=members,
+    )
+    return templates.TemplateResponse("bank_create.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /banks/create — Handle bank creation form submission
+# ---------------------------------------------------------------------------
+@router.post("/banks/create")
+def bank_create_post(
+    request: Request,
+    name: str = Form(...),
+    owner_user_id: int = Form(...),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Process the bank creation form.  Delegates to the API logic."""
+    if user.role not in ("nation_leader", "world_mint"):
+        return RedirectResponse(
+            url="/dashboard?error=Only+nation+leaders+can+create+banks",
+            status_code=303,
+        )
+
+    nation = db.execute(
+        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
+    ).scalar_one_or_none()
+    if nation is None:
+        return RedirectResponse(url="/dashboard?error=No+approved+nation+found", status_code=303)
+
+    # Check max 4 banks
+    bank_count = db.execute(
+        select(func.count(Bank.id)).where(Bank.nation_id == nation.id)
+    ).scalar() or 0
+    if bank_count >= 4:
+        return RedirectResponse(
+            url=f"/banks/nation/{nation.id}?error=Maximum+of+4+banks+reached",
+            status_code=303,
+        )
+
+    # Validate owner is a nation member
+    owner = db.execute(select(User).where(User.id == owner_user_id)).scalar_one_or_none()
+    if owner is None or owner.nation_id != nation.id:
+        return RedirectResponse(
+            url=f"/banks/create?error=Operator+must+be+a+nation+member",
+            status_code=303,
+        )
+
+    from app.wallet import generate_bank_wallet_address
+
+    bank = Bank(
+        nation_id=nation.id,
+        owner_id=owner_user_id,
+        name=name.strip(),
+        wallet_address="PENDING",
+    )
+    db.add(bank)
+    db.flush()
+    bank.wallet_address = generate_bank_wallet_address(bank.id)
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/banks/{bank.id}?success=Bank+created+successfully",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /banks/{bank_id} — Bank detail page
+# (Registered AFTER /banks/create and /banks/nation/{id} to avoid path conflicts)
+# ---------------------------------------------------------------------------
+@router.get("/banks/{bank_id}")
+def bank_detail_page(
+    request: Request,
+    bank_id: int,
+    user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Display bank details, loans, and stats."""
+    bank = db.execute(select(Bank).where(Bank.id == bank_id)).scalar_one_or_none()
+    if bank is None:
+        return RedirectResponse(url="/nations?error=Bank+not+found", status_code=303)
+
+    owner = db.execute(select(User).where(User.id == bank.owner_id)).scalar_one_or_none()
+    nation = db.execute(select(Nation).where(Nation.id == bank.nation_id)).scalar_one_or_none()
+
+    # Active loan count
+    active_loan_count = db.execute(
+        select(func.count(Loan.id)).where(
+            Loan.bank_id == bank.id, Loan.status == "active"
+        )
+    ).scalar() or 0
+
+    # All loans for this bank
+    loans = list(
+        db.execute(
+            select(Loan).where(Loan.bank_id == bank.id)
+            .order_by(Loan.opened_at.desc())
+        ).scalars().all()
+    )
+
+    loan_data = []
+    for loan in loans:
+        borrower = db.execute(
+            select(User).where(User.id == loan.borrower_id)
+        ).scalar_one_or_none()
+        loan_data.append({
+            "id": loan.id,
+            "borrower_name": borrower.display_name or borrower.username if borrower else "Unknown",
+            "borrower_wallet": borrower.wallet_address if borrower else "",
+            "principal": loan.principal,
+            "outstanding": loan.outstanding,
+            "interest_rate": loan.interest_rate,
+            "status": loan.status,
+            "opened_at": loan.opened_at.isoformat() if loan.opened_at else None,
+        })
+
+    # Check if current user is the nation leader (for forgive button)
+    is_leader = user is not None and nation is not None and nation.leader_id == user.id
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="banks",
+        bank=bank,
+        owner_name=owner.display_name or owner.username if owner else "Unknown",
+        nation_name=nation.name if nation else "Unknown",
+        active_loan_count=active_loan_count,
+        loans=loan_data,
+        is_leader=is_leader,
+    )
+    return templates.TemplateResponse("bank_detail.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /loans/apply — Loan application form
+# ---------------------------------------------------------------------------
+@router.get("/loans/apply")
+def loan_apply_page(
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Show the loan application form for citizens."""
+    # Get active banks in the user's nation
+    banks = []
+    if user.nation_id:
+        banks = list(
+            db.execute(
+                select(Bank).where(
+                    Bank.nation_id == user.nation_id,
+                    Bank.is_active == True,  # noqa: E712
+                )
+            ).scalars().all()
+        )
+
+    # Check if user already has an active loan
+    has_active_loan = db.execute(
+        select(Loan).where(Loan.borrower_id == user.id, Loan.status == "active")
+    ).scalar_one_or_none() is not None
+
+    # Get current global settings for display
+    gs = db.execute(
+        select(GlobalSettings).where(GlobalSettings.id == 1)
+    ).scalar_one_or_none()
+    burn_rate_pct = round((gs.burn_rate_bps if gs else 1000) / 100, 1)
+    interest_rate_cap_pct = round((gs.interest_rate_cap_bps if gs else 2000) / 100, 1)
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="loans",
+        banks=banks,
+        has_active_loan=has_active_loan,
+        burn_rate_pct=burn_rate_pct,
+        interest_rate_cap_pct=interest_rate_cap_pct,
+    )
+    return templates.TemplateResponse("loan_apply.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /loans/apply — Handle loan application form submission
+# ---------------------------------------------------------------------------
+@router.post("/loans/apply")
+def loan_apply_post(
+    request: Request,
+    bank_id: int = Form(...),
+    amount: int = Form(...),
+    memo: str = Form(None),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Process the loan application.  Creates the loan via bank operator logic."""
+    bank = db.execute(select(Bank).where(Bank.id == bank_id)).scalar_one_or_none()
+    if bank is None:
+        return RedirectResponse(url="/loans/apply?error=Bank+not+found", status_code=303)
+
+    # The loan issuance is performed by the bank operator via the API.
+    # For the citizen self-service form, we create the loan directly since
+    # the bank operator pre-approves loans by making the bank active.
+    # Validate all the same rules as the API endpoint.
+
+    if not bank.is_active:
+        return RedirectResponse(url="/loans/apply?error=Bank+is+not+active", status_code=303)
+
+    if user.nation_id != bank.nation_id:
+        return RedirectResponse(url="/loans/apply?error=Must+be+in+same+nation", status_code=303)
+
+    active_loan = db.execute(
+        select(Loan).where(Loan.borrower_id == user.id, Loan.status == "active")
+    ).scalar_one_or_none()
+    if active_loan is not None:
+        return RedirectResponse(url="/loans/apply?error=You+already+have+an+active+loan", status_code=303)
+
+    if amount <= 0:
+        return RedirectResponse(url="/loans/apply?error=Amount+must+be+positive", status_code=303)
+
+    if bank.balance < amount:
+        return RedirectResponse(url="/loans/apply?error=Bank+has+insufficient+reserves", status_code=303)
+
+    # Snapshot global settings
+    gs = db.execute(select(GlobalSettings).where(GlobalSettings.id == 1)).scalar_one_or_none()
+    if gs is None:
+        gs_burn = 1000
+        gs_interest = 2000
+    else:
+        gs_burn = gs.burn_rate_bps
+        gs_interest = gs.interest_rate_cap_bps
+
+    # Create the LOAN transaction
+    try:
+        tx = create_transaction(
+            db,
+            tx_type="LOAN",
+            from_address=bank.wallet_address,
+            to_address=user.wallet_address,
+            amount=amount,
+            memo=f"Loan from {bank.name}: {memo or 'No memo'}",
+        )
+    except ValueError as exc:
+        error_msg = str(exc).replace(" ", "+")
+        return RedirectResponse(url=f"/loans/apply?error={error_msg}", status_code=303)
+
+    bank.total_loaned += amount
+
+    loan = Loan(
+        bank_id=bank.id,
+        borrower_id=user.id,
+        principal=amount,
+        outstanding=amount,
+        interest_rate=gs_interest,
+        burn_rate_snapshot=gs_burn,
+        status="active",
+        memo=memo,
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+
+    return RedirectResponse(
+        url=f"/loans/{loan.id}?success=Loan+approved+and+disbursed",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /loans/mine — Citizen's loan dashboard
+# (Must be registered BEFORE /loans/{loan_id} to avoid "mine" matching as an ID)
+# ---------------------------------------------------------------------------
+@router.get("/loans/mine")
+def loans_mine_page(
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Display the current user's loan dashboard."""
+    all_loans = list(
+        db.execute(
+            select(Loan).where(Loan.borrower_id == user.id)
+            .order_by(Loan.opened_at.desc())
+        ).scalars().all()
+    )
+
+    # Build loan data with bank names
+    active_loans = []
+    closed_loans = []
+    for loan in all_loans:
+        bank = db.execute(select(Bank).where(Bank.id == loan.bank_id)).scalar_one_or_none()
+        loan_dict = {
+            "id": loan.id,
+            "bank_name": bank.name if bank else "Unknown",
+            "bank_id": loan.bank_id,
+            "principal": loan.principal,
+            "outstanding": loan.outstanding,
+            "interest_rate": loan.interest_rate,
+            "burn_rate_snapshot": loan.burn_rate_snapshot,
+            "status": loan.status,
+            "opened_at": loan.opened_at.isoformat() if loan.opened_at else None,
+            "closed_at": loan.closed_at.isoformat() if loan.closed_at else None,
+        }
+        if loan.status == "active":
+            active_loans.append(loan_dict)
+        else:
+            closed_loans.append(loan_dict)
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="loans",
+        active_loans=active_loans,
+        closed_loans=closed_loans,
+    )
+    return templates.TemplateResponse("loans_mine.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /loans/{loan_id} — Loan detail page
+# ---------------------------------------------------------------------------
+@router.get("/loans/{loan_id}")
+def loan_detail_page(
+    request: Request,
+    loan_id: int,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Display loan details and payment history."""
+    loan = db.execute(select(Loan).where(Loan.id == loan_id)).scalar_one_or_none()
+    if loan is None:
+        return RedirectResponse(url="/loans/mine?error=Loan+not+found", status_code=303)
+
+    # Only the borrower, bank operator, nation leader, or world_mint can see this
+    bank = db.execute(select(Bank).where(Bank.id == loan.bank_id)).scalar_one_or_none()
+    nation = db.execute(
+        select(Nation).where(Nation.id == bank.nation_id)
+    ).scalar_one_or_none() if bank else None
+
+    allowed = (
+        user.id == loan.borrower_id
+        or (bank and user.id == bank.owner_id)
+        or (nation and user.id == nation.leader_id)
+        or user.role == "world_mint"
+    )
+    if not allowed:
+        return RedirectResponse(url="/dashboard?error=Access+denied", status_code=303)
+
+    # Payment history
+    payments = list(
+        db.execute(
+            select(LoanPayment).where(LoanPayment.loan_id == loan.id)
+            .order_by(LoanPayment.created_at.desc())
+        ).scalars().all()
+    )
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="loans",
+        loan=loan,
+        bank_name=bank.name if bank else "Unknown",
+        payments=payments,
+    )
+    return templates.TemplateResponse("loan_detail.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /loans/{loan_id}/pay — Handle loan payment form submission
+# ---------------------------------------------------------------------------
+@router.post("/loans/{loan_id}/pay")
+def loan_pay_post(
+    request: Request,
+    loan_id: int,
+    amount: int = Form(...),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Process a loan payment from the form."""
+    import math as _math
+
+    loan = db.execute(select(Loan).where(Loan.id == loan_id)).scalar_one_or_none()
+    if loan is None:
+        return RedirectResponse(url="/loans/mine?error=Loan+not+found", status_code=303)
+    if loan.borrower_id != user.id:
+        return RedirectResponse(url="/loans/mine?error=Not+your+loan", status_code=303)
+    if loan.status != "active":
+        return RedirectResponse(url=f"/loans/{loan_id}?error=Loan+is+not+active", status_code=303)
+    if amount <= 0:
+        return RedirectResponse(url=f"/loans/{loan_id}?error=Amount+must+be+positive", status_code=303)
+
+    # Cap to outstanding
+    amount = min(amount, loan.outstanding)
+
+    if user.balance < amount:
+        return RedirectResponse(
+            url=f"/loans/{loan_id}?error=Insufficient+balance",
+            status_code=303,
+        )
+
+    # Calculate burn split
+    burn_amount = _math.floor(amount * loan.burn_rate_snapshot / 10000)
+    bank_amount = amount - burn_amount
+
+    bank = db.execute(select(Bank).where(Bank.id == loan.bank_id)).scalar_one_or_none()
+    if bank is None:
+        return RedirectResponse(url=f"/loans/{loan_id}?error=Bank+not+found", status_code=303)
+
+    # Transaction 1: LOAN_PAYMENT — borrower → bank
+    tx_hash = ""
+    if bank_amount > 0:
+        try:
+            tx = create_transaction(
+                db,
+                tx_type="LOAN_PAYMENT",
+                from_address=user.wallet_address,
+                to_address=bank.wallet_address,
+                amount=bank_amount,
+                memo=f"Loan payment #{loan.id} (bank portion)",
+            )
+            tx_hash = tx.tx_hash
+        except ValueError as exc:
+            error_msg = str(exc).replace(" ", "+")
+            return RedirectResponse(url=f"/loans/{loan_id}?error={error_msg}", status_code=303)
+
+    # Transaction 2: BURN — borrower → World Mint (if burn > 0)
+    if burn_amount > 0:
+        try:
+            burn_tx = create_transaction(
+                db,
+                tx_type="BURN",
+                from_address=user.wallet_address,
+                to_address=settings.WORLD_MINT_ADDRESS,
+                amount=burn_amount,
+                memo=f"Loan payment #{loan.id} burn split ({loan.burn_rate_snapshot}bps)",
+            )
+            if not tx_hash:
+                tx_hash = burn_tx.tx_hash
+        except ValueError as exc:
+            error_msg = str(exc).replace(" ", "+")
+            return RedirectResponse(url=f"/loans/{loan_id}?error={error_msg}", status_code=303)
+
+    # Update bank and loan
+    bank.total_burned += burn_amount
+    loan.outstanding -= amount
+    if loan.outstanding <= 0:
+        loan.outstanding = 0
+        loan.status = "closed"
+        from datetime import datetime, timezone
+        loan.closed_at = datetime.now(timezone.utc)
+
+    payment = LoanPayment(
+        loan_id=loan.id,
+        amount=amount,
+        burn_amount=burn_amount,
+        bank_amount=bank_amount,
+        balance_after=loan.outstanding,
+        tx_hash=tx_hash or "no_tx",
+    )
+    db.add(payment)
+    db.commit()
+
+    if loan.status == "closed":
+        return RedirectResponse(
+            url=f"/loans/{loan_id}?success=Loan+fully+repaid!",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/loans/{loan_id}?success=Payment+of+{amount}+{settings.CURRENCY_SHORT}+recorded",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /mint/settings — World Mint global settings page
+# ---------------------------------------------------------------------------
+@router.get("/mint/settings")
+def mint_settings_page(
+    request: Request,
+    user: User = Depends(require_role("world_mint")),
+    db: Session = Depends(get_db),
+):
+    """Display the World Mint global settings form."""
+    gs = db.execute(
+        select(GlobalSettings).where(GlobalSettings.id == 1)
+    ).scalar_one_or_none()
+
+    if gs is None:
+        # Seed if missing
+        gs = GlobalSettings(id=1, burn_rate_bps=1000, interest_rate_cap_bps=2000)
+        db.add(gs)
+        db.commit()
+        db.refresh(gs)
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="mint",
+        gs=gs,
+        burn_rate_pct=round(gs.burn_rate_bps / 100, 1),
+        interest_rate_cap_pct=round(gs.interest_rate_cap_bps / 100, 1),
+    )
+    return templates.TemplateResponse("mint/settings.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /mint/settings — Handle settings form submission
+# ---------------------------------------------------------------------------
+@router.post("/mint/settings")
+def mint_settings_post(
+    request: Request,
+    burn_rate_bps: int = Form(...),
+    interest_rate_cap_bps: int = Form(...),
+    user: User = Depends(require_role("world_mint")),
+    db: Session = Depends(get_db),
+):
+    """Process the global settings update form."""
+    from datetime import datetime, timezone
+
+    # Validate ranges
+    burn_rate_bps = max(0, min(10000, burn_rate_bps))
+    interest_rate_cap_bps = max(0, min(10000, interest_rate_cap_bps))
+
+    gs = db.execute(
+        select(GlobalSettings).where(GlobalSettings.id == 1)
+    ).scalar_one_or_none()
+
+    if gs is None:
+        gs = GlobalSettings(id=1)
+        db.add(gs)
+
+    gs.burn_rate_bps = burn_rate_bps
+    gs.interest_rate_cap_bps = interest_rate_cap_bps
+    gs.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return RedirectResponse(
+        url="/mint/settings?success=Settings+updated+successfully",
+        status_code=303,
+    )

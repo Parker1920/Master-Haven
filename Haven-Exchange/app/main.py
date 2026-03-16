@@ -13,10 +13,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from app.blockchain import create_genesis_block
 from app.config import settings
 from app.database import SessionLocal, init_db
-from app.models import GdpSnapshot, User  # noqa: F401  — ensures models are registered with Base
+from app.models import Bank, GdpSnapshot, GlobalSettings, Loan, LoanPayment, User  # noqa: F401  — ensures models are registered with Base
 from app.routes.mint_routes import router as mint_router
 from app.routes.nation_routes import router as nation_router
 from app.routes.page_routes import router as page_router
@@ -51,6 +53,8 @@ from app.routes.shop_routes import router as shop_router
 app.include_router(shop_router)
 from app.routes.stock_routes import router as stock_router
 app.include_router(stock_router)
+from app.routes.bank_routes import router as bank_router
+app.include_router(bank_router)
 app.include_router(page_router)
 
 
@@ -137,8 +141,63 @@ def on_startup() -> None:
         # 4. Create genesis block if the transactions table is empty
         create_genesis_block(db)
 
+        # 5. Seed default GlobalSettings if the table is empty
+        existing_settings = db.query(GlobalSettings).first()
+        if existing_settings is None:
+            default_settings = GlobalSettings(
+                id=1,
+                burn_rate_bps=1000,          # 10% burn rate
+                interest_rate_cap_bps=2000,  # 20% annual interest cap
+            )
+            db.add(default_settings)
+            db.commit()
+
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Background scheduler — GDP and stock price recalculation every 24 hours
+# ---------------------------------------------------------------------------
+from app.gdp import recalculate_all_gdp
+from app.valuation import recalculate_all_prices
+
+scheduler = BackgroundScheduler()
+
+
+def _scheduled_gdp_recalc() -> None:
+    """Recalculate GDP scores for all approved nations.  Uses its own DB session."""
+    db = SessionLocal()
+    try:
+        recalculate_all_gdp(db)
+    finally:
+        db.close()
+
+
+def _scheduled_stock_recalc() -> None:
+    """Recalculate stock prices for all active stocks.  Uses its own DB session."""
+    db = SessionLocal()
+    try:
+        recalculate_all_prices(db)
+    finally:
+        db.close()
+
+
+# Add jobs: run every 24 hours (86400 seconds)
+scheduler.add_job(_scheduled_gdp_recalc, "interval", hours=24, id="gdp_recalc")
+scheduler.add_job(_scheduled_stock_recalc, "interval", hours=24, id="stock_recalc")
+
+
+@app.on_event("startup")
+def start_scheduler() -> None:
+    """Start the background scheduler when the app comes up."""
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def stop_scheduler() -> None:
+    """Gracefully shut down the background scheduler."""
+    scheduler.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
