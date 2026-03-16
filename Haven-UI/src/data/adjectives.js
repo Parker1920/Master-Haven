@@ -689,7 +689,7 @@ export const floraAdjectives = [
   "Rare",
   "Regular",
   "Rich",
-  "Scarse",
+  "Scarce",
   "Screaming",
   "Sparse",
   "Sporadic",
