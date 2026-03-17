@@ -23,7 +23,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.47.0 | 2026-03-16 | Advanced filter cascade across all browse levels |
-| Haven-UI | 1.45.2 | 2026-03-16 | Filter cascade: regions, systems, planets/moons |
+| Haven-UI | 1.45.3 | 2026-03-17 | Fix GlyphPicker clearing loaded glyph on edit |
 | Backend API | 1.45.3 | 2026-03-16 | Region endpoint accepts advanced filters |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
@@ -81,6 +81,17 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Haven-UI 1.45.3 (2026-03-17) - Fix Glyph Not Loading on Edit
+Fix GlyphPicker clearing database glyph codes when editing existing systems, which blocked members from submitting edits and broke region name lookup.
+
+**Haven-UI 1.45.3**
+- Fixed: GlyphPicker `onChange` effect fired on mount with empty string, overwriting the glyph_code loaded from the API for edits
+- Added `useRef` guard to skip empty-string `onChange` propagation on initial mount
+- Fixed: `selectedGlyphs` initialized to empty array even when `value` prop was set — now initializes from `value`
+- Region name lookup now works on edit (glyph decode triggers correctly, populating region coordinates)
+
+---
 
 #### Master Haven 1.47.0 (2026-03-16) - Advanced Filter Cascade
 Advanced filters now cascade through all browse hierarchy levels: Galaxies → Regions → Systems → Planets/Moons.

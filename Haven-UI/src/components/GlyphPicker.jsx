@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 /**
@@ -12,7 +12,8 @@ import axios from 'axios';
  */
 const GlyphPicker = ({ value, onChange, onDecoded }) => {
   const [glyphCode, setGlyphCode] = useState(value || '');
-  const [selectedGlyphs, setSelectedGlyphs] = useState([]);
+  const [selectedGlyphs, setSelectedGlyphs] = useState(value ? value.split('') : []);
+  const isInitialMount = useRef(true);
   const [glyphImages, setGlyphImages] = useState({});
   const [inputMode, setInputMode] = useState('visual'); // 'visual' or 'text'
   const [validation, setValidation] = useState({ valid: null, message: null });
@@ -38,8 +39,12 @@ const GlyphPicker = ({ value, onChange, onDecoded }) => {
     }
   }, [value]);
 
-  // Update parent when glyph code changes
+  // Update parent when glyph code changes (skip empty on mount to avoid overwriting loaded edit data)
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      if (!glyphCode) return;
+    }
     if (onChange) {
       onChange(glyphCode);
     }
