@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 /**
@@ -13,12 +13,18 @@ import axios from 'axios';
 const GlyphPicker = ({ value, onChange, onDecoded }) => {
   const [glyphCode, setGlyphCode] = useState(value || '');
   const [selectedGlyphs, setSelectedGlyphs] = useState(value ? value.split('') : []);
-  const isInitialMount = useRef(true);
   const [glyphImages, setGlyphImages] = useState({});
   const [inputMode, setInputMode] = useState('visual'); // 'visual' or 'text'
   const [validation, setValidation] = useState({ valid: null, message: null });
   const [decodedCoords, setDecodedCoords] = useState(null);
   const [isDecoding, setIsDecoding] = useState(false);
+
+  // Helper: update local state AND notify parent (used by user-action handlers only)
+  const updateGlyph = (code) => {
+    setGlyphCode(code);
+    setSelectedGlyphs(code ? code.split('') : []);
+    if (onChange) onChange(code);
+  };
 
   // Fetch glyph images mapping on mount
   useEffect(() => {
@@ -32,23 +38,13 @@ const GlyphPicker = ({ value, onChange, onDecoded }) => {
   }, []);
 
   // Sync local state with parent value when it changes (e.g., when loading existing system for edit)
+  // Does NOT call onChange back — the parent already knows the value it set.
   useEffect(() => {
     if (value && value !== glyphCode) {
       setGlyphCode(value);
       setSelectedGlyphs(value.split(''));
     }
   }, [value]);
-
-  // Update parent when glyph code changes (skip empty on mount to avoid overwriting loaded edit data)
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      if (!glyphCode) return;
-    }
-    if (onChange) {
-      onChange(glyphCode);
-    }
-  }, [glyphCode, onChange]);
 
   // Decode glyph when complete (12 digits)
   useEffect(() => {
@@ -119,30 +115,26 @@ const GlyphPicker = ({ value, onChange, onDecoded }) => {
   const handleGlyphClick = (hexDigit) => {
     if (selectedGlyphs.length < 12) {
       const newGlyphs = [...selectedGlyphs, hexDigit];
-      setSelectedGlyphs(newGlyphs);
-      setGlyphCode(newGlyphs.join(''));
+      updateGlyph(newGlyphs.join(''));
     }
   };
 
   const handleBackspace = () => {
     if (selectedGlyphs.length > 0) {
       const newGlyphs = selectedGlyphs.slice(0, -1);
-      setSelectedGlyphs(newGlyphs);
-      setGlyphCode(newGlyphs.join(''));
+      updateGlyph(newGlyphs.join(''));
     }
   };
 
   const handleClear = () => {
-    setSelectedGlyphs([]);
-    setGlyphCode('');
+    updateGlyph('');
     setDecodedCoords(null);
     setValidation({ valid: null, message: null });
   };
 
   const handleTextInput = (e) => {
     const input = e.target.value.toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 12);
-    setGlyphCode(input);
-    setSelectedGlyphs(input.split(''));
+    updateGlyph(input);
   };
 
   const formatGlyphDisplay = (code) => {
