@@ -315,7 +315,7 @@ export default function SystemDetail() {
             </a>
             <Button
               className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-              onClick={() => navigate(`/create?edit=${encodeURIComponent(system.id || system.name)}`)}
+              onClick={() => navigate(`/create?edit=${encodeURIComponent(system.id)}`)}
             >
               Edit
             </Button>

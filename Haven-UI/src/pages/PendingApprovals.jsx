@@ -925,6 +925,12 @@ export default function PendingApprovals() {
                             NEW
                           </span>
                         )}
+                        {/* Mismatch warning badge - data differs from existing system */}
+                        {submission.system_data?._mismatch_flags?.length > 0 && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-600 text-white" title={submission.system_data._mismatch_flags.join('; ')}>
+                            DATA MISMATCH
+                          </span>
+                        )}
                         {/* Self-submission badge - user cannot approve their own */}
                         {checkSelfSubmission(submission) && (
                           <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500 text-black">
@@ -986,13 +992,16 @@ export default function PendingApprovals() {
                         EDIT
                       </span>
                     )}
-                    {/* New badge - shows when this was a new system */}
                     {!submission.edit_system_id && (
                       <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500 text-white">
                         NEW
                       </span>
                     )}
-                    {/* Discord Tag Badge - shows tag type without personal info */}
+                    {submission.system_data?._mismatch_flags?.length > 0 && (
+                      <span className="px-2 py-1 rounded text-xs font-semibold bg-yellow-600 text-white" title={submission.system_data._mismatch_flags.join('; ')}>
+                        DATA MISMATCH
+                      </span>
+                    )}
                     {(isSuperAdmin || isHavenSubAdmin) && submission.discord_tag && getDiscordTagBadge(submission.discord_tag, isSuperAdmin ? submission.personal_discord_username : null)}
                   </div>
                   <div className="text-sm text-gray-300 mt-1">
@@ -1240,6 +1249,16 @@ export default function PendingApprovals() {
                   </div>
                 ) : (
                   <div className="text-sm space-y-1">
+                    {selectedSubmission.system_data?._mismatch_flags?.length > 0 && (
+                      <div className="mb-3 p-2 rounded border border-yellow-600 bg-yellow-600/10">
+                        <p className="text-yellow-400 font-semibold text-xs mb-1">Data Mismatch — Review Carefully</p>
+                        <ul className="text-xs text-yellow-300 list-disc list-inside space-y-0.5">
+                          {selectedSubmission.system_data._mismatch_flags.map((flag, i) => (
+                            <li key={i}>{flag}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <p><strong>Name:</strong> {selectedSubmission.system_data?.name}</p>
                     <p><strong>Galaxy:</strong> {selectedSubmission.system_data?.galaxy || 'Euclid'}</p>
                     <p><strong>Reality:</strong> <span className={selectedSubmission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>{selectedSubmission.system_data?.reality || 'Normal'}</span></p>

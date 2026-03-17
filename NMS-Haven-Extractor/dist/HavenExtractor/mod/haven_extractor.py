@@ -2865,11 +2865,17 @@ class HavenExtractorMod(Mod):
 
         self._upload_systems_to_api_log(systems_to_export)
 
-    def _check_duplicates(self, glyph_codes: list) -> dict:
-        """Check which systems already exist in Haven."""
+    def _check_duplicates(self, glyph_codes: list, galaxy: str = None, reality: str = None) -> dict:
+        """Check which systems already exist in Haven.
+        Uses canonical dedup: last-11 glyph chars + galaxy + reality.
+        """
         try:
             url = f"{API_BASE_URL}/api/check_glyph_codes"
-            payload = json.dumps({"glyph_codes": glyph_codes}).encode('utf-8')
+            payload = json.dumps({
+                "glyph_codes": glyph_codes,
+                "galaxy": galaxy or getattr(self, '_current_galaxy', 'Euclid'),
+                "reality": reality or getattr(self, '_reality', 'Normal'),
+            }).encode('utf-8')
 
             ctx = ssl.create_default_context()
             ctx.check_hostname = False

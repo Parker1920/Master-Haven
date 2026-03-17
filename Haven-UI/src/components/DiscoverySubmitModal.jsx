@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 import FormField from './FormField'
+import GlyphPicker from './GlyphPicker'
 import { TYPE_INFO } from '../data/discoveryTypes'
 
 // Build dropdown options from the canonical TYPE_INFO.
@@ -204,10 +205,14 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     setIsStubSystem(false)
   }
 
-  // Create stub system
+  // Create stub system (requires name + glyphs)
   async function handleCreateStub(e) {
     e.preventDefault()
     if (!stubForm.name.trim()) return
+    if (!stubForm.glyph_code || stubForm.glyph_code.length !== 12) {
+      setError('Portal glyphs are required to create a system stub (exactly 12 glyphs)')
+      return
+    }
 
     setCreatingStub(true)
     try {
@@ -217,7 +222,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         body: JSON.stringify({
           name: stubForm.name.trim(),
           galaxy: stubForm.galaxy,
-          glyph_code: stubForm.glyph_code.trim() || null,
+          glyph_code: stubForm.glyph_code.trim(),
           discord_tag: form.discord_tag || null
         })
       })
@@ -507,7 +512,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
           {showCreateSystem && (
             <div className="mb-4 p-4 rounded" style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-primary)' }}>
               <h5 className="text-sm font-semibold mb-3" style={{ color: 'var(--app-primary)' }}>Create New System (Stub)</h5>
-              <p className="text-xs muted mb-3">This creates a minimal system record. Full details can be added later.</p>
+              <p className="text-xs muted mb-3">This creates a minimal system record. Portal glyphs are required so the system can be located. Full details can be added later.</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                 <FormField label={<>System Name <span className="text-red-400">*</span></>}>
                   <input
@@ -530,25 +535,23 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
                   </select>
                 </FormField>
               </div>
-              <FormField label="Glyph Code (optional)" hint="12-character hex portal code">
-                <input
-                  type="text"
-                  className="w-full p-2 rounded font-mono"
-                  style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+              <FormField label={<>Portal Glyphs <span className="text-red-400">*</span></>} hint="Click the glyph icons or paste a 12-character code">
+                <GlyphPicker
                   value={stubForm.glyph_code}
-                  onChange={e => setStubForm(prev => ({ ...prev, glyph_code: e.target.value }))}
-                  placeholder="e.g., 0042FA556C30"
-                  maxLength={12}
+                  onChange={code => setStubForm(prev => ({ ...prev, glyph_code: code }))}
                 />
               </FormField>
               <div className="flex gap-2 mt-3">
-                <Button type="button" onClick={handleCreateStub} disabled={creatingStub || !stubForm.name.trim()}>
+                <Button type="button" onClick={handleCreateStub} disabled={creatingStub || !stubForm.name.trim() || !stubForm.glyph_code || stubForm.glyph_code.length !== 12}>
                   {creatingStub ? 'Creating...' : 'Create System'}
                 </Button>
                 <Button type="button" variant="ghost" onClick={() => setShowCreateSystem(false)}>
                   Cancel
                 </Button>
               </div>
+              {stubForm.glyph_code && stubForm.glyph_code.length > 0 && stubForm.glyph_code.length < 12 && (
+                <p className="text-xs text-yellow-400 mt-2">{stubForm.glyph_code.length}/12 glyphs entered</p>
+              )}
             </div>
           )}
 

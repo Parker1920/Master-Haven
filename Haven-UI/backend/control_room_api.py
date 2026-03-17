@@ -269,6 +269,186 @@ def find_matching_system(cursor, glyph_code: str, galaxy: str, reality: str):
     return cursor.fetchone()
 
 
+def find_matching_pending_system(cursor, glyph_code: str, galaxy: str, reality: str):
+    """
+    Find a pending system that matches by glyph coordinates + galaxy + reality.
+    Same logic as find_matching_system() but queries pending_systems table.
+    Only returns submissions with status='pending'.
+    """
+    system_glyph = get_system_glyph(glyph_code)
+    if not system_glyph:
+        return None
+
+    cursor.execute('''
+        SELECT id, system_name, glyph_code, system_data, status
+        FROM pending_systems
+        WHERE SUBSTR(glyph_code, -11) = ?
+          AND galaxy = ?
+          AND reality = ?
+          AND status = 'pending'
+    ''', (system_glyph, galaxy or 'Euclid', reality or 'Normal'))
+
+    return cursor.fetchone()
+
+
+def build_mismatch_flags(existing_data: dict, new_data: dict) -> list:
+    """
+    Compare existing system data with new submission data and return a list
+    of mismatch flags for review. Only checks fields that both sources provide.
+    Coordinates match (that's how we got here) but other attributes may differ.
+    """
+    flags = []
+
+    # System-level attribute checks
+    system_checks = [
+        ('name', 'System name'),
+        ('star_type', 'Star type'),
+        ('star_color', 'Star type'),  # extractor uses star_color
+        ('economy_type', 'Economy type'),
+        ('dominant_lifeform', 'Dominant lifeform'),
+    ]
+    for field, label in system_checks:
+        old_val = existing_data.get(field)
+        new_val = new_data.get(field)
+        if old_val and new_val and str(old_val).strip().lower() != str(new_val).strip().lower():
+            # For star_type/star_color, check both field names before flagging
+            if field == 'star_color':
+                existing_star = existing_data.get('star_type') or existing_data.get('star_color')
+                new_star = new_data.get('star_type') or new_data.get('star_color')
+                if existing_star and new_star and str(existing_star).strip().lower() != str(new_star).strip().lower():
+                    flags.append(f"{label} differs: '{existing_star}' vs '{new_star}'")
+                continue
+            if field == 'star_type' and 'star_color' in [c[0] for c in system_checks]:
+                continue  # Already handled by star_color check
+            flags.append(f"{label} differs: '{old_val}' vs '{new_val}'")
+
+    # Planet count check
+    existing_planets = existing_data.get('planets', [])
+    new_planets = new_data.get('planets', [])
+    if existing_planets and new_planets and len(existing_planets) != len(new_planets):
+        flags.append(f"Planet count differs: {len(existing_planets)} vs {len(new_planets)}")
+
+    # Planet name comparison (order-independent)
+    if existing_planets and new_planets:
+        existing_names = {p.get('name', '').strip().lower() for p in existing_planets if p.get('name')}
+        new_names = {p.get('name', '').strip().lower() for p in new_planets if p.get('name')}
+        if existing_names and new_names:
+            missing = existing_names - new_names
+            added = new_names - existing_names
+            if missing:
+                flags.append(f"Planets removed: {', '.join(sorted(missing))}")
+            if added:
+                flags.append(f"Planets added: {', '.join(sorted(added))}")
+
+    # Moon count check
+    existing_moons = existing_data.get('moons', [])
+    new_moons = new_data.get('moons', [])
+    if existing_moons and new_moons and len(existing_moons) != len(new_moons):
+        flags.append(f"Moon count differs: {len(existing_moons)} vs {len(new_moons)}")
+
+    # Moon name comparison
+    if existing_moons and new_moons:
+        existing_moon_names = {m.get('name', '').strip().lower() for m in existing_moons if m.get('name')}
+        new_moon_names = {m.get('name', '').strip().lower() for m in new_moons if m.get('name')}
+        if existing_moon_names and new_moon_names:
+            missing = existing_moon_names - new_moon_names
+            added = new_moon_names - existing_moon_names
+            if missing:
+                flags.append(f"Moons removed: {', '.join(sorted(missing))}")
+            if added:
+                flags.append(f"Moons added: {', '.join(sorted(added))}")
+
+    return flags
+
+
+def merge_system_data(existing_data: dict, new_data: dict) -> dict:
+    """
+    Deep-merge new extraction data on top of existing pending submission data.
+    Extractor fields win (from live game memory). Manual-only fields are preserved.
+
+    Fields the extractor does NOT send (preserved from existing):
+    - spectral_class / stellar_classification
+    - space_station (entire object)
+    - Planet/moon: notes, photos, base_location, description, has_rings,
+      water_world, is_gas_giant, exotic_trophy, has_water
+    """
+    merged = dict(existing_data)
+
+    # System-level: extractor fields overwrite
+    extractor_system_fields = {
+        'name', 'glyph_code', 'galaxy', 'reality', 'x', 'y', 'z',
+        'region_x', 'region_y', 'region_z', 'glyph_solar_system',
+        'star_color', 'economy_type', 'economy_level', 'conflict_level',
+        'dominant_lifeform', 'discovered_by', 'discovered_at', 'source',
+        'extractor_version', 'game_mode',
+    }
+    for field in extractor_system_fields:
+        if field in new_data:
+            merged[field] = new_data[field]
+
+    # Planets: merge by matching planet name (case-insensitive)
+    if 'planets' in new_data:
+        existing_planets = {p.get('name', '').strip().lower(): p for p in existing_data.get('planets', []) if p.get('name')}
+        merged_planets = []
+        for new_planet in new_data['planets']:
+            pname = new_planet.get('name', '').strip().lower()
+            if pname in existing_planets:
+                # Merge: new extractor data on top, preserve manual-only fields
+                merged_planet = dict(existing_planets[pname])
+                extractor_planet_fields = {
+                    'name', 'biome', 'biome_subtype', 'weather', 'climate',
+                    'sentinels', 'sentinel', 'flora', 'fauna', 'planet_size',
+                    'common_resource', 'uncommon_resource', 'rare_resource',
+                    'plant_resource', 'materials',
+                    'is_dissonant', 'is_infested', 'extreme_weather',
+                    'vile_brood', 'ancient_bones', 'salvageable_scrap',
+                    'storm_crystals', 'gravitino_balls', 'dissonance',
+                    'planet_description', 'planet_type', 'is_weather_extreme',
+                }
+                for field in extractor_planet_fields:
+                    if field in new_planet:
+                        merged_planet[field] = new_planet[field]
+                merged_planets.append(merged_planet)
+                del existing_planets[pname]
+            else:
+                # New planet from extractor
+                merged_planets.append(new_planet)
+
+        # Keep any remaining existing planets the extractor didn't mention
+        merged_planets.extend(existing_planets.values())
+        merged['planets'] = merged_planets
+
+    # Moons: same merge logic
+    if 'moons' in new_data:
+        existing_moons = {m.get('name', '').strip().lower(): m for m in existing_data.get('moons', []) if m.get('name')}
+        merged_moons = []
+        for new_moon in new_data['moons']:
+            mname = new_moon.get('name', '').strip().lower()
+            if mname in existing_moons:
+                merged_moon = dict(existing_moons[mname])
+                extractor_moon_fields = {
+                    'name', 'biome', 'biome_subtype', 'weather', 'climate',
+                    'sentinels', 'sentinel', 'flora', 'fauna', 'planet_size',
+                    'common_resource', 'uncommon_resource', 'rare_resource',
+                    'plant_resource', 'materials',
+                    'is_dissonant', 'is_infested', 'extreme_weather',
+                    'vile_brood', 'ancient_bones', 'salvageable_scrap',
+                    'storm_crystals', 'gravitino_balls', 'dissonance',
+                }
+                for field in extractor_moon_fields:
+                    if field in new_moon:
+                        merged_moon[field] = new_moon[field]
+                merged_moons.append(merged_moon)
+                del existing_moons[mname]
+            else:
+                merged_moons.append(new_moon)
+
+        merged_moons.extend(existing_moons.values())
+        merged['moons'] = merged_moons
+
+    return merged
+
+
 # Ensure directories exist
 HAVEN_UI_DIR.mkdir(parents=True, exist_ok=True)
 (HAVEN_UI_DIR / 'data').mkdir(parents=True, exist_ok=True)
@@ -7029,10 +7209,12 @@ async def update_extractor_user(key_id: int, request: Request, session: Optional
 async def check_duplicate(
     glyph_code: str,
     galaxy: str = 'Euclid',
+    reality: str = 'Normal',
     x_api_key: Optional[str] = Header(None, alias='X-API-Key')
 ):
     """
     Check if a system already exists at the given coordinates.
+    Uses canonical dedup: last 11 glyph chars + galaxy + reality.
     Used by companion app to avoid uploading duplicates.
     Requires API key authentication.
     """
@@ -7049,36 +7231,26 @@ async def check_duplicate(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check approved systems
-        cursor.execute('''
-            SELECT id, name FROM systems
-            WHERE glyph_code = ? AND galaxy = ?
-        ''', (glyph_code, galaxy))
-        approved = cursor.fetchone()
+        # Check approved systems using canonical dedup (last-11 + galaxy + reality)
+        approved_row = find_matching_system(cursor, glyph_code, galaxy, reality)
 
-        if approved:
+        if approved_row:
             return {
                 'exists': True,
                 'location': 'approved',
-                'system_id': approved['id'],
-                'system_name': approved['name']
+                'system_id': approved_row[0],
+                'system_name': approved_row[1]
             }
 
-        # Check pending systems
-        cursor.execute('''
-            SELECT id, system_name FROM pending_systems
-            WHERE status = 'pending'
-            AND json_extract(system_data, '$.glyph_code') = ?
-            AND json_extract(system_data, '$.galaxy') = ?
-        ''', (glyph_code, galaxy))
-        pending = cursor.fetchone()
+        # Check pending systems using same canonical dedup
+        pending_row = find_matching_pending_system(cursor, glyph_code, galaxy, reality)
 
-        if pending:
+        if pending_row:
             return {
                 'exists': True,
                 'location': 'pending',
-                'submission_id': pending['id'],
-                'system_name': pending['system_name']
+                'submission_id': pending_row[0],
+                'system_name': pending_row[1]
             }
 
         return {'exists': False}
@@ -9566,13 +9738,9 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
         if db_path.exists():
             conn = get_db_connection()
             cursor = conn.cursor()
-            # Try by id
+            # Lookup by ID only — system identity is glyph-based, not name-based
             cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
             row = cursor.fetchone()
-            if not row:
-                # Try by name
-                cursor.execute('SELECT * FROM systems WHERE name = ?', (system_id,))
-                row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='System not found')
             system = dict(row)
@@ -9638,36 +9806,22 @@ async def delete_system(system_id: str, session: Optional[str] = Cookie(None)):
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Get system name before deleting
-            cursor.execute('SELECT name FROM systems WHERE id = ? OR name = ?', (system_id, system_id))
+            # Get system name before deleting — ID only, no name fallback
+            cursor.execute('SELECT name FROM systems WHERE id = ?', (system_id,))
             system_row = cursor.fetchone()
-            system_name = system_row['name'] if system_row else system_id
+            if not system_row:
+                raise HTTPException(status_code=404, detail='System not found')
+            system_name = system_row['name']
 
-            # Try delete by id first then by name
+            # Delete by ID only — no name fallback
             cursor.execute('DELETE FROM discoveries WHERE system_id = ?', (system_id,))
-            # Delete planets and moons
             cursor.execute('SELECT id FROM planets WHERE system_id = ?', (system_id,))
             planet_rows = cursor.fetchall()
             planet_ids = [r[0] for r in planet_rows]
             if planet_ids:
                 cursor.executemany('DELETE FROM moons WHERE planet_id = ?', [(pid,) for pid in planet_ids])
                 cursor.execute('DELETE FROM planets WHERE system_id = ?', (system_id,))
-            # Delete system by id first
             cursor.execute('DELETE FROM systems WHERE id = ?', (system_id,))
-            # If nothing deleted, try by name
-            if conn.total_changes == 0:
-                cursor.execute('SELECT id FROM systems WHERE name = ?', (system_id,))
-                row = cursor.fetchone()
-                if row:
-                    sid = row[0]
-                    cursor.execute('DELETE FROM discoveries WHERE system_id = ?', (sid,))
-                    cursor.execute('SELECT id FROM planets WHERE system_id = ?', (sid,))
-                    pr = cursor.fetchall()
-                    pids = [r[0] for r in pr]
-                    if pids:
-                        cursor.executemany('DELETE FROM moons WHERE planet_id = ?', [(pid,) for pid in pids])
-                        cursor.execute('DELETE FROM planets WHERE system_id = ?', (sid,))
-                    cursor.execute('DELETE FROM systems WHERE id = ?', (sid,))
             conn.commit()
 
             # Add activity log
@@ -9704,10 +9858,11 @@ async def create_system_stub(payload: dict, request: Request):
     Create a minimal system stub for discovery linking.
     No auth required.
 
-    Required: name
-    Optional: galaxy (default Euclid), glyph_code, reality (default Normal), discord_tag
+    Required: name, glyph_code (12 hex chars)
+    Optional: galaxy (default Euclid), reality (default Normal), discord_tag
 
-    If a system with the same name or glyph_code already exists, returns it instead.
+    Dedup: Uses canonical last-11 glyph chars + galaxy + reality.
+    If a matching system already exists, returns it instead.
     """
     import uuid as uuid_mod
 
@@ -9717,9 +9872,13 @@ async def create_system_stub(payload: dict, request: Request):
     if len(name) > 100:
         raise HTTPException(status_code=400, detail='System name must be 100 characters or less')
 
+    # Glyph code is REQUIRED for stubs (prevents 0,0,0 coordinate stubs)
+    glyph_code = (payload.get('glyph_code') or '').strip()
+    if not glyph_code or not re.match(r'^[0-9A-Fa-f]{12}$', glyph_code):
+        raise HTTPException(status_code=400, detail='Portal glyph code is required (exactly 12 hex characters)')
+
     galaxy = payload.get('galaxy', 'Euclid') or 'Euclid'
     reality = payload.get('reality', 'Normal') or 'Normal'
-    glyph_code = (payload.get('glyph_code') or '').strip() or None
     discord_tag = payload.get('discord_tag')
 
     # Validate galaxy
@@ -9730,59 +9889,53 @@ async def create_system_stub(payload: dict, request: Request):
     if reality and not validate_reality(reality):
         raise HTTPException(status_code=400, detail="Reality must be 'Normal' or 'Permadeath'")
 
-    # Decode glyph if provided
+    # Decode glyph
     star_x, star_y, star_z = None, None, None
     region_x, region_y, region_z = None, None, None
     x, y, z = 0, 0, 0
     glyph_planet, glyph_solar_system = 0, 1
-    if glyph_code:
-        try:
-            decoded = decode_glyph_to_coords(glyph_code)
-            x = decoded.get('x', 0)
-            y = decoded.get('y', 0)
-            z = decoded.get('z', 0)
-            star_x = decoded.get('star_x')
-            star_y = decoded.get('star_y')
-            star_z = decoded.get('star_z')
-            region_x = decoded.get('region_x')
-            region_y = decoded.get('region_y')
-            region_z = decoded.get('region_z')
-            glyph_planet = decoded.get('planet_index', 0)
-            glyph_solar_system = decoded.get('solar_system_index', 1)
-        except Exception as e:
-            logger.warning(f"Failed to decode glyph for stub system: {e}")
-            glyph_code = None  # Don't store invalid glyph
+    try:
+        decoded = decode_glyph_to_coords(glyph_code)
+        x = decoded.get('x', 0)
+        y = decoded.get('y', 0)
+        z = decoded.get('z', 0)
+        star_x = decoded.get('star_x')
+        star_y = decoded.get('star_y')
+        star_z = decoded.get('star_z')
+        region_x = decoded.get('region_x')
+        region_y = decoded.get('region_y')
+        region_z = decoded.get('region_z')
+        glyph_planet = decoded.get('planet_index', 0)
+        glyph_solar_system = decoded.get('solar_system_index', 1)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f'Invalid glyph code: {e}')
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # NOTE: Stubs are idempotent - if a system with the same name or glyph already exists,
-        # return it instead of creating a duplicate.
-        cursor.execute('SELECT id, name, galaxy, is_stub FROM systems WHERE LOWER(name) = LOWER(?)', (name,))
-        existing = cursor.fetchone()
-        if existing:
+        # Canonical dedup: last-11 glyph chars + galaxy + reality
+        existing_row = find_matching_system(cursor, glyph_code, galaxy, reality)
+        if existing_row:
             return {
                 'status': 'existing',
-                'system_id': existing['id'],
-                'name': existing['name'],
-                'galaxy': existing['galaxy'],
-                'is_stub': bool(existing['is_stub'])
+                'system_id': existing_row[0],
+                'name': existing_row[1],
+                'galaxy': galaxy,
+                'is_stub': False  # Existing full system
             }
 
-        # Check for duplicate by glyph_code
-        if glyph_code:
-            cursor.execute('SELECT id, name, galaxy, is_stub FROM systems WHERE glyph_code = ?', (glyph_code,))
-            existing = cursor.fetchone()
-            if existing:
-                return {
-                    'status': 'existing',
-                    'system_id': existing['id'],
-                    'name': existing['name'],
-                    'galaxy': existing['galaxy'],
-                    'is_stub': bool(existing['is_stub'])
-                }
+        # Also check pending systems
+        pending_row = find_matching_pending_system(cursor, glyph_code, galaxy, reality)
+        if pending_row:
+            return {
+                'status': 'existing_pending',
+                'submission_id': pending_row[0],
+                'name': pending_row[1],
+                'galaxy': galaxy,
+                'message': 'A system at these coordinates is already pending approval'
+            }
 
         # Create stub system
         sys_id = str(uuid_mod.uuid4())
@@ -9805,7 +9958,7 @@ async def create_system_stub(payload: dict, request: Request):
         update_completeness_score(cursor, sys_id)
         conn.commit()
 
-        logger.info(f"Created stub system '{name}' (ID: {sys_id})")
+        logger.info(f"Created stub system '{name}' (ID: {sys_id}, glyph: {glyph_code})")
         add_activity_log('system_stub_created', f"Stub system '{name}' created for discovery linking")
 
         return {
@@ -9957,13 +10110,15 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if system exists - prefer ID lookup (handles name changes), fallback to name
+        # Check if system exists - canonical dedup: glyph last-11 + galaxy + reality
+        # Fallback to ID if no glyph available (legacy edge case)
         existing = None
-        if system_id:
+        if payload.get('glyph_code'):
+            existing_row = find_matching_system(cursor, payload['glyph_code'], galaxy, reality)
+            if existing_row:
+                existing = {'id': existing_row[0]}
+        if not existing and system_id:
             cursor.execute('SELECT id FROM systems WHERE id = ?', (system_id,))
-            existing = cursor.fetchone()
-        if not existing:
-            cursor.execute('SELECT id FROM systems WHERE name = ?', (name,))
             existing = cursor.fetchone()
 
         # Get the editor's username for contributor tracking
@@ -10842,12 +10997,9 @@ async def get_system_3d_view(system_id: str):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Try to find system by id first, then by name
+        # Lookup by ID only — system identity is glyph-based, not name-based
         cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
         row = cursor.fetchone()
-        if not row:
-            cursor.execute('SELECT * FROM systems WHERE name = ?', (system_id,))
-            row = cursor.fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail='System not found')
@@ -11468,8 +11620,8 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                 region_x, region_y, region_z = decoded['region_x'], decoded['region_y'], decoded['region_z']
                 solar_system = decoded['solar_system']
 
-                cursor.execute("SELECT id, name FROM systems WHERE glyph_code = ?", (glyph_code,))
-                existing = cursor.fetchone()
+                # Canonical dedup: last-11 glyph chars + galaxy + reality
+                existing = find_matching_system(cursor, glyph_code, galaxy, reality)
                 if existing:
                     skipped_count += 1
                     continue
@@ -12815,43 +12967,59 @@ async def submit_system(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check for duplicate submissions (same name, pending status)
-        cursor.execute(
-            'SELECT id FROM pending_systems WHERE system_name = ? AND status = ?',
-            (system_name, 'pending')
-        )
-        existing = cursor.fetchone()
-        if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A pending submission for system '{system_name}' already exists"
-            )
-
-        # Coordinate-based duplicate detection: match on last 11 chars of glyph
-        # (ignoring planet index prefix) + galaxy + reality.
-        # Two portals on different planets in the same system share coordinates.
-        # If found, this submission becomes an edit of the existing system.
+        # Canonical dedup: last 11 glyph chars + galaxy + reality
+        # Glyphs are required for manual submissions (validated above)
         glyph_code = payload.get('glyph_code')
         system_reality = payload.get('reality', 'Normal')
         existing_glyph_system = None
+        mismatch_flags = []
+
+        # Check approved systems
         if glyph_code:
             existing_glyph_row = find_matching_system(cursor, glyph_code, system_galaxy, system_reality)
             if existing_glyph_row:
                 existing_glyph_system = {'id': existing_glyph_row[0], 'name': existing_glyph_row[1]}
-                # Check if names match - warn appropriately
-                if existing_glyph_row[1] and existing_glyph_row[1].strip() != system_name.strip():
+
+                # Build mismatch flags by comparing against existing system data
+                cursor.execute('SELECT * FROM systems WHERE id = ?', (existing_glyph_row[0],))
+                existing_sys = cursor.fetchone()
+                if existing_sys:
+                    existing_dict = dict(existing_sys)
+                    # Load existing planets for comparison
+                    cursor.execute('SELECT name FROM planets WHERE system_id = ?', (existing_glyph_row[0],))
+                    existing_dict['planets'] = [{'name': r['name']} for r in cursor.fetchall()]
+                    cursor.execute('SELECT name FROM moons WHERE system_id = ?', (existing_glyph_row[0],))
+                    existing_dict['moons'] = [{'name': r['name']} for r in cursor.fetchall()]
+                    mismatch_flags = build_mismatch_flags(existing_dict, payload)
+
+                if mismatch_flags:
                     warnings.append(
-                        f"EXISTING SYSTEM: This appears to update existing system '{existing_glyph_row[1]}' "
-                        f"(same glyph coordinates in {system_galaxy}/{system_reality}). "
-                        f"However, the submitted name '{system_name}' differs. Please verify before approving."
+                        f"EXISTING SYSTEM: This updates '{existing_glyph_row[1]}' "
+                        f"(same coordinates in {system_galaxy}/{system_reality}) but data differs: "
+                        f"{'; '.join(mismatch_flags)}"
+                    )
+                elif existing_glyph_row[1] and existing_glyph_row[1].strip() != system_name.strip():
+                    warnings.append(
+                        f"EXISTING SYSTEM: This updates '{existing_glyph_row[1]}' "
+                        f"(same coordinates in {system_galaxy}/{system_reality}). "
+                        f"Name differs: '{system_name}'. Please verify before approving."
                     )
                 else:
                     warnings.append(
-                        f"EXISTING SYSTEM: This appears to update existing system '{existing_glyph_row[1]}' "
-                        f"(same glyph coordinates in {system_galaxy}/{system_reality}). "
-                        f"Approving this submission will UPDATE the existing system."
+                        f"EXISTING SYSTEM: This updates '{existing_glyph_row[1]}' "
+                        f"(same coordinates in {system_galaxy}/{system_reality}). "
+                        f"Approving will UPDATE the existing system."
                     )
                 logger.info(f"Submission for '{system_name}' has glyph matching existing system '{existing_glyph_row[1]}' (ID: {existing_glyph_row[0]}) via last-11 + galaxy + reality")
+
+        # Check pending systems for coordinate match
+        if glyph_code and not existing_glyph_system:
+            pending_row = find_matching_pending_system(cursor, glyph_code, system_galaxy, system_reality)
+            if pending_row:
+                warnings.append(
+                    f"PENDING DUPLICATE: A submission for these coordinates is already pending "
+                    f"as '{pending_row[1]}'. Submitting anyway for review."
+                )
 
         # Extract discord_tag for filtering (partners only see their tagged submissions)
         # Priority: 1) Payload, 2) API key, 3) Logged-in user's session
@@ -12871,11 +13039,17 @@ async def submit_system(
         personal_discord_username = payload.get('personal_discord_username')
 
         # Determine if this is an edit (system has ID) or new submission
-        # Also check if glyph_code matches an existing system
-        edit_system_id = system_id  # From payload.get('id') above
-        if not edit_system_id and existing_glyph_system:
-            # Glyph code matches existing system - treat as edit
+        # Glyph-based: if coordinates match an existing approved system, treat as edit
+        edit_system_id = None
+        if existing_glyph_system:
             edit_system_id = existing_glyph_system['id']
+        elif system_id:
+            # Legacy fallback: explicit system ID from frontend edit mode
+            edit_system_id = system_id
+
+        # Store mismatch flags in payload for approvers to see
+        if mismatch_flags:
+            payload['_mismatch_flags'] = mismatch_flags
 
         # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
         cursor.execute('''
@@ -13513,56 +13687,21 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         if region_z is not None:
             system_data['region_z'] = region_z
 
-        # Determine if this is a new system or an edit of an existing one.
-        # Priority: 1) system_data JSON 'id' field (set by frontend edits),
-        #           2) edit_system_id column (set by extraction duplicate detection)
-        existing_system_id = system_data.get('id')
-        if not existing_system_id:
-            existing_system_id = submission.get('edit_system_id')
-            if existing_system_id:
-                system_data['id'] = existing_system_id
-                logger.info(f"Submission {submission_id}: using edit_system_id from pending_systems row: {existing_system_id}")
+        # Determine if this is an edit: canonical glyph-first dedup
+        # Priority: 1) Glyph coordinates (last-11 + galaxy + reality) — authoritative
+        #           2) edit_system_id from pending row — set during extraction/submission dedup
+        #           3) system_data JSON 'id' field — legacy fallback from frontend edits
+        submission_galaxy = system_data.get('galaxy', 'Euclid')
+        submission_reality = system_data.get('reality', 'Normal')
 
         is_edit = False
-        original_glyph_data = None  # Store original glyph info for edits
+        original_glyph_data = None
         original_discovered_by = None
         original_discovered_at = None
         original_contributors = None
 
-        logger.info(f"Approving submission {submission_id}: system_data.id = {existing_system_id}")
-
-        if existing_system_id:
-            # Check if the system actually exists in the database
-            cursor.execute('''
-                SELECT id, glyph_code, glyph_planet, glyph_solar_system,
-                       discovered_by, discovered_at, contributors
-                FROM systems WHERE id = ?
-            ''', (existing_system_id,))
-            existing_row = cursor.fetchone()
-            if existing_row:
-                is_edit = True
-                system_id = existing_system_id
-                # Store original glyph data to preserve if submission doesn't have it
-                original_glyph_data = {
-                    'glyph_code': existing_row[1],
-                    'glyph_planet': existing_row[2],
-                    'glyph_solar_system': existing_row[3]
-                }
-                original_discovered_by = existing_row[4]
-                original_discovered_at = existing_row[5]
-                original_contributors = existing_row[6]
-                logger.info(f"Submission {submission_id} is an EDIT - found existing system with ID: {system_id}, original glyph: {original_glyph_data['glyph_code']}")
-            else:
-                logger.info(f"Submission {submission_id} has ID {existing_system_id} but system not found in DB - treating as NEW")
-
-        # Coordinate-based fallback: if no explicit system_id, check if a system with
-        # matching glyph coordinates exists (last 11 chars + galaxy + reality).
-        # This catches re-submissions of existing systems via different portal planets.
-        submission_galaxy = system_data.get('galaxy', 'Euclid')
-        submission_reality = system_data.get('reality', 'Normal')
-        existing_system_row = None
-
-        if not is_edit and system_data.get('glyph_code'):
+        # Primary: glyph-based coordinate match
+        if system_data.get('glyph_code'):
             existing_system_row = find_matching_system(
                 cursor,
                 system_data['glyph_code'],
@@ -13573,8 +13712,6 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 existing_name = existing_system_row[1]
                 submitted_name = system_data.get('name', '').strip()
 
-                # Log warning if names differ, but proceed as edit
-                # Matching glyph coordinates = same system in NMS regardless of name
                 if existing_name and submitted_name and existing_name.strip() != submitted_name:
                     logger.warning(f"Submission {submission_id}: glyph coordinates match existing system "
                                    f"'{existing_name}' but submitted name is '{submitted_name}' - "
@@ -13587,11 +13724,35 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     'glyph_planet': existing_system_row[3],
                     'glyph_solar_system': existing_system_row[4]
                 }
-                # Store original discovered_by and contributors for preservation
                 original_discovered_by = existing_system_row[5]
                 original_discovered_at = existing_system_row[6]
                 original_contributors = existing_system_row[7]
-                logger.info(f"Submission {submission_id} has glyph matching existing system '{existing_name}' (ID: {system_id}) via last-11 + galaxy + reality - treating as EDIT")
+                logger.info(f"Submission {submission_id} matched existing system '{existing_name}' (ID: {system_id}) via glyph last-11 + galaxy + reality")
+
+        # Fallback: edit_system_id from pending row or system_data JSON id
+        if not is_edit:
+            existing_system_id = submission.get('edit_system_id') or system_data.get('id')
+            if existing_system_id:
+                cursor.execute('''
+                    SELECT id, glyph_code, glyph_planet, glyph_solar_system,
+                           discovered_by, discovered_at, contributors
+                    FROM systems WHERE id = ?
+                ''', (existing_system_id,))
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    is_edit = True
+                    system_id = existing_system_id
+                    original_glyph_data = {
+                        'glyph_code': existing_row[1],
+                        'glyph_planet': existing_row[2],
+                        'glyph_solar_system': existing_row[3]
+                    }
+                    original_discovered_by = existing_row[4]
+                    original_discovered_at = existing_row[5]
+                    original_contributors = existing_row[6]
+                    logger.info(f"Submission {submission_id} is EDIT via ID fallback: {existing_system_id}")
+                else:
+                    logger.info(f"Submission {submission_id} has ID {existing_system_id} but not found in DB - treating as NEW")
 
         # For EDITS: If submission doesn't have glyph data, preserve the original
         if is_edit and original_glyph_data:
@@ -14341,34 +14502,15 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                 if region_z is not None:
                     system_data['region_z'] = region_z
 
-                # Check if edit or new
-                # Priority: 1) system_data JSON 'id' field, 2) edit_system_id column from pending_systems row
-                existing_system_id = system_data.get('id')
-                if not existing_system_id:
-                    existing_system_id = submission.get('edit_system_id')
-                    if existing_system_id:
-                        system_data['id'] = existing_system_id
-                        logger.info(f"Batch approval {submission_id}: using edit_system_id from pending_systems row: {existing_system_id}")
-
+                # Check if edit or new — glyph-first canonical dedup
+                # Priority: 1) Glyph last-11 + galaxy + reality
+                #           2) edit_system_id / system_data id fallback
                 is_edit = False
                 system_id = None
-                original_glyph_data = None  # Store original glyph info for edits
+                original_glyph_data = None
 
-                if existing_system_id:
-                    cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
-                    existing_row = cursor.fetchone()
-                    if existing_row:
-                        is_edit = True
-                        system_id = existing_system_id
-                        original_glyph_data = {
-                            'glyph_code': existing_row[1],
-                            'glyph_planet': existing_row[2],
-                            'glyph_solar_system': existing_row[3]
-                        }
-
-                # Coordinate-based duplicate detection (same as single approve):
-                # last 11 glyph chars + galaxy + reality identifies the same NMS system.
-                if not is_edit and system_data.get('glyph_code'):
+                # Primary: glyph-based coordinate match
+                if system_data.get('glyph_code'):
                     existing_glyph_row = find_matching_system(
                         cursor, system_data['glyph_code'],
                         system_data.get('galaxy', 'Euclid'),
@@ -14382,7 +14524,23 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             'glyph_planet': existing_glyph_row[3],
                             'glyph_solar_system': existing_glyph_row[4]
                         }
-                        logger.info(f"Batch approval {submission_id}: glyph matches existing system '{existing_glyph_row[1]}' (ID: {system_id}) - treating as edit")
+                        logger.info(f"Batch approval {submission_id}: glyph matches existing system '{existing_glyph_row[1]}' (ID: {system_id})")
+
+                # Fallback: edit_system_id or system_data id
+                if not is_edit:
+                    existing_system_id = submission.get('edit_system_id') or system_data.get('id')
+                    if existing_system_id:
+                        cursor.execute('SELECT id, glyph_code, glyph_planet, glyph_solar_system FROM systems WHERE id = ?', (existing_system_id,))
+                        existing_row = cursor.fetchone()
+                        if existing_row:
+                            is_edit = True
+                            system_id = existing_system_id
+                            original_glyph_data = {
+                                'glyph_code': existing_row[1],
+                                'glyph_planet': existing_row[2],
+                                'glyph_solar_system': existing_row[3]
+                            }
+                            logger.info(f"Batch approval {submission_id}: edit via ID fallback: {existing_system_id}")
 
                 # For EDITS: If submission doesn't have glyph data, preserve the original
                 if is_edit and original_glyph_data:
@@ -14931,6 +15089,10 @@ async def check_glyph_codes(
     if not glyph_codes or not isinstance(glyph_codes, list):
         raise HTTPException(status_code=400, detail="glyph_codes array is required")
 
+    # Optional galaxy/reality for scoped dedup (defaults match most common case)
+    galaxy = payload.get('galaxy', 'Euclid') or 'Euclid'
+    reality = payload.get('reality', 'Normal') or 'Normal'
+
     # Limit to prevent abuse
     if len(glyph_codes) > 100:
         raise HTTPException(status_code=400, detail="Maximum 100 glyph codes per request")
@@ -14949,46 +15111,31 @@ async def check_glyph_codes(
                 results[glyph] = {'status': 'invalid', 'exists': False, 'error': 'Invalid glyph code format'}
                 continue
 
-            # Check approved systems table first
-            cursor.execute('''
-                SELECT id, name, galaxy, discovered_by, created_at
-                FROM systems
-                WHERE glyph_code = ?
-            ''', (glyph,))
-            approved = cursor.fetchone()
+            # Canonical dedup: last-11 glyph chars + galaxy + reality
+            approved_row = find_matching_system(cursor, glyph, galaxy, reality)
 
-            if approved:
+            if approved_row:
                 results[glyph] = {
                     'status': 'already_charted',
                     'exists': True,
                     'location': 'approved',
-                    'system_id': approved[0],
-                    'system_name': approved[1],
-                    'galaxy': approved[2],
-                    'submitted_by': approved[3],
-                    'approved_date': approved[4]
+                    'system_id': approved_row[0],
+                    'system_name': approved_row[1],
+                    'galaxy': galaxy,
                 }
                 summary['already_charted'] += 1
                 continue
 
-            # Check pending systems
-            cursor.execute('''
-                SELECT id, system_name, personal_discord_username, submitter_name, submission_date
-                FROM pending_systems
-                WHERE glyph_code = ? AND status = 'pending'
-            ''', (glyph,))
-            pending = cursor.fetchone()
+            # Check pending systems with same canonical dedup
+            pending_row = find_matching_pending_system(cursor, glyph, galaxy, reality)
 
-            if pending:
-                submitted_by = pending[2] or pending[3] or 'Unknown'
+            if pending_row:
                 results[glyph] = {
                     'status': 'pending_review',
                     'exists': True,
                     'location': 'pending',
-                    'submission_id': pending[0],
-                    'system_name': pending[1],
-                    'submitted_by': submitted_by,
-                    'submission_date': pending[4]
+                    'submission_id': pending_row[0],
+                    'system_name': pending_row[1],
                 }
                 summary['pending_review'] += 1
                 continue
@@ -15180,52 +15327,59 @@ async def receive_extraction(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Server-side duplicate check: Check if system already exists in APPROVED systems
-        cursor.execute('''
-            SELECT id, name FROM systems
-            WHERE glyph_code = ?
-        ''', (glyph_code,))
-        existing_approved = cursor.fetchone()
-
-        if existing_approved:
-            logger.info(f"Extraction rejected - system already charted: {glyph_code} as '{existing_approved[1]}'")
-            return JSONResponse({
-                'status': 'already_charted',
-                'message': f'System already exists as "{existing_approved[1]}"',
-                'existing_system_id': existing_approved[0],
-                'glyph_code': glyph_code
-            }, status_code=409)  # Conflict
-
-        # Check for coordinate match (same system, possibly different planet index)
-        # This catches the case where the same system was charted via a different portal glyph
+        # Canonical dedup: last 11 glyph chars + galaxy + reality
+        # Check approved systems first
         edit_system_id = None
+        mismatch_flags = []
         existing_system_row = find_matching_system(
             cursor, glyph_code, submission_data['galaxy'], reality
         )
         if existing_system_row:
             edit_system_id = existing_system_row[0]
+            # Build mismatch flags for approver review
+            cursor.execute('SELECT * FROM systems WHERE id = ?', (existing_system_row[0],))
+            existing_sys = cursor.fetchone()
+            if existing_sys:
+                existing_dict = dict(existing_sys)
+                cursor.execute('SELECT name FROM planets WHERE system_id = ?', (existing_system_row[0],))
+                existing_dict['planets'] = [{'name': r['name']} for r in cursor.fetchall()]
+                cursor.execute('SELECT name FROM moons WHERE system_id = ?', (existing_system_row[0],))
+                existing_dict['moons'] = [{'name': r['name']} for r in cursor.fetchall()]
+                mismatch_flags = build_mismatch_flags(existing_dict, submission_data)
+            if mismatch_flags:
+                submission_data['_mismatch_flags'] = mismatch_flags
             logger.info(f"Extraction matches existing system '{existing_system_row[1]}' "
-                        f"(ID: {edit_system_id}) via coordinate match - marking as edit")
+                        f"(ID: {edit_system_id}) via coordinate match - marking as edit"
+                        + (f" with mismatches: {mismatch_flags}" if mismatch_flags else ""))
 
-        # Check for duplicate in pending submissions
-        cursor.execute('''
-            SELECT id, status FROM pending_systems
-            WHERE glyph_code = ? AND status = 'pending'
-        ''', (glyph_code,))
-        existing_pending = cursor.fetchone()
+        # Check for duplicate in pending submissions (same canonical dedup)
+        existing_pending = find_matching_pending_system(
+            cursor, glyph_code, submission_data['galaxy'], reality
+        )
 
         if existing_pending:
-            # Update existing pending submission with new data
+            # MERGE: preserve manual-only fields from existing pending, overwrite with extractor data
+            try:
+                existing_system_data = json.loads(existing_pending[3])  # system_data column
+            except (json.JSONDecodeError, TypeError):
+                existing_system_data = {}
+
+            merged_data = merge_system_data(existing_system_data, submission_data)
+            # Preserve mismatch flags if we found them
+            if mismatch_flags:
+                merged_data['_mismatch_flags'] = mismatch_flags
+
             cursor.execute('''
                 UPDATE pending_systems
                 SET raw_json = ?, system_data = ?, submission_timestamp = ?,
                     discord_tag = ?, personal_discord_username = ?, personal_id = ?,
-                    system_name = ?, galaxy = ?, reality = ?, region_x = ?, region_y = ?, region_z = ?,
-                    x = ?, y = ?, z = ?
+                    system_name = ?, galaxy = ?, reality = ?, glyph_code = ?,
+                    region_x = ?, region_y = ?, region_z = ?,
+                    x = ?, y = ?, z = ?, edit_system_id = ?
                 WHERE id = ?
             ''', (
-                json.dumps(submission_data),
-                json.dumps(submission_data),
+                json.dumps(merged_data),
+                json.dumps(merged_data),
                 datetime.now(timezone.utc).isoformat(),
                 discord_tag if discord_tag else None,
                 discord_username if discord_username else None,
@@ -15233,20 +15387,22 @@ async def receive_extraction(
                 submission_data['name'],
                 submission_data['galaxy'],
                 reality,
+                glyph_code,
                 region_x,
                 region_y,
                 region_z,
                 submission_data['x'],
                 submission_data['y'],
                 submission_data['z'],
+                edit_system_id,
                 existing_pending[0]
             ))
             conn.commit()
 
-            logger.info(f"Updated pending extraction for {glyph_code} (discord_tag={discord_tag})")
+            logger.info(f"Merged extraction into pending submission for {glyph_code} (discord_tag={discord_tag})")
             return JSONResponse({
                 'status': 'updated',
-                'message': f'Extraction updated for {glyph_code}',
+                'message': f'Extraction merged for {glyph_code}',
                 'submission_id': existing_pending[0],
                 'planet_count': len(planets),
                 'moon_count': len(moons)
