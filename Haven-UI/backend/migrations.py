@@ -4015,3 +4015,108 @@ def migration_1_53_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.53.0")
+
+
+@register_migration("1.54.0", "Remove UNIQUE constraint on systems.name, replace glyph UNIQUE with canonical dedup index")
+def migration_1_54_0(conn):
+    """
+    The systems table was created with `name TEXT NOT NULL UNIQUE` which prevents
+    same-named systems in different galaxies/realities — a legitimate NMS scenario.
+
+    System identity is now based on canonical glyph dedup:
+    last 11 glyph chars + galaxy + reality (not name, not exact glyph).
+
+    This migration:
+    1. Rebuilds systems table without UNIQUE on name
+    2. Drops the old exact glyph_code UNIQUE index
+    3. Adds a new canonical dedup index on (SUBSTR(glyph_code, -11), galaxy, reality)
+    """
+    cursor = conn.cursor()
+
+    logger.info("Rebuilding systems table to remove UNIQUE constraint on name...")
+
+    # Get current column list dynamically
+    cursor.execute("PRAGMA table_info(systems)")
+    columns = [row[1] for row in cursor.fetchall()]
+    logger.info(f"Systems table has {len(columns)} columns")
+
+    # Drop any leftover temp table
+    cursor.execute("DROP TABLE IF EXISTS systems_new")
+
+    # Build CREATE TABLE without UNIQUE on name
+    # We need to get the full schema and modify it
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='systems'")
+    original_sql = cursor.fetchone()[0]
+
+    # Replace "name TEXT NOT NULL UNIQUE" with "name TEXT NOT NULL"
+    new_sql = original_sql.replace(
+        'name TEXT NOT NULL UNIQUE',
+        'name TEXT NOT NULL'
+    )
+    # Change table name to systems_new
+    new_sql = new_sql.replace('CREATE TABLE "systems"', 'CREATE TABLE "systems_new"', 1)
+    if 'systems_new' not in new_sql:
+        new_sql = new_sql.replace('CREATE TABLE systems', 'CREATE TABLE systems_new', 1)
+
+    logger.info("Creating systems_new without UNIQUE on name...")
+    cursor.execute(new_sql)
+
+    # Copy all data
+    cols_str = ', '.join(columns)
+    cursor.execute(f'INSERT INTO systems_new ({cols_str}) SELECT {cols_str} FROM systems')
+    cursor.execute('SELECT COUNT(*) FROM systems_new')
+    count = cursor.fetchone()[0]
+    logger.info(f"Copied {count} systems to new table")
+
+    # Drop old table and rename
+    cursor.execute('DROP TABLE systems')
+    cursor.execute('ALTER TABLE systems_new RENAME TO systems')
+    logger.info("Rebuilt systems table without UNIQUE on name")
+
+    # Drop old exact glyph_code UNIQUE index (no longer correct for dedup)
+    cursor.execute("DROP INDEX IF EXISTS idx_systems_glyph")
+    logger.info("Dropped old idx_systems_glyph UNIQUE index")
+
+    # Recreate all needed indexes (they were dropped with the table)
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_systems_name ON systems(name)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_coords ON systems(x, y, z)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_galaxy ON systems(galaxy)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_star_coords ON systems(star_x, star_y, star_z)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_discord_tag ON systems(discord_tag)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_region ON systems(region_x, region_y, region_z)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_glyph_code ON systems(glyph_code)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_created_at ON systems(created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_reality ON systems(reality)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_hierarchy ON systems(reality, galaxy, region_x, region_y, region_z)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_reality_galaxy ON systems(reality, galaxy)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_discord_created ON systems(discord_tag, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_star_type ON systems(star_type)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_economy_type ON systems(economy_type)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_conflict_level ON systems(conflict_level)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_dominant_lifeform ON systems(dominant_lifeform)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_stellar_classification ON systems(stellar_classification)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_is_complete ON systems(is_complete)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_is_stub ON systems(is_stub)",
+        "CREATE INDEX IF NOT EXISTS idx_systems_completeness ON systems(is_complete)",
+    ]
+    for idx_sql in indexes:
+        try:
+            cursor.execute(idx_sql)
+        except Exception as e:
+            logger.warning(f"Index creation warning: {e}")
+
+    logger.info("Recreated all system indexes")
+
+    conn.commit()
+
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_metadata'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            UPDATE _metadata SET value = '1.54.0', updated_at = ?
+            WHERE key = 'version'
+        """, (datetime.now().isoformat(),))
+        logger.info("Updated _metadata version to 1.54.0")
