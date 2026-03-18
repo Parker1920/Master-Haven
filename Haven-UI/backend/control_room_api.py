@@ -12988,8 +12988,11 @@ async def submit_system(
                     # Load existing planets for comparison
                     cursor.execute('SELECT name FROM planets WHERE system_id = ?', (existing_glyph_row[0],))
                     existing_dict['planets'] = [{'name': r['name']} for r in cursor.fetchall()]
-                    cursor.execute('SELECT name FROM moons WHERE system_id = ?', (existing_glyph_row[0],))
-                    existing_dict['moons'] = [{'name': r['name']} for r in cursor.fetchall()]
+                    moon_names = []
+                    for p in cursor.execute('SELECT id FROM planets WHERE system_id = ?', (existing_glyph_row[0],)).fetchall():
+                        for m in cursor.execute('SELECT name FROM moons WHERE planet_id = ?', (p[0],)).fetchall():
+                            moon_names.append({'name': m['name']})
+                    existing_dict['moons'] = moon_names
                     mismatch_flags = build_mismatch_flags(existing_dict, payload)
 
                 if mismatch_flags:
@@ -15341,10 +15344,14 @@ async def receive_extraction(
             existing_sys = cursor.fetchone()
             if existing_sys:
                 existing_dict = dict(existing_sys)
-                cursor.execute('SELECT name FROM planets WHERE system_id = ?', (existing_system_row[0],))
-                existing_dict['planets'] = [{'name': r['name']} for r in cursor.fetchall()]
-                cursor.execute('SELECT name FROM moons WHERE system_id = ?', (existing_system_row[0],))
-                existing_dict['moons'] = [{'name': r['name']} for r in cursor.fetchall()]
+                cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (existing_system_row[0],))
+                planet_rows = cursor.fetchall()
+                existing_dict['planets'] = [{'name': r['name']} for r in planet_rows]
+                moon_names = []
+                for p in planet_rows:
+                    for m in cursor.execute('SELECT name FROM moons WHERE planet_id = ?', (p[0],)).fetchall():
+                        moon_names.append({'name': m['name']})
+                existing_dict['moons'] = moon_names
                 mismatch_flags = build_mismatch_flags(existing_dict, submission_data)
             if mismatch_flags:
                 submission_data['_mismatch_flags'] = mismatch_flags
