@@ -26,8 +26,11 @@ export default function Profile() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMessage, setPwMessage] = useState('')
   // Submissions
-  const [submissions, setSubmissions] = useState({ systems: [], pending: [] })
+  const [submissions, setSubmissions] = useState({ systems: [], pending: [], total: 0, total_pages: 1, source_counts: {} })
   const [subsLoading, setSubsLoading] = useState(true)
+  const [sourceTab, setSourceTab] = useState('all') // 'all', 'manual', 'haven_extractor'
+  const [page, setPage] = useState(1)
+  const perPage = 50
 
   useEffect(() => {
     if (!user) {
@@ -38,6 +41,10 @@ export default function Profile() {
     fetchSubmissions()
     axios.get('/api/communities').then(r => setCommunities(r.data.communities || [])).catch(() => {})
   }, [user])
+
+  useEffect(() => {
+    fetchSubmissions()
+  }, [sourceTab, page])
 
   async function fetchProfile() {
     try {
@@ -59,7 +66,9 @@ export default function Profile() {
   async function fetchSubmissions() {
     setSubsLoading(true)
     try {
-      const r = await axios.get('/api/profiles/me/submissions')
+      const params = { page, per_page: perPage }
+      if (sourceTab !== 'all') params.source = sourceTab
+      const r = await axios.get('/api/profiles/me/submissions', { params })
       setSubmissions(r.data)
     } catch {
       // Silent
@@ -108,11 +117,20 @@ export default function Profile() {
     }
   }
 
+  function handleSourceTab(tab) {
+    setSourceTab(tab)
+    setPage(1)
+  }
+
   if (loading) return <div className="text-gray-400 text-center py-12">Loading profile...</div>
   if (!profile) return <div className="text-gray-400 text-center py-12">Not authenticated</div>
 
+  const manualCount = submissions.source_counts?.manual || 0
+  const extractorCount = submissions.source_counts?.haven_extractor || 0
+  const totalSystems = manualCount + extractorCount
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">My Profile</h1>
 
       <Card>
@@ -246,26 +264,54 @@ export default function Profile() {
       {/* My Submissions */}
       <Card>
         <h2 className="text-lg font-semibold mb-3">My Submissions</h2>
+
+        {/* Source tabs */}
+        {totalSystems > 0 && (
+          <div className="flex gap-1 mb-4 border-b border-gray-700 pb-2">
+            <button
+              onClick={() => handleSourceTab('all')}
+              className={`px-3 py-1.5 text-sm rounded-t transition-colors ${
+                sourceTab === 'all' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              All <span className="text-xs text-gray-500 ml-1">{totalSystems}</span>
+            </button>
+            <button
+              onClick={() => handleSourceTab('manual')}
+              className={`px-3 py-1.5 text-sm rounded-t transition-colors ${
+                sourceTab === 'manual' ? 'bg-cyan-900/50 text-cyan-400' : 'text-gray-400 hover:text-cyan-400'
+              }`}
+            >
+              Manual <span className="text-xs opacity-60 ml-1">{manualCount}</span>
+            </button>
+            <button
+              onClick={() => handleSourceTab('haven_extractor')}
+              className={`px-3 py-1.5 text-sm rounded-t transition-colors ${
+                sourceTab === 'haven_extractor' ? 'bg-purple-900/50 text-purple-400' : 'text-gray-400 hover:text-purple-400'
+              }`}
+            >
+              Extractor <span className="text-xs opacity-60 ml-1">{extractorCount}</span>
+            </button>
+          </div>
+        )}
+
         {subsLoading ? (
           <div className="text-gray-400 text-sm">Loading...</div>
         ) : (
           <div className="space-y-4">
             {/* Pending submissions */}
-            {submissions.pending.length > 0 && (
+            {submissions.pending.length > 0 && sourceTab === 'all' && (
               <div>
                 <h3 className="text-sm font-medium text-yellow-400 mb-2">Pending Approval ({submissions.pending.length})</h3>
                 <div className="space-y-1">
                   {submissions.pending.map(p => (
                     <div key={`p-${p.id}`} className="flex items-center justify-between py-1.5 px-2 bg-gray-800 rounded text-sm">
-                      <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${p.source === 'haven_extractor' ? 'bg-purple-400' : 'bg-cyan-400'}`} />
                         <span className="text-white">{p.system_name}</span>
-                        <span className="text-gray-500 ml-2">{p.galaxy} / {p.reality}</span>
+                        <span className="text-gray-500">{p.galaxy} / {p.reality}</span>
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        p.status === 'pending' ? 'bg-yellow-600/30 text-yellow-400' :
-                        p.status === 'approved' ? 'bg-green-600/30 text-green-400' :
-                        'bg-red-600/30 text-red-400'
-                      }`}>{p.status}</span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-yellow-600/30 text-yellow-400">pending</span>
                     </div>
                   ))}
                 </div>
@@ -275,7 +321,9 @@ export default function Profile() {
             {/* Approved systems */}
             {submissions.systems.length > 0 ? (
               <div>
-                <h3 className="text-sm font-medium text-green-400 mb-2">Approved Systems ({submissions.systems.length})</h3>
+                <h3 className="text-sm font-medium text-green-400 mb-2">
+                  Approved Systems ({submissions.total})
+                </h3>
                 <div className="space-y-1">
                   {submissions.systems.map(s => (
                     <a
@@ -283,10 +331,12 @@ export default function Profile() {
                       href={`/haven-ui/systems/${s.id}`}
                       className="flex items-center justify-between py-1.5 px-2 bg-gray-800 hover:bg-gray-700 rounded text-sm transition-colors block"
                     >
-                      <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${s.source === 'haven_extractor' ? 'bg-purple-400' : 'bg-cyan-400'}`}
+                              title={s.source === 'haven_extractor' ? 'Haven Extractor' : 'Manual Upload'} />
                         <span className="text-white">{s.name}</span>
-                        <span className="text-gray-500 ml-2">{s.galaxy}</span>
-                        {s.discord_tag && <span className="text-cyan-400 ml-2 text-xs">{s.discord_tag}</span>}
+                        <span className="text-gray-500">{s.galaxy}</span>
+                        {s.discord_tag && <span className="text-cyan-400 text-xs">{s.discord_tag}</span>}
                       </div>
                       {s.is_complete !== null && s.is_complete !== undefined && (
                         <span className={`text-xs px-1.5 py-0.5 rounded ${
@@ -303,9 +353,36 @@ export default function Profile() {
                     </a>
                   ))}
                 </div>
+
+                {/* Pagination */}
+                {submissions.total_pages > 1 && (
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700">
+                    <button
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={page <= 1}
+                      className="px-3 py-1 text-sm bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-400">
+                      Page {page} of {submissions.total_pages}
+                    </span>
+                    <button
+                      onClick={() => setPage(p => Math.min(submissions.total_pages, p + 1))}
+                      disabled={page >= submissions.total_pages}
+                      className="px-3 py-1 text-sm bg-gray-700 rounded disabled:opacity-30 hover:bg-gray-600 transition-colors"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="text-gray-500 text-sm">No approved systems yet. Submit your first system from the Create page!</div>
+              <div className="text-gray-500 text-sm">
+                {sourceTab !== 'all'
+                  ? `No ${sourceTab === 'haven_extractor' ? 'extractor' : 'manual'} submissions yet.`
+                  : 'No approved systems yet. Submit your first system from the Create page!'}
+              </div>
             )}
           </div>
         )}

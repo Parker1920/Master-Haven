@@ -123,7 +123,7 @@ export default function App() {
 
               {/* Super admin only routes */}
               <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />
-              <Route path="/admin/users" element={<RequireSuperAdmin><UserManagement /></RequireSuperAdmin>} />
+              <Route path="/admin/users" element={<RequireAdmin><UserManagement /></RequireAdmin>} />
               <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
               <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
               <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />

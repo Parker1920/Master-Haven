@@ -2322,19 +2322,31 @@ def generate_session_token() -> str:
     """Generate a secure random session token"""
     return secrets.token_urlsafe(32)
 
+SESSION_TIMEOUT_MINUTES = 20
+
 def get_session(session_token: Optional[str]) -> Optional[dict]:
-    """Look up session by token; returns session dict or None if missing/expired. Auto-deletes expired."""
+    """Look up session by token; returns session dict or None if missing/expired. Auto-extends on access."""
     if not session_token or session_token not in _sessions:
         return None
     session = _sessions[session_token]
     if datetime.now(timezone.utc) > session.get('expires_at', datetime.min.replace(tzinfo=timezone.utc)):
         del _sessions[session_token]
         return None
+    # Auto-extend session on every access (sliding window)
+    session['expires_at'] = datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
     return session
 
 def verify_session(session_token: Optional[str]) -> bool:
     """Returns True if session token maps to a valid, non-expired session. Thin wrapper around get_session()."""
     return get_session(session_token) is not None
+
+def require_feature(session_data: dict, feature: str) -> None:
+    """Raise 403 if the user doesn't have the required feature. Super admins bypass all checks."""
+    if session_data.get('user_type') == 'super_admin':
+        return  # Super admin has all features
+    enabled = session_data.get('enabled_features', [])
+    if feature not in enabled:
+        raise HTTPException(status_code=403, detail=f"You don't have the '{feature}' permission")
 
 def is_super_admin(session_token: Optional[str]) -> bool:
     """Returns True if session token belongs to the super admin (user_type == 'super_admin')."""
@@ -2824,7 +2836,7 @@ async def admin_login(credentials: dict, response: Response):
                 'default_civ_tag': profile['default_civ_tag'],
                 'default_reality': profile['default_reality'] or None,
                 'default_galaxy': profile['default_galaxy'] or None,
-                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
             }
 
             # Sub-admin specific fields
@@ -2894,7 +2906,7 @@ async def admin_login(credentials: dict, response: Response):
                     'display_name': 'Super Admin',
                     'enabled_features': ['all'],
                     'tier': TIER_SUPER_ADMIN,
-                    'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+                    'expires_at': datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
                 }
                 response.set_cookie(key='session', value=session_token,
                                     httponly=True, max_age=600, samesite='lax')
@@ -2923,7 +2935,7 @@ async def admin_login(credentials: dict, response: Response):
                 'user_type': 'partner', 'username': username, 'discord_tag': row['discord_tag'],
                 'partner_id': row['id'], 'display_name': row['display_name'] or username,
                 'enabled_features': enabled_features, 'tier': TIER_PARTNER,
-                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
             }
             response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
             return {
@@ -2970,7 +2982,7 @@ async def admin_login(credentials: dict, response: Response):
             'additional_discord_tags': additional_discord_tags,
             'can_approve_personal_uploads': can_approve_personal_uploads,
             'tier': TIER_SUB_ADMIN,
-            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
         }
         response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
         return {
@@ -7058,7 +7070,7 @@ async def profile_login(credentials: dict, response: Response):
             'default_civ_tag': row['default_civ_tag'],
             'default_reality': row['default_reality'],
             'default_galaxy': row['default_galaxy'],
-            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=SESSION_TIMEOUT_MINUTES)
         }
 
         response.set_cookie(key='session', value=session_token,
@@ -7176,8 +7188,13 @@ async def profile_me(session: Optional[str] = Cookie(None)):
 
 
 @app.get('/api/profiles/me/submissions')
-async def profile_my_submissions(session: Optional[str] = Cookie(None)):
-    """Get the current user's systems and pending submissions."""
+async def profile_my_submissions(
+    page: int = 1,
+    per_page: int = 50,
+    source: Optional[str] = None,
+    session: Optional[str] = Cookie(None)
+):
+    """Get the current user's systems and pending submissions with pagination and source filter."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -7191,60 +7208,88 @@ async def profile_my_submissions(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Approved systems by profile_id OR username OR partner tag
+        # Build WHERE clause for matching user's systems
         if profile_id and username and partner_tag:
-            cursor.execute("""
-                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
-                FROM systems WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ? OR discord_tag = ?
-                ORDER BY created_at DESC LIMIT 200
-            """, (profile_id, username, username, partner_tag))
+            where = "(s.profile_id = ? OR s.personal_discord_username = ? OR s.discovered_by = ? OR s.discord_tag = ?)"
+            params = [profile_id, username, username, partner_tag]
         elif profile_id and username:
-            cursor.execute("""
-                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
-                FROM systems WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ?
-                ORDER BY created_at DESC LIMIT 50
-            """, (profile_id, username, username))
+            where = "(s.profile_id = ? OR s.personal_discord_username = ? OR s.discovered_by = ?)"
+            params = [profile_id, username, username]
         elif profile_id:
-            cursor.execute("""
-                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
-                FROM systems WHERE profile_id = ?
-                ORDER BY created_at DESC LIMIT 50
-            """, (profile_id,))
+            where = "s.profile_id = ?"
+            params = [profile_id]
         else:
-            cursor.execute("""
-                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
-                FROM systems WHERE personal_discord_username = ? OR discovered_by = ?
-                ORDER BY created_at DESC LIMIT 50
-            """, (username, username))
-        systems = [dict(r) for r in cursor.fetchall()]
-        # Deduplicate by id (profile_id and username may match same row)
-        seen_ids = set()
-        systems = [s for s in systems if not (s['id'] in seen_ids or seen_ids.add(s['id']))]
+            where = "(s.personal_discord_username = ? OR s.discovered_by = ?)"
+            params = [username, username]
 
-        # Pending submissions by profile_id OR username (only status='pending')
+        # Add source filter
+        source_filter = ""
+        if source == 'manual':
+            source_filter = " AND COALESCE(s.source, 'manual') = 'manual'"
+        elif source == 'haven_extractor':
+            source_filter = " AND s.source = 'haven_extractor'"
+
+        # Count total
+        cursor.execute(f"SELECT COUNT(DISTINCT s.id) FROM systems s WHERE {where}{source_filter}", params)
+        total = cursor.fetchone()[0]
+
+        # Count by source for tab badges
+        cursor.execute(f"""
+            SELECT COALESCE(s.source, 'manual') as src, COUNT(DISTINCT s.id) as cnt
+            FROM systems s WHERE {where}
+            GROUP BY src
+        """, params)
+        source_counts = {r[0]: r[1] for r in cursor.fetchall()}
+
+        # Paginated systems
+        offset = (page - 1) * per_page
+        cursor.execute(f"""
+            SELECT DISTINCT s.id, s.name, s.galaxy, s.reality, s.star_type, s.discord_tag,
+                   s.is_complete, s.created_at, COALESCE(s.source, 'manual') as source
+            FROM systems s WHERE {where}{source_filter}
+            ORDER BY s.created_at DESC
+            LIMIT ? OFFSET ?
+        """, params + [per_page, offset])
+        systems = [dict(r) for r in cursor.fetchall()]
+
+        # Pending submissions (only status='pending', no pagination needed - usually small)
         if profile_id and username:
             cursor.execute("""
-                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag,
+                       COALESCE(source, 'manual') as source
                 FROM pending_systems WHERE status = 'pending' AND (submitter_profile_id = ? OR personal_discord_username = ? OR submitted_by = ?)
-                ORDER BY submission_date DESC LIMIT 50
+                ORDER BY submission_date DESC
             """, (profile_id, username, username))
         elif profile_id:
             cursor.execute("""
-                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag,
+                       COALESCE(source, 'manual') as source
                 FROM pending_systems WHERE status = 'pending' AND submitter_profile_id = ?
-                ORDER BY submission_date DESC LIMIT 50
+                ORDER BY submission_date DESC
             """, (profile_id,))
         else:
             cursor.execute("""
-                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag,
+                       COALESCE(source, 'manual') as source
                 FROM pending_systems WHERE status = 'pending' AND (personal_discord_username = ? OR submitted_by = ?)
-                ORDER BY submission_date DESC LIMIT 50
+                ORDER BY submission_date DESC
             """, (username, username))
         pending = [dict(r) for r in cursor.fetchall()]
         seen_ids = set()
         pending = [p for p in pending if not (p['id'] in seen_ids or seen_ids.add(p['id']))]
 
-        return {'systems': systems, 'pending': pending}
+        return {
+            'systems': systems,
+            'pending': pending,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': max(1, (total + per_page - 1) // per_page),
+            'source_counts': {
+                'manual': source_counts.get('manual', 0),
+                'haven_extractor': source_counts.get('haven_extractor', 0),
+            }
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -10770,6 +10815,7 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
 
     if not verify_session(session):
         raise HTTPException(status_code=401, detail='Admin authentication required')
+    require_feature(get_session(session), 'approvals')
 
     conn = None
     try:
@@ -10854,6 +10900,7 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
 
     if not verify_session(session):
         raise HTTPException(status_code=401, detail='Admin authentication required')
+    require_feature(get_session(session), 'approvals')
 
     review_notes = payload.get('notes', '') if payload else ''
 
@@ -11272,6 +11319,13 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
     is_super = session_data.get('user_type') == 'super_admin'
     partner_tag = session_data.get('discord_tag')
     partner_id = session_data.get('partner_id')
+
+    # Feature enforcement: system_create for new, system_edit for updates
+    system_id = payload.get('id')
+    if system_id:
+        require_feature(session_data, 'system_edit')
+    else:
+        require_feature(session_data, 'system_create')
 
     name = payload.get('name')
     if not name:
@@ -13824,6 +13878,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
     session_data = get_session(session)
     current_user_type = session_data.get('user_type')
     current_username = session_data.get('username')
+    require_feature(session_data, 'approvals')
     current_account_id = None
     if current_user_type == 'partner':
         current_account_id = session_data.get('partner_id')
@@ -13968,6 +14023,7 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
     session_data = get_session(session)
     current_user_type = session_data.get('user_type')
     current_username = session_data.get('username')
+    require_feature(session_data, 'approvals')
     current_account_id = None
     if current_user_type == 'partner':
         current_account_id = session_data.get('partner_id')
@@ -14795,6 +14851,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
     session_data = get_session(session)
     current_user_type = session_data.get('user_type')
     current_username = session_data.get('username')
+    require_feature(session_data, 'approvals')
     current_account_id = None
     if current_user_type == 'partner':
         current_account_id = session_data.get('partner_id')
@@ -15104,8 +15161,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                    contributors, created_at, game_mode, profile_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contributors, created_at, game_mode, profile_id, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -15138,6 +15195,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 now_iso,
                 system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
                 submission.get('submitter_profile_id'),
+                submission.get('source', 'manual'),
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -15466,6 +15524,7 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
     session_data = get_session(session)
     current_user_type = session_data.get('user_type')
     current_username = session_data.get('username')
+    require_feature(session_data, 'approvals')
     current_account_id = None
     if current_user_type == 'partner':
         current_account_id = session_data.get('partner_id')
@@ -15584,8 +15643,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
     current_username = session_data.get('username')
     enabled_features = session_data.get('enabled_features', [])
 
-    # Permission check: super admin OR has batch_approvals feature
+    # Permission check: super admin OR has both approvals AND batch_approvals features
     is_super = current_user_type == 'super_admin'
+    require_feature(session_data, 'approvals')
     if not is_super and 'batch_approvals' not in enabled_features:
         raise HTTPException(status_code=403, detail="Batch approvals permission required")
 
@@ -15842,8 +15902,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                            contributors, created_at, game_mode, profile_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            contributors, created_at, game_mode, profile_id, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -15874,6 +15934,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         now_iso,
                         system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
                         submission.get('submitter_profile_id'),
+                        submission.get('source', 'manual'),
                     ))
 
                 # Insert planets
@@ -16098,8 +16159,9 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
     current_username = session_data.get('username')
     enabled_features = session_data.get('enabled_features', [])
 
-    # Permission check: super admin OR has batch_approvals feature
+    # Permission check: super admin OR has both approvals AND batch_approvals features
     is_super = current_user_type == 'super_admin'
+    require_feature(session_data, 'approvals')
     if not is_super and 'batch_approvals' not in enabled_features:
         raise HTTPException(status_code=403, detail="Batch approvals permission required")
 

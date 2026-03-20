@@ -4592,3 +4592,48 @@ def migration_1_58_0(conn):
 
     logger.info(f"Total rows updated with profile_id: {total_updated}")
     conn.commit()
+
+
+@register_migration("1.59.0", "Add source column to systems table, backfill from pending_systems")
+def migration_1_59_0(conn):
+    """
+    Add upload source tracking to approved systems so the Profile page
+    can split submissions by manual vs extractor.
+    """
+    cursor = conn.cursor()
+
+    # Add source column to systems table
+    try:
+        cursor.execute("ALTER TABLE systems ADD COLUMN source TEXT DEFAULT 'manual'")
+        logger.info("Added source column to systems table")
+    except Exception:
+        logger.info("source column already exists on systems")
+
+    # Backfill from pending_systems where we have a match
+    cursor.execute("""
+        UPDATE systems SET source = (
+            SELECT COALESCE(ps.source, 'manual')
+            FROM pending_systems ps
+            WHERE (
+                ps.status = 'approved'
+                AND (
+                    (ps.system_name IS NOT NULL AND ps.system_name = systems.name AND ps.galaxy = systems.galaxy)
+                    OR (ps.submitter_profile_id IS NOT NULL AND ps.submitter_profile_id = systems.profile_id
+                        AND ps.system_name = systems.name)
+                )
+            )
+            ORDER BY ps.id DESC LIMIT 1
+        )
+        WHERE EXISTS (
+            SELECT 1 FROM pending_systems ps
+            WHERE ps.status = 'approved'
+            AND (
+                (ps.system_name IS NOT NULL AND ps.system_name = systems.name AND ps.galaxy = systems.galaxy)
+                OR (ps.submitter_profile_id IS NOT NULL AND ps.submitter_profile_id = systems.profile_id
+                    AND ps.system_name = systems.name)
+            )
+        )
+    """)
+    backfilled = cursor.rowcount
+    logger.info(f"Backfilled source on {backfilled} systems from pending_systems")
+    conn.commit()
