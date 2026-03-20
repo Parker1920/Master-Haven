@@ -9642,16 +9642,16 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             visible_counts = {}  # Initialize before conditional to avoid NameError
 
             if all_region_coords:
-                # Build WHERE clause for all regions (not just paginated ones)
-                placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(all_region_coords))
-                params = [coord for region in all_region_coords for coord in region]
-                # Add hierarchy filter params if present
-                params.extend(filter_params)
+                # Use temp table to avoid SQLite expression tree depth limit (max 1000)
+                cursor.execute("CREATE TEMP TABLE IF NOT EXISTS _tmp_region_coords (rx INTEGER, ry INTEGER, rz INTEGER)")
+                cursor.execute("DELETE FROM _tmp_region_coords")
+                cursor.executemany("INSERT INTO _tmp_region_coords VALUES (?, ?, ?)", all_region_coords)
 
                 cursor.execute(f'''
-                    SELECT id, discord_tag, region_x, region_y, region_z FROM systems s
-                    WHERE ({placeholders}) {combined_filter}
-                ''', params)
+                    SELECT s.id, s.discord_tag, s.region_x, s.region_y, s.region_z FROM systems s
+                    INNER JOIN _tmp_region_coords t ON s.region_x = t.rx AND s.region_y = t.ry AND s.region_z = t.rz
+                    WHERE 1=1 {combined_filter}
+                ''', filter_params)
 
                 all_systems = [dict(row) for row in cursor.fetchall()]
 
@@ -9715,17 +9715,17 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         if not region_coords:
             return {'regions': [], 'total_regions': 0}
 
-        # Build WHERE clause for all regions
-        placeholders = ' OR '.join(['(region_x = ? AND region_y = ? AND region_z = ?)'] * len(region_coords))
-        params = [coord for region in region_coords for coord in region]
-        # Add hierarchy filter params if present
-        params.extend(filter_params)
+        # Use temp table to avoid SQLite expression tree depth limit
+        cursor.execute("CREATE TEMP TABLE IF NOT EXISTS _tmp_region_coords (rx INTEGER, ry INTEGER, rz INTEGER)")
+        cursor.execute("DELETE FROM _tmp_region_coords")
+        cursor.executemany("INSERT INTO _tmp_region_coords VALUES (?, ?, ?)", region_coords)
 
         cursor.execute(f'''
-            SELECT * FROM systems s
-            WHERE ({placeholders}) {combined_filter}
+            SELECT s.* FROM systems s
+            INNER JOIN _tmp_region_coords t ON s.region_x = t.rx AND s.region_y = t.ry AND s.region_z = t.rz
+            WHERE 1=1 {combined_filter}
             ORDER BY s.region_x, s.region_y, s.region_z, s.created_at ASC NULLS FIRST, s.id ASC
-        ''', params)
+        ''', filter_params)
 
         all_systems = [dict(row) for row in cursor.fetchall()]
 
