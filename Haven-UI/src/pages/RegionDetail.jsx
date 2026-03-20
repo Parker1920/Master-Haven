@@ -177,6 +177,16 @@ export default function RegionDetail() {
   const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
   const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
 
+  // Auto-fill from user profile
+  useEffect(() => {
+    if (auth?.user?.username && !submitterDiscordUsername) {
+      setSubmitterDiscordUsername(auth.user.username)
+    }
+    if (auth?.user?.defaultCivTag && !newRegionDiscordTag) {
+      setNewRegionDiscordTag(auth.user.defaultCivTag)
+    }
+  }, [auth?.user])
+
   // Load data when region changes (reset to page 1)
   useEffect(() => {
     setCurrentPage(1)

@@ -7,6 +7,7 @@
 # -----------------
 # Keeper Discord Bot - maintained separately
 keeper-discord-bot-main/
+keeper-discord-bot-main.zip
 
 # Travelers Collective - separate project with its own repo
 Travelers-Collective/
@@ -195,6 +196,7 @@ NMS-Save-Watcher/config.json
 # MISC
 # -----------------
 *.map
+flamegraph.html
 .netlify/
 .vercel/
 Haven-UI/.env.backup
@@ -220,3 +222,4 @@ NMS-Haven-Extractor/archive/
 # Large binary analysis outputs (14MB+ symbol dumps, string extractions)
 NMS-Debug-Enabler/analysis/
 NMS-Debug-Enabler/*.log
+CLAUDE.md

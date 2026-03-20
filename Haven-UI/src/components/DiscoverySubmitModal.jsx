@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useContext } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 import FormField from './FormField'
 import GlyphPicker from './GlyphPicker'
 import { TYPE_INFO } from '../data/discoveryTypes'
+import { AuthContext } from '../utils/AuthContext'
 
 // Build dropdown options from the canonical TYPE_INFO.
 // value = emoji (used as discovery_type in the API), label = "emoji Label" for display.
@@ -72,6 +73,8 @@ const GALAXIES = [
  * Props: isOpen, onClose, onSuccess.
  */
 export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
+  const auth = useContext(AuthContext)
+  const { user } = auth || {}
   const [form, setForm] = useState({
     discovery_name: '',
     discovery_type: '',
@@ -115,7 +118,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       .catch(() => setCommunities([{ tag: 'Personal', name: 'Personal (Not affiliated)' }]))
   }, [])
 
-  // Reset form when modal opens
+  // Reset form when modal opens, auto-fill from profile if logged in
   useEffect(() => {
     if (isOpen) {
       setForm({
@@ -127,8 +130,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         moon_id: '',
         location_type: 'planet',
         location_name: '',
-        discord_username: '',
-        discord_tag: '',
+        discord_username: user?.username || '',
+        discord_tag: user?.defaultCivTag || '',
         evidence_urls: ''
       })
       setTypeMetadata({})
@@ -365,11 +368,13 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         discord_tag: form.discord_tag,
         photo_url: primaryPhoto || null,
         evidence_urls: allEvidence.length > 0 ? allEvidence.join(',') : null,
-        type_metadata: Object.keys(metadata).length > 0 ? metadata : null
+        type_metadata: Object.keys(metadata).length > 0 ? metadata : null,
+        profile_id: user?.profileId || null
       }
 
       const res = await fetch('/api/submit_discovery', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })

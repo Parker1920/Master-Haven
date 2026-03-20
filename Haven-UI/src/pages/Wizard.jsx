@@ -10,6 +10,7 @@ import { AuthContext } from '../utils/AuthContext'
 import { generateStationPosition } from '../utils/stationPlacement'
 import { getTradeGoodsForEconomy, getTradeGoodsForEconomyAndTier } from '../utils/economyTradeGoods'
 import SearchableSelect from '../components/SearchableSelect'
+import ProfileClaimModal from '../components/ProfileClaimModal'
 import { GALAXIES, REALITIES } from '../data/galaxies'
 
 function useQuery(){ return new URLSearchParams(useLocation().search) }
@@ -43,7 +44,7 @@ export default function Wizard(){
   const auth = useContext(AuthContext)
   const { isAdmin, isSuperAdmin, isPartner, user } = auth || {}
   const edit = query.get('edit')
-  const [system, setSystem] = useState({ id:'', name:'', galaxy:'Euclid', reality:'Normal', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '', stellar_classification: '' })
+  const [system, setSystem] = useState({ id:'', name:'', galaxy:'', reality:'', glyph_code:'', x:'', y:'', z:'', description:'', planets: [], space_station: null, region_x: null, region_y: null, region_z: null, glyph_planet: 0, glyph_solar_system: 1, discord_tag: null, star_type: '', economy_type: '', economy_level: '', conflict_level: '', dominant_lifeform: '', stellar_classification: '' })
   const [planetModalOpen, setPlanetModalOpen] = useState(false)
   const [editingPlanetIndex, setEditingPlanetIndex] = useState(null)
   const [editingPlanet, setEditingPlanet] = useState(null)
@@ -53,11 +54,18 @@ export default function Wizard(){
   const [editExplanation, setEditExplanation] = useState('')
   const [originalTag, setOriginalTag] = useState(null)
   // Discord username for all submissions (required for self-submission detection)
+  // Blank by default - auto-filled from profile if logged in, otherwise user must enter
   const [submitterDiscordUsername, setSubmitterDiscordUsername] = useState('')
   // Personal discord username for non-community submissions
   const [personalDiscordUsername, setPersonalDiscordUsername] = useState('')
   const [personalDiscordModalOpen, setPersonalDiscordModalOpen] = useState(false)
   const [pendingPersonalSelection, setPendingPersonalSelection] = useState(false)
+  // Profile claim modal state
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [profileModalStatus, setProfileModalStatus] = useState(null) // 'suggestions' | 'not_found' | 'created'
+  const [profileSuggestions, setProfileSuggestions] = useState([])
+  const [resolvedProfileId, setResolvedProfileId] = useState(null)
+  const [pendingSubmitPayload, setPendingSubmitPayload] = useState(null)
   // Region info state
   const [regionInfo, setRegionInfo] = useState(null)
   const [regionLoading, setRegionLoading] = useState(false)
@@ -72,6 +80,26 @@ export default function Wizard(){
       setDiscordTags(r.data.tags || [])
     }).catch(() => {})
   }, [])
+
+  // Auto-fill from user profile when logged in
+  useEffect(() => {
+    if (!user) return
+    // Auto-fill discord username from profile
+    if (user.username && !submitterDiscordUsername) {
+      setSubmitterDiscordUsername(user.username)
+    }
+    // Auto-fill default community tag
+    if (user.defaultCivTag && !system.discord_tag && !edit) {
+      setSystem(prev => ({ ...prev, discord_tag: user.defaultCivTag }))
+    }
+    // Auto-fill reality and galaxy from profile defaults
+    if (user.defaultReality && !edit) {
+      setSystem(prev => ({ ...prev, reality: user.defaultReality }))
+    }
+    if (user.defaultGalaxy && !edit) {
+      setSystem(prev => ({ ...prev, galaxy: user.defaultGalaxy }))
+    }
+  }, [user])
 
   useEffect(()=>{
     if(edit){
@@ -152,6 +180,8 @@ export default function Wizard(){
     explicitSubmitRef.current = false;
     // Client-side validation for nested planets & moons
     if(!system.name || !system.name.trim()) { alert('System name is required'); return; }
+    if(!system.reality) { alert('Reality is required. Please select Normal or Permadeath.'); return; }
+    if(!system.galaxy) { alert('Galaxy is required. Please select which galaxy this system is in.'); return; }
     if(!system.glyph_code || system.glyph_code.length !== 12 || !/^[0-9A-Fa-f]{12}$/.test(system.glyph_code)) { alert('Portal Glyph Code is required and must be exactly 12 hex characters (0-9, A-F)'); return; }
     if(!system.star_type) { alert('Star Color is required'); return; }
     if(!system.economy_type) { alert('Economy Type is required'); return; }
@@ -220,15 +250,110 @@ export default function Wizard(){
         if (system.discord_tag === 'personal' && personalDiscordUsername.trim()) {
           payload.personal_discord_username = personalDiscordUsername.trim()
         }
-        const r = await axios.post('/api/submit_system', payload);
-        alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
-        navigate('/systems');
+
+        // If user is logged in with a profile, attach profile_id
+        if (user?.profileId) {
+          payload.profile_id = user.profileId
+          const r = await axios.post('/api/submit_system', payload);
+          alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
+          navigate('/systems');
+        } else {
+          // Not logged in: do profile lookup before submitting
+          const lookupName = submitterDiscordUsername.trim() || personalDiscordUsername.trim()
+          if (lookupName) {
+            try {
+              const lookupRes = await axios.post('/api/profiles/lookup', { username: lookupName })
+              const lookupData = lookupRes.data
+
+              if (lookupData.status === 'found') {
+                // Exact match - attach profile_id and submit
+                payload.profile_id = lookupData.profile.id
+                const r = await axios.post('/api/submit_system', payload);
+                alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
+                navigate('/systems');
+              } else if (lookupData.status === 'suggestions') {
+                // Fuzzy matches - show claim modal, defer submission
+                setProfileSuggestions(lookupData.suggestions)
+                setProfileModalStatus('suggestions')
+                setProfileModalOpen(true)
+                setPendingSubmitPayload(payload)
+                return // Don't navigate yet
+              } else {
+                // Not found - show create modal, defer submission
+                setProfileModalStatus('not_found')
+                setProfileModalOpen(true)
+                setPendingSubmitPayload(payload)
+                return // Don't navigate yet
+              }
+            } catch {
+              // Profile lookup failed - submit anyway without profile_id
+              const r = await axios.post('/api/submit_system', payload);
+              alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
+              navigate('/systems');
+            }
+          } else {
+            const r = await axios.post('/api/submit_system', payload);
+            alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`);
+            navigate('/systems');
+          }
+        }
       }
     } catch(err){
       const errorMsg = err.response?.data?.detail || err.message || err;
       alert(`${isAdmin ? 'Save' : 'Submission'} failed: ${errorMsg}`);
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Profile claim/create handlers for the ProfileClaimModal
+  async function handleProfileUse(profileId) {
+    setResolvedProfileId(profileId)
+    setProfileModalOpen(false)
+    // Resume submission with the claimed profile
+    if (pendingSubmitPayload) {
+      try {
+        const payload = { ...pendingSubmitPayload, profile_id: profileId }
+        const r = await axios.post('/api/submit_system', payload)
+        alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`)
+        navigate('/systems')
+      } catch (err) {
+        alert(`Submission failed: ${err.response?.data?.detail || err.message}`)
+      } finally {
+        setPendingSubmitPayload(null)
+        setIsSubmitting(false)
+      }
+    }
+  }
+
+  async function handleProfileCreate(profileData) {
+    try {
+      const createRes = await axios.post('/api/profiles/create', profileData)
+      const newProfileId = createRes.data.profile.id
+      setResolvedProfileId(newProfileId)
+      setProfileModalStatus('created')
+      // Modal stays open - user clicks "Continue with Submission" to proceed
+    } catch (err) {
+      alert(`Profile creation failed: ${err.response?.data?.detail || err.message}`)
+      setIsSubmitting(false)
+    }
+  }
+
+  // Called when user clicks "Continue with Submission" on the created profile modal
+  async function handleProfileCreatedContinue() {
+    setProfileModalOpen(false)
+    if (pendingSubmitPayload && resolvedProfileId) {
+      try {
+        const payload = { ...pendingSubmitPayload, profile_id: resolvedProfileId }
+        const r = await axios.post('/api/submit_system', payload)
+        alert(`System submitted for approval!\n\nSubmission ID: ${r.data.submission_id}\nSystem Name: ${r.data.system_name}\n\nAn admin will review your submission.`)
+        navigate('/systems')
+      } catch (err) {
+        alert(`Submission failed: ${err.response?.data?.detail || err.message}`)
+      } finally {
+        setPendingSubmitPayload(null)
+        setIsSubmitting(false)
+      }
     }
   }
 
@@ -396,11 +521,12 @@ export default function Wizard(){
               Reality <span className="text-red-400">*</span>
             </label>
             <select
-              className="w-full p-2 border rounded bg-gray-700 border-gray-600"
-              value={system.reality || 'Normal'}
+              className={`w-full p-2 border rounded bg-gray-700 ${!system.reality ? 'border-red-500 text-gray-400' : 'border-gray-600'}`}
+              value={system.reality || ''}
               onChange={e => setField('reality', e.target.value)}
               required
             >
+              <option value="" disabled>-- Select Reality --</option>
               {REALITIES.map(r => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
@@ -415,9 +541,9 @@ export default function Wizard(){
             </label>
             <SearchableSelect
               options={GALAXIES.map(g => ({ value: g.name, label: `${g.index}: ${g.name}` }))}
-              value={system.galaxy || 'Euclid'}
-              onChange={v => setField('galaxy', v || 'Euclid')}
-              placeholder="Search by number or name..."
+              value={system.galaxy || ''}
+              onChange={v => setField('galaxy', v || '')}
+              placeholder="-- Select Galaxy --"
             />
             <p className="text-xs text-gray-500 mt-1">
               Search by galaxy number (1-256) or name
@@ -1045,6 +1171,23 @@ export default function Wizard(){
               </div>
             </div>
           </Modal>
+        )}
+
+        {/* Profile claim/create modal for first-time submitters */}
+        {profileModalOpen && (
+          <ProfileClaimModal
+            status={profileModalStatus}
+            suggestions={profileSuggestions}
+            username={submitterDiscordUsername.trim() || personalDiscordUsername.trim()}
+            onUse={handleProfileUse}
+            onCreate={handleProfileCreate}
+            onContinue={handleProfileCreatedContinue}
+            onClose={() => {
+              setProfileModalOpen(false)
+              setPendingSubmitPayload(null)
+              setIsSubmitting(false)
+            }}
+          />
         )}
         </form>
       </Card>

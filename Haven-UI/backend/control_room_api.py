@@ -64,13 +64,18 @@ from image_processor import process_image
 app = FastAPI()
 logger = logging.getLogger('control.room')
 
-# Basic CORS - adjust for dev
+# CORS - restrict to known origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://havenmap.online",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://10.0.0.229:8005",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Cookie"],
 )
 
 # Determine Haven UI directory using centralized path config
@@ -221,6 +226,119 @@ def normalize_discord_username(username: str) -> str:
     if '#' in normalized:
         normalized = normalized.split('#')[0]
     return normalized
+
+
+# ============================================================================
+# Unified User Profile System - Tier Constants & Helpers
+# ============================================================================
+
+TIER_SUPER_ADMIN = 1
+TIER_PARTNER = 2
+TIER_SUB_ADMIN = 3
+TIER_MEMBER = 4
+TIER_MEMBER_READONLY = 5
+
+TIER_TO_USER_TYPE = {
+    TIER_SUPER_ADMIN: 'super_admin',
+    TIER_PARTNER: 'partner',
+    TIER_SUB_ADMIN: 'sub_admin',
+    TIER_MEMBER: 'member',
+    TIER_MEMBER_READONLY: 'member_readonly',
+}
+
+
+def normalize_username_for_dedup(username: str) -> str:
+    """
+    Authoritative normalization for user_profiles.username_normalized.
+    Strips unicode accents, lowercases, removes spaces/underscores/dashes/#,
+    strips trailing 4-digit Discord discriminator.
+    """
+    import unicodedata
+    if not username:
+        return ''
+    # Strip unicode accents (e.g., û -> u)
+    normalized = unicodedata.normalize('NFKD', username)
+    normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.strip().lower()
+    normalized = normalized.replace('#', '').replace(' ', '').replace('_', '').replace('-', '')
+    # Strip trailing 4-digit Discord discriminator
+    if len(normalized) > 4 and normalized[-4:].isdigit():
+        prefix = normalized[:-4]
+        if prefix and not prefix[-1].isdigit():
+            normalized = prefix
+    return normalized
+
+
+def _levenshtein_distance(s1: str, s2: str) -> int:
+    """Classic dynamic programming Levenshtein distance."""
+    if len(s1) < len(s2):
+        return _levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    prev_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+
+def find_fuzzy_profile_matches(conn, username: str, max_distance: int = 2) -> list:
+    """
+    Find profiles within Levenshtein edit distance of the given username.
+    Returns list of {id, username, display_name, default_civ_tag, distance}.
+    Excludes exact matches (distance 0) — those are handled by exact lookup.
+    """
+    normalized = normalize_username_for_dedup(username)
+    if not normalized:
+        return []
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, username, display_name, default_civ_tag, username_normalized
+        FROM user_profiles WHERE is_active = 1
+    """)
+    matches = []
+    for row in cursor.fetchall():
+        dist = _levenshtein_distance(normalized, row['username_normalized'])
+        if 0 < dist <= max_distance:
+            matches.append({
+                'id': row['id'],
+                'username': row['username'],
+                'display_name': row['display_name'],
+                'default_civ_tag': row['default_civ_tag'],
+                'distance': dist
+            })
+    return sorted(matches, key=lambda m: m['distance'])[:5]
+
+
+def get_or_create_profile(conn, username: str, discord_snowflake_id: str = None,
+                          default_civ_tag: str = None, created_by: str = 'auto') -> int:
+    """
+    Look up a profile by normalized username. If not found, create a tier-5 profile.
+    Returns the profile_id.
+    """
+    normalized = normalize_username_for_dedup(username)
+    if not normalized:
+        return None
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM user_profiles WHERE username_normalized = ?", (normalized,))
+    row = cursor.fetchone()
+    if row:
+        return row['id']
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute('''
+        INSERT INTO user_profiles (
+            username, username_normalized, display_name, tier,
+            discord_snowflake_id, default_civ_tag, default_reality, default_galaxy,
+            created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+    ''', (username, normalized, username, TIER_MEMBER_READONLY,
+          discord_snowflake_id, default_civ_tag, created_by, now, now))
+    return cursor.lastrowid
 
 
 def get_system_glyph(glyph_code: str) -> str:
@@ -1479,7 +1597,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.45.3', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.46.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -2168,19 +2286,37 @@ def set_personal_color(color: str) -> bool:
 # In-memory session storage — all sessions lost on server restart (10-min TTL).
 # Maps session_token -> session_data dict:
 # {
-#   'user_type': 'super_admin' | 'partner' | 'sub_admin',
+#   'user_type': 'super_admin' | 'partner' | 'sub_admin' | 'member' | 'member_readonly',
+#   'profile_id': int,            # Primary identifier (user_profiles.id)
 #   'username': str,
-#   'discord_tag': str | None,  # Only for partners
-#   'partner_id': int | None,   # Only for partners
+#   'discord_tag': str | None,    # Partner tag or default_civ_tag
+#   'partner_id': int | None,     # COMPAT: same as profile_id for partners
 #   'display_name': str | None,
 #   'enabled_features': list,
+#   'tier': int,                  # 1-5
+#   'default_civ_tag': str | None,
+#   'default_reality': str,
+#   'default_galaxy': str,
 #   'expires_at': datetime
 # }
 _sessions: Dict[str, dict] = {}
 
 def hash_password(password: str) -> str:
-    """Hash a password using SHA-256"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password using bcrypt with salt"""
+    import bcrypt
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify password against stored hash. Supports bcrypt and legacy SHA-256."""
+    import bcrypt
+    if stored_hash.startswith('$2b$') or stored_hash.startswith('$2a$'):
+        return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    # Legacy SHA-256 fallback for pre-migration hashes
+    return hashlib.sha256(password.encode()).hexdigest() == stored_hash
+
+def _needs_rehash(stored_hash: str) -> bool:
+    """Check if a stored hash needs to be upgraded from SHA-256 to bcrypt."""
+    return not (stored_hash.startswith('$2b$') or stored_hash.startswith('$2a$'))
 
 def generate_session_token() -> str:
     """Generate a secure random session token"""
@@ -2244,24 +2380,73 @@ def get_effective_discord_tag(session_token: Optional[str]) -> Optional[str]:
     return None
 
 def get_submitter_identity(session_token: Optional[str]) -> dict:
-    """Return {type, username, account_id, discord_tag} for audit logging and self-approval prevention."""
+    """Return {type, username, account_id, profile_id, discord_tag} for audit logging and self-approval prevention."""
     session = get_session(session_token)
     if not session:
-        return {'type': 'anonymous', 'username': None, 'account_id': None, 'discord_tag': None}
+        return {'type': 'anonymous', 'username': None, 'account_id': None, 'profile_id': None, 'discord_tag': None}
 
     user_type = session.get('user_type')
-    account_id = None
-    if user_type == 'partner':
-        account_id = session.get('partner_id')
-    elif user_type == 'sub_admin':
-        account_id = session.get('sub_admin_id')
+    profile_id = session.get('profile_id')
+    # Backward compat: account_id = profile_id
+    account_id = profile_id
+    if not account_id:
+        if user_type == 'partner':
+            account_id = session.get('partner_id')
+        elif user_type == 'sub_admin':
+            account_id = session.get('sub_admin_id')
 
     return {
         'type': user_type,
         'username': session.get('username'),
         'account_id': account_id,
+        'profile_id': profile_id,
         'discord_tag': session.get('discord_tag')
     }
+
+
+def check_self_submission(submission: dict, session_data: dict) -> bool:
+    """
+    Check if a submission was made by the current user (self-approval prevention).
+    Returns True if it IS a self-submission (should be blocked).
+    Super admin and partners are always exempt (returns False).
+
+    Uses profile_id as primary match, falls back to normalized username for legacy rows.
+    """
+    current_user_type = session_data.get('user_type')
+    # Super admin and partners are exempt (trusted community leaders)
+    if current_user_type in ('super_admin', 'partner'):
+        return False
+
+    # Primary: profile_id match
+    current_profile_id = session_data.get('profile_id')
+    submitter_profile_id = submission.get('submitter_profile_id')
+    if current_profile_id and submitter_profile_id:
+        return current_profile_id == submitter_profile_id
+
+    # Secondary: account_id match (legacy)
+    submitter_account_id = submission.get('submitter_account_id')
+    submitter_account_type = submission.get('submitter_account_type')
+    current_account_id = session_data.get('profile_id') or session_data.get('partner_id') or session_data.get('sub_admin_id')
+    if submitter_account_id is not None and submitter_account_type:
+        if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
+            return True
+
+    # Tertiary: normalized username fallback
+    current_username = session_data.get('username', '')
+    normalized_current = normalize_discord_username(current_username)
+    if not normalized_current:
+        return False
+
+    submitted_by = submission.get('submitted_by') or ''
+    personal_discord_username = submission.get('personal_discord_username') or ''
+
+    if submitted_by and normalize_discord_username(submitted_by) == normalized_current:
+        return True
+    if personal_discord_username and normalize_discord_username(personal_discord_username) == normalized_current:
+        return True
+
+    return False
+
 
 # ============================================================================
 # DATA RESTRICTION HELPER FUNCTIONS
@@ -2535,11 +2720,14 @@ async def admin_status(session: Optional[str] = Cookie(None)):
         return {'logged_in': False}
 
     user_type = session_data.get('user_type')
-    account_id = None
-    if user_type == 'partner':
-        account_id = session_data.get('partner_id')
-    elif user_type == 'sub_admin':
-        account_id = session_data.get('sub_admin_id')
+    profile_id = session_data.get('profile_id')
+    # Backward compat: account_id = profile_id
+    account_id = profile_id
+    if not account_id:
+        if user_type == 'partner':
+            account_id = session_data.get('partner_id')
+        elif user_type == 'sub_admin':
+            account_id = session_data.get('sub_admin_id')
 
     return {
         'logged_in': True,
@@ -2549,189 +2737,247 @@ async def admin_status(session: Optional[str] = Cookie(None)):
         'display_name': session_data.get('display_name'),
         'enabled_features': session_data.get('enabled_features', []),
         'account_id': account_id,
+        'profile_id': profile_id,
+        'tier': session_data.get('tier'),
+        'default_civ_tag': session_data.get('default_civ_tag'),
+        'default_reality': session_data.get('default_reality'),
+        'default_galaxy': session_data.get('default_galaxy'),
         'parent_display_name': session_data.get('parent_display_name'),  # For sub-admins
         'is_haven_sub_admin': session_data.get('is_haven_sub_admin', False)  # True if sub-admin under Haven
     }
 
 @app.post('/api/admin/login')
 async def admin_login(credentials: dict, response: Response):
-    """Login with username/password - supports super admin, partners, and sub-admins"""
+    """Login with username/password - supports all tiers via user_profiles table.
+    Falls back to legacy partner_accounts/sub_admin_accounts if profile not found."""
     username = credentials.get('username', '').strip()
     password = credentials.get('password', '')
 
-    # Check super admin
-    if username == SUPER_ADMIN_USERNAME:
-        if hash_password(password) == get_super_admin_password_hash():
-            session_token = generate_session_token()
-            _sessions[session_token] = {
-                'user_type': 'super_admin',
-                'username': username,
-                'discord_tag': None,
-                'partner_id': None,
-                'display_name': 'Super Admin',
-                'enabled_features': ['all'],
-                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
-            }
-            response.set_cookie(
-                key='session',
-                value=session_token,
-                httponly=True,
-                max_age=600,  # 10 minutes
-                samesite='lax'
-            )
-            return {
-                'status': 'ok',
-                'logged_in': True,
-                'user_type': 'super_admin',
-                'username': username,
-                'discord_tag': None,
-                'display_name': 'Super Admin',
-                'enabled_features': ['all'],
-                'account_id': None
-            }
-        raise HTTPException(status_code=401, detail='Invalid password')
+    if not username or not password:
+        raise HTTPException(status_code=401, detail='Username and password are required')
 
-    # Check partner accounts and sub-admin accounts
+    normalized = normalize_username_for_dedup(username)
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # First check partner_accounts
-        cursor.execute('''
-            SELECT id, password_hash, discord_tag, display_name, enabled_features, is_active
-            FROM partner_accounts WHERE username = ?
-        ''', (username,))
-        row = cursor.fetchone()
+        # Primary path: look up in user_profiles
+        cursor.execute("""
+            SELECT id, username, username_normalized, password_hash, display_name, tier,
+                   partner_discord_tag, enabled_features, theme_settings, region_color,
+                   parent_profile_id, additional_discord_tags, can_approve_personal_uploads,
+                   default_civ_tag, default_reality, default_galaxy, is_active
+            FROM user_profiles WHERE username_normalized = ?
+        """, (normalized,))
+        profile = cursor.fetchone()
 
-        if row:
-            # Found a partner account
-            if not row['is_active']:
+        if profile:
+            profile = dict(profile)
+
+            if not profile['is_active']:
                 raise HTTPException(status_code=401, detail='Account is deactivated')
 
-            if hash_password(password) != row['password_hash']:
+            if not profile['password_hash']:
+                # Super admin may have password in super_admin_settings, not in profile
+                if profile['tier'] == TIER_SUPER_ADMIN:
+                    stored_hash = get_super_admin_password_hash()
+                    if verify_password(password, stored_hash):
+                        # Migrate password to profile
+                        new_hash = hash_password(password) if _needs_rehash(stored_hash) else stored_hash
+                        cursor.execute('UPDATE user_profiles SET password_hash = ? WHERE id = ?',
+                                       (new_hash, profile['id']))
+                        conn.commit()
+                        profile['password_hash'] = new_hash
+                    else:
+                        raise HTTPException(status_code=401, detail='Invalid password')
+                else:
+                    raise HTTPException(status_code=401, detail='No password set. Use member login for read-only access, or set a password first.')
+
+            if not verify_password(password, profile['password_hash']):
                 raise HTTPException(status_code=401, detail='Invalid username or password')
 
-            # Update last_login_at
-            cursor.execute(
-                'UPDATE partner_accounts SET last_login_at = ? WHERE id = ?',
-                (datetime.now(timezone.utc).isoformat(), row['id'])
-            )
+            # Upgrade legacy hash
+            if _needs_rehash(profile['password_hash']):
+                cursor.execute('UPDATE user_profiles SET password_hash = ? WHERE id = ?',
+                               (hash_password(password), profile['id']))
+
+            # Update last login
+            cursor.execute('UPDATE user_profiles SET last_login_at = ? WHERE id = ?',
+                           (datetime.now(timezone.utc).isoformat(), profile['id']))
             conn.commit()
 
-            enabled_features = json.loads(row['enabled_features'] or '[]')
+            tier = profile['tier']
+            user_type = TIER_TO_USER_TYPE.get(tier, 'member')
+            enabled_features = json.loads(profile['enabled_features'] or '[]')
 
-            session_token = generate_session_token()
-            _sessions[session_token] = {
-                'user_type': 'partner',
-                'username': username,
-                'discord_tag': row['discord_tag'],
-                'partner_id': row['id'],
-                'display_name': row['display_name'] or username,
+            # Build session dict
+            session_dict = {
+                'user_type': user_type,
+                'profile_id': profile['id'],
+                'username': profile['username'],
+                'discord_tag': profile['partner_discord_tag'] or profile['default_civ_tag'],
+                'partner_id': profile['id'] if tier == TIER_PARTNER else profile['parent_profile_id'],
+                'display_name': profile['display_name'] or profile['username'],
                 'enabled_features': enabled_features,
+                'tier': tier,
+                'default_civ_tag': profile['default_civ_tag'],
+                'default_reality': profile['default_reality'] or None,
+                'default_galaxy': profile['default_galaxy'] or None,
                 'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
             }
 
-            response.set_cookie(
-                key='session',
-                value=session_token,
-                httponly=True,
-                max_age=600,  # 10 minutes
-                samesite='lax'
-            )
+            # Sub-admin specific fields
+            if tier == TIER_SUB_ADMIN:
+                is_haven_sub_admin = profile['parent_profile_id'] is None
+                additional_discord_tags = json.loads(profile['additional_discord_tags'] or '[]') if is_haven_sub_admin else []
+                can_approve_personal_uploads = bool(profile['can_approve_personal_uploads']) if is_haven_sub_admin else False
 
-            return {
+                # Get parent info for discord_tag inheritance
+                if profile['parent_profile_id']:
+                    cursor.execute("SELECT partner_discord_tag, display_name FROM user_profiles WHERE id = ?",
+                                   (profile['parent_profile_id'],))
+                    parent = cursor.fetchone()
+                    if parent:
+                        session_dict['discord_tag'] = parent['partner_discord_tag']
+                        session_dict['parent_display_name'] = parent['display_name']
+                    else:
+                        session_dict['parent_display_name'] = 'Unknown'
+                else:
+                    session_dict['discord_tag'] = None  # Haven sub-admin
+                    session_dict['parent_display_name'] = 'Haven'
+
+                session_dict['sub_admin_id'] = profile['id']
+                session_dict['is_haven_sub_admin'] = is_haven_sub_admin
+                session_dict['additional_discord_tags'] = additional_discord_tags
+                session_dict['can_approve_personal_uploads'] = can_approve_personal_uploads
+
+            session_token = generate_session_token()
+            _sessions[session_token] = session_dict
+
+            response.set_cookie(key='session', value=session_token,
+                                httponly=True, max_age=600, samesite='lax')
+
+            result = {
                 'status': 'ok',
                 'logged_in': True,
-                'user_type': 'partner',
-                'username': username,
-                'discord_tag': row['discord_tag'],
-                'display_name': row['display_name'] or username,
+                'user_type': user_type,
+                'username': profile['username'],
+                'discord_tag': session_dict.get('discord_tag'),
+                'display_name': session_dict['display_name'],
                 'enabled_features': enabled_features,
-                'account_id': row['id']
+                'account_id': profile['id'],
+                'profile_id': profile['id'],
+                'tier': tier,
+                'default_civ_tag': profile['default_civ_tag'],
+                'default_reality': profile['default_reality'],
+                'default_galaxy': profile['default_galaxy'],
+            }
+            if tier == TIER_SUB_ADMIN:
+                result['parent_display_name'] = session_dict.get('parent_display_name')
+                result['is_haven_sub_admin'] = session_dict.get('is_haven_sub_admin', False)
+            return result
+
+        # ── Fallback: legacy tables (for transition period) ──
+        # Check super admin hardcoded username
+        if username == SUPER_ADMIN_USERNAME:
+            stored_hash = get_super_admin_password_hash()
+            if verify_password(password, stored_hash):
+                if _needs_rehash(stored_hash):
+                    set_super_admin_password_hash(hash_password(password))
+                session_token = generate_session_token()
+                _sessions[session_token] = {
+                    'user_type': 'super_admin',
+                    'username': username,
+                    'discord_tag': None,
+                    'partner_id': None,
+                    'display_name': 'Super Admin',
+                    'enabled_features': ['all'],
+                    'tier': TIER_SUPER_ADMIN,
+                    'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+                }
+                response.set_cookie(key='session', value=session_token,
+                                    httponly=True, max_age=600, samesite='lax')
+                return {
+                    'status': 'ok', 'logged_in': True, 'user_type': 'super_admin',
+                    'username': username, 'discord_tag': None, 'display_name': 'Super Admin',
+                    'enabled_features': ['all'], 'account_id': None
+                }
+            raise HTTPException(status_code=401, detail='Invalid password')
+
+        # Fallback: check partner_accounts
+        cursor.execute('SELECT id, password_hash, discord_tag, display_name, enabled_features, is_active FROM partner_accounts WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        if row:
+            if not row['is_active']:
+                raise HTTPException(status_code=401, detail='Account is deactivated')
+            if not verify_password(password, row['password_hash']):
+                raise HTTPException(status_code=401, detail='Invalid username or password')
+            if _needs_rehash(row['password_hash']):
+                cursor.execute('UPDATE partner_accounts SET password_hash = ? WHERE id = ?', (hash_password(password), row['id']))
+            cursor.execute('UPDATE partner_accounts SET last_login_at = ? WHERE id = ?', (datetime.now(timezone.utc).isoformat(), row['id']))
+            conn.commit()
+            enabled_features = json.loads(row['enabled_features'] or '[]')
+            session_token = generate_session_token()
+            _sessions[session_token] = {
+                'user_type': 'partner', 'username': username, 'discord_tag': row['discord_tag'],
+                'partner_id': row['id'], 'display_name': row['display_name'] or username,
+                'enabled_features': enabled_features, 'tier': TIER_PARTNER,
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+            }
+            response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
+            return {
+                'status': 'ok', 'logged_in': True, 'user_type': 'partner', 'username': username,
+                'discord_tag': row['discord_tag'], 'display_name': row['display_name'] or username,
+                'enabled_features': enabled_features, 'account_id': row['id']
             }
 
-        # Not a partner - check sub_admin_accounts
+        # Fallback: check sub_admin_accounts
         cursor.execute('''
             SELECT sa.id, sa.password_hash, sa.display_name, sa.enabled_features, sa.is_active,
                    sa.parent_partner_id, sa.additional_discord_tags, sa.can_approve_personal_uploads,
                    pa.discord_tag as parent_discord_tag, pa.display_name as parent_display_name,
                    pa.is_active as parent_is_active
-            FROM sub_admin_accounts sa
-            LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
+            FROM sub_admin_accounts sa LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
             WHERE sa.username = ?
         ''', (username,))
         sub_row = cursor.fetchone()
-
         if not sub_row:
             raise HTTPException(status_code=401, detail='Invalid username or password')
-
-        # Check if sub-admin account is active
         if not sub_row['is_active']:
             raise HTTPException(status_code=401, detail='Account is deactivated')
-
-        # Check if parent partner account is active (only if has a parent)
         if sub_row['parent_partner_id'] and not sub_row['parent_is_active']:
             raise HTTPException(status_code=401, detail='Parent partner account is deactivated')
-
-        if hash_password(password) != sub_row['password_hash']:
+        if not verify_password(password, sub_row['password_hash']):
             raise HTTPException(status_code=401, detail='Invalid username or password')
-
-        # Update last_login_at
-        cursor.execute(
-            'UPDATE sub_admin_accounts SET last_login_at = ? WHERE id = ?',
-            (datetime.now(timezone.utc).isoformat(), sub_row['id'])
-        )
+        if _needs_rehash(sub_row['password_hash']):
+            cursor.execute('UPDATE sub_admin_accounts SET password_hash = ? WHERE id = ?', (hash_password(password), sub_row['id']))
+        cursor.execute('UPDATE sub_admin_accounts SET last_login_at = ? WHERE id = ?', (datetime.now(timezone.utc).isoformat(), sub_row['id']))
         conn.commit()
-
-        # Sub-admin features are their own (subset of parent's, or any for Haven sub-admins)
         enabled_features = json.loads(sub_row['enabled_features'] or '[]')
-
-        # Haven sub-admins have no parent partner
         is_haven_sub_admin = sub_row['parent_partner_id'] is None
         discord_tag = None if is_haven_sub_admin else sub_row['parent_discord_tag']
         parent_display_name = 'Haven' if is_haven_sub_admin else sub_row['parent_display_name']
-
-        # Get additional discord tags and personal uploads permission for Haven sub-admins
         sub_row_dict = dict(sub_row)
         additional_discord_tags = json.loads(sub_row_dict.get('additional_discord_tags') or '[]') if is_haven_sub_admin else []
         can_approve_personal_uploads = bool(sub_row_dict.get('can_approve_personal_uploads', 0)) if is_haven_sub_admin else False
-
         session_token = generate_session_token()
         _sessions[session_token] = {
-            'user_type': 'sub_admin',
-            'username': username,
-            'discord_tag': discord_tag,  # Inherit parent's discord_tag (None for Haven sub-admins)
-            'sub_admin_id': sub_row['id'],
-            'partner_id': sub_row['parent_partner_id'],  # None for Haven sub-admins
-            'display_name': sub_row['display_name'] or username,
-            'parent_display_name': parent_display_name,
-            'enabled_features': enabled_features,
-            'is_haven_sub_admin': is_haven_sub_admin,
-            'additional_discord_tags': additional_discord_tags,  # Extra discord tags this Haven sub-admin can see
-            'can_approve_personal_uploads': can_approve_personal_uploads,  # Permission to approve personal uploads (without discord tag)
+            'user_type': 'sub_admin', 'username': username, 'discord_tag': discord_tag,
+            'sub_admin_id': sub_row['id'], 'partner_id': sub_row['parent_partner_id'],
+            'display_name': sub_row['display_name'] or username, 'parent_display_name': parent_display_name,
+            'enabled_features': enabled_features, 'is_haven_sub_admin': is_haven_sub_admin,
+            'additional_discord_tags': additional_discord_tags,
+            'can_approve_personal_uploads': can_approve_personal_uploads,
+            'tier': TIER_SUB_ADMIN,
             'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
         }
-
-        response.set_cookie(
-            key='session',
-            value=session_token,
-            httponly=True,
-            max_age=600,  # 10 minutes
-            samesite='lax'
-        )
-
+        response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
         return {
-            'status': 'ok',
-            'logged_in': True,
-            'user_type': 'sub_admin',
-            'username': username,
-            'discord_tag': discord_tag,
-            'display_name': sub_row['display_name'] or username,
-            'parent_display_name': parent_display_name,
-            'enabled_features': enabled_features,
-            'is_haven_sub_admin': is_haven_sub_admin,
-            'account_id': sub_row['id']
+            'status': 'ok', 'logged_in': True, 'user_type': 'sub_admin', 'username': username,
+            'discord_tag': discord_tag, 'display_name': sub_row['display_name'] or username,
+            'parent_display_name': parent_display_name, 'enabled_features': enabled_features,
+            'is_haven_sub_admin': is_haven_sub_admin, 'account_id': sub_row['id']
         }
     finally:
         if conn:
@@ -2750,8 +2996,7 @@ async def admin_logout(response: Response, session: Optional[str] = Cookie(None)
 async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
     """
     Change password for the currently logged-in user.
-    Works for both super admin and partner accounts.
-    Requires current password for verification.
+    Uses user_profiles table as primary, with legacy fallback.
     """
     session_data = get_session(session)
     if not session_data:
@@ -2766,55 +3011,69 @@ async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
     if not new_password or len(new_password) < 4:
         raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
 
+    profile_id = session_data.get('profile_id')
+
+    # Primary: use profiles table
+    if profile_id:
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT password_hash FROM user_profiles WHERE id = ?', (profile_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Profile not found')
+            if not row['password_hash']:
+                raise HTTPException(status_code=400, detail='No password set. Use set-password endpoint instead.')
+            if not verify_password(current_password, row['password_hash']):
+                raise HTTPException(status_code=401, detail='Current password is incorrect')
+            cursor.execute('UPDATE user_profiles SET password_hash = ?, updated_at = ? WHERE id = ?',
+                           (hash_password(new_password), datetime.now(timezone.utc).isoformat(), profile_id))
+            conn.commit()
+            logger.info(f"Profile {profile_id} ({session_data.get('username')}) changed password")
+            return {'status': 'ok', 'message': 'Password changed successfully'}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to change password: {e}")
+            raise HTTPException(status_code=500, detail="Failed to change password")
+        finally:
+            if conn:
+                conn.close()
+
+    # Legacy fallback for sessions without profile_id
     user_type = session_data.get('user_type')
 
     if user_type == 'super_admin':
-        # Verify current password
-        if hash_password(current_password) != get_super_admin_password_hash():
+        if not verify_password(current_password, get_super_admin_password_hash()):
             raise HTTPException(status_code=401, detail='Current password is incorrect')
-
-        # Set new password
         if set_super_admin_password_hash(hash_password(new_password)):
-            logger.info("Super admin password changed successfully")
             return {'status': 'ok', 'message': 'Password changed successfully'}
-        else:
-            raise HTTPException(status_code=500, detail='Failed to save new password')
+        raise HTTPException(status_code=500, detail='Failed to save new password')
 
     elif user_type == 'partner':
         partner_id = session_data.get('partner_id')
         if not partner_id:
             raise HTTPException(status_code=400, detail='Invalid session')
-
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-
-            # Get current password hash
             cursor.execute('SELECT password_hash FROM partner_accounts WHERE id = ?', (partner_id,))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='Account not found')
-
-            # Verify current password
-            if hash_password(current_password) != row['password_hash']:
+            if not verify_password(current_password, row['password_hash']):
                 raise HTTPException(status_code=401, detail='Current password is incorrect')
-
-            # Update password
-            cursor.execute(
-                'UPDATE partner_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
-                (hash_password(new_password), datetime.now(timezone.utc).isoformat(), partner_id)
-            )
+            cursor.execute('UPDATE partner_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
+                           (hash_password(new_password), datetime.now(timezone.utc).isoformat(), partner_id))
             conn.commit()
-
-            logger.info(f"Partner {session_data.get('username')} changed their password")
             return {'status': 'ok', 'message': 'Password changed successfully'}
-
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Failed to change partner password: {e}")
-            raise HTTPException(status_code=500, detail=f'Failed to change password: {str(e)}')
+            raise HTTPException(status_code=500, detail="Failed to change password")
         finally:
             if conn:
                 conn.close()
@@ -2823,37 +3082,25 @@ async def change_password(payload: dict, session: Optional[str] = Cookie(None)):
         sub_admin_id = session_data.get('sub_admin_id')
         if not sub_admin_id:
             raise HTTPException(status_code=400, detail='Invalid session')
-
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-
-            # Get current password hash
             cursor.execute('SELECT password_hash FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='Account not found')
-
-            # Verify current password
-            if hash_password(current_password) != row['password_hash']:
+            if not verify_password(current_password, row['password_hash']):
                 raise HTTPException(status_code=401, detail='Current password is incorrect')
-
-            # Update password
-            cursor.execute(
-                'UPDATE sub_admin_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
-                (hash_password(new_password), datetime.now(timezone.utc).isoformat(), sub_admin_id)
-            )
+            cursor.execute('UPDATE sub_admin_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
+                           (hash_password(new_password), datetime.now(timezone.utc).isoformat(), sub_admin_id))
             conn.commit()
-
-            logger.info(f"Sub-admin {session_data.get('username')} changed their password")
             return {'status': 'ok', 'message': 'Password changed successfully'}
-
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Failed to change sub-admin password: {e}")
-            raise HTTPException(status_code=500, detail=f'Failed to change password: {str(e)}')
+            raise HTTPException(status_code=500, detail="Failed to change password")
         finally:
             if conn:
                 conn.close()
@@ -2917,7 +3164,7 @@ async def change_username(payload: dict, session: Optional[str] = Cookie(None)):
             raise HTTPException(status_code=400, detail='New username must be different from current username')
 
         # Verify current password
-        if hash_password(current_password) != row['password_hash']:
+        if not verify_password(current_password, row['password_hash']):
             raise HTTPException(status_code=401, detail='Current password is incorrect')
 
         # Check if new username is already taken
@@ -2939,7 +3186,8 @@ async def change_username(payload: dict, session: Optional[str] = Cookie(None)):
         raise
     except Exception as e:
         logger.error(f"Failed to change partner username: {e}")
-        raise HTTPException(status_code=500, detail=f'Failed to change username: {str(e)}')
+        logger.exception("Failed to change username")
+        raise HTTPException(status_code=500, detail="Failed to change username")
     finally:
         if conn:
             conn.close()
@@ -3241,7 +3489,8 @@ async def list_sub_admins(
         raise
     except Exception as e:
         logger.error(f"Error listing sub-admins: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -3356,7 +3605,8 @@ async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None))
         raise
     except Exception as e:
         logger.error(f"Error creating sub-admin: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -3451,7 +3701,8 @@ async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[s
         raise
     except Exception as e:
         logger.error(f"Error updating sub-admin: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -3502,7 +3753,8 @@ async def reset_sub_admin_password(sub_admin_id: int, payload: dict, session: Op
         raise
     except Exception as e:
         logger.error(f"Error resetting sub-admin password: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -3549,7 +3801,8 @@ async def delete_sub_admin(sub_admin_id: int, session: Optional[str] = Cookie(No
         raise
     except Exception as e:
         logger.error(f"Error deactivating sub-admin: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -3587,7 +3840,8 @@ async def get_available_discord_tags(session: Optional[str] = Cookie(None)):
         return {'discord_tags': tags}
     except Exception as e:
         logger.error(f"Error fetching discord tags: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -6289,7 +6543,7 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
         cursor = conn.cursor()
         cursor.execute('''
             SELECT id, name, permissions, rate_limit, is_active, created_by, discord_tag,
-                   key_type, discord_username
+                   key_type, discord_username, profile_id
             FROM api_keys WHERE key_hash = ?
         ''', (key_hash,))
         row = cursor.fetchone()
@@ -6310,7 +6564,8 @@ def verify_api_key(api_key: Optional[str]) -> Optional[dict]:
                 'created_by': row['created_by'],
                 'discord_tag': row['discord_tag'],
                 'key_type': row['key_type'],
-                'discord_username': row['discord_username']
+                'discord_username': row['discord_username'],
+                'profile_id': row['profile_id']
             }
         return None
     except Exception as e:
@@ -6392,7 +6647,8 @@ async def create_api_key(payload: dict, session: Optional[str] = Cookie(None)):
         raise
     except Exception as e:
         logger.error(f"Failed to create API key: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create API key: {str(e)}")
+        logger.exception("Failed to create API key")
+        raise HTTPException(status_code=500, detail="Failed to create API key")
     finally:
         if conn:
             conn.close()
@@ -6441,7 +6697,8 @@ async def list_api_keys(session: Optional[str] = Cookie(None)):
 
     except Exception as e:
         logger.error(f"Failed to list API keys: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list API keys: {str(e)}")
+        logger.exception("Failed to list API keys")
+        raise HTTPException(status_code=500, detail="Failed to list API keys")
     finally:
         if conn:
             conn.close()
@@ -6477,7 +6734,8 @@ async def revoke_api_key(key_id: int, session: Optional[str] = Cookie(None)):
         raise
     except Exception as e:
         logger.error(f"Failed to revoke API key: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to revoke API key: {str(e)}")
+        logger.exception("Failed to revoke API key")
+        raise HTTPException(status_code=500, detail="Failed to revoke API key")
     finally:
         if conn:
             conn.close()
@@ -6535,7 +6793,976 @@ async def update_api_key(key_id: int, payload: dict, session: Optional[str] = Co
         raise
     except Exception as e:
         logger.error(f"Failed to update API key: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update API key: {str(e)}")
+        logger.exception("Failed to update API key")
+        raise HTTPException(status_code=500, detail="Failed to update API key")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Unified User Profile Endpoints
+# ============================================================================
+
+@app.post('/api/profiles/lookup')
+async def profile_lookup(request: Request):
+    """
+    Public endpoint: Look up a profile by username.
+    Returns exact match, fuzzy suggestions, or not_found.
+    Used by Wizard and DiscoverySubmitModal before submission.
+    """
+    body = await request.json()
+    username = (body.get('username') or '').strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+
+    normalized = normalize_username_for_dedup(username)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid username")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Exact match
+        cursor.execute("""
+            SELECT id, username, display_name, default_civ_tag, tier, default_reality, default_galaxy
+            FROM user_profiles WHERE username_normalized = ? AND is_active = 1
+        """, (normalized,))
+        row = cursor.fetchone()
+
+        if row:
+            return {
+                'status': 'found',
+                'profile': {
+                    'id': row['id'],
+                    'username': row['username'],
+                    'display_name': row['display_name'],
+                    'default_civ_tag': row['default_civ_tag'],
+                    'tier': row['tier'],
+                    'default_reality': row['default_reality'],
+                    'default_galaxy': row['default_galaxy'],
+                }
+            }
+
+        # Fuzzy match
+        suggestions = find_fuzzy_profile_matches(conn, username)
+        if suggestions:
+            return {'status': 'suggestions', 'suggestions': suggestions}
+
+        return {'status': 'not_found'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Lookup failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/profiles/create')
+async def profile_create(request: Request):
+    """
+    Public endpoint: Create a new tier-5 (readonly) profile.
+    Optionally set a password to immediately become tier 4.
+    Used during first-submission flow.
+    """
+    body = await request.json()
+    username = (body.get('username') or '').strip()
+    password = body.get('password')
+    default_civ_tag = (body.get('default_civ_tag') or '').strip() or None
+    discord_snowflake_id = (body.get('discord_snowflake_id') or '').strip() or None
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+    if len(username) < 2 or len(username) > 64:
+        raise HTTPException(status_code=400, detail="Username must be 2-64 characters")
+
+    normalized = normalize_username_for_dedup(username)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid username")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check for existing profile
+        cursor.execute("SELECT id FROM user_profiles WHERE username_normalized = ?", (normalized,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail="A profile with this username already exists")
+
+        tier = TIER_MEMBER_READONLY
+        password_hash = None
+        if password and len(password) >= 4:
+            password_hash = hash_password(password)
+            tier = TIER_MEMBER
+
+        now = datetime.now(timezone.utc).isoformat()
+        cursor.execute('''
+            INSERT INTO user_profiles (
+                username, username_normalized, password_hash, display_name, tier,
+                default_civ_tag, discord_snowflake_id, default_reality, default_galaxy,
+                created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'self_registration', ?, ?)
+        ''', (username, normalized, password_hash, username, tier,
+              default_civ_tag, discord_snowflake_id, now, now))
+        conn.commit()
+
+        profile_id = cursor.lastrowid
+        logger.info(f"Created profile '{username}' (id={profile_id}, tier={tier})")
+
+        return {
+            'status': 'created',
+            'profile': {
+                'id': profile_id,
+                'username': username,
+                'display_name': username,
+                'tier': tier,
+                'default_civ_tag': default_civ_tag,
+                'has_password': password_hash is not None,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile creation failed: {e}")
+        raise HTTPException(status_code=500, detail="Profile creation failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/profiles/use')
+async def profile_use(request: Request):
+    """
+    Public endpoint: Use an existing profile by confirming identity.
+    Used when fuzzy matching shows a suggestion and the user confirms "that's me".
+    Returns the profile data for the selected profile.
+    """
+    body = await request.json()
+    profile_id = body.get('profile_id')
+    username = (body.get('username') or '').strip()
+
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, username, display_name, default_civ_tag, tier,
+                   default_reality, default_galaxy
+            FROM user_profiles WHERE id = ? AND is_active = 1
+        """, (profile_id,))
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        return {
+            'status': 'ok',
+            'profile': {
+                'id': row['id'],
+                'username': row['username'],
+                'display_name': row['display_name'],
+                'default_civ_tag': row['default_civ_tag'],
+                'tier': row['tier'],
+                'default_reality': row['default_reality'],
+                'default_galaxy': row['default_galaxy'],
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile claim failed: {e}")
+        raise HTTPException(status_code=500, detail="Claim failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/profile/login')
+async def profile_login(credentials: dict, response: Response):
+    """
+    Passwordless login for tier 4/5 members.
+    Username-only = tier 5 read-only session.
+    Username + password = tier 4+ full session (same as /api/admin/login for members).
+    """
+    username = (credentials.get('username') or '').strip()
+    password = credentials.get('password')
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+
+    normalized = normalize_username_for_dedup(username)
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, username, password_hash, display_name, tier,
+                   default_civ_tag, enabled_features, partner_discord_tag,
+                   default_reality, default_galaxy, is_active
+            FROM user_profiles WHERE username_normalized = ?
+        """, (normalized,))
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=401, detail="Username not found. Submit a system or discovery to create your profile.")
+
+        if not row['is_active']:
+            raise HTTPException(status_code=401, detail="Account is deactivated")
+
+        tier = row['tier']
+
+        # Admin-tier users (1-3) must use /api/admin/login for full session
+        if tier <= TIER_SUB_ADMIN:
+            raise HTTPException(status_code=401, detail="Admin accounts must use the admin login. Use the Admin/Partner login tab.")
+
+        # If password provided, verify it
+        if password:
+            if not row['password_hash']:
+                raise HTTPException(status_code=401, detail="No password set on this account. Login with username only for read-only access, or set a password first.")
+            if not verify_password(password, row['password_hash']):
+                raise HTTPException(status_code=401, detail="Invalid password")
+            # Upgrade hash if needed
+            if _needs_rehash(row['password_hash']):
+                cursor.execute('UPDATE user_profiles SET password_hash = ? WHERE id = ?',
+                               (hash_password(password), row['id']))
+        else:
+            # Passwordless login - force read-only
+            tier = TIER_MEMBER_READONLY
+
+        user_type = TIER_TO_USER_TYPE.get(tier, 'member_readonly')
+
+        # Update last login
+        cursor.execute('UPDATE user_profiles SET last_login_at = ? WHERE id = ?',
+                       (datetime.now(timezone.utc).isoformat(), row['id']))
+        conn.commit()
+
+        session_token = generate_session_token()
+        _sessions[session_token] = {
+            'user_type': user_type,
+            'profile_id': row['id'],
+            'username': row['username'],
+            'discord_tag': row['partner_discord_tag'] or row['default_civ_tag'],
+            'display_name': row['display_name'] or row['username'],
+            'enabled_features': json.loads(row['enabled_features'] or '[]'),
+            'tier': tier,
+            'default_civ_tag': row['default_civ_tag'],
+            'default_reality': row['default_reality'],
+            'default_galaxy': row['default_galaxy'],
+            'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+        }
+
+        response.set_cookie(key='session', value=session_token,
+                            httponly=True, max_age=600, samesite='lax')
+
+        return {
+            'status': 'ok',
+            'logged_in': True,
+            'user_type': user_type,
+            'username': row['username'],
+            'display_name': row['display_name'] or row['username'],
+            'profile_id': row['id'],
+            'tier': tier,
+            'default_civ_tag': row['default_civ_tag'],
+            'default_reality': row['default_reality'],
+            'default_galaxy': row['default_galaxy'],
+            'enabled_features': json.loads(row['enabled_features'] or '[]'),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile login failed: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/profiles/me')
+async def profile_me(session: Optional[str] = Cookie(None)):
+    """Get the current user's full profile. Requires any login (including passwordless)."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    profile_id = session_data.get('profile_id')
+    if not profile_id:
+        # Legacy session without profile_id (super admin before migration)
+        return {
+            'username': session_data.get('username'),
+            'display_name': session_data.get('display_name'),
+            'tier': TIER_SUPER_ADMIN if session_data.get('user_type') == 'super_admin' else None,
+            'user_type': session_data.get('user_type'),
+        }
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, username, display_name, default_civ_tag, discord_snowflake_id,
+                   tier, partner_discord_tag, enabled_features, default_reality,
+                   default_galaxy, is_active, created_at, last_login_at,
+                   password_hash IS NOT NULL as has_password
+            FROM user_profiles WHERE id = ?
+        """, (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Get submission stats (match by profile_id OR username OR partner tag for pre-profile submissions)
+        username = row['username']
+        partner_tag = row['partner_discord_tag'] if 'partner_discord_tag' in row.keys() else None
+        if partner_tag:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as count FROM systems
+                WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ? OR discord_tag = ?
+            """, (profile_id, username, username, partner_tag))
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as count FROM systems
+                WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ?
+            """, (profile_id, username, username))
+        system_count = cursor.fetchone()['count']
+        if partner_tag:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as count FROM discoveries
+                WHERE profile_id = ? OR discovered_by = ? OR discord_tag = ?
+            """, (profile_id, username, partner_tag))
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as count FROM discoveries
+                WHERE profile_id = ? OR discovered_by = ?
+            """, (profile_id, username))
+        discovery_count = cursor.fetchone()['count']
+
+        return {
+            'id': row['id'],
+            'username': row['username'],
+            'display_name': row['display_name'],
+            'default_civ_tag': row['default_civ_tag'],
+            'discord_snowflake_id': row['discord_snowflake_id'],
+            'tier': row['tier'],
+            'user_type': TIER_TO_USER_TYPE.get(row['tier'], 'member_readonly'),
+            'partner_discord_tag': row['partner_discord_tag'],
+            'enabled_features': json.loads(row['enabled_features'] or '[]'),
+            'default_reality': row['default_reality'],
+            'default_galaxy': row['default_galaxy'],
+            'has_password': bool(row['has_password']),
+            'created_at': row['created_at'],
+            'last_login_at': row['last_login_at'],
+            'stats': {
+                'systems': system_count,
+                'discoveries': discovery_count,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile me failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get profile")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/profiles/me/submissions')
+async def profile_my_submissions(session: Optional[str] = Cookie(None)):
+    """Get the current user's systems and pending submissions."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    profile_id = session_data.get('profile_id')
+    username = session_data.get('username', '')
+    partner_tag = session_data.get('discord_tag') if session_data.get('user_type') == 'partner' else None
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Approved systems by profile_id OR username OR partner tag
+        if profile_id and username and partner_tag:
+            cursor.execute("""
+                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
+                FROM systems WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ? OR discord_tag = ?
+                ORDER BY created_at DESC LIMIT 200
+            """, (profile_id, username, username, partner_tag))
+        elif profile_id and username:
+            cursor.execute("""
+                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
+                FROM systems WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ?
+                ORDER BY created_at DESC LIMIT 50
+            """, (profile_id, username, username))
+        elif profile_id:
+            cursor.execute("""
+                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
+                FROM systems WHERE profile_id = ?
+                ORDER BY created_at DESC LIMIT 50
+            """, (profile_id,))
+        else:
+            cursor.execute("""
+                SELECT id, name, galaxy, reality, star_type, discord_tag, is_complete, created_at
+                FROM systems WHERE personal_discord_username = ? OR discovered_by = ?
+                ORDER BY created_at DESC LIMIT 50
+            """, (username, username))
+        systems = [dict(r) for r in cursor.fetchall()]
+        # Deduplicate by id (profile_id and username may match same row)
+        seen_ids = set()
+        systems = [s for s in systems if not (s['id'] in seen_ids or seen_ids.add(s['id']))]
+
+        # Pending submissions by profile_id OR username (only status='pending')
+        if profile_id and username:
+            cursor.execute("""
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                FROM pending_systems WHERE status = 'pending' AND (submitter_profile_id = ? OR personal_discord_username = ? OR submitted_by = ?)
+                ORDER BY submission_date DESC LIMIT 50
+            """, (profile_id, username, username))
+        elif profile_id:
+            cursor.execute("""
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                FROM pending_systems WHERE status = 'pending' AND submitter_profile_id = ?
+                ORDER BY submission_date DESC LIMIT 50
+            """, (profile_id,))
+        else:
+            cursor.execute("""
+                SELECT id, system_name, galaxy, reality, status, submission_date, discord_tag
+                FROM pending_systems WHERE status = 'pending' AND (personal_discord_username = ? OR submitted_by = ?)
+                ORDER BY submission_date DESC LIMIT 50
+            """, (username, username))
+        pending = [dict(r) for r in cursor.fetchall()]
+        seen_ids = set()
+        pending = [p for p in pending if not (p['id'] in seen_ids or seen_ids.add(p['id']))]
+
+        return {'systems': systems, 'pending': pending}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile submissions failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get submissions")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/profiles/me')
+async def profile_update_me(request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Update the current user's profile preferences.
+    Requires tier 4+ (must have password set). Tier 5 gets 403.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if session_data.get('user_type') == 'member_readonly':
+        raise HTTPException(status_code=403, detail="Set a password to edit your profile")
+
+    profile_id = session_data.get('profile_id')
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="No profile linked to this session")
+
+    body = await request.json()
+    allowed_fields = {'display_name', 'default_civ_tag', 'default_reality', 'default_galaxy'}
+    updates = {k: v for k, v in body.items() if k in allowed_fields and v is not None}
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
+        values = list(updates.values()) + [datetime.now(timezone.utc).isoformat(), profile_id]
+        cursor.execute(f"UPDATE user_profiles SET {set_clause}, updated_at = ? WHERE id = ?", values)
+        conn.commit()
+
+        # Update the in-memory session so /api/admin/status returns fresh data
+        if 'display_name' in updates:
+            session_data['display_name'] = updates['display_name']
+        if 'default_civ_tag' in updates:
+            session_data['default_civ_tag'] = updates['default_civ_tag']
+            # Also update discord_tag if this is a member (their discord_tag comes from default_civ_tag)
+            if session_data.get('user_type') in ('member', 'member_readonly'):
+                session_data['discord_tag'] = updates['default_civ_tag']
+        if 'default_reality' in updates:
+            session_data['default_reality'] = updates['default_reality']
+        if 'default_galaxy' in updates:
+            session_data['default_galaxy'] = updates['default_galaxy']
+
+        logger.info(f"Profile {profile_id} updated fields: {list(updates.keys())}")
+        return {'status': 'ok', 'updated': list(updates.keys())}
+    except Exception as e:
+        logger.error(f"Profile update failed: {e}")
+        raise HTTPException(status_code=500, detail="Update failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/profiles/me/set-password')
+async def profile_set_password(request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Set or change password on the current profile.
+    If tier 5 (no password), promotes to tier 4. Requires current password if already set.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    profile_id = session_data.get('profile_id')
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="No profile linked to this session")
+
+    body = await request.json()
+    new_password = body.get('new_password', '')
+    current_password = body.get('current_password', '')
+
+    if not new_password or len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT password_hash, tier FROM user_profiles WHERE id = ?", (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # If already has a password, require current password
+        if row['password_hash']:
+            if not current_password:
+                raise HTTPException(status_code=400, detail="Current password is required")
+            if not verify_password(current_password, row['password_hash']):
+                raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+        new_hash = hash_password(new_password)
+        new_tier = row['tier']
+        # Promote tier 5 to tier 4 when setting password
+        if new_tier == TIER_MEMBER_READONLY:
+            new_tier = TIER_MEMBER
+
+        cursor.execute("""
+            UPDATE user_profiles SET password_hash = ?, tier = ?, updated_at = ? WHERE id = ?
+        """, (new_hash, new_tier, datetime.now(timezone.utc).isoformat(), profile_id))
+        conn.commit()
+
+        # Update session to reflect new tier
+        session_data['tier'] = new_tier
+        session_data['user_type'] = TIER_TO_USER_TYPE.get(new_tier, 'member')
+
+        logger.info(f"Profile {profile_id} password set, tier now {new_tier}")
+        return {'status': 'ok', 'tier': new_tier, 'user_type': session_data['user_type']}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Set password failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set password")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ─── Admin Profile Management Endpoints ──────────────────────────────────────
+
+@app.get('/api/admin/profiles')
+async def admin_list_profiles(
+    session: Optional[str] = Cookie(None),
+    tier: Optional[int] = None,
+    search: Optional[str] = None,
+    discord_tag: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 50
+):
+    """
+    List all user profiles (admin only).
+    Super admin sees all. Partners see profiles in their community.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if session_data.get('user_type') not in ('super_admin', 'partner', 'sub_admin'):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        where_clauses = []
+        params = []
+
+        if tier is not None:
+            where_clauses.append("up.tier = ?")
+            params.append(tier)
+
+        if search:
+            where_clauses.append("(up.username LIKE ? OR up.display_name LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%"])
+
+        # Partner scoping: only show profiles that have submitted to their community
+        if session_data.get('user_type') == 'partner':
+            partner_tag = session_data.get('discord_tag')
+            if partner_tag:
+                where_clauses.append("""(
+                    up.default_civ_tag = ? OR up.partner_discord_tag = ?
+                    OR up.id IN (SELECT DISTINCT profile_id FROM systems WHERE discord_tag = ? AND profile_id IS NOT NULL)
+                    OR up.id IN (SELECT DISTINCT submitter_profile_id FROM pending_systems WHERE discord_tag = ? AND submitter_profile_id IS NOT NULL)
+                )""")
+                params.extend([partner_tag, partner_tag, partner_tag, partner_tag])
+
+        if discord_tag:
+            where_clauses.append("up.default_civ_tag = ?")
+            params.append(discord_tag)
+
+        where = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        offset = (page - 1) * per_page
+
+        # Count total
+        cursor.execute(f"SELECT COUNT(*) as total FROM user_profiles up {where}", params)
+        total = cursor.fetchone()['total']
+
+        # Fetch page
+        cursor.execute(f"""
+            SELECT up.id, up.username, up.display_name, up.tier, up.default_civ_tag,
+                   up.partner_discord_tag, up.is_active, up.created_at, up.last_login_at,
+                   up.password_hash IS NOT NULL as has_password,
+                   (SELECT COUNT(*) FROM systems s WHERE s.profile_id = up.id OR s.personal_discord_username = up.username OR s.discovered_by = up.username OR (up.partner_discord_tag IS NOT NULL AND s.discord_tag = up.partner_discord_tag)) as system_count,
+                   (SELECT COUNT(*) FROM discoveries d WHERE d.profile_id = up.id OR d.discovered_by = up.username OR (up.partner_discord_tag IS NOT NULL AND d.discord_tag = up.partner_discord_tag)) as discovery_count
+            FROM user_profiles up
+            {where}
+            ORDER BY up.tier ASC, up.last_login_at DESC NULLS LAST
+            LIMIT ? OFFSET ?
+        """, params + [per_page, offset])
+
+        profiles = []
+        for row in cursor.fetchall():
+            profiles.append({
+                'id': row['id'],
+                'username': row['username'],
+                'display_name': row['display_name'],
+                'tier': row['tier'],
+                'user_type': TIER_TO_USER_TYPE.get(row['tier'], 'member_readonly'),
+                'default_civ_tag': row['default_civ_tag'],
+                'partner_discord_tag': row['partner_discord_tag'],
+                'is_active': bool(row['is_active']),
+                'has_password': bool(row['has_password']),
+                'created_at': row['created_at'],
+                'last_login_at': row['last_login_at'],
+                'system_count': row['system_count'],
+                'discovery_count': row['discovery_count'],
+            })
+
+        return {'profiles': profiles, 'total': total, 'page': page, 'per_page': per_page}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin list profiles failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list profiles")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get('/api/admin/profiles/{profile_id}')
+async def admin_get_profile(profile_id: int, session: Optional[str] = Cookie(None)):
+    """Get full profile detail (admin only)."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if session_data.get('user_type') not in ('super_admin', 'partner', 'sub_admin'):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM user_profiles WHERE id = ?", (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        row = dict(row)
+
+        # Get submission stats (match by profile_id OR username OR partner tag)
+        username = row.get('username', '')
+        partner_tag = row.get('partner_discord_tag')
+        if partner_tag:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as c FROM systems
+                WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ? OR discord_tag = ?
+            """, (profile_id, username, username, partner_tag))
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as c FROM systems
+                WHERE profile_id = ? OR personal_discord_username = ? OR discovered_by = ?
+            """, (profile_id, username, username))
+        system_count = cursor.fetchone()['c']
+        if partner_tag:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as c FROM discoveries
+                WHERE profile_id = ? OR discovered_by = ? OR discord_tag = ?
+            """, (profile_id, username, partner_tag))
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT id) as c FROM discoveries
+                WHERE profile_id = ? OR discovered_by = ?
+            """, (profile_id, username))
+        discovery_count = cursor.fetchone()['c']
+
+        # Get parent profile info for sub-admins
+        parent_info = None
+        if row.get('parent_profile_id'):
+            cursor.execute("SELECT id, username, display_name, partner_discord_tag FROM user_profiles WHERE id = ?",
+                           (row['parent_profile_id'],))
+            p = cursor.fetchone()
+            if p:
+                parent_info = dict(p)
+
+        return {
+            'id': row['id'],
+            'username': row['username'],
+            'display_name': row['display_name'],
+            'tier': row['tier'],
+            'user_type': TIER_TO_USER_TYPE.get(row['tier'], 'member_readonly'),
+            'default_civ_tag': row['default_civ_tag'],
+            'discord_snowflake_id': row['discord_snowflake_id'],
+            'partner_discord_tag': row['partner_discord_tag'],
+            'enabled_features': json.loads(row['enabled_features'] or '[]'),
+            'theme_settings': json.loads(row['theme_settings'] or '{}'),
+            'region_color': row['region_color'],
+            'parent_profile_id': row['parent_profile_id'],
+            'parent_info': parent_info,
+            'additional_discord_tags': json.loads(row['additional_discord_tags'] or '[]'),
+            'can_approve_personal_uploads': bool(row['can_approve_personal_uploads']),
+            'default_reality': row['default_reality'],
+            'default_galaxy': row['default_galaxy'],
+            'has_password': row['password_hash'] is not None,
+            'is_active': bool(row['is_active']),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+            'last_login_at': row['last_login_at'],
+            'stats': {'systems': system_count, 'discoveries': discovery_count},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin get profile failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get profile")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/admin/profiles/{profile_id}/tier')
+async def admin_set_profile_tier(profile_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Elevate or demote a user's tier (super admin only).
+    For tier 2 (partner): must provide partner_discord_tag and enabled_features.
+    For tier 3 (sub-admin): must provide parent_profile_id and enabled_features.
+    """
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin required")
+
+    body = await request.json()
+    new_tier = body.get('tier')
+    if new_tier not in (TIER_PARTNER, TIER_SUB_ADMIN, TIER_MEMBER, TIER_MEMBER_READONLY):
+        raise HTTPException(status_code=400, detail="Invalid tier. Must be 2-5.")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, username, tier, password_hash FROM user_profiles WHERE id = ?", (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Tier 2+ requires password
+        if new_tier <= TIER_SUB_ADMIN and not row['password_hash']:
+            raise HTTPException(status_code=400, detail="User must set a password before being elevated to admin tier")
+
+        updates = {'tier': new_tier, 'updated_at': datetime.now(timezone.utc).isoformat()}
+
+        if new_tier == TIER_PARTNER:
+            partner_tag = (body.get('partner_discord_tag') or '').strip()
+            if not partner_tag:
+                raise HTTPException(status_code=400, detail="partner_discord_tag is required for partner tier")
+            # Check uniqueness
+            cursor.execute("SELECT id FROM user_profiles WHERE partner_discord_tag = ? AND id != ?",
+                           (partner_tag, profile_id))
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail=f"partner_discord_tag '{partner_tag}' is already taken")
+            updates['partner_discord_tag'] = partner_tag
+            updates['enabled_features'] = json.dumps(body.get('enabled_features', []))
+            if 'theme_settings' in body:
+                updates['theme_settings'] = json.dumps(body['theme_settings'])
+            if 'region_color' in body:
+                updates['region_color'] = body['region_color']
+            # Clear sub-admin fields
+            updates['parent_profile_id'] = None
+            updates['additional_discord_tags'] = '[]'
+            updates['can_approve_personal_uploads'] = 0
+
+        elif new_tier == TIER_SUB_ADMIN:
+            parent_id = body.get('parent_profile_id')
+            updates['parent_profile_id'] = parent_id  # Can be None for Haven sub-admins
+            updates['enabled_features'] = json.dumps(body.get('enabled_features', []))
+            updates['additional_discord_tags'] = json.dumps(body.get('additional_discord_tags', []))
+            updates['can_approve_personal_uploads'] = 1 if body.get('can_approve_personal_uploads') else 0
+            # Clear partner fields
+            updates['partner_discord_tag'] = None
+
+        else:
+            # Demoting to member - clear admin fields
+            updates['partner_discord_tag'] = None
+            updates['parent_profile_id'] = None
+            updates['enabled_features'] = '[]'
+            updates['additional_discord_tags'] = '[]'
+            updates['can_approve_personal_uploads'] = 0
+
+        set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
+        values = list(updates.values()) + [profile_id]
+        cursor.execute(f"UPDATE user_profiles SET {set_clause} WHERE id = ?", values)
+        conn.commit()
+
+        logger.info(f"Profile {profile_id} ({row['username']}) tier changed: {row['tier']} -> {new_tier}")
+        return {'status': 'ok', 'profile_id': profile_id, 'new_tier': new_tier}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin set tier failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update tier")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.put('/api/admin/profiles/{profile_id}')
+async def admin_update_profile(profile_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """
+    Edit a profile (super admin for all, partner for own sub-admins).
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if session_data.get('user_type') not in ('super_admin', 'partner'):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    body = await request.json()
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Partners can only edit their own sub-admins
+        if session_data.get('user_type') == 'partner':
+            if row['parent_profile_id'] != session_data.get('profile_id'):
+                raise HTTPException(status_code=403, detail="Can only edit your own sub-admins")
+
+        allowed = {'display_name', 'enabled_features', 'is_active',
+                   'additional_discord_tags', 'can_approve_personal_uploads',
+                   'default_civ_tag', 'theme_settings', 'region_color'}
+        updates = {}
+        for k, v in body.items():
+            if k in allowed:
+                if k in ('enabled_features', 'additional_discord_tags', 'theme_settings'):
+                    updates[k] = json.dumps(v) if isinstance(v, (list, dict)) else v
+                elif k == 'can_approve_personal_uploads':
+                    updates[k] = 1 if v else 0
+                elif k == 'is_active':
+                    updates[k] = 1 if v else 0
+                else:
+                    updates[k] = v
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+
+        updates['updated_at'] = datetime.now(timezone.utc).isoformat()
+        set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
+        values = list(updates.values()) + [profile_id]
+        cursor.execute(f"UPDATE user_profiles SET {set_clause} WHERE id = ?", values)
+        conn.commit()
+
+        return {'status': 'ok', 'updated': list(body.keys())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin update profile failed: {e}")
+        raise HTTPException(status_code=500, detail="Update failed")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/admin/profiles/{profile_id}/reset-password')
+async def admin_reset_password(profile_id: int, request: Request, session: Optional[str] = Cookie(None)):
+    """Reset a user's password (super admin, or partner for own sub-admins)."""
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if session_data.get('user_type') not in ('super_admin', 'partner'):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    body = await request.json()
+    new_password = body.get('new_password', '')
+    if not new_password or len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Partners can only reset their own sub-admins
+        if session_data.get('user_type') == 'partner':
+            if row['parent_profile_id'] != session_data.get('profile_id'):
+                raise HTTPException(status_code=403, detail="Can only reset password for your own sub-admins")
+
+        new_hash = hash_password(new_password)
+        new_tier = row['tier']
+        if new_tier == TIER_MEMBER_READONLY:
+            new_tier = TIER_MEMBER  # Promote on password set
+
+        cursor.execute("""
+            UPDATE user_profiles SET password_hash = ?, tier = ?, updated_at = ? WHERE id = ?
+        """, (new_hash, new_tier, datetime.now(timezone.utc).isoformat(), profile_id))
+        conn.commit()
+
+        return {'status': 'ok', 'new_tier': new_tier}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin reset password failed: {e}")
+        raise HTTPException(status_code=500, detail="Reset failed")
     finally:
         if conn:
             conn.close()
@@ -6591,10 +7818,23 @@ async def register_extractor(request: Request):
 
         if existing:
             if existing['is_active']:
+                # Also return profile_id if linked
+                profile_id = None
+                cursor.execute("SELECT profile_id FROM api_keys WHERE id = ?", (existing['id'],))
+                pk_row = cursor.fetchone()
+                if pk_row:
+                    profile_id = pk_row['profile_id']
+                # If no profile linked yet, create one and link it
+                if not profile_id:
+                    profile_id = get_or_create_profile(conn, discord_username, created_by='extractor_registration')
+                    if profile_id:
+                        cursor.execute("UPDATE api_keys SET profile_id = ? WHERE id = ?", (profile_id, existing['id']))
+                        conn.commit()
                 return {
                     'status': 'already_registered',
                     'key_prefix': existing['key_prefix'],
                     'discord_username': existing['discord_username'],
+                    'profile_id': profile_id,
                     'message': 'An API key already exists for this username. If you lost your key, contact an admin.'
                 }
             else:
@@ -6602,6 +7842,9 @@ async def register_extractor(request: Request):
                     status_code=403,
                     detail="Your extractor account has been suspended. Contact an admin for assistance."
                 )
+
+        # Create profile for this user (or get existing)
+        profile_id = get_or_create_profile(conn, discord_username, created_by='extractor_registration')
 
         # Generate new personal API key
         api_key = generate_api_key()
@@ -6611,8 +7854,8 @@ async def register_extractor(request: Request):
 
         cursor.execute('''
             INSERT INTO api_keys (key_hash, key_prefix, name, created_at, permissions, rate_limit,
-                                  is_active, created_by, discord_tag, key_type, discord_username)
-            VALUES (?, ?, ?, ?, ?, ?, 1, 'self_registration', NULL, 'extractor', ?)
+                                  is_active, created_by, discord_tag, key_type, discord_username, profile_id)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 'self_registration', NULL, 'extractor', ?, ?)
         ''', (
             key_hash,
             key_prefix,
@@ -6620,18 +7863,26 @@ async def register_extractor(request: Request):
             now,
             json.dumps(["submit", "check_duplicate"]),
             100,  # Lower rate limit than shared key (1000) or admin keys (200)
-            discord_username
+            discord_username,
+            profile_id
         ))
         conn.commit()
 
         key_id = cursor.lastrowid
-        logger.info(f"Registered extractor key for '{discord_username}' (ID: {key_id})")
+
+        # Link profile to API key
+        if profile_id:
+            cursor.execute("UPDATE user_profiles SET api_key_id = ? WHERE id = ?", (key_id, profile_id))
+            conn.commit()
+
+        logger.info(f"Registered extractor key for '{discord_username}' (ID: {key_id}, profile: {profile_id})")
 
         return {
             'status': 'registered',
             'key': api_key,
             'key_prefix': key_prefix,
             'discord_username': discord_username,
+            'profile_id': profile_id,
             'rate_limit': 100,
             'message': 'Save this key now — it cannot be retrieved later!'
         }
@@ -7257,7 +8508,8 @@ async def check_duplicate(
 
     except Exception as e:
         logger.error(f"Duplicate check failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Duplicate check failed: {str(e)}")
+        logger.exception("Duplicate check failed")
+        raise HTTPException(status_code=500, detail="Duplicate check failed")
     finally:
         if conn:
             conn.close()
@@ -8211,7 +9463,8 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0,
 
     except Exception as e:
         logger.error(f"Error fetching systems by region: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8540,7 +9793,8 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         import traceback
         logger.error(f"Error fetching grouped regions: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8574,7 +9828,8 @@ async def api_list_regions():
         return {'regions': regions}
     except Exception as e:
         logger.error(f"Error listing regions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8652,7 +9907,8 @@ async def api_get_region(rx: int, ry: int, rz: int,
         }
     except Exception as e:
         logger.error(f"Error getting region: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8768,7 +10024,8 @@ async def api_region_systems(rx: int, ry: int, rz: int, page: int = 1, limit: in
 
     except Exception as e:
         logger.error(f"Error fetching region systems: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8859,7 +10116,8 @@ async def api_system_planets(system_id: str, session: Optional[str] = Cookie(Non
 
     except Exception as e:
         logger.error(f"Error fetching system planets: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8909,7 +10167,8 @@ async def api_get_planet_pois(planet_id: int, session: Optional[str] = Cookie(No
         raise
     except Exception as e:
         logger.error(f"Error fetching planet POIs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -8989,7 +10248,8 @@ async def api_create_planet_poi(planet_id: int, payload: dict, session: Optional
         raise
     except Exception as e:
         logger.error(f"Error creating planet POI: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9070,7 +10330,8 @@ async def api_update_planet_poi(poi_id: int, payload: dict, session: Optional[st
         raise
     except Exception as e:
         logger.error(f"Error updating planet POI: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9105,7 +10366,8 @@ async def api_delete_planet_poi(poi_id: int, session: Optional[str] = Cookie(Non
         raise
     except Exception as e:
         logger.error(f"Error deleting planet POI: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9163,7 +10425,8 @@ async def get_planet_3d_map(planet_id: int, session: Optional[str] = Cookie(None
         raise
     except Exception as e:
         logger.error(f"Error generating planet 3D map: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9226,7 +10489,8 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
         raise
     except Exception as e:
         logger.error(f"Error updating region: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9264,7 +10528,8 @@ async def api_delete_region_name(rx: int, ry: int, rz: int, session: Optional[st
         }
     except Exception as e:
         logger.error(f"Error deleting region name: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9373,7 +10638,8 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
         raise
     except Exception as e:
         logger.error(f"Error submitting region name: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9490,7 +10756,8 @@ async def api_list_pending_region_names(session: Optional[str] = Cookie(None)):
         return {'pending': pending, 'count': len(pending)}
     except Exception as e:
         logger.error(f"Error listing pending region names: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9573,7 +10840,8 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
         raise
     except Exception as e:
         logger.error(f"Error approving region name: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9634,7 +10902,8 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
         raise
     except Exception as e:
         logger.error(f"Error rejecting region name: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9788,7 +11057,8 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9837,7 +11107,8 @@ async def delete_system(system_id: str, session: Optional[str] = Cookie(None)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -9908,7 +11179,7 @@ async def create_system_stub(payload: dict, request: Request):
         glyph_planet = decoded.get('planet_index', 0)
         glyph_solar_system = decoded.get('solar_system_index', 1)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f'Invalid glyph code: {e}')
+        raise HTTPException(status_code=400, detail='Invalid glyph code')
 
     conn = None
     try:
@@ -9971,7 +11242,8 @@ async def create_system_stub(payload: dict, request: Request):
 
     except Exception as e:
         logger.error(f"Error creating stub system: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -10400,7 +11672,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
 
     except Exception as e:
         logger.error(f'Error saving system to database: {e}')
-        raise HTTPException(status_code=500, detail=f'Database error: {str(e)}')
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
     finally:
         if conn:
             conn.close()
@@ -11082,7 +12355,8 @@ async def get_system_3d_view(system_id: str):
         raise
     except Exception as e:
         logger.error('Failed to render system 3D view for %s: %s', system_id, e)
-        raise HTTPException(status_code=500, detail=f'Error rendering system view: {str(e)}')
+        logger.exception("Error rendering system view")
+        raise HTTPException(status_code=500, detail="Error rendering system view")
     finally:
         if conn:
             conn.close()
@@ -11100,8 +12374,10 @@ async def get_logs():
     return {'lines': lines}
 
 @app.post('/api/backup')
-async def create_backup():
-    """Create database backup"""
+async def create_backup(session: Optional[str] = Cookie(None)):
+    """Create database backup (super admin only)"""
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
     try:
         import shutil
         from datetime import datetime
@@ -11115,19 +12391,9 @@ async def create_backup():
 
         return {'backup_path': str(backup_path.relative_to(HAVEN_UI_DIR))}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post('/api/db_upload')
-async def db_upload(file: UploadFile = File(...)):
-    """Upload a database file"""
-    try:
-        dest = HAVEN_UI_DIR / 'data' / 'uploaded.db'
-        with open(dest, 'wb') as f:
-            content = await file.read()
-            f.write(content)
-        return {'path': str(dest.relative_to(HAVEN_UI_DIR))}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post('/api/csv_preview')
@@ -11147,6 +12413,8 @@ async def csv_preview(file: UploadFile = File(...), session: Optional[str] = Coo
 
     try:
         content = await file.read()
+        if len(content) > 50 * 1024 * 1024:  # 50 MB limit
+            raise HTTPException(status_code=400, detail='CSV file too large (max 50 MB)')
         text_content = content.decode('utf-8-sig')
         reader = csv.reader(io.StringIO(text_content))
         rows = list(reader)
@@ -11253,7 +12521,8 @@ async def csv_preview(file: UploadFile = File(...), session: Optional[str] = Coo
         raise
     except Exception as e:
         logger.error(f"CSV preview error: {e}")
-        raise HTTPException(status_code=500, detail=f"Preview failed: {str(e)}")
+        logger.exception("CSV preview failed")
+        raise HTTPException(status_code=500, detail="Preview failed")
 
 
 # --- Galaxy name → number lookup (loaded once) ---
@@ -11417,6 +12686,8 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
 
     try:
         content = await file.read()
+        if len(content) > 50 * 1024 * 1024:  # 50 MB limit
+            raise HTTPException(status_code=400, detail='CSV file too large (max 50 MB)')
         text_content = content.decode('utf-8-sig')
         reader = csv.reader(io.StringIO(text_content))
         rows = list(reader)
@@ -11742,7 +13013,8 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
         raise
     except Exception as e:
         logger.error(f"CSV import error: {e}")
-        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+        logger.exception("CSV import failed")
+        raise HTTPException(status_code=500, detail="Import failed")
 
 
 # =============================================================================
@@ -11776,7 +13048,8 @@ async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
 
         return {'results': []}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -11868,7 +13141,8 @@ async def create_discovery(payload: dict):
 
     except Exception as e:
         logger.error(f"Error saving discovery: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12002,7 +13276,8 @@ async def browse_discoveries(
 
     except Exception as e:
         logger.error(f"Error browsing discoveries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12063,7 +13338,8 @@ async def get_discovery_stats():
 
     except Exception as e:
         logger.error(f"Error getting discovery stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12112,7 +13388,8 @@ async def get_recent_discoveries(limit: int = 8):
 
     except Exception as e:
         logger.error(f"Error getting recent discoveries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12155,7 +13432,8 @@ async def get_discovery(discovery_id: int):
     except IndexError:
         raise HTTPException(status_code=404, detail='Discovery not found')
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12216,7 +13494,8 @@ async def toggle_discovery_featured(discovery_id: int, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error toggling discovery featured status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12297,14 +13576,19 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
     session_data = get_session(session)
     submitter_account_id = None
     submitter_account_type = None
+    submitter_profile_id = None
     if session_data:
         user_type = session_data.get('user_type')
+        submitter_profile_id = session_data.get('profile_id')
         if user_type == 'partner':
             submitter_account_id = session_data.get('partner_id')
             submitter_account_type = 'partner'
         elif user_type == 'sub_admin':
             submitter_account_id = session_data.get('sub_admin_id')
             submitter_account_type = 'sub_admin'
+        elif user_type in ('member', 'member_readonly'):
+            submitter_account_id = submitter_profile_id
+            submitter_account_type = user_type
 
     conn = None
     try:
@@ -12340,9 +13624,9 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
                 discovery_data, discovery_name, discovery_type, type_slug,
                 system_id, system_name, planet_name, moon_name, location_type,
                 discord_tag, submitted_by, submitted_by_ip,
-                submitter_account_id, submitter_account_type,
+                submitter_account_id, submitter_account_type, submitter_profile_id,
                 submission_date, photo_url, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             discovery_data,
             discovery_name,
@@ -12358,6 +13642,7 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             client_ip,
             submitter_account_id,
             submitter_account_type,
+            submitter_profile_id,
             datetime.now(timezone.utc).isoformat(),
             payload.get('photo_url'),
         ))
@@ -12380,7 +13665,8 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
 
     except Exception as e:
         logger.error(f"Error submitting discovery: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12483,7 +13769,8 @@ async def get_pending_discoveries(session: Optional[str] = Cookie(None)):
 
     except Exception as e:
         logger.error(f"Error getting pending discoveries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12518,7 +13805,8 @@ async def get_pending_discovery_detail(submission_id: int, session: Optional[str
         raise
     except Exception as e:
         logger.error(f"Error getting pending discovery detail: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12557,27 +13845,12 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
         if submission['status'] != 'pending':
             raise HTTPException(status_code=400, detail=f"Submission already {submission['status']}")
 
-        # Self-approval blocking: sub-admins cannot approve their own submissions.
-        # Matches by account_id (reliable) or normalized username (legacy fallback).
-        if current_user_type not in ('super_admin', 'partner'):
-            submitter_account_id = submission.get('submitter_account_id')
-            submitter_account_type = submission.get('submitter_account_type')
-            submitted_by = submission.get('submitted_by')
-
-            normalized_current = normalize_discord_username(current_username)
-            is_self = False
-
-            if submitter_account_id is not None and submitter_account_type:
-                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
-                    is_self = True
-            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
-                is_self = True
-
-            if is_self:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You cannot approve your own submission. Another admin must review it."
-                )
+        # Self-approval blocking
+        if check_self_submission(submission, session_data):
+            raise HTTPException(
+                status_code=403,
+                detail="You cannot approve your own submission. Another admin must review it."
+            )
 
         # Parse discovery data and insert into discoveries table
         discovery_data = {}
@@ -12602,8 +13875,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                 discovered_by, submission_timestamp,
                 mystery_tier, analysis_status, pattern_matches,
                 discord_user_id, discord_guild_id,
-                photo_url, evidence_url, type_slug, discord_tag, type_metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             discovery_type,
             discovery_name,
@@ -12626,6 +13899,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             type_slug,
             discovery_data.get('discord_tag') or submission.get('discord_tag'),
             type_metadata_json,
+            submission.get('submitter_profile_id'),
         ))
         discovery_id = cursor.lastrowid
 
@@ -12675,7 +13949,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
         raise
     except Exception as e:
         logger.error(f"Error approving discovery: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -12785,7 +14060,8 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
         raise
     except Exception as e:
         logger.error(f"Error rejecting discovery: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -13057,8 +14333,8 @@ async def submit_system(
         # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
@@ -13073,7 +14349,8 @@ async def submit_system(
             personal_discord_username,
             edit_system_id,
             submitter_identity['account_id'],
-            submitter_identity['type'] if submitter_identity['type'] != 'anonymous' else None
+            submitter_identity['type'] if submitter_identity['type'] != 'anonymous' else None,
+            submitter_identity.get('profile_id')
         ))
 
         submission_id = cursor.lastrowid
@@ -13126,7 +14403,8 @@ async def submit_system(
         raise
     except Exception as e:
         logger.error(f"Error saving submission: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save submission: {str(e)}")
+        logger.exception("Failed to save submission")
+        raise HTTPException(status_code=500, detail="Failed to save submission")
     finally:
         if conn:
             conn.close()
@@ -13266,7 +14544,8 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
 
     except Exception as e:
         logger.error(f"Error fetching pending systems: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch submissions: {str(e)}")
+        logger.exception("Failed to fetch submissions")
+        raise HTTPException(status_code=500, detail="Failed to fetch submissions")
     finally:
         if conn:
             conn.close()
@@ -13404,7 +14683,8 @@ async def get_pending_system_details(submission_id: int, session: Optional[str] 
         raise
     except Exception as e:
         logger.error(f"Error fetching submission details: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch submission: {str(e)}")
+        logger.exception("Failed to fetch submission")
+        raise HTTPException(status_code=500, detail="Failed to fetch submission")
     finally:
         if conn:
             conn.close()
@@ -13494,7 +14774,8 @@ async def edit_pending_system(submission_id: int, request: Request, session: Opt
         raise
     except Exception as e:
         logger.error(f"Error editing pending submission: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to edit submission: {str(e)}")
+        logger.exception("Failed to edit submission")
+        raise HTTPException(status_code=500, detail="Failed to edit submission")
     finally:
         if conn:
             conn.close()
@@ -13542,35 +14823,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             )
 
         # SELF-APPROVAL BLOCKING: prevents users from reviewing their own submissions.
-        # Super admin and partners are exempt (trusted community leaders).
-        # Sub-admins are blocked. Matches by account_id first, then normalized username.
-        if current_user_type not in ('super_admin', 'partner'):
-            submitter_account_id = submission.get('submitter_account_id')
-            submitter_account_type = submission.get('submitter_account_type')
-            submitted_by = submission.get('submitted_by')
-            personal_discord_username = submission.get('personal_discord_username')
-            # Normalize usernames to handle Discord #XXXX discriminator
-            normalized_current = normalize_discord_username(current_username)
-
-            is_self_submission = False
-
-            # Match by account ID if available (most reliable)
-            if submitter_account_id is not None and submitter_account_type:
-                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
-                    is_self_submission = True
-            # Fallback: match by username (for legacy submissions without account tracking)
-            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
-                is_self_submission = True
-            # Also check personal_discord_username (used for all submissions now)
-            if not is_self_submission and personal_discord_username and normalized_current:
-                if normalize_discord_username(personal_discord_username) == normalized_current:
-                    is_self_submission = True
-
-            if is_self_submission:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You cannot approve your own submission. Another admin must review it."
-                )
+        if check_self_submission(dict(submission), session_data):
+            raise HTTPException(
+                status_code=403,
+                detail="You cannot approve your own submission. Another admin must review it."
+            )
 
         # Parse system data
         system_data = json.loads(submission['system_data'])
@@ -13847,8 +15104,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                    contributors, created_at, game_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contributors, created_at, game_mode, profile_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -13880,6 +15137,7 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
                 now_iso,
                 system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
+                submission.get('submitter_profile_id'),
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -14187,7 +15445,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
         raise
     except Exception as e:
         logger.error(f"Error approving submission: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to approve submission: {str(e)}")
+        logger.exception("Failed to approve submission")
+        raise HTTPException(status_code=500, detail="Failed to approve submission")
     finally:
         if conn:
             conn.close()
@@ -14238,32 +15497,11 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
             )
 
         # SELF-REJECTION BLOCKING: same identity matching as approval.
-        # Super admin is exempt. Partners and sub-admins are blocked.
-        if current_user_type != 'super_admin':
-            submitter_account_id = submission.get('submitter_account_id')
-            submitter_account_type = submission.get('submitter_account_type')
-            submitted_by = submission.get('submitted_by')
-            personal_discord_username = submission.get('personal_discord_username')
-            # Normalize usernames to handle Discord #XXXX discriminator
-            normalized_current = normalize_discord_username(current_username)
-
-            is_self_submission = False
-
-            if submitter_account_id is not None and submitter_account_type:
-                if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
-                    is_self_submission = True
-            elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
-                is_self_submission = True
-            # Also check personal_discord_username (used for all submissions now)
-            if not is_self_submission and personal_discord_username and normalized_current:
-                if normalize_discord_username(personal_discord_username) == normalized_current:
-                    is_self_submission = True
-
-            if is_self_submission:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You cannot reject your own submission. Another admin must review it."
-                )
+        if check_self_submission(submission, session_data):
+            raise HTTPException(
+                status_code=403,
+                detail="You cannot reject your own submission. Another admin must review it."
+            )
 
         # Mark as rejected (use actual username)
         cursor.execute('''
@@ -14319,7 +15557,8 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
         raise
     except Exception as e:
         logger.error(f"Error rejecting submission: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to reject submission: {str(e)}")
+        logger.exception("Failed to reject submission")
+        raise HTTPException(status_code=500, detail="Failed to reject submission")
     finally:
         if conn:
             conn.close()
@@ -14397,33 +15636,13 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     continue
 
                 # Self-approval check: self-submissions are skipped (not failed)
-                # so the batch continues processing remaining items.
-                if not is_super and current_user_type != 'partner':
-                    submitter_account_id = submission.get('submitter_account_id')
-                    submitter_account_type = submission.get('submitter_account_type')
-                    submitted_by = submission.get('submitted_by')
-                    personal_discord_username = submission.get('personal_discord_username')
-                    # Normalize usernames to handle Discord #XXXX discriminator
-                    normalized_current = normalize_discord_username(current_username)
-
-                    is_self_submission = False
-                    if submitter_account_id is not None and submitter_account_type:
-                        if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
-                            is_self_submission = True
-                    elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
-                        is_self_submission = True
-                    # Also check personal_discord_username (used for all submissions now)
-                    if not is_self_submission and personal_discord_username and normalized_current:
-                        if normalize_discord_username(personal_discord_username) == normalized_current:
-                            is_self_submission = True
-
-                    if is_self_submission:
-                        results['skipped'].append({
-                            'id': submission_id,
-                            'name': system_name,
-                            'reason': 'Self-submission'
-                        })
-                        continue
+                if check_self_submission(submission, session_data):
+                    results['skipped'].append({
+                        'id': submission_id,
+                        'name': system_name,
+                        'reason': 'Self-submission'
+                    })
+                    continue
 
                 # Parse and process system data
                 system_data = json.loads(submission['system_data'])
@@ -14623,8 +15842,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                            contributors, created_at, game_mode)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            contributors, created_at, game_mode, profile_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -14654,6 +15873,7 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         json.dumps([{"name": discoverer_username, "action": "upload", "date": now_iso}]),
                         now_iso,
                         system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
+                        submission.get('submitter_profile_id'),
                     ))
 
                 # Insert planets
@@ -14855,7 +16075,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
         raise
     except Exception as e:
         logger.error(f"Batch approval error: {e}")
-        raise HTTPException(status_code=500, detail=f"Batch approval failed: {str(e)}")
+        logger.exception("Batch approval failed")
+        raise HTTPException(status_code=500, detail="Batch approval failed")
     finally:
         if conn:
             conn.close()
@@ -14934,32 +16155,13 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
                     continue
 
                 # Self-rejection check (skip for non-super-admins)
-                if not is_super:
-                    submitter_account_id = submission.get('submitter_account_id')
-                    submitter_account_type = submission.get('submitter_account_type')
-                    submitted_by = submission.get('submitted_by')
-                    personal_discord_username = submission.get('personal_discord_username')
-                    # Normalize usernames to handle Discord #XXXX discriminator
-                    normalized_current = normalize_discord_username(current_username)
-
-                    is_self_submission = False
-                    if submitter_account_id is not None and submitter_account_type:
-                        if current_user_type == submitter_account_type and current_account_id == submitter_account_id:
-                            is_self_submission = True
-                    elif submitted_by and normalized_current and normalize_discord_username(submitted_by) == normalized_current:
-                        is_self_submission = True
-                    # Also check personal_discord_username (used for all submissions now)
-                    if not is_self_submission and personal_discord_username and normalized_current:
-                        if normalize_discord_username(personal_discord_username) == normalized_current:
-                            is_self_submission = True
-
-                    if is_self_submission:
-                        results['skipped'].append({
-                            'id': submission_id,
-                            'name': system_name,
-                            'reason': 'Self-submission'
-                        })
-                        continue
+                if not is_super and check_self_submission(submission, session_data):
+                    results['skipped'].append({
+                        'id': submission_id,
+                        'name': system_name,
+                        'reason': 'Self-submission'
+                    })
+                    continue
 
                 # Mark as rejected
                 cursor.execute('''
@@ -15033,7 +16235,8 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
         raise
     except Exception as e:
         logger.error(f"Batch rejection error: {e}")
-        raise HTTPException(status_code=500, detail=f"Batch rejection failed: {str(e)}")
+        logger.exception("Batch rejection failed")
+        raise HTTPException(status_code=500, detail="Batch rejection failed")
     finally:
         if conn:
             conn.close()
@@ -15158,7 +16361,8 @@ async def check_glyph_codes(
         raise
     except Exception as e:
         logger.error(f"Error checking glyph codes: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -15246,6 +16450,8 @@ async def receive_extraction(
     discord_tag = payload.get('discord_tag', 'personal')  # Default to personal if not specified
     reality = payload.get('reality', 'Normal')
     game_mode = payload.get('game_mode', 'Normal')  # v1.6.8: difficulty preset tracking
+    # Profile ID: from payload (new extractor) or resolve from username/api_key
+    submitter_profile_id = payload.get('profile_id')
 
     # Accept both star_color (v10+) and star_type (legacy)
     star_color = payload.get('star_color') or payload.get('star_type', 'Unknown')
@@ -15419,6 +16625,20 @@ async def receive_extraction(
         now = datetime.now(timezone.utc).isoformat()
         raw_json_str = json.dumps(submission_data)
 
+        # Resolve submitter_profile_id from payload, api_key, or username
+        if not submitter_profile_id:
+            # Try from API key link
+            if api_key_info and api_key_info.get('profile_id'):
+                submitter_profile_id = api_key_info['profile_id']
+            # Fallback: look up or create profile from discord_username
+            elif discord_username:
+                submitter_profile_id = get_or_create_profile(
+                    conn, discord_username,
+                    discord_snowflake_id=personal_id or None,
+                    default_civ_tag=discord_tag if discord_tag != 'personal' else None,
+                    created_by='extraction'
+                )
+
         # Get API key name for tracking (if authenticated)
         api_key_name = api_key_info.get('name') if api_key_info else None
         # Tag submissions from the old shared key as "unregistered"
@@ -15431,8 +16651,8 @@ async def receive_extraction(
                 region_x, region_y, region_z,
                 submitter_name, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
-                submitted_by_ip, api_key_name, edit_system_id, game_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                submitted_by_ip, api_key_name, edit_system_id, game_mode, submitter_profile_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -15457,7 +16677,8 @@ async def receive_extraction(
             client_ip,
             api_key_name,
             edit_system_id,
-            game_mode
+            game_mode,
+            submitter_profile_id
         ))
         conn.commit()
         submission_id = cursor.lastrowid
@@ -15487,7 +16708,8 @@ async def receive_extraction(
 
     except Exception as e:
         logger.error(f"Error storing extraction: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if conn:
             conn.close()
@@ -15795,7 +17017,8 @@ async def get_enrollment_status(session: Optional[str] = Cookie(None)):
         logger.error(f"Error in get_enrollment_status: {type(e).__name__}: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put('/api/warroom/enrollment/{partner_id}/home-region')
@@ -16897,7 +18120,8 @@ async def get_debrief(session: Optional[str] = Cookie(None)):
         logger.error(f"Error in get_debrief: {type(e).__name__}: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put('/api/warroom/debrief')
@@ -17127,15 +18351,13 @@ async def create_correspondent(request: Request, session: Optional[str] = Cookie
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('''
             INSERT INTO war_correspondents (username, password_hash, display_name, created_by)
             VALUES (?, ?, ?, ?)
-        ''', (username, password_hash, display_name, session_data.get('username')))
+        ''', (username, hash_password(password), display_name, session_data.get('username')))
         conn.commit()
 
         logger.info(f"War Room: Correspondent created: {username}")
@@ -17156,20 +18378,24 @@ async def correspondent_login(request: Request, response: Response):
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            SELECT id, username, display_name, is_active
+            SELECT id, username, display_name, is_active, password_hash
             FROM war_correspondents
-            WHERE username = ? AND password_hash = ?
-        ''', (username, password_hash))
+            WHERE username = ?
+        ''', (username,))
         correspondent = cursor.fetchone()
 
-        if not correspondent:
+        if not correspondent or not verify_password(password, correspondent['password_hash']):
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # Upgrade legacy SHA-256 hash to bcrypt on successful login
+        if _needs_rehash(correspondent['password_hash']):
+            cursor.execute('UPDATE war_correspondents SET password_hash = ? WHERE id = ?',
+                           (hash_password(password), correspondent['id']))
+            conn.commit()
 
         if not correspondent[3]:
             raise HTTPException(status_code=403, detail="Account is inactive")
@@ -18560,8 +19786,6 @@ async def add_org_member(org_id: int, request: Request, session: Optional[str] =
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -18573,7 +19797,7 @@ async def add_org_member(org_id: int, request: Request, session: Optional[str] =
         cursor.execute('''
             INSERT INTO reporting_org_members (org_id, username, password_hash, display_name, role, created_by)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (org_id, username, password_hash, data.get('display_name'), data.get('role', 'reporter'),
+        ''', (org_id, username, hash_password(password), data.get('display_name'), data.get('role', 'reporter'),
               session_data.get('username')))
         conn.commit()
 
@@ -18596,19 +19820,17 @@ async def reporting_org_login(request: Request, response: Response):
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         query = '''
             SELECT rom.id, rom.org_id, rom.username, rom.display_name, rom.role, rom.is_active,
-                   ro.name as org_name, ro.is_active as org_active
+                   ro.name as org_name, ro.is_active as org_active, rom.password_hash
             FROM reporting_org_members rom
             JOIN reporting_organizations ro ON rom.org_id = ro.id
-            WHERE rom.username = ? AND rom.password_hash = ?
+            WHERE rom.username = ?
         '''
-        params = [username, password_hash]
+        params = [username]
         if org_id:
             query += ' AND rom.org_id = ?'
             params.append(org_id)
@@ -18616,8 +19838,13 @@ async def reporting_org_login(request: Request, response: Response):
         cursor.execute(query, params)
         member = cursor.fetchone()
 
-        if not member:
+        if not member or not verify_password(password, member['password_hash']):
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # Upgrade legacy SHA-256 hash to bcrypt on successful login
+        if _needs_rehash(member['password_hash']):
+            cursor.execute('UPDATE reporting_org_members SET password_hash = ? WHERE id = ?',
+                           (hash_password(password), member['id']))
 
         if not member[5]:
             raise HTTPException(status_code=403, detail="Account is inactive")

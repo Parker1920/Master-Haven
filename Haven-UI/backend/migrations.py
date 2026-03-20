@@ -3883,13 +3883,15 @@ def migration_1_51_0(conn):
         # Layer 2: Use approval_audit_log timestamp for remaining
         cursor.execute("""
             UPDATE systems SET created_at = (
-                SELECT MIN(a.action_timestamp)
+                SELECT MIN(a.timestamp)
                 FROM approval_audit_log a
-                WHERE a.system_id = systems.id AND a.action = 'approve'
+                WHERE CAST(a.submission_id AS TEXT) = CAST(systems.id AS TEXT)
+                  AND a.action IN ('approve_system', 'approved')
             )
             WHERE created_at IS NULL AND EXISTS (
                 SELECT 1 FROM approval_audit_log a
-                WHERE a.system_id = systems.id AND a.action = 'approve'
+                WHERE CAST(a.submission_id AS TEXT) = CAST(systems.id AS TEXT)
+                  AND a.action IN ('approve_system', 'approved')
             )
         """)
         layer2 = cursor.rowcount
@@ -4120,3 +4122,473 @@ def migration_1_54_0(conn):
             WHERE key = 'version'
         """, (datetime.now().isoformat(),))
         logger.info("Updated _metadata version to 1.54.0")
+
+
+@register_migration("1.55.0", "Unified user profiles table - single identity source for all users")
+def migration_1_55_0(conn):
+    """
+    Creates the user_profiles table as the single source of truth for all user identity.
+    Replaces the fragmented identity system (partner_accounts, sub_admin_accounts,
+    super_admin_settings, api_keys.discord_username, anonymous submitted_by fields).
+
+    Tier system:
+      1 = Super Admin
+      2 = Partner (community leader)
+      3 = Sub-Admin (delegated by partner)
+      4 = Member (has password, can edit profile)
+      5 = Member readonly (no password, view-only)
+    """
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            username_normalized TEXT NOT NULL UNIQUE,
+            password_hash TEXT,
+            display_name TEXT,
+            default_civ_tag TEXT,
+            discord_snowflake_id TEXT,
+            tier INTEGER NOT NULL DEFAULT 5,
+            partner_discord_tag TEXT UNIQUE,
+            enabled_features TEXT DEFAULT '[]',
+            theme_settings TEXT DEFAULT '{}',
+            region_color TEXT DEFAULT '#00C2B3',
+            parent_profile_id INTEGER,
+            additional_discord_tags TEXT DEFAULT '[]',
+            can_approve_personal_uploads INTEGER DEFAULT 0,
+            default_reality TEXT,
+            default_galaxy TEXT,
+            api_key_id INTEGER,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP,
+            created_by TEXT,
+            FOREIGN KEY (parent_profile_id) REFERENCES user_profiles(id) ON DELETE SET NULL
+        )
+    ''')
+    logger.info("Created user_profiles table")
+
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_profiles_username_norm ON user_profiles(username_normalized)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_tier ON user_profiles(tier)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_partner_tag ON user_profiles(partner_discord_tag)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_parent ON user_profiles(parent_profile_id)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_discord_snowflake ON user_profiles(discord_snowflake_id)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_default_civ ON user_profiles(default_civ_tag)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_active ON user_profiles(is_active)",
+    ]
+    for idx_sql in indexes:
+        cursor.execute(idx_sql)
+    logger.info("Created user_profiles indexes")
+
+    conn.commit()
+
+
+@register_migration("1.56.0", "Add profile_id foreign key columns to existing tables")
+def migration_1_56_0(conn):
+    """
+    Adds nullable profile_id columns to all tables that track user identity.
+    These will be backfilled in migration 1.57.0 after profiles are created.
+    """
+    cursor = conn.cursor()
+
+    def add_col(table, column, coltype="INTEGER"):
+        cursor.execute(f"PRAGMA table_info({table})")
+        cols = [r[1] for r in cursor.fetchall()]
+        if column not in cols:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+            logger.info(f"Added {column} to {table}")
+
+    # Systems - who submitted/created
+    add_col('systems', 'profile_id')
+
+    # Pending systems - who submitted for approval
+    add_col('pending_systems', 'submitter_profile_id')
+
+    # Discoveries - who discovered
+    add_col('discoveries', 'profile_id')
+
+    # Pending discoveries - who submitted
+    add_col('pending_discoveries', 'submitter_profile_id')
+
+    # Pending region names - who proposed
+    add_col('pending_region_names', 'submitter_profile_id')
+
+    # Audit log - who approved and who submitted
+    add_col('approval_audit_log', 'approver_profile_id')
+    add_col('approval_audit_log', 'submitter_profile_id')
+
+    # API keys - link to profile
+    add_col('api_keys', 'profile_id')
+
+    # Create indexes for profile_id lookups
+    index_pairs = [
+        ('idx_systems_profile', 'systems', 'profile_id'),
+        ('idx_pending_systems_profile', 'pending_systems', 'submitter_profile_id'),
+        ('idx_discoveries_profile', 'discoveries', 'profile_id'),
+        ('idx_pending_discoveries_profile', 'pending_discoveries', 'submitter_profile_id'),
+        ('idx_pending_regions_profile', 'pending_region_names', 'submitter_profile_id'),
+        ('idx_audit_approver_profile', 'approval_audit_log', 'approver_profile_id'),
+        ('idx_audit_submitter_profile', 'approval_audit_log', 'submitter_profile_id'),
+        ('idx_api_keys_profile', 'api_keys', 'profile_id'),
+    ]
+    for idx_name, table, col in index_pairs:
+        try:
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({col})")
+        except Exception as e:
+            logger.warning(f"Index {idx_name} warning: {e}")
+
+    logger.info("Added profile_id columns and indexes to 8 tables")
+    conn.commit()
+
+
+@register_migration("1.57.0", "Backfill user profiles from existing accounts and submissions")
+def migration_1_57_0(conn):
+    """
+    Populates user_profiles from all existing identity sources:
+    1. Super admin -> tier 1
+    2. partner_accounts -> tier 2
+    3. sub_admin_accounts -> tier 3
+    4. api_keys (extractor) -> tier 5
+    5. Anonymous submitters from all tables -> tier 5
+    """
+    import sqlite3
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    def normalize_for_dedup(username):
+        """Normalize username for dedup: lowercase, strip whitespace/#/trailing 4-digit discriminator."""
+        if not username:
+            return ''
+        n = username.strip().lower().replace('#', '')
+        if len(n) > 4 and n[-4:].isdigit():
+            prefix = n[:-4]
+            if prefix and not prefix[-1].isdigit():
+                n = prefix
+        return n
+
+    def insert_profile(username, normalized, password_hash, display_name, tier,
+                        partner_discord_tag=None, enabled_features='[]',
+                        theme_settings='{}', region_color='#00C2B3',
+                        parent_profile_id=None, additional_discord_tags='[]',
+                        can_approve_personal=0, created_by=None,
+                        is_active=1, last_login_at=None, api_key_id=None):
+        """Insert a profile, skipping if normalized username already exists."""
+        cursor.execute("SELECT id FROM user_profiles WHERE username_normalized = ?", (normalized,))
+        if cursor.fetchone():
+            return None  # Already exists
+        now = datetime.now().isoformat()
+        cursor.execute('''
+            INSERT INTO user_profiles (
+                username, username_normalized, password_hash, display_name, tier,
+                partner_discord_tag, enabled_features, theme_settings, region_color,
+                parent_profile_id, additional_discord_tags, can_approve_personal_uploads,
+                is_active, created_at, updated_at, last_login_at, created_by, api_key_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            username, normalized, password_hash, display_name, tier,
+            partner_discord_tag, enabled_features, theme_settings, region_color,
+            parent_profile_id, additional_discord_tags, can_approve_personal,
+            is_active, now, now, last_login_at, created_by, api_key_id
+        ))
+        return cursor.lastrowid
+
+    # Track old ID -> new profile ID mappings
+    partner_id_map = {}
+    created_count = 0
+
+    # Step 1: Super admin
+    cursor.execute("SELECT value FROM super_admin_settings WHERE key = 'password_hash'")
+    sa_row = cursor.fetchone()
+    sa_hash = sa_row['value'] if sa_row else None
+    pid = insert_profile('Haven', 'haven', sa_hash, 'Super Admin', 1,
+                          enabled_features='["all"]', created_by='migration')
+    if pid:
+        created_count += 1
+        logger.info(f"Created super admin profile (id={pid})")
+
+    # Step 2: Partner accounts -> tier 2
+    cursor.execute('''
+        SELECT id, username, password_hash, discord_tag, display_name, enabled_features,
+               theme_settings, region_color, is_active, last_login_at, created_by
+        FROM partner_accounts
+    ''')
+    for row in cursor.fetchall():
+        row = dict(row)
+        normalized = normalize_for_dedup(row['username'])
+        if not normalized:
+            continue
+        pid = insert_profile(
+            row['username'], normalized, row['password_hash'],
+            row['display_name'], 2,
+            partner_discord_tag=row['discord_tag'],
+            enabled_features=row['enabled_features'] or '[]',
+            theme_settings=row['theme_settings'] or '{}',
+            region_color=row['region_color'] or '#00C2B3',
+            is_active=row['is_active'] or 1,
+            last_login_at=row['last_login_at'],
+            created_by=row.get('created_by') or 'migration'
+        )
+        if pid:
+            partner_id_map[row['id']] = pid
+            created_count += 1
+        else:
+            # Profile already existed (e.g. username collision with super admin)
+            cursor.execute("SELECT id FROM user_profiles WHERE username_normalized = ?", (normalized,))
+            existing = cursor.fetchone()
+            if existing:
+                partner_id_map[row['id']] = existing['id']
+
+    logger.info(f"Migrated {len(partner_id_map)} partner accounts to profiles")
+
+    # Step 3: Sub-admin accounts -> tier 3
+    sub_count = 0
+    cursor.execute('''
+        SELECT id, parent_partner_id, username, password_hash, display_name,
+               enabled_features, is_active, last_login_at, created_by,
+               additional_discord_tags, can_approve_personal_uploads
+        FROM sub_admin_accounts
+    ''')
+    for row in cursor.fetchall():
+        row = dict(row)
+        normalized = normalize_for_dedup(row['username'])
+        if not normalized:
+            continue
+        parent_pid = partner_id_map.get(row['parent_partner_id'])
+        pid = insert_profile(
+            row['username'], normalized, row['password_hash'],
+            row['display_name'], 3,
+            parent_profile_id=parent_pid,
+            enabled_features=row['enabled_features'] or '[]',
+            additional_discord_tags=row.get('additional_discord_tags') or '[]',
+            can_approve_personal=row.get('can_approve_personal_uploads') or 0,
+            is_active=row['is_active'] or 1,
+            last_login_at=row['last_login_at'],
+            created_by=row.get('created_by') or 'migration'
+        )
+        if pid:
+            sub_count += 1
+            created_count += 1
+
+    logger.info(f"Migrated {sub_count} sub-admin accounts to profiles")
+
+    # Step 4: Extractor API keys -> tier 5
+    ext_count = 0
+    cursor.execute('''
+        SELECT id, discord_username
+        FROM api_keys
+        WHERE key_type = 'extractor' AND discord_username IS NOT NULL AND discord_username != ''
+    ''')
+    for row in cursor.fetchall():
+        row = dict(row)
+        normalized = normalize_for_dedup(row['discord_username'])
+        if not normalized:
+            continue
+        pid = insert_profile(
+            row['discord_username'], normalized, None,
+            row['discord_username'], 5,
+            created_by='extractor_migration',
+            api_key_id=row['id']
+        )
+        if pid:
+            cursor.execute("UPDATE api_keys SET profile_id = ? WHERE id = ?", (pid, row['id']))
+            ext_count += 1
+            created_count += 1
+        else:
+            # Profile existed, link api key to it
+            cursor.execute("SELECT id FROM user_profiles WHERE username_normalized = ?", (normalized,))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("UPDATE api_keys SET profile_id = ? WHERE id = ?", (existing['id'], row['id']))
+
+    logger.info(f"Migrated {ext_count} extractor users to profiles, linked API keys")
+
+    # Step 5: Scan all anonymous submitter usernames across tables
+    anon_count = 0
+    username_sources = []
+
+    # Gather distinct usernames from all relevant tables
+    for query in [
+        "SELECT DISTINCT personal_discord_username AS u FROM pending_systems WHERE personal_discord_username IS NOT NULL AND personal_discord_username != ''",
+        "SELECT DISTINCT submitted_by AS u FROM pending_systems WHERE submitted_by IS NOT NULL AND submitted_by != '' AND submitted_by != 'Anonymous' AND submitted_by != 'anonymous'",
+        "SELECT DISTINCT personal_discord_username AS u FROM systems WHERE personal_discord_username IS NOT NULL AND personal_discord_username != ''",
+        "SELECT DISTINCT discovered_by AS u FROM systems WHERE discovered_by IS NOT NULL AND discovered_by != '' AND discovered_by != 'Anonymous' AND discovered_by != 'anonymous'",
+        "SELECT DISTINCT submitted_by AS u FROM pending_region_names WHERE submitted_by IS NOT NULL AND submitted_by != '' AND submitted_by != 'Anonymous' AND submitted_by != 'anonymous'",
+        "SELECT DISTINCT personal_discord_username AS u FROM pending_region_names WHERE personal_discord_username IS NOT NULL AND personal_discord_username != ''",
+        "SELECT DISTINCT discovered_by AS u FROM discoveries WHERE discovered_by IS NOT NULL AND discovered_by != '' AND discovered_by != 'Anonymous' AND discovered_by != 'anonymous'",
+        "SELECT DISTINCT submitted_by AS u FROM pending_discoveries WHERE submitted_by IS NOT NULL AND submitted_by != '' AND submitted_by != 'Anonymous' AND submitted_by != 'anonymous'",
+    ]:
+        try:
+            cursor.execute(query)
+            for r in cursor.fetchall():
+                if r['u']:
+                    username_sources.append(r['u'])
+        except Exception as e:
+            logger.warning(f"Skipping username source query: {e}")
+
+    # Deduplicate by normalized form
+    seen_normalized = set()
+    cursor.execute("SELECT username_normalized FROM user_profiles")
+    for r in cursor.fetchall():
+        seen_normalized.add(r['username_normalized'])
+
+    for raw_username in username_sources:
+        normalized = normalize_for_dedup(raw_username)
+        if not normalized or normalized in seen_normalized:
+            continue
+        seen_normalized.add(normalized)
+        pid = insert_profile(
+            raw_username, normalized, None,
+            raw_username, 5,
+            created_by='submission_migration'
+        )
+        if pid:
+            anon_count += 1
+            created_count += 1
+
+    logger.info(f"Created {anon_count} profiles from anonymous submitter usernames")
+    logger.info(f"Total profiles created: {created_count}")
+
+    conn.commit()
+
+
+@register_migration("1.58.0", "Backfill profile_id on systems, pending_systems, discoveries, and other tables")
+def migration_1_58_0(conn):
+    """
+    Links existing rows in systems, pending_systems, discoveries, etc. to their
+    user_profiles by matching normalized usernames. Uses the same COALESCE chain
+    as the analytics leaderboard queries.
+    """
+    import sqlite3
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    def normalize_for_dedup(username):
+        if not username:
+            return ''
+        n = username.strip().lower().replace('#', '')
+        if len(n) > 4 and n[-4:].isdigit():
+            prefix = n[:-4]
+            if prefix and not prefix[-1].isdigit():
+                n = prefix
+        return n
+
+    # Build a lookup dict: normalized_username -> profile_id
+    cursor.execute("SELECT id, username_normalized FROM user_profiles")
+    profile_lookup = {row['username_normalized']: row['id'] for row in cursor.fetchall()}
+
+    def find_profile(username):
+        if not username:
+            return None
+        n = normalize_for_dedup(username)
+        return profile_lookup.get(n)
+
+    total_updated = 0
+
+    # 1. systems.profile_id from personal_discord_username or discovered_by
+    cursor.execute("""
+        SELECT id, personal_discord_username, discovered_by
+        FROM systems WHERE profile_id IS NULL
+    """)
+    for row in cursor.fetchall():
+        pid = find_profile(row['personal_discord_username']) or find_profile(row['discovered_by'])
+        if pid:
+            cursor.execute("UPDATE systems SET profile_id = ? WHERE id = ?", (pid, row['id']))
+            total_updated += 1
+    logger.info(f"Backfilled profile_id on {total_updated} systems rows")
+
+    # 2. pending_systems.submitter_profile_id
+    count = 0
+    cursor.execute("""
+        SELECT id, personal_discord_username, submitted_by, system_data
+        FROM pending_systems WHERE submitter_profile_id IS NULL
+    """)
+    for row in cursor.fetchall():
+        row = dict(row)
+        pid = find_profile(row['personal_discord_username']) or find_profile(row['submitted_by'])
+        if not pid and row.get('system_data'):
+            try:
+                sd = json.loads(row['system_data'])
+                pid = find_profile(sd.get('discovered_by'))
+            except Exception:
+                pass
+        if pid:
+            cursor.execute("UPDATE pending_systems SET submitter_profile_id = ? WHERE id = ?", (pid, row['id']))
+            count += 1
+    total_updated += count
+    logger.info(f"Backfilled submitter_profile_id on {count} pending_systems rows")
+
+    # 3. discoveries.profile_id
+    count = 0
+    cursor.execute("""
+        SELECT id, discovered_by FROM discoveries WHERE profile_id IS NULL
+    """)
+    for row in cursor.fetchall():
+        pid = find_profile(row['discovered_by'])
+        if pid:
+            cursor.execute("UPDATE discoveries SET profile_id = ? WHERE id = ?", (pid, row['id']))
+            count += 1
+    total_updated += count
+    logger.info(f"Backfilled profile_id on {count} discoveries rows")
+
+    # 4. pending_discoveries.submitter_profile_id
+    count = 0
+    try:
+        cursor.execute("""
+            SELECT id, submitted_by FROM pending_discoveries WHERE submitter_profile_id IS NULL
+        """)
+        for row in cursor.fetchall():
+            pid = find_profile(row['submitted_by'])
+            if pid:
+                cursor.execute("UPDATE pending_discoveries SET submitter_profile_id = ? WHERE id = ?", (pid, row['id']))
+                count += 1
+        total_updated += count
+        logger.info(f"Backfilled submitter_profile_id on {count} pending_discoveries rows")
+    except Exception as e:
+        logger.warning(f"Skipping pending_discoveries backfill: {e}")
+
+    # 5. pending_region_names.submitter_profile_id
+    count = 0
+    try:
+        cursor.execute("""
+            SELECT id, submitted_by, personal_discord_username
+            FROM pending_region_names WHERE submitter_profile_id IS NULL
+        """)
+        for row in cursor.fetchall():
+            pid = find_profile(row['personal_discord_username']) or find_profile(row['submitted_by'])
+            if pid:
+                cursor.execute("UPDATE pending_region_names SET submitter_profile_id = ? WHERE id = ?", (pid, row['id']))
+                count += 1
+        total_updated += count
+        logger.info(f"Backfilled submitter_profile_id on {count} pending_region_names rows")
+    except Exception as e:
+        logger.warning(f"Skipping pending_region_names backfill: {e}")
+
+    # 6. approval_audit_log - approver and submitter profile IDs
+    count = 0
+    try:
+        cursor.execute("""
+            SELECT id, approver_username, submitter_username
+            FROM approval_audit_log
+            WHERE approver_profile_id IS NULL OR submitter_profile_id IS NULL
+        """)
+        for row in cursor.fetchall():
+            approver_pid = find_profile(row['approver_username'])
+            submitter_pid = find_profile(row['submitter_username'])
+            if approver_pid or submitter_pid:
+                cursor.execute("""
+                    UPDATE approval_audit_log
+                    SET approver_profile_id = COALESCE(approver_profile_id, ?),
+                        submitter_profile_id = COALESCE(submitter_profile_id, ?)
+                    WHERE id = ?
+                """, (approver_pid, submitter_pid, row['id']))
+                count += 1
+        total_updated += count
+        logger.info(f"Backfilled profile IDs on {count} audit log rows")
+    except Exception as e:
+        logger.warning(f"Skipping audit log backfill: {e}")
+
+    logger.info(f"Total rows updated with profile_id: {total_updated}")
+    conn.commit()

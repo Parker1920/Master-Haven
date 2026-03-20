@@ -27,13 +27,35 @@ export const AuthContext = createContext({
   isSubAdmin: false,
   isHavenSubAdmin: false,
   isCorrespondent: false,
+  isMember: false,
+  isReadOnly: false,
   user: null,
   loading: true,
   login: async () => {},
+  memberLogin: async () => {},
   logout: async () => {},
   canAccess: () => false,
   refreshAuth: async () => {}
 })
+
+/** Build user object from API response data (shared between checkAuth, login, memberLogin) */
+function buildUserFromData(data) {
+  return {
+    type: data.user_type,
+    username: data.username,
+    discordTag: data.discord_tag,
+    displayName: data.display_name,
+    enabledFeatures: data.enabled_features || [],
+    accountId: data.account_id,
+    profileId: data.profile_id || null,
+    tier: data.tier || null,
+    defaultCivTag: data.default_civ_tag || null,
+    defaultReality: data.default_reality || null,
+    defaultGalaxy: data.default_galaxy || null,
+    parentDisplayName: data.parent_display_name,
+    isHavenSubAdmin: data.is_haven_sub_admin || false
+  }
+}
 
 /** Provides auth state to the app. Checks session on mount and exposes login/logout/canAccess. */
 export function AuthProvider({ children }) {
@@ -45,16 +67,7 @@ export function AuthProvider({ children }) {
       const r = await fetch('/api/admin/status', { credentials: 'include' })
       const data = await r.json()
       if (data.logged_in) {
-        setUser({
-          type: data.user_type,
-          username: data.username,
-          discordTag: data.discord_tag,
-          displayName: data.display_name,
-          enabledFeatures: data.enabled_features || [],
-          accountId: data.account_id,
-          parentDisplayName: data.parent_display_name,  // For sub-admins
-          isHavenSubAdmin: data.is_haven_sub_admin || false  // True if Haven sub-admin (no parent partner)
-        })
+        setUser(buildUserFromData(data))
       } else {
         setUser(null)
       }
@@ -70,12 +83,14 @@ export function AuthProvider({ children }) {
     checkAuth()
   }, [])
 
-  const isAdmin = !!user
+  const isAdmin = !!user && !['member', 'member_readonly'].includes(user?.type)
   const isSuperAdmin = user?.type === 'super_admin'
   const isPartner = user?.type === 'partner'
   const isSubAdmin = user?.type === 'sub_admin'
   const isHavenSubAdmin = user?.isHavenSubAdmin || false
   const isCorrespondent = user?.type === 'correspondent'
+  const isMember = user?.type === 'member' || user?.type === 'member_readonly'
+  const isReadOnly = user?.type === 'member_readonly'
 
   /** Check if the current user can access a given FEATURES flag. Super admins always pass. */
   const canAccess = useCallback((feature) => {
@@ -86,6 +101,7 @@ export function AuthProvider({ children }) {
     return enabled.includes(feature)
   }, [user, isSuperAdmin])
 
+  /** Admin/Partner login with username + password */
   const login = useCallback(async (username, password) => {
     const r = await fetch('/api/admin/login', {
       method: 'POST',
@@ -98,16 +114,26 @@ export function AuthProvider({ children }) {
       throw new Error(data.detail || 'Login failed')
     }
     const data = await r.json()
-    setUser({
-      type: data.user_type,
-      username: data.username,
-      discordTag: data.discord_tag,
-      displayName: data.display_name,
-      enabledFeatures: data.enabled_features || [],
-      accountId: data.account_id,
-      parentDisplayName: data.parent_display_name,
-      isHavenSubAdmin: data.is_haven_sub_admin || false
+    setUser(buildUserFromData(data))
+    return data
+  }, [])
+
+  /** Member login - username only (readonly) or username + password (full member) */
+  const memberLogin = useCallback(async (username, password) => {
+    const body = { username }
+    if (password) body.password = password
+    const r = await fetch('/api/profile/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     })
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}))
+      throw new Error(data.detail || 'Login failed')
+    }
+    const data = await r.json()
+    setUser(buildUserFromData(data))
     return data
   }, [])
 
@@ -128,13 +154,16 @@ export function AuthProvider({ children }) {
     isSubAdmin,
     isHavenSubAdmin,
     isCorrespondent,
+    isMember,
+    isReadOnly,
     user,
     loading,
     login,
+    memberLogin,
     logout,
     canAccess,
     refreshAuth
-  }), [isAdmin, isSuperAdmin, isPartner, isSubAdmin, isHavenSubAdmin, isCorrespondent, user, loading, login, logout, canAccess, refreshAuth])
+  }), [isAdmin, isSuperAdmin, isPartner, isSubAdmin, isHavenSubAdmin, isCorrespondent, isMember, isReadOnly, user, loading, login, memberLogin, logout, canAccess, refreshAuth])
 
   return (
     <AuthContext.Provider value={contextValue}>

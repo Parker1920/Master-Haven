@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.47.0 | 2026-03-16 | Advanced filter cascade across all browse levels |
+| **Master Haven** | 1.48.0 | 2026-03-18 | Unified User Profiles - Phase 1 Backend |
 | Haven-UI | 1.45.3 | 2026-03-17 | Fix GlyphPicker clearing loaded glyph on edit |
-| Backend API | 1.45.3 | 2026-03-16 | Region endpoint accepts advanced filters |
+| Backend API | 1.46.0 | 2026-03-18 | Unified user profiles table, tier-based auth, profile endpoints |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,40 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.48.0 (2026-03-18) - Unified User Profiles (Phase 1: Backend)
+Unified user identity system replacing fragmented auth across partner_accounts, sub_admin_accounts, api_keys, and anonymous submitter fields. Single `user_profiles` table with 4.5-tier permission system.
+
+**Backend API 1.46.0**
+- New `user_profiles` table: single source of truth for all user identity (username, password, tier, defaults, partner/sub-admin fields)
+- 4.5-tier system: Super Admin (1), Partner (2), Sub-Admin (3), Member with password (4), Member readonly (5)
+- `POST /api/profiles/lookup`: Public fuzzy username matching with Levenshtein distance for "is this you?" flow
+- `POST /api/profiles/create`: Auto-create profile on first submission with optional password
+- `POST /api/profiles/claim`: Claim existing profile from fuzzy match suggestions
+- `POST /api/profile/login`: Passwordless member login (tier 5 read-only session)
+- `GET/PUT /api/profiles/me`: View/edit own profile preferences (default civ, reality, galaxy)
+- `POST /api/profiles/me/set-password`: Set password, promotes tier 5 → tier 4
+- `GET /api/admin/profiles`: Admin profile list with search, tier filter, community scoping
+- `PUT /api/admin/profiles/{id}/tier`: Elevate/demote users (super admin only)
+- `PUT /api/admin/profiles/{id}`: Edit profile (super admin or parent partner)
+- `POST /api/admin/profiles/{id}/reset-password`: Admin password reset
+- Login endpoint now uses `user_profiles` table as primary auth, legacy tables as fallback
+- Session system includes `profile_id` for all user types
+- Self-approval prevention simplified to `profile_id` comparison with username fallback
+- `/api/extraction` resolves `submitter_profile_id` from payload, API key, or username
+- `/api/extractor/register` now creates a profile alongside the API key, returns `profile_id`
+- `verify_api_key()` returns `profile_id` from linked profile
+- `get_submitter_identity()` returns `profile_id` for audit logging
+- `normalize_username_for_dedup()`: Authoritative normalization for profile dedup
+- `find_fuzzy_profile_matches()`: Levenshtein distance matching for similar usernames
+- `get_or_create_profile()`: Idempotent profile creation helper
+- `check_self_submission()`: Centralized self-approval check replacing 5 duplicated blocks
+- Migration v1.55.0: Create `user_profiles` table with indexes
+- Migration v1.56.0: Add `profile_id` FK columns to 8 existing tables
+- Migration v1.57.0: Backfill profiles from partner_accounts, sub_admin_accounts, api_keys, anonymous submitters
+- Migration v1.58.0: Backfill `profile_id` on systems, pending_systems, discoveries, audit_log rows
+
+---
 
 #### Haven-UI 1.45.3 (2026-03-17) - Fix Glyph Not Loading on Edit
 Fix GlyphPicker clearing database glyph codes when editing existing systems, which blocked members from submitting edits and broke region name lookup.

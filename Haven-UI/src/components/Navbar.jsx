@@ -20,7 +20,7 @@ export default function Navbar() {
   const intervalRef = useRef(null)
   const warIntervalRef = useRef(null)
   const dropdownRef = useRef(null)
-  const { isAdmin, isSuperAdmin, isPartner, isSubAdmin, isCorrespondent, user, canAccess } = auth
+  const { isAdmin, isSuperAdmin, isPartner, isSubAdmin, isCorrespondent, isMember, user, canAccess } = auth
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -117,13 +117,14 @@ export default function Navbar() {
             <div>
               <div className="text-xl font-semibold" style={{ color: 'var(--app-text)' }}>Haven Control Room</div>
               <div className="text-sm muted" style={{ color: 'var(--app-accent-3)' }}>
-                {isAdmin ? (
+                {user ? (
                   <span>
                     {user?.displayName || user?.username}
                     {isPartner && user?.discordTag && <span className="ml-1 text-cyan-400">({user.discordTag})</span>}
                     {isSuperAdmin && <span className="ml-1 text-yellow-400">(Super Admin)</span>}
                     {isSubAdmin && <span className="ml-1 text-amber-400">(Sub-Admin)</span>}
                     {isCorrespondent && <span className="ml-1 text-red-400">(War Correspondent)</span>}
+                    {isMember && <span className="ml-1 text-green-400">(Member)</span>}
                   </span>
                 ) : 'Web'}
               </div>
@@ -211,16 +212,20 @@ export default function Navbar() {
                 </button>
                 {openDropdown === 'superadmin' && (
                   <div className={dropdownPanel}>
+                    <Link className={dropdownItem} to="/admin/users" onClick={closeDropdown}>User Management</Link>
                     <Link className={dropdownItem} to="/api-keys" onClick={closeDropdown}>API Keys</Link>
-                    <Link className={dropdownItem} to="/admin/partners" onClick={closeDropdown}>Partners</Link>
+                    <Link className={dropdownItem} to="/admin/partners" onClick={closeDropdown}>Partners (Legacy)</Link>
                     <Link className={dropdownItem} to="/admin/audit" onClick={closeDropdown}>Audit Log</Link>
                   </div>
                 )}
               </div>
             )}
 
+            {/* Profile link for all logged-in users */}
+            {user && <Link className={`${navLink} text-green-400`} to="/profile">My Profile</Link>}
+
             {/* Auth button */}
-            {!isAdmin ? (
+            {!user ? (
               <button className="px-3 py-1 bg-blue-500 text-white rounded whitespace-nowrap" onClick={() => setShowLogin(true)}>Login</button>
             ) : (
               <button className="px-3 py-1 bg-red-500 text-white rounded whitespace-nowrap" onClick={() => auth.logout()}>Logout</button>
@@ -302,23 +307,28 @@ export default function Navbar() {
                 <div className="pt-2 mt-1 border-t border-gray-700">
                   <div className="px-3 py-1 text-xs text-gray-500 uppercase tracking-wider">Super Admin</div>
                 </div>
+                <Link className="px-3 py-2 hover:bg-gray-700 rounded pl-5" to="/admin/users" onClick={closeMenu}>User Management</Link>
                 <Link className="px-3 py-2 hover:bg-gray-700 rounded pl-5" to="/api-keys" onClick={closeMenu}>API Keys</Link>
-                <Link className="px-3 py-2 hover:bg-gray-700 rounded pl-5" to="/admin/partners" onClick={closeMenu}>Partners</Link>
+                <Link className="px-3 py-2 hover:bg-gray-700 rounded pl-5" to="/admin/partners" onClick={closeMenu}>Partners (Legacy)</Link>
                 <Link className="px-3 py-2 hover:bg-gray-700 rounded pl-5" to="/admin/audit" onClick={closeMenu}>Audit Log</Link>
               </>
             )}
 
             {/* Auth */}
             <div className="pt-2 border-t border-gray-700">
-              {isAdmin && (
+              {user && (
                 <div className="px-3 py-2 text-sm text-gray-400 mb-2">
                   Logged in as: {user?.displayName || user?.username}
                   {isPartner && user?.discordTag && <span className="text-cyan-400"> ({user.discordTag})</span>}
                   {isSubAdmin && <span className="text-amber-400"> (Sub-Admin)</span>}
                   {isCorrespondent && <span className="text-yellow-400"> (War Correspondent)</span>}
+                  {isMember && <span className="text-green-400"> (Member)</span>}
                 </div>
               )}
-              {!isAdmin ? (
+              {user && (
+                <Link className="px-3 py-2 hover:bg-gray-700 rounded text-green-400 block mb-2" to="/profile" onClick={closeMenu}>My Profile</Link>
+              )}
+              {!user ? (
                 <button className="w-full px-3 py-2 bg-blue-500 text-white rounded" onClick={() => { setShowLogin(true); closeMenu(); }}>Login</button>
               ) : (
                 <button className="w-full px-3 py-2 bg-red-500 text-white rounded" onClick={() => { auth.logout(); closeMenu(); }}>Logout</button>

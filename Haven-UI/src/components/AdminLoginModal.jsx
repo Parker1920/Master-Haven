@@ -3,13 +3,13 @@ import Modal from './Modal'
 import AuthContext from '../utils/AuthContext'
 import axios from 'axios'
 
-/** Renders a login modal with tab toggle between Admin/Partner and War Correspondent modes. Props: open, onClose. */
+/** Renders a login modal with tab toggle between Admin/Partner, Member, and War Correspondent modes. Props: open, onClose. */
 export default function AdminLoginModal({ open, onClose }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [loginType, setLoginType] = useState('admin') // 'admin' or 'correspondent'
+  const [loginType, setLoginType] = useState('admin') // 'admin', 'member', or 'correspondent'
   const auth = useContext(AuthContext)
 
   if (!open) return null
@@ -21,12 +21,14 @@ export default function AdminLoginModal({ open, onClose }) {
     try {
       if (loginType === 'correspondent') {
         // Correspondent login uses a separate endpoint; refreshAuth() picks up the session cookie
-        const response = await axios.post('/api/warroom/correspondents/login', {
-          username,
-          password
-        })
-        // Refresh auth state after correspondent login
+        await axios.post('/api/warroom/correspondents/login', { username, password })
         await auth.refreshAuth()
+        setUsername('')
+        setPassword('')
+        onClose()
+      } else if (loginType === 'member') {
+        // Member login - username only (readonly) or username + password (full member)
+        await auth.memberLogin(username, password || undefined)
         setUsername('')
         setPassword('')
         onClose()
@@ -50,6 +52,8 @@ export default function AdminLoginModal({ open, onClose }) {
     }
   }
 
+  const passwordRequired = loginType !== 'member'
+
   return (
     <Modal title="Login" onClose={onClose}>
       <form onSubmit={submit}>
@@ -69,6 +73,17 @@ export default function AdminLoginModal({ open, onClose }) {
             </button>
             <button
               type="button"
+              onClick={() => setLoginType('member')}
+              className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
+                loginType === 'member'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Member
+            </button>
+            <button
+              type="button"
               onClick={() => setLoginType('correspondent')}
               className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
                 loginType === 'correspondent'
@@ -76,9 +91,16 @@ export default function AdminLoginModal({ open, onClose }) {
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
             >
-              War Correspondent
+              Correspondent
             </button>
           </div>
+
+          {loginType === 'member' && (
+            <div className="text-xs text-gray-400 bg-gray-800 rounded p-2">
+              Login with your username to view your submission history and stats.
+              Password is optional — set one on your profile page to edit your defaults.
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-1">Username</label>
@@ -94,14 +116,16 @@ export default function AdminLoginModal({ open, onClose }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
+            <label className="block text-sm font-medium mb-1">
+              Password {loginType === 'member' && <span className="text-gray-500">(optional)</span>}
+            </label>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={handleKeyDown}
               type="password"
               className="w-full p-2 border rounded bg-gray-700 text-white placeholder-gray-400"
-              placeholder="Enter password"
+              placeholder={loginType === 'member' ? 'Optional - leave blank for read-only' : 'Enter password'}
               disabled={loading}
             />
           </div>
@@ -109,7 +133,7 @@ export default function AdminLoginModal({ open, onClose }) {
             <button
               type="submit"
               className="btn flex-1"
-              disabled={loading || !username.trim() || !password}
+              disabled={loading || !username.trim() || (passwordRequired && !password)}
             >
               {loading ? 'Logging in...' : 'Login'}
             </button>

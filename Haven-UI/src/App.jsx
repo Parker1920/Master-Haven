@@ -29,6 +29,8 @@ const DataRestrictions = lazy(() => import('./pages/DataRestrictions'))
 const ExtractorUsers = lazy(() => import('./pages/ExtractorUsers'))
 const CommunityStats = lazy(() => import('./pages/CommunityStats'))
 const CommunityDetail = lazy(() => import('./pages/CommunityDetail'))
+const Profile = lazy(() => import('./pages/Profile'))
+const UserManagement = lazy(() => import('./pages/UserManagement'))
 
 // Heavy components with Three.js - load separately for better code splitting
 const WarRoom = lazy(() => import('./pages/WarRoom'))
@@ -117,9 +119,11 @@ export default function App() {
               <Route path="/db_stats" element={<DBStats />} />
               <Route path="/community-stats" element={<CommunityStats />} />
               <Route path="/community-stats/:tag" element={<CommunityDetail />} />
+              <Route path="/profile" element={<Profile />} />
 
               {/* Super admin only routes */}
               <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />
+              <Route path="/admin/users" element={<RequireSuperAdmin><UserManagement /></RequireSuperAdmin>} />
               <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
               <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
               <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />

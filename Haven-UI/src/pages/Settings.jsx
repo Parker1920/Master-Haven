@@ -21,7 +21,6 @@ import Button from '../components/Button'
  *   POST     /api/change_password
  *   POST     /api/change_username
  *   POST     /api/backup
- *   POST     /api/db_upload
  *   POST     /api/migrate_hub_tags
  */
 export default function Settings() {
@@ -179,20 +178,6 @@ export default function Settings() {
     }
   }
 
-  const onUploadDB = async (e) => {
-    try {
-      const file = e.target.files && e.target.files[0]
-      if (!file) return
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await fetch('/api/db_upload', { method: 'POST', credentials: 'include', body: fd })
-      if (!res.ok) throw new Error(await res.text())
-      const j = await res.json()
-      alert('DB uploaded: ' + j.path)
-    } catch (e) {
-      alert('DB upload failed: ' + e)
-    }
-  }
 
   const migrateHubTags = async () => {
     if (!confirm('This will rename systems that have "HUB Tag:" in their description to use the hub tag as the system name. The original name will be preserved in the notes. Continue?')) {
@@ -672,15 +657,6 @@ export default function Settings() {
             <div className="flex flex-wrap gap-4">
               <div>
                 <Button onClick={doBackup}>Create Backup</Button>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Upload Database (.db file)</label>
-                <input
-                  type="file"
-                  accept=".db"
-                  onChange={onUploadDB}
-                  className="text-sm text-gray-400"
-                />
               </div>
             </div>
           </div>

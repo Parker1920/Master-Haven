@@ -1,6 +1,6 @@
 {
   "name": "haven-ui",
-  "version": "1.45.3",
+  "version": "1.46.0",
   "private": true,
   "scripts": {
     "dev": "vite --config vite.config.mjs",
@@ -30,6 +30,7 @@
     "@vitejs/plugin-react": "^5.1.0",
     "autoprefixer": "^10.4.14",
     "postcss": "^8.4.24",
+    "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.18",
     "vite": "^7.2.2",
     "vite-plugin-pwa": "^1.1.0"

@@ -105,12 +105,18 @@ export default function PendingApprovals() {
     if (isSuperAdmin) return false
     // Partners can self-approve (trusted community leaders)
     if (user.type === 'partner') return false
-    // Use backend flag if available (most reliable)
+    // Primary: profile_id match (most reliable)
+    if (user.profileId && submission.submitter_profile_id) {
+      return user.profileId === submission.submitter_profile_id
+    }
+    // Use backend flag if available
     if (submission.is_self_submission) return true
+    // Secondary: account_id match
     if (submission.submitter_account_id && submission.submitter_account_type) {
       return user.type === submission.submitter_account_type &&
              user.accountId === submission.submitter_account_id
     }
+    // Tertiary: normalized username fallback
     if (normalizedCurrentUser) {
       if (submission.submitted_by && normalizeDiscordUsername(submission.submitted_by) === normalizedCurrentUser) {
         return true
