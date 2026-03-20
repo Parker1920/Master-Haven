@@ -35,6 +35,7 @@ export default function ApprovalAudit() {
   const [filterAction, setFilterAction] = useState('')
   const [filterSubmissionType, setFilterSubmissionType] = useState('')
   const [searchNotes, setSearchNotes] = useState('')
+  const [filterSource, setFilterSource] = useState('')
   const [dateRange, setDateRange] = useState({ startDate: null, endDate: null })
   const [discordTags, setDiscordTags] = useState([])
   const [exporting, setExporting] = useState(false)
@@ -51,7 +52,7 @@ export default function ApprovalAudit() {
 
   useEffect(() => {
     loadAuditLog()
-  }, [page, filterApprover, filterSubmitter, filterDiscordTag, filterAction, filterSubmissionType, searchNotes, dateRange])
+  }, [page, filterApprover, filterSubmitter, filterDiscordTag, filterAction, filterSubmissionType, searchNotes, filterSource, dateRange])
 
   async function loadDiscordTags() {
     try {
@@ -74,6 +75,7 @@ export default function ApprovalAudit() {
       if (filterAction) params.append('action', filterAction)
       if (filterSubmissionType) params.append('submission_type', filterSubmissionType)
       if (searchNotes) params.append('search', searchNotes)
+      if (filterSource) params.append('source', filterSource)
       if (dateRange.startDate) params.append('start_date', format(dateRange.startDate, 'yyyy-MM-dd'))
       if (dateRange.endDate) params.append('end_date', format(dateRange.endDate, 'yyyy-MM-dd'))
 
@@ -134,6 +136,7 @@ export default function ApprovalAudit() {
     setFilterAction('')
     setFilterSubmissionType('')
     setSearchNotes('')
+    setFilterSource('')
     setDateRange({ startDate: null, endDate: null })
     setPage(0)
   }
@@ -143,19 +146,38 @@ export default function ApprovalAudit() {
       approved: 'bg-green-500 text-white',
       rejected: 'bg-red-500 text-white',
       direct_edit: 'bg-blue-500 text-white',
-      direct_add: 'bg-purple-500 text-white'
+      direct_add: 'bg-purple-500 text-white',
+      edit_pending: 'bg-yellow-500 text-black',
+      tier_change: 'bg-orange-500 text-white',
+      permission_change: 'bg-teal-500 text-white',
+      activated: 'bg-green-600 text-white',
+      deactivated: 'bg-red-600 text-white',
+      password_reset: 'bg-amber-500 text-black'
     }
     const labels = {
       approved: 'APPROVED',
       rejected: 'REJECTED',
       direct_edit: 'EDITED',
-      direct_add: 'ADDED'
+      direct_add: 'ADDED',
+      edit_pending: 'EDIT PENDING',
+      tier_change: 'TIER CHANGE',
+      permission_change: 'PERMS CHANGED',
+      activated: 'ACTIVATED',
+      deactivated: 'DEACTIVATED',
+      password_reset: 'PW RESET'
     }
     return (
       <span className={`px-2 py-1 rounded text-xs font-semibold ${colors[action] || 'bg-gray-500 text-white'}`}>
         {labels[action] || action.toUpperCase()}
       </span>
     )
+  }
+
+  function getSourceBadge(source) {
+    if (!source) return null
+    if (source === 'haven_extractor') return <span className="px-1.5 py-0.5 rounded text-xs bg-purple-600 text-white ml-1">Extractor</span>
+    if (source === 'companion_app') return <span className="px-1.5 py-0.5 rounded text-xs bg-cyan-600 text-white ml-1">Companion</span>
+    return null
   }
 
   function getApproverTypeBadge(type) {
@@ -183,6 +205,7 @@ export default function ApprovalAudit() {
     filterAction,
     filterSubmissionType,
     searchNotes,
+    filterSource,
     dateRange.startDate
   ].filter(Boolean).length
 
@@ -292,6 +315,12 @@ export default function ApprovalAudit() {
                 <option value="rejected">Rejected</option>
                 <option value="direct_edit">Direct Edit</option>
                 <option value="direct_add">Direct Add</option>
+                <option value="edit_pending">Edit Pending</option>
+                <option value="tier_change">Tier Change</option>
+                <option value="permission_change">Permission Change</option>
+                <option value="activated">Activated</option>
+                <option value="deactivated">Deactivated</option>
+                <option value="password_reset">Password Reset</option>
               </select>
             </div>
 
@@ -308,7 +337,27 @@ export default function ApprovalAudit() {
               >
                 <option value="">All</option>
                 <option value="system">System</option>
+                <option value="discovery">Discovery</option>
                 <option value="region">Region</option>
+                <option value="profile">Profile</option>
+              </select>
+            </div>
+
+            {/* Source */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Source</label>
+              <select
+                className="w-full border rounded p-2 bg-gray-600 text-white text-sm"
+                value={filterSource}
+                onChange={(e) => {
+                  setFilterSource(e.target.value)
+                  setPage(0)
+                }}
+              >
+                <option value="">All</option>
+                <option value="manual">Manual</option>
+                <option value="haven_extractor">Extractor</option>
+                <option value="companion_app">Companion App</option>
               </select>
             </div>
 
@@ -395,8 +444,9 @@ export default function ApprovalAudit() {
                     <div className="font-semibold">{entry.submission_name || 'Unknown'}</div>
                     {getActionBadge(entry.action)}
                   </div>
-                  <div className="text-xs text-gray-400 mb-2">
+                  <div className="text-xs text-gray-400 mb-2 flex items-center gap-1">
                     {entry.submission_type} {entry.submission_id === 0 ? '(Direct)' : `#${entry.submission_id}`}
+                    {getSourceBadge(entry.source)}
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
@@ -460,8 +510,9 @@ export default function ApprovalAudit() {
                         <div className="font-semibold truncate" title={entry.submission_name || 'Unknown'}>
                           {entry.submission_name || 'Unknown'}
                         </div>
-                        <div className="text-xs text-gray-400 mt-1">
+                        <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                           {entry.submission_type} {entry.submission_id === 0 ? '(Direct)' : `#${entry.submission_id}`}
+                          {getSourceBadge(entry.source)}
                         </div>
                       </td>
                       <td className="px-4 py-3">

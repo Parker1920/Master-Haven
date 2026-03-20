@@ -4637,3 +4637,48 @@ def migration_1_59_0(conn):
     backfilled = cursor.rowcount
     logger.info(f"Backfilled source on {backfilled} systems from pending_systems")
     conn.commit()
+
+
+@register_migration("1.60.0", "Backfill submitted_by from personal_discord_username where NULL or anonymous")
+def migration_1_60_0(conn):
+    """
+    Fix 'Anonymous' display on pending submissions and region names by copying
+    personal_discord_username to submitted_by where it's missing.
+    """
+    cursor = conn.cursor()
+
+    # Fix pending_systems
+    cursor.execute("""
+        UPDATE pending_systems
+        SET submitted_by = personal_discord_username
+        WHERE personal_discord_username IS NOT NULL
+          AND personal_discord_username != ''
+          AND (submitted_by IS NULL OR submitted_by = '' OR submitted_by = 'Anonymous' OR submitted_by = 'anonymous')
+    """)
+    ps_count = cursor.rowcount
+    logger.info(f"Backfilled submitted_by on {ps_count} pending_systems rows")
+
+    # Fix pending_region_names
+    cursor.execute("""
+        UPDATE pending_region_names
+        SET submitted_by = personal_discord_username
+        WHERE personal_discord_username IS NOT NULL
+          AND personal_discord_username != ''
+          AND (submitted_by IS NULL OR submitted_by = '' OR submitted_by = 'Anonymous' OR submitted_by = 'anonymous')
+    """)
+    rn_count = cursor.rowcount
+    logger.info(f"Backfilled submitted_by on {rn_count} pending_region_names rows")
+
+    conn.commit()
+
+
+@register_migration("1.61.0", "Add source column to approval_audit_log for submission method tracking")
+def migration_1_61_0(conn):
+    """Add source column to track whether audit entries came from manual, extractor, or companion_app."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("ALTER TABLE approval_audit_log ADD COLUMN source TEXT")
+        logger.info("Added source column to approval_audit_log")
+    except Exception:
+        logger.info("source column already exists on approval_audit_log")
+    conn.commit()

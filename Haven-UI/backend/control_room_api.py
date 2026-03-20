@@ -3871,6 +3871,7 @@ async def get_approval_audit(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     search: Optional[str] = None,
+    source: Optional[str] = None,
     session: Optional[str] = Cookie(None)
 ):
     """
@@ -3881,10 +3882,11 @@ async def get_approval_audit(
     - discord_tag: Filter by community
     - approver: Filter by approver username
     - submitter: Filter by submitter username
-    - action: Filter by action type (approved, rejected, direct_edit, direct_add)
-    - submission_type: Filter by submission type (system, region)
+    - action: Filter by action type (approved, rejected, direct_edit, direct_add, tier_change, permission_change, password_reset)
+    - submission_type: Filter by submission type (system, region, discovery, profile)
     - start_date, end_date: Date range filter (ISO format)
     - search: Full-text search across submitter, approver, submission name, and notes
+    - source: Filter by submission source (manual, haven_extractor, companion_app)
     """
     if not is_super_admin(session):
         raise HTTPException(status_code=403, detail='Super admin access required')
@@ -3936,6 +3938,10 @@ async def get_approval_audit(
             search_term = f'%{search}%'
             params.extend([search_term, search_term, search_term, search_term])
 
+        if source:
+            query += ' AND source = ?'
+            params.append(source)
+
         query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
         params.extend([limit, offset])
 
@@ -3978,6 +3984,9 @@ async def get_approval_audit(
             )'''
             search_term = f'%{search}%'
             count_params.extend([search_term, search_term, search_term, search_term])
+        if source:
+            count_query += ' AND source = ?'
+            count_params.append(source)
 
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()[0]
@@ -7689,6 +7698,36 @@ async def admin_set_profile_tier(profile_id: int, request: Request, session: Opt
         conn.commit()
 
         logger.info(f"Profile {profile_id} ({row['username']}) tier changed: {row['tier']} -> {new_tier}")
+
+        # Audit log for tier change
+        tier_names = {1: 'Super Admin', 2: 'Partner', 3: 'Sub-Admin', 4: 'Member', 5: 'Read-Only'}
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, notes, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'tier_change',
+                'profile',
+                profile_id,
+                row['username'],
+                session_data.get('username'),
+                session_data.get('user_type'),
+                session_data.get('profile_id'),
+                session_data.get('discord_tag'),
+                row['username'],
+                f"Tier changed: {tier_names.get(row['tier'], row['tier'])} -> {tier_names.get(new_tier, new_tier)}" +
+                (f" (tag: {body.get('partner_discord_tag')})" if new_tier == TIER_PARTNER else ''),
+                body.get('partner_discord_tag'),
+                'manual'
+            ))
+            conn.commit()
+        except Exception as audit_err:
+            logger.warning(f"Failed to add tier change audit log: {audit_err}")
+
         return {'status': 'ok', 'profile_id': profile_id, 'new_tier': new_tier}
     except HTTPException:
         raise
@@ -7718,7 +7757,7 @@ async def admin_update_profile(profile_id: int, request: Request, session: Optio
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT id, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
+        cursor.execute("SELECT id, username, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -7752,6 +7791,44 @@ async def admin_update_profile(profile_id: int, request: Request, session: Optio
         cursor.execute(f"UPDATE user_profiles SET {set_clause} WHERE id = ?", values)
         conn.commit()
 
+        # Audit log for significant profile changes
+        audit_fields = {'enabled_features', 'is_active', 'additional_discord_tags', 'can_approve_personal_uploads'}
+        if audit_fields & set(body.keys()):
+            try:
+                action = 'deactivated' if body.get('is_active') == False else 'activated' if body.get('is_active') == True else 'permission_change'
+                notes_parts = []
+                if 'enabled_features' in body:
+                    notes_parts.append(f"Features: {json.dumps(body['enabled_features'])}")
+                if 'is_active' in body:
+                    notes_parts.append(f"Active: {body['is_active']}")
+                if 'additional_discord_tags' in body:
+                    notes_parts.append(f"Additional tags: {json.dumps(body['additional_discord_tags'])}")
+                if 'can_approve_personal_uploads' in body:
+                    notes_parts.append(f"Can approve personal: {body['can_approve_personal_uploads']}")
+                cursor.execute('''
+                    INSERT INTO approval_audit_log
+                    (timestamp, action, submission_type, submission_id, submission_name,
+                     approver_username, approver_type, approver_account_id, approver_discord_tag,
+                     submitter_username, notes, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    datetime.now(timezone.utc).isoformat(),
+                    action,
+                    'profile',
+                    profile_id,
+                    row['username'],
+                    session_data.get('username'),
+                    session_data.get('user_type'),
+                    session_data.get('profile_id'),
+                    session_data.get('discord_tag'),
+                    row['username'],
+                    '; '.join(notes_parts),
+                    'manual'
+                ))
+                conn.commit()
+            except Exception as audit_err:
+                logger.warning(f"Failed to add profile edit audit log: {audit_err}")
+
         return {'status': 'ok', 'updated': list(body.keys())}
     except HTTPException:
         raise
@@ -7782,7 +7859,7 @@ async def admin_reset_password(profile_id: int, request: Request, session: Optio
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT id, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
+        cursor.execute("SELECT id, username, tier, parent_profile_id FROM user_profiles WHERE id = ?", (profile_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -7801,6 +7878,32 @@ async def admin_reset_password(profile_id: int, request: Request, session: Optio
             UPDATE user_profiles SET password_hash = ?, tier = ?, updated_at = ? WHERE id = ?
         """, (new_hash, new_tier, datetime.now(timezone.utc).isoformat(), profile_id))
         conn.commit()
+
+        # Audit log for password reset
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, notes, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'password_reset',
+                'profile',
+                profile_id,
+                row['username'],
+                session_data.get('username'),
+                session_data.get('user_type'),
+                session_data.get('profile_id'),
+                session_data.get('discord_tag'),
+                row['username'],
+                'Admin password reset',
+                'manual'
+            ))
+            conn.commit()
+        except Exception as audit_err:
+            logger.warning(f"Failed to add password reset audit log: {audit_err}")
 
         return {'status': 'ok', 'new_tier': new_tier}
     except HTTPException:
@@ -10591,9 +10694,10 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
     logger.info(f"Region name submission from {client_ip}: region=[{rx},{ry},{rz}], payload={payload}")
 
     proposed_name = payload.get('proposed_name', '').strip()
-    submitted_by = payload.get('submitted_by', 'anonymous').strip() or 'anonymous'
     discord_tag = payload.get('discord_tag')  # Community tag for routing
     personal_discord_username = (payload.get('personal_discord_username') or '').strip() or None  # Discord username for contact
+    # Use personal_discord_username as fallback for submitted_by to avoid "anonymous" display
+    submitted_by = (payload.get('submitted_by') or '').strip() or personal_discord_username or 'anonymous'
     reality = payload.get('reality', 'Normal')
     galaxy = payload.get('galaxy', 'Euclid')
 
@@ -10872,8 +10976,35 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
             'region_approved',
             f"Region name '{proposed_name}' approved",
             details=f"Region: [{rx}, {ry}, {rz}]",
-            user_name='Admin'
+            user_name=session_data.get('username', 'Admin') if 'session_data' in dir() else 'Admin'
         )
+
+        # Audit log for region approval
+        try:
+            s_data = get_session(session)
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'approved',
+                'region',
+                submission_id,
+                proposed_name,
+                s_data.get('username', 'admin') if s_data else 'admin',
+                s_data.get('user_type', 'super_admin') if s_data else 'super_admin',
+                s_data.get('profile_id') if s_data else None,
+                s_data.get('discord_tag') if s_data else None,
+                row['submitted_by'] if row else None,
+                row['discord_tag'] if row and 'discord_tag' in row.keys() else None,
+                'manual'
+            ))
+            conn.commit()
+        except Exception as audit_err:
+            logger.warning(f"Failed to add region audit log: {audit_err}")
 
         return {
             'status': 'approved',
@@ -10933,12 +11064,40 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
         conn.commit()
 
         # Add activity log
+        s_data = get_session(session)
         add_activity_log(
             'region_rejected',
             f"Region name '{proposed_name}' rejected",
             details=f"Region: [{rx}, {ry}, {rz}]. Reason: {review_notes or 'No reason provided'}",
-            user_name='Admin'
+            user_name=s_data.get('username', 'Admin') if s_data else 'Admin'
         )
+
+        # Audit log for region rejection
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, notes, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'rejected',
+                'region',
+                submission_id,
+                proposed_name,
+                s_data.get('username', 'admin') if s_data else 'admin',
+                s_data.get('user_type', 'super_admin') if s_data else 'super_admin',
+                s_data.get('profile_id') if s_data else None,
+                s_data.get('discord_tag') if s_data else None,
+                submission_dict.get('submitted_by'),
+                review_notes,
+                submission_dict.get('discord_tag'),
+                'manual'
+            ))
+            conn.commit()
+        except Exception as audit_err:
+            logger.warning(f"Failed to add region rejection audit log: {audit_err}")
 
         return {
             'status': 'rejected',
@@ -11699,8 +11858,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 INSERT INTO approval_audit_log
                 (timestamp, action, submission_type, submission_id, submission_name,
                  approver_username, approver_type, approver_account_id, approver_discord_tag,
-                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 datetime.now(timezone.utc).isoformat(),
                 action,
@@ -11715,7 +11874,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 current_account_id,
                 current_user_type,
                 f"Direct save to database (system_id: {sys_id})",
-                payload.get('discord_tag')
+                payload.get('discord_tag'),
+                'manual'
             ))
             conn.commit()
             logger.info(f"Audit log: {action} for system '{name}' by {current_username}")
@@ -13970,8 +14130,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             INSERT INTO approval_audit_log
             (timestamp, action, submission_type, submission_id, submission_name,
              approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.now(timezone.utc).isoformat(),
             'approved',
@@ -13986,6 +14146,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             submission.get('submitter_account_id'),
             submission.get('submitter_account_type'),
             submission.get('discord_tag'),
+            submission.get('source', 'manual'),
         ))
 
         conn.commit()
@@ -14081,8 +14242,8 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
             INSERT INTO approval_audit_log
             (timestamp, action, submission_type, submission_id, submission_name,
              approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.now(timezone.utc).isoformat(),
             'rejected',
@@ -14098,6 +14259,7 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
             submission.get('submitter_account_type'),
             reason,
             submission.get('discord_tag'),
+            submission.get('source', 'manual'),
         ))
 
         conn.commit()
@@ -14794,8 +14956,8 @@ async def edit_pending_system(submission_id: int, request: Request, session: Opt
                 INSERT INTO approval_audit_log
                 (timestamp, action, submission_type, submission_id, submission_name,
                  approver_username, approver_type, approver_account_id, approver_discord_tag,
-                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 datetime.now(timezone.utc).isoformat(),
                 'edit_pending',
@@ -14810,7 +14972,8 @@ async def edit_pending_system(submission_id: int, request: Request, session: Opt
                 submission.get('submitter_account_id'),
                 submission.get('submitter_account_type'),
                 f"Edited pending submission (old name: '{old_name}', new name: '{new_name}')",
-                submission.get('discord_tag')
+                submission.get('discord_tag'),
+                submission.get('source', 'manual')
             ))
         except Exception as audit_err:
             logger.warning(f"Failed to add audit log for edit: {audit_err}")
@@ -15459,8 +15622,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             INSERT INTO approval_audit_log
             (timestamp, action, submission_type, submission_id, submission_name,
              approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.now(timezone.utc).isoformat(),
             'approved',
@@ -15471,11 +15634,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             current_user_type,
             current_account_id,
             session_data.get('discord_tag'),
-            # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
             submission.get('personal_discord_username') or submission.get('submitted_by'),
             submission.get('submitter_account_id'),
             submission.get('submitter_account_type'),
-            submission.get('discord_tag')
+            submission.get('discord_tag'),
+            submission.get('source', 'manual')
         ))
 
         conn.commit()
@@ -15574,8 +15737,8 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
             INSERT INTO approval_audit_log
             (timestamp, action, submission_type, submission_id, submission_name,
              approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.now(timezone.utc).isoformat(),
             'rejected',
@@ -15586,12 +15749,12 @@ async def reject_system(submission_id: int, payload: dict, session: Optional[str
             current_user_type,
             current_account_id,
             session_data.get('discord_tag'),
-            # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
             submission.get('personal_discord_username') or submission.get('submitted_by'),
             submission.get('submitter_account_id'),
             submission.get('submitter_account_type'),
             reason,
-            submission.get('discord_tag')
+            submission.get('discord_tag'),
+            submission.get('source', 'manual')
         ))
 
         conn.commit()
@@ -16075,8 +16238,8 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     INSERT INTO approval_audit_log
                     (timestamp, action, submission_type, submission_id, submission_name,
                      approver_username, approver_type, approver_account_id, approver_discord_tag,
-                     submitter_username, submitter_account_id, submitter_type, submission_discord_tag)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     datetime.now(timezone.utc).isoformat(),
                     'approved',
@@ -16087,11 +16250,11 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     current_user_type,
                     current_account_id,
                     session_data.get('discord_tag'),
-                    # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
                     submission.get('personal_discord_username') or submission.get('submitted_by'),
                     submission.get('submitter_account_id'),
                     submission.get('submitter_account_type'),
-                    submission.get('discord_tag')
+                    submission.get('discord_tag'),
+                    submission.get('source', 'manual')
                 ))
 
                 results['approved'].append({
@@ -16237,8 +16400,8 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
                     INSERT INTO approval_audit_log
                     (timestamp, action, submission_type, submission_id, submission_name,
                      approver_username, approver_type, approver_account_id, approver_discord_tag,
-                     submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     datetime.now(timezone.utc).isoformat(),
                     'rejected',
@@ -16249,12 +16412,12 @@ async def batch_reject_systems(payload: dict, session: Optional[str] = Cookie(No
                     current_user_type,
                     current_account_id,
                     session_data.get('discord_tag'),
-                    # Show personal_discord_username (required for all submissions now) or fall back to submitted_by
                     submission.get('personal_discord_username') or submission.get('submitted_by'),
                     submission.get('submitter_account_id'),
                     submission.get('submitter_account_type'),
                     reason,
-                    submission.get('discord_tag')
+                    submission.get('discord_tag'),
+                    submission.get('source', 'manual')
                 ))
 
                 results['rejected'].append({
@@ -16707,14 +16870,15 @@ async def receive_extraction(
         if api_key_info and api_key_info.get('key_type') == 'system':
             api_key_name = f"{api_key_info['name']} (unregistered)"
 
+        submitter_display = discord_username if discord_username else 'HavenExtractor'
         cursor.execute('''
             INSERT INTO pending_systems (
                 system_name, glyph_code, galaxy, reality, x, y, z,
                 region_x, region_y, region_z,
-                submitter_name, submission_timestamp, submission_date, status, source,
+                submitter_name, submitted_by, submission_timestamp, submission_date, status, source,
                 raw_json, system_data, discord_tag, personal_discord_username, personal_id,
                 submitted_by_ip, api_key_name, edit_system_id, game_mode, submitter_profile_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submission_data['name'],
             glyph_code,
@@ -16726,7 +16890,8 @@ async def receive_extraction(
             region_x,
             region_y,
             region_z,
-            discord_username if discord_username else 'HavenExtractor',
+            submitter_display,
+            submitter_display,  # submitted_by - was missing, caused "Anonymous" display
             now,
             now,  # submission_date
             'pending',
