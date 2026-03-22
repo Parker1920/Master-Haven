@@ -928,6 +928,8 @@ export default function SystemDetail() {
                         { key: 'storm_crystals', label: 'Storm Crystals', icon: '\u{1F48E}' },
                         { key: 'gravitino_balls', label: 'Gravitino Balls', icon: '\u{1F7E3}' },
                         { key: 'is_gas_giant', label: 'Gas Giant', icon: '\u{1F310}' },
+                        { key: 'is_bubble', label: 'Bubble Planet', icon: '\u{1FAE7}' },
+                        { key: 'is_floating_islands', label: 'Floating Islands', icon: '\u{1F3DD}' },
                       ].filter(a => planet[a.key])
                       const hasExoticTrophy = planet.exotic_trophy && planet.exotic_trophy.trim()
                       if (attrs.length === 0 && !hasExoticTrophy) return null

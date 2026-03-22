@@ -146,9 +146,10 @@ export default function Wizard(){
           proposed_name: proposedRegionName.trim(),
           submitted_by,
           discord_tag: system.discord_tag || null,
-          personal_discord_username: system.discord_tag === 'personal' ? personalDiscordUsername : null,
+          personal_discord_username: system.discord_tag === 'personal' ? personalDiscordUsername : submitterDiscordUsername.trim() || null,
           reality: system.reality || 'Normal',
-          galaxy: system.galaxy || 'Euclid'
+          galaxy: system.galaxy || 'Euclid',
+          submitter_profile_id: user?.profile_id || null
         }
       )
       setRegionSubmitResult({ success: true, message: 'Region name submitted for approval!' })
@@ -197,6 +198,14 @@ export default function Wizard(){
             if(!m.name || !m.name.trim()){ alert('All moons must have a name'); return; }
           }
         }
+      }
+    }
+
+    // Region naming is REQUIRED for unnamed regions (only if region coordinates are decoded)
+    if (system.region_x !== null && system.region_y !== null && system.region_z !== null) {
+      if (regionInfo && !regionInfo.custom_name && !regionInfo.pending_name) {
+        alert('This region does not have a name yet. Please propose a region name before submitting your system.');
+        return;
       }
     }
 
@@ -417,6 +426,8 @@ export default function Wizard(){
       storm_crystals: 0,
       gravitino_balls: 0,
       is_gas_giant: 0,
+      is_bubble: 0,
+      is_floating_islands: 0,
       exotic_trophy: ''
     })
     setPlanetModalOpen(true)
@@ -639,8 +650,8 @@ export default function Wizard(){
 
                 {/* Case 3: No name, no pending - allow proposal */}
                 {!regionInfo.custom_name && !regionInfo.pending_name && (
-                  <div className="p-3 bg-gray-800 border border-gray-600 rounded">
-                    <div className="text-gray-400 text-sm mb-2">This region has no name yet. Would you like to propose one?</div>
+                  <div className="p-3 bg-amber-900/30 border border-amber-600 rounded">
+                    <div className="text-amber-300 text-sm mb-2 font-semibold">This region has no name yet. A region name is required before submission. <span className="text-red-400">*</span></div>
                     <div className="flex items-center gap-2">
                       <input
                         type="text"

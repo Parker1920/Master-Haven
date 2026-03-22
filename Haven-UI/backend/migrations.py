@@ -4682,3 +4682,74 @@ def migration_1_61_0(conn):
     except Exception:
         logger.info("source column already exists on approval_audit_log")
     conn.commit()
+
+
+# =============================================================================
+# v1.62.0 - Add is_bubble and is_floating_islands columns to planets and moons
+# =============================================================================
+@register_migration("1.62.0", "Add is_bubble and is_floating_islands columns to planets and moons")
+def migration_1_62_0(conn):
+    """
+    Track Bubble Planet and Floating Islands planetary attributes.
+    These are rare biome features added in NMS Worlds Part updates.
+    """
+    cursor = conn.cursor()
+
+    for table in ['planets', 'moons']:
+        for col in ['is_bubble', 'is_floating_islands']:
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER DEFAULT 0")
+                logger.info(f"Added {col} column to {table} table")
+            except Exception as e:
+                if "duplicate column" in str(e).lower():
+                    logger.info(f"{col} column already exists in {table}")
+                else:
+                    raise
+
+    conn.commit()
+
+
+# =============================================================================
+# v1.63.0 - Add submitter_profile_id to pending_region_names for profile tracking
+# =============================================================================
+@register_migration("1.63.0", "Add submitter_profile_id to pending_region_names for profile tracking")
+def migration_1_63_0(conn):
+    """
+    Track which user_profile submitted region name proposals.
+    Backfill from personal_discord_username where possible.
+    """
+    cursor = conn.cursor()
+
+    # Add submitter_profile_id column
+    try:
+        cursor.execute("ALTER TABLE pending_region_names ADD COLUMN submitter_profile_id INTEGER")
+        logger.info("Added submitter_profile_id column to pending_region_names")
+    except Exception as e:
+        if "duplicate column" in str(e).lower():
+            logger.info("submitter_profile_id column already exists in pending_region_names")
+        else:
+            raise
+
+    # Backfill from user_profiles where personal_discord_username matches
+    try:
+        cursor.execute("""
+            SELECT name FROM sqlite_master WHERE type='table' AND name='user_profiles'
+        """)
+        if cursor.fetchone():
+            cursor.execute("""
+                UPDATE pending_region_names
+                SET submitter_profile_id = (
+                    SELECT up.id FROM user_profiles up
+                    WHERE LOWER(REPLACE(up.username, '#', '')) = LOWER(REPLACE(pending_region_names.personal_discord_username, '#', ''))
+                    LIMIT 1
+                )
+                WHERE personal_discord_username IS NOT NULL
+                  AND personal_discord_username != ''
+                  AND submitter_profile_id IS NULL
+            """)
+            backfilled = cursor.rowcount
+            logger.info(f"Backfilled submitter_profile_id on {backfilled} pending_region_names rows")
+    except Exception as e:
+        logger.warning(f"Could not backfill submitter_profile_id: {e}")
+
+    conn.commit()

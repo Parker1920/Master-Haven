@@ -218,7 +218,8 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
           {(() => {
             const c = [
               planet.has_rings, planet.is_dissonant, planet.is_infested,
-              planet.extreme_weather, planet.water_world, planet.vile_brood
+              planet.extreme_weather, planet.water_world, planet.vile_brood,
+              planet.is_bubble, planet.is_floating_islands
             ].filter(Boolean).length + (planet.exotic_trophy ? 1 : 0)
             return c > 0 ? <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">{c}</span> : null
           })()}
@@ -259,6 +260,8 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
                   { key: 'water_world', label: 'Water World', icon: 'water' },
                   { key: 'vile_brood', label: 'Vile Brood', icon: 'skull' },
                   { key: 'is_gas_giant', label: 'Gas Giant', icon: 'globe' },
+                  { key: 'is_bubble', label: 'Bubble Planet', icon: 'bubble' },
+                  { key: 'is_floating_islands', label: 'Floating Islands', icon: 'float' },
                 ].map(({ key, label, icon }) => {
                   const active = !!planet[key]
                   return (
@@ -280,6 +283,8 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
                         {icon === 'water' && '\u{1F30A}'}
                         {icon === 'skull' && '\u{1F480}'}
                         {icon === 'globe' && '\u{1F310}'}
+                        {icon === 'bubble' && '\u{1FAE7}'}
+                        {icon === 'float' && '\u{1F3DD}'}
                       </span>
                       {label}
                     </button>

@@ -1597,7 +1597,7 @@ async def spa_haven_war_room_admin():
 @app.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.46.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.47.0', 'api': 'Master Haven'}
 
 @app.get('/api/stats')
 async def api_stats():
@@ -10700,6 +10700,7 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
     submitted_by = (payload.get('submitted_by') or '').strip() or personal_discord_username or 'anonymous'
     reality = payload.get('reality', 'Normal')
     galaxy = payload.get('galaxy', 'Euclid')
+    submitter_profile_id = payload.get('submitter_profile_id')
 
     if not proposed_name:
         logger.warning(f"Region name submission rejected - empty proposed_name. Full payload: {payload}")
@@ -10759,11 +10760,12 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
         cursor.execute('''
             INSERT INTO pending_region_names
             (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
-             submission_date, status, discord_tag, personal_discord_username, reality, galaxy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+             submission_date, status, discord_tag, personal_discord_username, reality, galaxy,
+             submitter_profile_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
         ''', (rx, ry, rz, proposed_name, submitted_by, client_ip,
               datetime.now(timezone.utc).isoformat(), discord_tag, personal_discord_username,
-              reality, galaxy))
+              reality, galaxy, submitter_profile_id))
 
         conn.commit()
 
@@ -11108,6 +11110,220 @@ async def api_reject_region_name(submission_id: int, payload: dict = None, sessi
         raise
     except Exception as e:
         logger.error(f"Error rejecting region name: {e}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/approve_region_names/batch')
+async def api_batch_approve_region_names(payload: dict, session: Optional[str] = Cookie(None)):
+    """Batch approve pending region name submissions. Requires batch_approvals feature."""
+    from datetime import datetime, timezone
+
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail='Admin authentication required')
+    session_data = get_session(session)
+    require_feature(session_data, 'approvals')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    if not is_super:
+        enabled_features = session_data.get('enabled_features', [])
+        if 'batch_approvals' not in enabled_features:
+            raise HTTPException(status_code=403, detail='Batch approvals permission required')
+
+    submission_ids = payload.get('submission_ids', [])
+    if not submission_ids or not isinstance(submission_ids, list):
+        raise HTTPException(status_code=400, detail='submission_ids array is required')
+
+    results = {'approved': [], 'failed': [], 'skipped': []}
+    approver_username = session_data.get('username', 'admin')
+    approver_profile_id = session_data.get('profile_id')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                cursor.execute('SELECT * FROM pending_region_names WHERE id = ? AND status = ?',
+                               (submission_id, 'pending'))
+                row = cursor.fetchone()
+                if not row:
+                    results['failed'].append({'id': submission_id, 'error': 'Not found or already processed'})
+                    continue
+
+                submission = dict(row)
+                rx, ry, rz = submission['region_x'], submission['region_y'], submission['region_z']
+                proposed_name = submission['proposed_name']
+                reality = submission.get('reality') or 'Normal'
+                galaxy = submission.get('galaxy') or 'Euclid'
+
+                # Self-submission check (skip, don't fail)
+                if not is_super:
+                    submitter_profile = submission.get('submitter_profile_id')
+                    submitter_username = submission.get('personal_discord_username') or submission.get('submitted_by', '')
+                    if approver_profile_id and submitter_profile and approver_profile_id == submitter_profile:
+                        results['skipped'].append({'id': submission_id, 'name': proposed_name, 'reason': 'Self-submission'})
+                        continue
+                    if submitter_username and normalize_discord_username(submitter_username) == normalize_discord_username(approver_username):
+                        results['skipped'].append({'id': submission_id, 'name': proposed_name, 'reason': 'Self-submission'})
+                        continue
+
+                # Check name uniqueness
+                cursor.execute('SELECT id FROM regions WHERE custom_name = ?', (proposed_name,))
+                if cursor.fetchone():
+                    results['failed'].append({'id': submission_id, 'name': proposed_name, 'error': 'Name already taken'})
+                    cursor.execute('''
+                        UPDATE pending_region_names SET status = 'rejected', review_date = ?, review_notes = ? WHERE id = ?
+                    ''', (datetime.now(timezone.utc).isoformat(), 'Name already taken by another region', submission_id))
+                    continue
+
+                # Approve: INSERT or UPDATE region
+                cursor.execute('''
+                    INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
+                    DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
+                ''', (rx, ry, rz, proposed_name, reality, galaxy))
+
+                # Mark as approved
+                cursor.execute('''
+                    UPDATE pending_region_names SET status = 'approved', review_date = ?, reviewed_by = ? WHERE id = ?
+                ''', (datetime.now(timezone.utc).isoformat(), approver_username, submission_id))
+
+                # Audit log
+                try:
+                    cursor.execute('''
+                        INSERT INTO approval_audit_log
+                        (timestamp, action, submission_type, submission_id, submission_name,
+                         approver_username, approver_type, approver_account_id, approver_discord_tag,
+                         submitter_username, submission_discord_tag, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        datetime.now(timezone.utc).isoformat(), 'approved', 'region', submission_id,
+                        proposed_name, approver_username,
+                        session_data.get('user_type', 'super_admin'), approver_profile_id,
+                        session_data.get('discord_tag'), submission.get('submitted_by'),
+                        submission.get('discord_tag'), 'manual'
+                    ))
+                except Exception as audit_err:
+                    logger.warning(f"Failed to add batch region audit log: {audit_err}")
+
+                results['approved'].append({'id': submission_id, 'name': proposed_name,
+                                           'coords': f'[{rx}, {ry}, {rz}]'})
+
+            except Exception as e:
+                results['failed'].append({'id': submission_id, 'error': str(e)})
+
+        conn.commit()
+
+        add_activity_log(
+            'batch_region_approved',
+            f"Batch approved {len(results['approved'])} region names",
+            details=f"Approved: {len(results['approved'])}, Failed: {len(results['failed'])}, Skipped: {len(results['skipped'])}",
+            user_name=approver_username
+        )
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch region approve: {e}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post('/api/reject_region_names/batch')
+async def api_batch_reject_region_names(payload: dict, session: Optional[str] = Cookie(None)):
+    """Batch reject pending region name submissions. Requires batch_approvals feature."""
+    from datetime import datetime, timezone
+
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail='Admin authentication required')
+    session_data = get_session(session)
+    require_feature(session_data, 'approvals')
+
+    is_super = session_data.get('user_type') == 'super_admin'
+    if not is_super:
+        enabled_features = session_data.get('enabled_features', [])
+        if 'batch_approvals' not in enabled_features:
+            raise HTTPException(status_code=403, detail='Batch approvals permission required')
+
+    submission_ids = payload.get('submission_ids', [])
+    reason = payload.get('reason', '')
+    if not submission_ids or not isinstance(submission_ids, list):
+        raise HTTPException(status_code=400, detail='submission_ids array is required')
+
+    results = {'rejected': [], 'failed': [], 'skipped': []}
+    approver_username = session_data.get('username', 'admin')
+    approver_profile_id = session_data.get('profile_id')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                cursor.execute('SELECT * FROM pending_region_names WHERE id = ? AND status = ?',
+                               (submission_id, 'pending'))
+                row = cursor.fetchone()
+                if not row:
+                    results['failed'].append({'id': submission_id, 'error': 'Not found or already processed'})
+                    continue
+
+                submission = dict(row)
+                proposed_name = submission['proposed_name']
+
+                # Mark as rejected
+                cursor.execute('''
+                    UPDATE pending_region_names SET status = 'rejected', review_date = ?, reviewed_by = ?, review_notes = ?
+                    WHERE id = ?
+                ''', (datetime.now(timezone.utc).isoformat(), approver_username, reason, submission_id))
+
+                # Audit log
+                try:
+                    cursor.execute('''
+                        INSERT INTO approval_audit_log
+                        (timestamp, action, submission_type, submission_id, submission_name,
+                         approver_username, approver_type, approver_account_id, approver_discord_tag,
+                         submitter_username, notes, submission_discord_tag, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        datetime.now(timezone.utc).isoformat(), 'rejected', 'region', submission_id,
+                        proposed_name, approver_username,
+                        session_data.get('user_type', 'super_admin'), approver_profile_id,
+                        session_data.get('discord_tag'), submission.get('submitted_by'),
+                        reason, submission.get('discord_tag'), 'manual'
+                    ))
+                except Exception as audit_err:
+                    logger.warning(f"Failed to add batch region reject audit log: {audit_err}")
+
+                results['rejected'].append({'id': submission_id, 'name': proposed_name})
+
+            except Exception as e:
+                results['failed'].append({'id': submission_id, 'error': str(e)})
+
+        conn.commit()
+
+        add_activity_log(
+            'batch_region_rejected',
+            f"Batch rejected {len(results['rejected'])} region names",
+            details=f"Rejected: {len(results['rejected'])}, Failed: {len(results['failed'])}. Reason: {reason or 'No reason'}",
+            user_name=approver_username
+        )
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch region reject: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
@@ -11731,9 +11947,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     common_resource, uncommon_resource, rare_resource,
                     weather_text, sentinels_text, flora_text, fauna_text,
                     has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
-                    ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy
+                    ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
+                    is_bubble, is_floating_islands
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 planet.get('name', 'Unknown'),
@@ -11784,7 +12001,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 1 if planet.get('storm_crystals') else 0,
                 1 if planet.get('gravitino_balls') else 0,
                 1 if planet.get('is_gas_giant') else 0,
-                planet.get('exotic_trophy')
+                planet.get('exotic_trophy'),
+                1 if planet.get('is_bubble') else 0,
+                1 if planet.get('is_floating_islands') else 0
             ))
             planet_id = cursor.lastrowid
 
@@ -11793,8 +12012,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
-                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
+                        is_bubble, is_floating_islands)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name', 'Unknown'),
@@ -11820,7 +12040,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     1 if moon.get('storm_crystals') else 0,
                     1 if moon.get('gravitino_balls') else 0,
                     1 if moon.get('infested') else 0,
-                    1 if moon.get('is_gas_giant') else 0
+                    1 if moon.get('is_gas_giant') else 0,
+                    1 if moon.get('is_bubble') else 0,
+                    1 if moon.get('is_floating_islands') else 0
                 ))
 
         # Insert space station if present
@@ -15392,7 +15614,8 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         common_resource = ?, uncommon_resource = ?, rare_resource = ?,
                         weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?,
                         has_rings = ?, is_dissonant = ?, is_infested = ?, extreme_weather = ?, water_world = ?, vile_brood = ?,
-                        ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, exotic_trophy = ?
+                        ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, is_gas_giant = ?, exotic_trophy = ?,
+                        is_bubble = ?, is_floating_islands = ?
                     WHERE id = ?
                 ''', (
                     planet.get('x', 0),
@@ -15439,7 +15662,10 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if planet.get('salvageable_scrap') else 0,
                     1 if planet.get('storm_crystals') else 0,
                     1 if planet.get('gravitino_balls') else 0,
+                    1 if planet.get('is_gas_giant') else 0,
                     planet.get('exotic_trophy'),
+                    1 if planet.get('is_bubble') else 0,
+                    1 if planet.get('is_floating_islands') else 0,
                     existing_planet_id
                 ))
                 planet_id = existing_planet_id
@@ -15456,9 +15682,10 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                         common_resource, uncommon_resource, rare_resource,
                         weather_text, sentinels_text, flora_text, fauna_text,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
-                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
+                        is_bubble, is_floating_islands
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     system_id,
                     planet_name,
@@ -15507,7 +15734,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if planet.get('storm_crystals') else 0,
                     1 if planet.get('gravitino_balls') else 0,
                     1 if planet.get('is_gas_giant') else 0,
-                    planet.get('exotic_trophy')
+                    planet.get('exotic_trophy'),
+                    1 if planet.get('is_bubble') else 0,
+                    1 if planet.get('is_floating_islands') else 0
                 ))
                 planet_id = cursor.lastrowid
                 if is_edit:
@@ -15518,8 +15747,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
-                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
+                        is_bubble, is_floating_islands)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -15545,7 +15775,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if moon.get('storm_crystals') else 0,
                     1 if moon.get('gravitino_balls') else 0,
                     1 if moon.get('infested') else 0,
-                    1 if moon.get('is_gas_giant') else 0
+                    1 if moon.get('is_gas_giant') else 0,
+                    1 if moon.get('is_bubble') else 0,
+                    1 if moon.get('is_floating_islands') else 0
                 ))
 
         # Handle root-level moons (from Haven Extractor which sends moons as flat list)
@@ -15559,8 +15791,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 cursor.execute('''
                     INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
-                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
+                        is_bubble, is_floating_islands)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,  # Attach to last planet
                     moon.get('name'),
@@ -15586,7 +15819,9 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                     1 if moon.get('storm_crystals') else 0,
                     1 if moon.get('gravitino_balls') else 0,
                     1 if moon.get('infested') else 0,
-                    1 if moon.get('is_gas_giant') else 0
+                    1 if moon.get('is_gas_giant') else 0,
+                    1 if moon.get('is_bubble') else 0,
+                    1 if moon.get('is_floating_islands') else 0
                 ))
 
         # Insert space station if present
@@ -16116,9 +16351,10 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             common_resource, uncommon_resource, rare_resource,
                             weather_text, sentinels_text, flora_text, fauna_text,
                             has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
-                            ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy
+                            ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
+                            is_bubble, is_floating_islands
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         planet.get('name'),
@@ -16167,7 +16403,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         1 if planet.get('storm_crystals') else 0,
                         1 if planet.get('gravitino_balls') else 0,
                         1 if planet.get('is_gas_giant') else 0,
-                        planet.get('exotic_trophy')
+                        planet.get('exotic_trophy'),
+                        1 if planet.get('is_bubble') else 0,
+                        1 if planet.get('is_floating_islands') else 0
                     ))
                     planet_id = cursor.lastrowid
 
@@ -16202,7 +16440,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                             1 if moon.get('storm_crystals') else 0,
                             1 if moon.get('gravitino_balls') else 0,
                             1 if moon.get('infested') else 0,
-                            1 if moon.get('is_gas_giant') else 0
+                            1 if moon.get('is_gas_giant') else 0,
+                            1 if moon.get('is_bubble') else 0,
+                            1 if moon.get('is_floating_islands') else 0
                         ))
 
                 # Insert space station if present
@@ -16744,7 +16984,10 @@ async def receive_extraction(
             'salvageable_scrap': planet_data.get('salvageable_scrap'),
             'storm_crystals': planet_data.get('storm_crystals'),
             'gravitino_balls': planet_data.get('gravitino_balls'),
+            'is_gas_giant': planet_data.get('is_gas_giant'),
             'exotic_trophy': planet_data.get('exotic_trophy'),
+            'is_bubble': planet_data.get('is_bubble'),
+            'is_floating_islands': planet_data.get('is_floating_islands'),
         }
 
         if planet_data.get('is_moon', False):

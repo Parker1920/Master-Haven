@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.48.0 | 2026-03-18 | Unified User Profiles - Phase 1 Backend |
-| Haven-UI | 1.45.3 | 2026-03-17 | Fix GlyphPicker clearing loaded glyph on edit |
-| Backend API | 1.46.0 | 2026-03-18 | Unified user profiles table, tier-based auth, profile endpoints |
+| **Master Haven** | 1.49.0 | 2026-03-22 | Bubble/Floating planet tags, required region naming, batch region approve |
+| Haven-UI | 1.47.0 | 2026-03-22 | Bubble/Floating planet tags, required region naming, batch region UI |
+| Backend API | 1.47.0 | 2026-03-22 | New planet columns, batch region endpoints, profile tracking on region names |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,39 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.49.0 (2026-03-22) - Bubble/Floating Planet Tags, Required Region Naming, Batch Region Approve
+Three features: new planet attribute tags, mandatory region naming in Wizard, and batch approve/reject for pending region names.
+
+**Haven-UI 1.47.0**
+- PlanetEditor: 2 new special feature toggles — "Bubble Planet" and "Floating Islands" fill the remaining grid slots
+- MoonEditor: Same 2 new toggles added
+- Wizard: Planet/moon defaults include `is_bubble: 0` and `is_floating_islands: 0`
+- Wizard: Region naming now **required** for unnamed regions — submission blocked until a region name is proposed or already exists
+- Wizard: Unnamed region section styled as amber/required instead of gray/optional
+- Wizard: `submitter_profile_id` included in region name submission payload
+- Wizard: `personal_discord_username` sent for all region submissions (not just personal tag)
+- SystemDetail: Bubble Planet and Floating Islands badges displayed in Special Attributes section
+- PendingApprovals: Bubble Planet and Floating Islands checkboxes in planet/moon edit mode
+- PendingApprovals: Bubble Planet (pink) and Floating Islands (teal) badges in read-only mode for planets and moons
+- PendingApprovals: Batch mode toggle for Pending Region Names section
+- PendingApprovals: Region batch select-all, clear, approve/reject with self-submission prevention
+- PendingApprovals: Batch region reject modal with reason field
+- PendingApprovals: Reuses existing batch results modal for region batch operations
+
+**Backend API 1.47.0**
+- Migration v1.62.0: Add `is_bubble` and `is_floating_islands` INTEGER columns to `planets` and `moons` tables
+- Migration v1.63.0: Add `submitter_profile_id` INTEGER column to `pending_region_names`, backfill from `user_profiles`
+- `is_bubble` and `is_floating_islands` added to all 4 planet INSERT statements (save_system, approve_system, batch_approve, extraction)
+- `is_bubble` and `is_floating_islands` added to all 4 moon INSERT statements
+- `is_bubble` and `is_floating_islands` added to approve_system UPDATE statement
+- `is_gas_giant` added to approve_system UPDATE (was previously missing)
+- `is_gas_giant` added to extraction endpoint planet_entry dict (was previously missing)
+- `POST /api/regions/{rx}/{ry}/{rz}/submit` now accepts and stores `submitter_profile_id`
+- `POST /api/pending_region_names/batch/approve`: Batch approve region names with self-submission prevention, name uniqueness checks, audit logging
+- `POST /api/pending_region_names/batch/reject`: Batch reject region names with reason and audit logging
+
+---
 
 #### Master Haven 1.48.0 (2026-03-18) - Unified User Profiles (Phase 1: Backend)
 Unified user identity system replacing fragmented auth across partner_accounts, sub_admin_accounts, api_keys, and anonymous submitter fields. Single `user_profiles` table with 4.5-tier permission system.

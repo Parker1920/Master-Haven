@@ -63,6 +63,12 @@ export default function PendingApprovals() {
   const [batchRejectionReason, setBatchRejectionReason] = useState('')
   const [batchResultsModalOpen, setBatchResultsModalOpen] = useState(false)
   const [batchResults, setBatchResults] = useState(null)
+  // Batch region name state
+  const [batchRegionMode, setBatchRegionMode] = useState(false)
+  const [selectedRegionIds, setSelectedRegionIds] = useState(new Set())
+  const [batchRegionInProgress, setBatchRegionInProgress] = useState(false)
+  const [batchRegionRejectModalOpen, setBatchRegionRejectModalOpen] = useState(false)
+  const [batchRegionRejectionReason, setBatchRegionRejectionReason] = useState('')
   // Discord tag filtering (super admin only)
   const [discordTags, setDiscordTags] = useState([])
   const [filterTag, setFilterTag] = useState('all') // 'all', 'untagged', or specific tag
@@ -348,6 +354,91 @@ export default function PendingApprovals() {
       alert('Rejection failed: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
+    }
+  }
+
+  // Batch region name functions
+  function toggleRegionSelection(id) {
+    setSelectedRegionIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function selectAllRegions() {
+    const ids = new Set()
+    pendingRegions.forEach(r => {
+      if (!isSelfSubmission(r)) ids.add(r.id)
+    })
+    setSelectedRegionIds(ids)
+  }
+
+  function exitBatchRegionMode() {
+    setBatchRegionMode(false)
+    setSelectedRegionIds(new Set())
+  }
+
+  async function handleBatchRegionApprove() {
+    if (selectedRegionIds.size === 0) return
+    if (!confirm(`Approve ${selectedRegionIds.size} region name(s)?`)) return
+    setBatchRegionInProgress(true)
+    try {
+      const response = await axios.post('/api/approve_region_names/batch', {
+        submission_ids: Array.from(selectedRegionIds)
+      })
+      const data = response.data
+      // Wrap in same format as system batch results for the shared modal
+      setBatchResults({
+        results: { approved: data.approved || [], failed: data.failed || [], skipped: data.skipped || [] },
+        summary: {
+          total: (data.approved?.length || 0) + (data.failed?.length || 0) + (data.skipped?.length || 0),
+          approved: data.approved?.length || 0,
+          failed: data.failed?.length || 0,
+          skipped: data.skipped?.length || 0
+        }
+      })
+      setBatchResultsModalOpen(true)
+      exitBatchRegionMode()
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch approve failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchRegionInProgress(false)
+    }
+  }
+
+  async function handleBatchRegionReject() {
+    if (selectedRegionIds.size === 0) return
+    if (!batchRegionRejectionReason.trim()) {
+      alert('Please provide a rejection reason')
+      return
+    }
+    setBatchRegionInProgress(true)
+    try {
+      const response = await axios.post('/api/reject_region_names/batch', {
+        submission_ids: Array.from(selectedRegionIds),
+        reason: batchRegionRejectionReason
+      })
+      const data = response.data
+      setBatchResults({
+        results: { rejected: data.rejected || [], failed: data.failed || [], skipped: data.skipped || [] },
+        summary: {
+          total: (data.rejected?.length || 0) + (data.failed?.length || 0) + (data.skipped?.length || 0),
+          rejected: data.rejected?.length || 0,
+          failed: data.failed?.length || 0,
+          skipped: data.skipped?.length || 0
+        }
+      })
+      setBatchResultsModalOpen(true)
+      exitBatchRegionMode()
+      setBatchRegionRejectModalOpen(false)
+      setBatchRegionRejectionReason('')
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch reject failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchRegionInProgress(false)
     }
   }
 
@@ -744,9 +835,53 @@ export default function PendingApprovals() {
         {/* Pending Region Names */}
         {pendingRegions.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-xl font-semibold mb-3">
-              Pending Region Names ({pendingRegions.length})
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xl font-semibold">
+                Pending Region Names ({pendingRegions.length})
+              </h3>
+              <div className="flex gap-2">
+                {canAccess && canAccess(FEATURES.BATCH_APPROVALS) && pendingRegions.length > 0 && (
+                  <Button
+                    className={`text-sm ${batchRegionMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                    onClick={() => batchRegionMode ? exitBatchRegionMode() : setBatchRegionMode(true)}
+                  >
+                    {batchRegionMode ? 'Exit Batch' : 'Batch Mode'}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Batch region actions bar */}
+            {batchRegionMode && (
+              <div className="mb-3 p-3 bg-indigo-900/40 border border-indigo-700 rounded flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-indigo-300">{selectedRegionIds.size} selected</span>
+                  <button onClick={selectAllRegions} className="text-sm text-indigo-300 hover:text-white underline">Select All</button>
+                  {selectedRegionIds.size > 0 && (
+                    <button onClick={() => setSelectedRegionIds(new Set())} className="text-sm text-indigo-300 hover:text-white underline">Clear</button>
+                  )}
+                </div>
+                {selectedRegionIds.size > 0 && (
+                  <div className="flex gap-2">
+                    <Button
+                      className="bg-green-600 hover:bg-green-700 text-white text-sm"
+                      onClick={handleBatchRegionApprove}
+                      disabled={batchRegionInProgress}
+                    >
+                      {batchRegionInProgress ? '...' : `Approve (${selectedRegionIds.size})`}
+                    </Button>
+                    <Button
+                      className="bg-red-600 hover:bg-red-700 text-white text-sm"
+                      onClick={() => setBatchRegionRejectModalOpen(true)}
+                      disabled={batchRegionInProgress}
+                    >
+                      {batchRegionInProgress ? '...' : `Reject (${selectedRegionIds.size})`}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               {pendingRegions.map(region => (
                 <div
@@ -754,6 +889,19 @@ export default function PendingApprovals() {
                   className="border rounded p-3 bg-purple-700 hover:bg-purple-600"
                 >
                   <div className="flex items-start gap-3">
+                    {/* Batch mode checkbox */}
+                    {batchRegionMode && (
+                      <div className="flex-shrink-0 pt-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedRegionIds.has(region.id)}
+                          onChange={() => toggleRegionSelection(region.id)}
+                          disabled={isSelfSubmission(region)}
+                          className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={isSelfSubmission(region) ? 'Cannot select your own submission' : ''}
+                        />
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-lg">{region.proposed_name}</h4>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
@@ -772,17 +920,52 @@ export default function PendingApprovals() {
                         <span>{new Date(region.submission_date).toLocaleDateString()}</span>
                       </div>
                     </div>
-                    <button
-                      onClick={() => viewRegion(region)}
-                      className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                    >
-                      Review
-                    </button>
+                    {!batchRegionMode && (
+                      <button
+                        onClick={() => viewRegion(region)}
+                        className="flex-shrink-0 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                      >
+                        Review
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
+        )}
+
+        {/* Batch Region Reject Modal */}
+        {batchRegionRejectModalOpen && (
+          <Modal title={`Reject ${selectedRegionIds.size} Region Name(s)`} onClose={() => setBatchRegionRejectModalOpen(false)}>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Rejection Reason</label>
+                <textarea
+                  value={batchRegionRejectionReason}
+                  onChange={e => setBatchRegionRejectionReason(e.target.value)}
+                  className="w-full p-2 border rounded bg-gray-700 border-gray-600 text-sm"
+                  rows={3}
+                  placeholder="Enter reason for rejection..."
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="bg-red-600 hover:bg-red-700 text-white text-sm"
+                  onClick={handleBatchRegionReject}
+                  disabled={batchRegionInProgress}
+                >
+                  {batchRegionInProgress ? 'Rejecting...' : 'Confirm Reject'}
+                </Button>
+                <Button
+                  className="bg-gray-600 hover:bg-gray-700 text-sm"
+                  onClick={() => setBatchRegionRejectModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </Modal>
         )}
 
         {/* Pending Edit Requests (Partner edits to untagged systems) */}
@@ -1386,6 +1569,8 @@ export default function PendingApprovals() {
                           <label className="flex items-center"><input type="checkbox" checked={!!body.gravitino_balls} onChange={e => updateEditField(`${prefix}.gravitino_balls`, e.target.checked ? 1 : 0)} className={checkCls} />Gravitino Balls</label>
                           <label className="flex items-center"><input type="checkbox" checked={!!body.is_infested} onChange={e => updateEditField(`${prefix}.is_infested`, e.target.checked ? 1 : 0)} className={checkCls} />Infested</label>
                           <label className="flex items-center"><input type="checkbox" checked={!!body.is_dissonant} onChange={e => updateEditField(`${prefix}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.is_bubble} onChange={e => updateEditField(`${prefix}.is_bubble`, e.target.checked ? 1 : 0)} className={checkCls} />Bubble Planet</label>
+                          <label className="flex items-center"><input type="checkbox" checked={!!body.is_floating_islands} onChange={e => updateEditField(`${prefix}.is_floating_islands`, e.target.checked ? 1 : 0)} className={checkCls} />Floating Islands</label>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           <label className="block"><span className="text-gray-400 text-xs">Base Location:</span>
@@ -1450,7 +1635,7 @@ export default function PendingApprovals() {
                           <span className="text-gray-400">Resources:</span> {body.materials || body.resources?.join(', ')}
                         </div>
                       )}
-                      {(body.ancient_bones || body.vile_brood || body.salvageable_scrap || body.storm_crystals || body.gravitino_balls || body.is_infested || body.is_dissonant) && (
+                      {(body.ancient_bones || body.vile_brood || body.salvageable_scrap || body.storm_crystals || body.gravitino_balls || body.is_infested || body.is_dissonant || body.is_bubble || body.is_floating_islands) && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {body.ancient_bones ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-300">Ancient Bones</span> : null}
                           {body.vile_brood ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Vile Brood</span> : null}
@@ -1459,6 +1644,8 @@ export default function PendingApprovals() {
                           {body.gravitino_balls ? <span className="text-xs px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300">Gravitino Balls</span> : null}
                           {body.is_infested ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-400">Infested</span> : null}
                           {body.is_dissonant ? <span className="text-xs px-1.5 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
+                          {body.is_bubble ? <span className="text-xs px-1.5 py-0.5 rounded bg-pink-800/60 text-pink-300">Bubble Planet</span> : null}
+                          {body.is_floating_islands ? <span className="text-xs px-1.5 py-0.5 rounded bg-teal-800/60 text-teal-300">Floating Islands</span> : null}
                         </div>
                       )}
                       {body.base_location && (
@@ -1577,6 +1764,8 @@ export default function PendingApprovals() {
                                 <label className="flex items-center"><input type="checkbox" checked={!!moon.gravitino_balls} onChange={e => updateEditField(`moons.${i}.gravitino_balls`, e.target.checked ? 1 : 0)} className={checkCls} />Gravitino Balls</label>
                                 <label className="flex items-center"><input type="checkbox" checked={!!moon.is_infested} onChange={e => updateEditField(`moons.${i}.is_infested`, e.target.checked ? 1 : 0)} className={checkCls} />Infested</label>
                                 <label className="flex items-center"><input type="checkbox" checked={!!moon.is_dissonant} onChange={e => updateEditField(`moons.${i}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.is_bubble} onChange={e => updateEditField(`moons.${i}.is_bubble`, e.target.checked ? 1 : 0)} className={checkCls} />Bubble Planet</label>
+                                <label className="flex items-center"><input type="checkbox" checked={!!moon.is_floating_islands} onChange={e => updateEditField(`moons.${i}.is_floating_islands`, e.target.checked ? 1 : 0)} className={checkCls} />Floating Islands</label>
                               </div>
                             </div>
                           ) : (
@@ -1612,7 +1801,7 @@ export default function PendingApprovals() {
                                   <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
                                 </div>
                               )}
-                              {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant) && (
+                              {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant || moon.is_bubble || moon.is_floating_islands) && (
                                 <div className="mt-1 flex flex-wrap gap-1">
                                   {moon.ancient_bones ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-800/60 text-amber-200 border border-amber-700/50">Ancient Bones</span> : null}
                                   {moon.vile_brood ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Vile Brood</span> : null}
@@ -1621,6 +1810,8 @@ export default function PendingApprovals() {
                                   {moon.gravitino_balls ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-purple-800/60 text-purple-200 border border-purple-700/50">Gravitino Balls</span> : null}
                                   {moon.is_infested ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-200 border border-red-800/50">Infested</span> : null}
                                   {moon.is_dissonant ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-violet-800/60 text-violet-200 border border-violet-700/50">Dissonant</span> : null}
+                                  {moon.is_bubble ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-pink-800/60 text-pink-200 border border-pink-700/50">Bubble Planet</span> : null}
+                                  {moon.is_floating_islands ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-teal-800/60 text-teal-200 border border-teal-700/50">Floating Islands</span> : null}
                                 </div>
                               )}
                             </>
