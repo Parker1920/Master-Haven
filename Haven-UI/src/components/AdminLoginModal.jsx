@@ -8,6 +8,7 @@ export default function AdminLoginModal({ open, onClose }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [suggestions, setSuggestions] = useState([])
   const [loading, setLoading] = useState(false)
   const [loginType, setLoginType] = useState('admin') // 'admin', 'member', or 'correspondent'
   const auth = useContext(AuthContext)
@@ -39,8 +40,14 @@ export default function AdminLoginModal({ open, onClose }) {
         onClose()
       }
     } catch (e) {
-      const message = e.response?.data?.detail || e.message || 'Login failed'
-      setError(message)
+      const detail = e.response?.data?.detail
+      if (detail && typeof detail === 'object' && detail.suggestions) {
+        setError(detail.message)
+        setSuggestions(detail.suggestions)
+      } else {
+        setError(typeof detail === 'string' ? detail : (e.message || 'Login failed'))
+        setSuggestions([])
+      }
     } finally {
       setLoading(false)
     }
@@ -147,6 +154,21 @@ export default function AdminLoginModal({ open, onClose }) {
             </button>
           </div>
           {error && <div className="text-red-500 mt-2 text-sm">{error}</div>}
+          {suggestions.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-gray-400">Did you mean:</p>
+              {suggestions.map(name => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => { setUsername(name); setSuggestions([]); setError('') }}
+                  className="block w-full text-left px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-cyan-400 text-sm transition-colors"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </form>
     </Modal>

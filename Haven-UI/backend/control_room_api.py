@@ -7035,6 +7035,17 @@ async def profile_login(credentials: dict, response: Response):
         row = cursor.fetchone()
 
         if not row:
+            # Try fuzzy match to give helpful suggestions
+            suggestions = find_fuzzy_profile_matches(conn, username)
+            if suggestions:
+                suggestion_names = [s['username'] for s in suggestions[:3]]
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        'message': 'Username not found. Did you mean one of these?',
+                        'suggestions': suggestion_names
+                    }
+                )
             raise HTTPException(status_code=401, detail="Username not found. Submit a system or discovery to create your profile.")
 
         if not row['is_active']:
@@ -16413,8 +16424,9 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                         cursor.execute('''
                             INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                                 has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
-                                ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
+                                is_bubble, is_floating_islands)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             planet_id,
                             moon.get('name'),
