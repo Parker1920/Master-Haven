@@ -130,7 +130,13 @@ export function AuthProvider({ children }) {
     })
     if (!r.ok) {
       const data = await r.json().catch(() => ({}))
-      throw new Error(data.detail || 'Login failed')
+      const detail = data.detail
+      if (detail && typeof detail === 'object') {
+        const err = new Error(detail.message || 'Login failed')
+        err.suggestions = detail.suggestions || []
+        throw err
+      }
+      throw new Error(typeof detail === 'string' ? detail : 'Login failed')
     }
     const data = await r.json()
     setUser(buildUserFromData(data))

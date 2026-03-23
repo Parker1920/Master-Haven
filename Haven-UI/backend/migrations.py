@@ -4753,3 +4753,110 @@ def migration_1_63_0(conn):
         logger.warning(f"Could not backfill submitter_profile_id: {e}")
 
     conn.commit()
+
+
+@register_migration("1.64.0", "Re-normalize username_normalized to strip spaces, underscores, dashes, unicode accents and merge duplicate profiles")
+def migration_1_64_0(conn):
+    """
+    Tighten username normalization: strip spaces, underscores, dashes, and unicode accents.
+    Merge profiles that collide under the new normalization (keep lower ID / higher tier).
+    Re-backfill profile_id on systems, pending_systems, discoveries.
+    """
+    import unicodedata
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    def normalize(username):
+        if not username:
+            return ''
+        n = unicodedata.normalize('NFKD', username)
+        n = ''.join(ch for ch in n if not unicodedata.combining(ch))
+        n = n.strip().lower().replace('#', '').replace(' ', '').replace('_', '').replace('-', '')
+        if len(n) > 4 and n[-4:].isdigit():
+            prefix = n[:-4]
+            if prefix and not prefix[-1].isdigit():
+                n = prefix
+        return n
+
+    # Find collisions under new normalization
+    cursor.execute('SELECT id, username, tier FROM user_profiles ORDER BY tier ASC, id ASC')
+    all_profiles = cursor.fetchall()
+    norm_map = {}
+    merges = []
+
+    for row in all_profiles:
+        nn = normalize(row['username'])
+        if nn in norm_map:
+            keep_id = norm_map[nn][0]
+            merges.append((keep_id, row['id']))
+        else:
+            norm_map[nn] = (row['id'], row['username'], row['tier'])
+
+    # Merge duplicates
+    for keep_id, merge_id in merges:
+        logger.info(f"Merging profile {merge_id} -> {keep_id}")
+        for tbl, col in [('systems', 'profile_id'), ('pending_systems', 'submitter_profile_id'),
+                         ('discoveries', 'profile_id'), ('api_keys', 'profile_id'),
+                         ('approval_audit_log', 'approver_profile_id'),
+                         ('approval_audit_log', 'submitter_profile_id'),
+                         ('pending_region_names', 'submitter_profile_id')]:
+            try:
+                cursor.execute(f'UPDATE {tbl} SET {col} = ? WHERE {col} = ?', (keep_id, merge_id))
+            except Exception:
+                pass
+        cursor.execute('DELETE FROM user_profiles WHERE id = ?', (merge_id,))
+
+    logger.info(f"Merged {len(merges)} duplicate profiles")
+
+    # Update all username_normalized with tighter normalization
+    cursor.execute('SELECT id, username FROM user_profiles')
+    for row in cursor.fetchall():
+        nn = normalize(row['username'])
+        cursor.execute('UPDATE user_profiles SET username_normalized = ? WHERE id = ?', (nn, row['id']))
+
+    logger.info("Updated all username_normalized values")
+
+    # Re-backfill profile_id on systems, pending_systems, discoveries
+    cursor.execute('SELECT id, username, username_normalized FROM user_profiles')
+    profile_lookup = {}
+    for row in cursor.fetchall():
+        profile_lookup[row['username_normalized']] = row['id']
+        profile_lookup[row['username'].lower().strip()] = row['id']
+
+    def find_profile(username):
+        if not username:
+            return None
+        low = username.lower().strip()
+        if low in profile_lookup:
+            return profile_lookup[low]
+        return profile_lookup.get(normalize(username))
+
+    # Systems
+    cursor.execute('SELECT id, personal_discord_username, discovered_by FROM systems WHERE profile_id IS NULL')
+    sys_count = 0
+    for row in cursor.fetchall():
+        pid = find_profile(row['personal_discord_username']) or find_profile(row['discovered_by'])
+        if pid:
+            cursor.execute('UPDATE systems SET profile_id = ? WHERE id = ?', (pid, row['id']))
+            sys_count += 1
+
+    # Pending systems
+    cursor.execute('SELECT id, personal_discord_username, submitted_by FROM pending_systems WHERE submitter_profile_id IS NULL')
+    pend_count = 0
+    for row in cursor.fetchall():
+        pid = find_profile(row['personal_discord_username']) or find_profile(row['submitted_by'])
+        if pid:
+            cursor.execute('UPDATE pending_systems SET submitter_profile_id = ? WHERE id = ?', (pid, row['id']))
+            pend_count += 1
+
+    # Discoveries
+    cursor.execute('SELECT id, discovered_by FROM discoveries WHERE profile_id IS NULL')
+    disc_count = 0
+    for row in cursor.fetchall():
+        pid = find_profile(row['discovered_by'])
+        if pid:
+            cursor.execute('UPDATE discoveries SET profile_id = ? WHERE id = ?', (pid, row['id']))
+            disc_count += 1
+
+    logger.info(f"Backfilled profile_id: {sys_count} systems, {pend_count} pending, {disc_count} discoveries")
+    conn.commit()

@@ -40,11 +40,13 @@ export default function AdminLoginModal({ open, onClose }) {
         onClose()
       }
     } catch (e) {
-      const detail = e.response?.data?.detail
-      if (detail && typeof detail === 'object' && detail.suggestions) {
-        setError(detail.message)
-        setSuggestions(detail.suggestions)
+      // memberLogin throws Error with .suggestions array for fuzzy matches
+      // admin/correspondent login throws axios errors with e.response.data.detail
+      if (e.suggestions && e.suggestions.length > 0) {
+        setError(e.message)
+        setSuggestions(e.suggestions)
       } else {
+        const detail = e.response?.data?.detail
         setError(typeof detail === 'string' ? detail : (e.message || 'Login failed'))
         setSuggestions([])
       }
