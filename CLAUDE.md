@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.49.0 | 2026-03-22 | Bubble/Floating planet tags, required region naming, batch region approve |
-| Haven-UI | 1.47.0 | 2026-03-22 | Bubble/Floating planet tags, required region naming, batch region UI |
-| Backend API | 1.47.0 | 2026-03-22 | New planet columns, batch region endpoints, profile tracking on region names |
+| **Master Haven** | 1.50.0 | 2026-03-23 | Codebase Refactoring - modular backend, shared frontend hooks |
+| Haven-UI | 1.48.0 | 2026-03-23 | Shared hooks, data-driven Navbar, unified CelestialBodyEditor |
+| Backend API | 1.48.0 | 2026-03-23 | Modular architecture: 12 route modules, 3 service modules, shared constants |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,37 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.0 (2026-03-23) - Codebase Refactoring
+Major structural refactoring to improve maintainability and reduce duplication. No functional changes.
+
+**Backend Architecture**
+- Extracted shared constants into `constants.py`: grade thresholds, pagination limits, session timeout, tier constants, discovery constants, galaxy data
+- Extracted database helpers into `db.py`: connection management, context manager, system/glyph helpers, merge/mismatch logic
+- Created `services/auth_service.py`: sessions, passwords, API keys, profile helpers, self-approval prevention
+- Created `services/completeness.py`: scoring logic, grade conversion via single `score_to_grade()` function
+- Created `services/restrictions.py`: data restriction pipeline (6 functions)
+- Extracted 211 endpoints into 12 route modules using FastAPI `APIRouter`:
+  - `routes/auth.py` (8 routes): login, logout, sessions, password, settings
+  - `routes/analytics.py` (15 routes): analytics + public community stats
+  - `routes/partners.py` (30 routes): partner/sub-admin mgmt, audit, themes, data restrictions
+  - `routes/warroom.py` (67 routes): territorial conflicts, news, claims, peace treaties
+  - `routes/systems.py` (18 routes): system CRUD, search, browse, galaxies, glyphs
+  - `routes/approvals.py` (11 routes): pending systems, approve/reject, batch, extraction
+  - `routes/discoveries.py` (15 routes): discovery CRUD, pending, approve/reject
+  - `routes/profiles.py` (13 routes): user profiles, lookup, claim, admin management
+  - `routes/events.py` (6 routes): events CRUD + leaderboard
+  - `routes/regions.py` (17 routes): regions, pending names, batch approve/reject
+  - `routes/extractor.py` (8 routes): API keys, registration, communities
+  - `routes/csv_import.py` (3 routes): CSV preview/import, photo upload
+
+**Haven-UI 1.48.0**
+- New `useDebounce` hook in `hooks/useDebounce.js` — replaced 3 identical inline implementations in Systems, RegionDetail, DiscoveryType
+- New `useDateFormat` utility in `hooks/useDateFormat.js` — `formatDate()`, `formatDateShort()`, `formatRelativeDate()`, `formatDateTime()` replacing 5+ inline implementations
+- Navbar refactored to data-driven `NAV_LINKS` + `NAV_GROUPS` arrays — desktop and mobile views render from same source, eliminating manual sync requirement
+- New `CelestialBodyEditor.jsx` — unified planet/moon form editor with `type` prop. PlanetEditor and MoonEditor are now thin wrappers (~10 lines each vs 300+230 lines duplicated before)
+
+---
 
 #### Master Haven 1.49.0 (2026-03-22) - Bubble/Floating Planet Tags, Required Region Naming, Batch Region Approve
 Three features: new planet attribute tags, mandatory region naming in Wizard, and batch approve/reject for pending region names.

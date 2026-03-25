@@ -18,23 +18,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthContext } from '../utils/AuthContext'
-
-// Custom debounce hook for search performance
-function useDebounce(value, delay) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value)
-    }, delay)
-
-    return () => {
-      clearTimeout(handler)
-    }
-  }, [value, delay])
-
-  return debouncedValue
-}
+import useDebounce from '../hooks/useDebounce'
 
 /**
  * Systems Browser

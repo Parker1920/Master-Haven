@@ -1,4 +1,14 @@
 // API client helpers for Haven backend. All requests use same-origin credentials (session cookie).
+//
+// Core helpers: apiGet, apiPost, apiPut, apiDelete
+// Typed endpoints: grouped by feature domain for discoverability.
+// Usage: import { getSystems, approvePendingSystem } from '../utils/api'
+
+import axios from 'axios'
+
+// ============================================================================
+// Core Fetch Helpers
+// ============================================================================
 
 /** Fetch JSON from a GET endpoint. Throws on non-OK response. */
 export async function apiGet(path){
@@ -15,6 +25,81 @@ export async function apiPost(path, body, { adminToken } = {}){
   if(!res.ok) throw new Error(await res.text())
   return await res.json()
 }
+
+/** PUT JSON to an endpoint. */
+export async function apiPut(path, body){
+  const res = await fetch(path, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if(!res.ok) throw new Error(await res.text())
+  return await res.json()
+}
+
+/** DELETE an endpoint. */
+export async function apiDelete(path){
+  const res = await fetch(path, { method: 'DELETE', credentials: 'same-origin' })
+  if(!res.ok) throw new Error(await res.text())
+  return await res.json()
+}
+
+// ============================================================================
+// Typed Endpoint Functions
+// Each wraps a specific API call with consistent error handling.
+// Pages can import these instead of using raw axios/fetch calls.
+// ============================================================================
+
+// --- Stats & Dashboard ---
+export const getStats = () => axios.get('/api/stats').then(r => r.data)
+export const getDailyChanges = () => axios.get('/api/stats/daily_changes').then(r => r.data)
+export const getActivityLogs = (limit = 50) => axios.get(`/api/activity_logs?limit=${limit}`).then(r => r.data)
+export const getRecentSystems = (limit = 10) => axios.get(`/api/systems/recent?limit=${limit}`).then(r => r.data)
+
+// --- Systems ---
+export const getSystems = (params = {}) => axios.get('/api/systems', { params }).then(r => r.data)
+export const getSystemDetail = (id) => axios.get(`/api/systems/${id}`).then(r => r.data)
+export const searchSystems = (q, params = {}) => axios.get('/api/systems/search', { params: { q, ...params } }).then(r => r.data)
+export const getFilterOptions = (params = {}) => axios.get('/api/systems/filter-options', { params }).then(r => r.data)
+export const saveSystem = (data) => axios.post('/api/save_system', data).then(r => r.data)
+export const deleteSystem = (id) => axios.delete(`/api/systems/${id}`).then(r => r.data)
+
+// --- Galaxies & Regions ---
+export const getGalaxies = () => axios.get('/api/galaxies').then(r => r.data)
+export const getGalaxySummary = (params = {}) => axios.get('/api/galaxies/summary', { params }).then(r => r.data)
+export const getRealitiesSummary = () => axios.get('/api/realities/summary').then(r => r.data)
+export const getRegionsGrouped = (params = {}) => axios.get('/api/regions/grouped', { params }).then(r => r.data)
+export const getRegionDetail = (rx, ry, rz, params = {}) => axios.get(`/api/regions/${rx}/${ry}/${rz}`, { params }).then(r => r.data)
+
+// --- Pending Systems (Approvals) ---
+export const getPendingSystems = (params = {}) => axios.get('/api/pending_systems', { params }).then(r => r.data)
+export const getPendingCount = () => axios.get('/api/pending_systems/count').then(r => r.data)
+export const getPendingDetail = (id) => axios.get(`/api/pending_systems/${id}`).then(r => r.data)
+export const approvePendingSystem = (id) => axios.post(`/api/approve_system/${id}`).then(r => r.data)
+export const rejectPendingSystem = (id, data = {}) => axios.post(`/api/reject_system/${id}`, data).then(r => r.data)
+export const batchApproveSystems = (ids) => axios.post('/api/approve_systems/batch', { submission_ids: ids }).then(r => r.data)
+export const batchRejectSystems = (ids, reason) => axios.post('/api/reject_systems/batch', { submission_ids: ids, reason }).then(r => r.data)
+
+// --- Discoveries ---
+export const getDiscoveries = (params = {}) => axios.get('/api/discoveries/browse', { params }).then(r => r.data)
+export const getDiscoveryTypes = () => axios.get('/api/discoveries/types').then(r => r.data)
+export const getDiscoveryStats = () => axios.get('/api/discoveries/stats').then(r => r.data)
+export const submitDiscovery = (data) => axios.post('/api/submit_discovery', data).then(r => r.data)
+
+// --- Analytics ---
+export const getSubmissionLeaderboard = (params = {}) => axios.get('/api/analytics/submission-leaderboard', { params }).then(r => r.data)
+export const getCommunityStats = (params = {}) => axios.get('/api/analytics/community-stats', { params }).then(r => r.data)
+export const getSubmissionsTimeline = (params = {}) => axios.get('/api/analytics/submissions-timeline', { params }).then(r => r.data)
+export const getSourceBreakdown = () => axios.get('/api/analytics/source-breakdown').then(r => r.data)
+export const getPartnerOverview = (params = {}) => axios.get('/api/analytics/partner-overview', { params }).then(r => r.data)
+
+// --- Public Community Stats ---
+export const getCommunityOverview = () => axios.get('/api/public/community-overview').then(r => r.data)
+export const getContributors = (params = {}) => axios.get('/api/public/contributors', { params }).then(r => r.data)
+export const getActivityTimeline = (params = {}) => axios.get('/api/public/activity-timeline', { params }).then(r => r.data)
+export const getDiscoveryBreakdown = () => axios.get('/api/public/discovery-breakdown').then(r => r.data)
+export const getCommunityRegions = (params = {}) => axios.get('/api/public/community-regions', { params }).then(r => r.data)
+
+// --- Events ---
+export const getEvents = () => axios.get('/api/events').then(r => r.data)
+export const getEventDetail = (id) => axios.get(`/api/events/${id}`).then(r => r.data)
+export const getEventLeaderboard = (id, params = {}) => axios.get(`/api/events/${id}/leaderboard`, { params }).then(r => r.data)
 
 /** Authenticate with the super admin password. Returns session data. */
 export async function adminLogin(password){

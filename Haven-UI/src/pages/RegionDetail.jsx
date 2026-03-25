@@ -9,6 +9,7 @@ import { AuthContext } from '../utils/AuthContext'
 import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
 import { getThumbnailUrl } from '../utils/api'
+import useDebounce from '../hooks/useDebounce'
 
 /**
  * Region Detail Page
@@ -25,16 +26,6 @@ import { getThumbnailUrl } from '../utils/api'
  *   POST /api/regions/:rx/:ry/:rz/name    (propose region name -- queued for approval)
  *   PUT  /api/regions/:rx/:ry/:rz/name    (admin: update region name directly)
  */
-
-// Custom debounce hook
-function useDebounce(value, delay) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay)
-    return () => clearTimeout(handler)
-  }, [value, delay])
-  return debouncedValue
-}
 
 
 // Star type colors

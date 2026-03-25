@@ -5,6 +5,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
  * Partner Management
@@ -202,11 +203,6 @@ export default function PartnerManagement() {
         ? prev.enabled_features.filter(f => f !== featureId)
         : [...prev.enabled_features, featureId]
     }))
-  }
-
-  function formatDate(isoString) {
-    if (!isoString) return 'Never'
-    return new Date(isoString).toLocaleString()
   }
 
   if (loading) {

@@ -1,86 +1,54 @@
 import React, { useState } from 'react'
+import CelestialBodyEditor from './CelestialBodyEditor'
 import MoonEditor from './MoonEditor'
-import { uploadPhoto, getPhotoUrl } from '../utils/api'
 import Modal from './Modal'
-import SearchableSelect from './SearchableSelect'
-import {
-  biomeAdjectives,
-  weatherAdjectives,
-  sentinelAdjectives,
-  floraAdjectives,
-  faunaAdjectives,
-  resourcesList,
-  exoticTrophyList,
-  toSelectOptions
-} from '../data/adjectives'
 
-// Pre-compute options for react-select
-const biomeOptions = toSelectOptions(biomeAdjectives)
-const weatherOptions = toSelectOptions(weatherAdjectives)
-const sentinelOptions = toSelectOptions(sentinelAdjectives)
-const floraOptions = toSelectOptions(floraAdjectives)
-const faunaOptions = toSelectOptions(faunaAdjectives)
-const resourcesOptions = toSelectOptions(resourcesList)
-const exoticTrophyOptions = toSelectOptions(exoticTrophyList)
-
-/** Form editor for a planet and its moons. Handles biome/weather/resource fields, photo uploads, and special feature toggles. Props: planet, index, onChange, onRemove, onSave. */
-export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }){
-  const [uploading, setUploading] = useState(false)
+/**
+ * Planet editor - thin wrapper around CelestialBodyEditor that adds moon management.
+ * Props: planet, index, onChange, onRemove, onSave.
+ */
+export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }) {
   const [moonModalOpen, setMoonModalOpen] = useState(false)
   const [editingMoonIndex, setEditingMoonIndex] = useState(null)
   const [editingMoon, setEditingMoon] = useState(null)
-  const [attrsModalOpen, setAttrsModalOpen] = useState(false)
 
-  function setField(k, v){
-    const p = {...planet, [k]: v}
+  function setField(k, v) {
+    const p = { ...planet, [k]: v }
     onChange(index, p)
   }
 
-  function openAddMoonModal(){
+  function openAddMoonModal() {
     setEditingMoonIndex(-1)
-    // Initialize ALL moon fields with defaults to ensure they're saved
     setEditingMoon({
-      name: '',
-      biome: '',
-      weather: '',
-      sentinel: 'None',
-      fauna: 'N/A',
-      flora: 'N/A',
-      materials: '',
-      notes: '',
-      photo: null,
-      has_rings: 0,
-      is_dissonant: 0,
-      is_infested: 0,
-      extreme_weather: 0,
-      water_world: 0,
-      vile_brood: 0,
-      exotic_trophy: ''
+      name: '', biome: '', weather: '', sentinel: 'None',
+      fauna: 'N/A', flora: 'N/A', materials: '', notes: '', photo: null,
+      has_rings: 0, is_dissonant: 0, is_infested: 0,
+      extreme_weather: 0, water_world: 0, vile_brood: 0, exotic_trophy: ''
     })
     setMoonModalOpen(true)
   }
 
-  function updateMoon(i, val){
+  function updateMoon(i, val) {
     const moons = [...(planet.moons || [])]
     moons[i] = val
     setField('moons', moons)
   }
 
-  function removeMoon(i){
+  function removeMoon(i) {
     const moons = [...(planet.moons || [])]
-    moons.splice(i,1)
+    moons.splice(i, 1)
     setField('moons', moons)
   }
 
-  function editMoon(i){
+  function editMoon(i) {
     setEditingMoonIndex(i)
     setEditingMoon(planet.moons[i])
     setMoonModalOpen(true)
   }
 
-  function commitMoon(moon){
+  function commitMoon(moon) {
     const moons = [...(planet.moons || [])]
-    if(editingMoonIndex === -1){
+    if (editingMoonIndex === -1) {
       moons.push(moon)
     } else {
       moons[editingMoonIndex] = moon
@@ -89,148 +57,20 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
     setMoonModalOpen(false)
   }
 
-  async function upload(e){
-    setUploading(true)
-    try{
-      const file = e.target.files[0]
-      if(!file) return
-      const res = await uploadPhoto(file)
-      setField('photo', res.path)
-    }catch(err){
-      alert('Upload failed: ' + err)
-    }
-    setUploading(false)
-  }
-
   return (
-    <div className="p-3 my-3 border rounded bg-white/5">
-      {/* Top row: Planet Name, Biome, Weather - stacks on mobile */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <div>
-          <label className="block text-sm">Planet Name</label>
-          <input className="mt-1 p-1 rounded w-full" value={planet.name || ''} onChange={e => setField('name', e.target.value)} placeholder="Planet name" />
-        </div>
-        <div>
-          <label className="block text-sm">Biome</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={biomeOptions}
-              value={planet.biome || ''}
-              onChange={(val) => setField('biome', val)}
-              placeholder="Search biome..."
-            />
-          </div>
-        </div>
-        <div className="sm:col-span-2 lg:col-span-1">
-          <label className="block text-sm">Weather</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={weatherOptions}
-              value={planet.weather || ''}
-              onChange={(val) => setField('weather', val)}
-              placeholder="Search weather..."
-            />
-          </div>
-        </div>
-      </div>
-      {/* Second row: Sentinels, Flora, Fauna, Resources, Base, Photo, Notes */}
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <div>
-          <label className="block text-sm">Sentinels</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={sentinelOptions}
-              value={planet.sentinel || ''}
-              onChange={(val) => setField('sentinel', val)}
-              placeholder="Search sentinels..."
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm">Flora</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={floraOptions}
-              value={planet.flora || ''}
-              onChange={(val) => setField('flora', val)}
-              placeholder="Search flora..."
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm">Fauna</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={faunaOptions}
-              value={planet.fauna || ''}
-              onChange={(val) => setField('fauna', val)}
-              placeholder="Search fauna..."
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm">Resources / Materials</label>
-          <div className="mt-1">
-            <SearchableSelect
-              options={resourcesOptions}
-              value={planet.materials || ''}
-              onChange={(val) => setField('materials', val)}
-              placeholder="Search resources..."
-              isMulti={true}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm">Base Location</label>
-          <input aria-label="Planet Base" placeholder="Base location" className="mt-1 p-1 rounded w-full" value={planet.base_location || ''} onChange={e => setField('base_location', e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-sm">Photo</label>
-          <input aria-label="Planet Photo" type="file" onChange={upload} className="mt-1" />
-          {uploading && <div className="muted text-sm mt-1">Uploading...</div>}
-          {!uploading && planet.photo && (
-            <div className="mt-2 relative inline-block group">
-              <img
-                src={getPhotoUrl(planet.photo)}
-                alt="Planet photo"
-                className="max-w-full sm:max-w-xs max-h-32 rounded border border-gray-600"
-              />
-              <button
-                type="button"
-                onClick={() => setField('photo', null)}
-                className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-sm font-bold"
-                title="Remove photo"
-              >
-                X
-              </button>
-              <div className="text-xs text-gray-400 mt-1 break-all">{planet.photo}</div>
-            </div>
-          )}
-        </div>
-        <div>
-          <label className="block text-sm">Notes</label>
-          <input placeholder="Notes" className="mt-1 p-1 rounded w-full" value={planet.notes || ''} onChange={e => setField('notes', e.target.value)} />
-        </div>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => setAttrsModalOpen(true)} className="px-3 py-1.5 bg-purple-600 rounded text-sm">
-          Planet Attributes
-          {(() => {
-            const c = [
-              planet.has_rings, planet.is_dissonant, planet.is_infested,
-              planet.extreme_weather, planet.water_world, planet.vile_brood,
-              planet.is_bubble, planet.is_floating_islands
-            ].filter(Boolean).length + (planet.exotic_trophy ? 1 : 0)
-            return c > 0 ? <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">{c}</span> : null
-          })()}
-        </button>
+    <CelestialBodyEditor
+      type="planet"
+      body={planet}
+      index={index}
+      onChange={onChange}
+      onRemove={onRemove}
+      onSave={onSave}
+    >
+      {/* Moon management — planet-only feature */}
+      <div className="mt-3 mb-1">
         <button type="button" onClick={openAddMoonModal} className="px-3 py-1.5 bg-green-600 rounded text-sm">Add Moon</button>
-        <button type="button" onClick={() => onRemove(index)} className="px-3 py-1.5 bg-red-600 rounded text-sm">Remove Planet</button>
-        {onSave && (
-          <button type="button" onClick={() => onSave(planet)} className="px-3 py-1.5 bg-blue-600 rounded text-sm">Save</button>
-        )}
       </div>
-      <div className="mt-3">
+      <div className="mt-1">
         {(planet.moons || []).map((m, i) => (
           <div key={i}>
             <MoonEditor index={i} moon={m} onChange={updateMoon} onRemove={removeMoon} />
@@ -242,68 +82,9 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       </div>
       {moonModalOpen && (
         <Modal title={editingMoonIndex === -1 ? 'Add Moon' : 'Edit Moon'} onClose={() => setMoonModalOpen(false)}>
-          <MoonEditor moon={editingMoon} index={editingMoonIndex} onChange={(idx,m)=>setEditingMoon(m)} onSave={commitMoon} onRemove={() => { setMoonModalOpen(false) }} />
+          <MoonEditor moon={editingMoon} index={editingMoonIndex} onChange={(idx, m) => setEditingMoon(m)} onSave={commitMoon} onRemove={() => setMoonModalOpen(false)} />
         </Modal>
       )}
-      {attrsModalOpen && (
-        <Modal title="Planet Attributes" onClose={() => setAttrsModalOpen(false)}>
-          <div className="space-y-5 pb-48">
-            <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Planet Specials</h3>
-              {/* Special feature toggle buttons - stored as 0/1 integers in the DB. Affects completeness scoring for biome-aware grading. */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {[
-                  { key: 'has_rings', label: 'Has Rings', icon: 'ring' },
-                  { key: 'is_dissonant', label: 'Dissonant', icon: 'wave' },
-                  { key: 'is_infested', label: 'Infested', icon: 'bug' },
-                  { key: 'extreme_weather', label: 'Extreme Weather', icon: 'bolt' },
-                  { key: 'water_world', label: 'Water World', icon: 'water' },
-                  { key: 'vile_brood', label: 'Vile Brood', icon: 'skull' },
-                  { key: 'is_gas_giant', label: 'Gas Giant', icon: 'globe' },
-                  { key: 'is_bubble', label: 'Bubble Planet', icon: 'bubble' },
-                  { key: 'is_floating_islands', label: 'Floating Islands', icon: 'float' },
-                ].map(({ key, label, icon }) => {
-                  const active = !!planet[key]
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setField(key, active ? 0 : 1)}
-                      className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
-                        active
-                          ? 'border-purple-500 bg-purple-500/20 text-purple-200'
-                          : 'border-gray-600 bg-white/5 text-gray-400 hover:border-gray-500 hover:bg-white/10'
-                      }`}
-                    >
-                      <span className="text-base">
-                        {icon === 'ring' && '\u{1FA90}'}
-                        {icon === 'wave' && '\u{1F50A}'}
-                        {icon === 'bug' && '\u{1F9A0}'}
-                        {icon === 'bolt' && '\u{26A1}'}
-                        {icon === 'water' && '\u{1F30A}'}
-                        {icon === 'skull' && '\u{1F480}'}
-                        {icon === 'globe' && '\u{1F310}'}
-                        {icon === 'bubble' && '\u{1FAE7}'}
-                        {icon === 'float' && '\u{1F3DD}'}
-                      </span>
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Exotic Trophy</h3>
-              <SearchableSelect
-                options={exoticTrophyOptions}
-                value={planet.exotic_trophy || ''}
-                onChange={(val) => setField('exotic_trophy', val)}
-                placeholder="Search exotic trophy..."
-              />
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
+    </CelestialBodyEditor>
   )
 }

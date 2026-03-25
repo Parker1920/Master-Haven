@@ -5,6 +5,7 @@ import Button from '../components/Button'
 import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 import { DiscoveryCard, DiscoveryFilters, DiscoveryDetailModal } from '../components/discoveries'
 import { TYPE_INFO } from '../data/discoveryTypes'
+import useDebounce from '../hooks/useDebounce'
 
 /**
  * Discovery Type Page — Route: /discoveries/:type
@@ -17,21 +18,6 @@ import { TYPE_INFO } from '../data/discoveryTypes'
  * API endpoint:
  *   GET /api/discoveries/browse?type=X&q=...&sort=...&page=N&limit=24
  */
-
-// Custom hook for debouncing
-function useDebounce(value, delay) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value)
-    }, delay)
-
-    return () => clearTimeout(handler)
-  }, [value, delay])
-
-  return debouncedValue
-}
 
 export default function DiscoveryType() {
   const { type } = useParams()

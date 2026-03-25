@@ -4860,3 +4860,164 @@ def migration_1_64_0(conn):
 
     logger.info(f"Backfilled profile_id: {sys_count} systems, {pend_count} pending, {disc_count} discoveries")
     conn.commit()
+
+
+# =============================================================================
+# v1.65.0 - Add missing moon columns and backfill from pending_systems JSON
+# =============================================================================
+@register_migration("1.65.0", "Add missing moon columns (biome, weather, resources) and backfill from pending_systems JSON")
+def migration_1_65_0(conn):
+    """
+    The moons table was missing biome, weather, and resource columns that planets have had
+    since v1.36.0. Moon data was submitted correctly (stored in pending_systems.system_data JSON)
+    but silently dropped during approval because the INSERT statements didn't include these columns.
+
+    This migration:
+    1. Adds the missing columns to the moons table
+    2. Backfills moon data from pending_systems JSON by matching system name → planet → moon name
+    """
+    import sqlite3 as _sqlite3
+    conn.row_factory = _sqlite3.Row
+    cursor = conn.cursor()
+
+    # Step 1: Add missing columns
+    new_columns = [
+        ('biome', 'TEXT'),
+        ('biome_subtype', 'TEXT'),
+        ('weather', 'TEXT'),
+        ('planet_size', 'TEXT'),
+        ('common_resource', 'TEXT'),
+        ('uncommon_resource', 'TEXT'),
+        ('rare_resource', 'TEXT'),
+        ('weather_text', 'TEXT'),
+        ('sentinels_text', 'TEXT'),
+        ('flora_text', 'TEXT'),
+        ('fauna_text', 'TEXT'),
+        ('plant_resource', 'TEXT'),
+        ('dissonance', 'INTEGER DEFAULT 0'),
+    ]
+
+    for col_name, col_type in new_columns:
+        try:
+            cursor.execute(f"ALTER TABLE moons ADD COLUMN {col_name} {col_type}")
+            logger.info(f"Added {col_name} column to moons table")
+        except Exception as e:
+            if "duplicate column" in str(e).lower():
+                pass  # Already exists from init_database
+            else:
+                raise
+
+    conn.commit()
+
+    # Step 2: Build a lookup of moon data from pending_systems JSON
+    # For each approved system, find its pending_systems row and extract moon data
+    logger.info("Backfilling moon data from pending_systems JSON...")
+
+    # Get all systems with their names and IDs
+    cursor.execute("SELECT id, name, glyph_code FROM systems")
+    systems = {row['name']: {'id': row['id'], 'glyph': row['glyph_code']} for row in cursor.fetchall()}
+
+    # Get all pending_systems with their JSON data (approved ones have the data we need)
+    cursor.execute("SELECT system_name, system_data FROM pending_systems WHERE system_data IS NOT NULL")
+    pending_rows = cursor.fetchall()
+
+    # Build moon data lookup: { (system_name, moon_name_lower): moon_dict }
+    moon_data_lookup = {}
+    for row in pending_rows:
+        try:
+            data = json.loads(row['system_data'])
+            sys_name = data.get('name') or row['system_name']
+            if not sys_name:
+                continue
+
+            # Moons nested under planets
+            for planet in data.get('planets', []):
+                for moon in planet.get('moons', []):
+                    moon_name = (moon.get('name') or '').strip()
+                    if moon_name:
+                        key = (sys_name, moon_name.lower())
+                        # Keep the most data-rich version
+                        existing = moon_data_lookup.get(key)
+                        if not existing or (moon.get('biome') and not existing.get('biome')):
+                            moon_data_lookup[key] = moon
+
+            # Root-level moons (from extractor)
+            for moon in data.get('moons', []):
+                moon_name = (moon.get('name') or '').strip()
+                if moon_name:
+                    key = (sys_name, moon_name.lower())
+                    existing = moon_data_lookup.get(key)
+                    if not existing or (moon.get('biome') and not existing.get('biome')):
+                        moon_data_lookup[key] = moon
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    logger.info(f"Found {len(moon_data_lookup)} moon data entries in pending_systems JSON")
+
+    # Step 3: Update each moon in the moons table
+    cursor.execute("""
+        SELECT m.id, m.name, p.name as planet_name, s.name as system_name
+        FROM moons m
+        JOIN planets p ON m.planet_id = p.id
+        JOIN systems s ON p.system_id = s.id
+    """)
+    moon_rows = cursor.fetchall()
+
+    updated = 0
+    for moon_row in moon_rows:
+        moon_name = (moon_row['name'] or '').strip()
+        sys_name = moon_row['system_name']
+        if not moon_name or not sys_name:
+            continue
+
+        key = (sys_name, moon_name.lower())
+        source = moon_data_lookup.get(key)
+        if not source:
+            continue
+
+        # Only update fields that are currently NULL/empty in the DB
+        updates = []
+        values = []
+
+        field_map = {
+            'biome': 'biome',
+            'biome_subtype': 'biome_subtype',
+            'weather': 'weather',
+            'planet_size': 'planet_size',
+            'common_resource': 'common_resource',
+            'uncommon_resource': 'uncommon_resource',
+            'rare_resource': 'rare_resource',
+            'plant_resource': 'plant_resource',
+            'weather_text': 'weather_text',
+            'sentinels_text': 'sentinels_text',
+            'flora_text': 'flora_text',
+            'fauna_text': 'fauna_text',
+        }
+
+        for db_col, json_key in field_map.items():
+            val = source.get(json_key)
+            if val and str(val).strip():
+                updates.append(f"{db_col} = ?")
+                values.append(str(val).strip())
+
+        # Also backfill sentinel/flora/fauna if they're still at defaults
+        for field, default in [('sentinel', 'None'), ('flora', 'N/A'), ('fauna', 'N/A')]:
+            src_val = source.get(field)
+            if src_val and str(src_val).strip() and str(src_val).strip() not in ('N/A', 'None', ''):
+                updates.append(f"{field} = CASE WHEN {field} IS NULL OR {field} = '{default}' OR {field} = '' THEN ? ELSE {field} END")
+                values.append(str(src_val).strip())
+
+        # Backfill climate from weather if climate is empty
+        weather_val = source.get('weather') or source.get('climate')
+        if weather_val and str(weather_val).strip():
+            updates.append("climate = CASE WHEN climate IS NULL OR climate = '' THEN ? ELSE climate END")
+            values.append(str(weather_val).strip())
+
+        if updates:
+            values.append(moon_row['id'])
+            sql = f"UPDATE moons SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(sql, values)
+            updated += 1
+
+    logger.info(f"Backfilled data for {updated} of {len(moon_rows)} moons from pending_systems JSON")
+    conn.commit()

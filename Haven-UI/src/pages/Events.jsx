@@ -2,8 +2,8 @@ import React, { useState, useEffect, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import LeaderboardTable from '../components/LeaderboardTable'
-import { format, parseISO } from 'date-fns'
 import { AuthContext } from '../utils/AuthContext'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
  * Community Events — Route: /events
@@ -187,14 +187,6 @@ export default function Events() {
       setEvents(res.data.events || [])
     } catch (err) {
       console.error('Failed to delete event:', err)
-    }
-  }
-
-  const formatDate = (dateStr) => {
-    try {
-      return format(parseISO(dateStr), 'MMM d, yyyy')
-    } catch {
-      return dateStr
     }
   }
 

@@ -6,6 +6,7 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import StatCard from '../components/StatCard'
 import { AuthContext } from '../utils/AuthContext'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
  * Extractor Users Management — Route: /admin/extractors
@@ -111,16 +112,6 @@ export default function ExtractorUsers() {
       alert('Failed to update: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
-    }
-  }
-
-  function formatDate(dateStr) {
-    if (!dateStr) return 'Never'
-    try {
-      const d = new Date(dateStr)
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    } catch {
-      return dateStr
     }
   }
 

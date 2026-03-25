@@ -15,6 +15,9 @@ Travelers-Collective/
 # Haven Trading Engine - BTC trading bot, not part of the Haven platform
 trade-engine/
 
+# Glyph YOLO training data - large dataset, not needed in repo
+docs/glyph_training/
+
 
 # -----------------
 # ENVIRONMENT & SECRETS

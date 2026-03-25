@@ -5,6 +5,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { adminStatus } from '../utils/api'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
  * API Keys Management — Route: /api-keys
@@ -183,12 +184,6 @@ export default function ApiKeys() {
     }).catch(() => {
       alert('Failed to copy to clipboard. Please copy manually.')
     })
-  }
-
-  function formatDate(isoString) {
-    if (!isoString) return 'Never'
-    const date = new Date(isoString)
-    return date.toLocaleString()
   }
 
   if (loading) {

@@ -9,6 +9,7 @@ import { getTradeGoodById } from '../utils/economyTradeGoods'
 import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjectiveColors'
 
 import { getPhotoUrl } from '../utils/api'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
  * System Detail Page
@@ -27,21 +28,6 @@ import { getPhotoUrl } from '../utils/api'
  * functions from adjectiveColors.js. Star type badge colors are conditional
  * (Yellow/Red/Green/Blue/Purple).
  */
-
-// Format date for display
-function formatDate(dateStr) {
-  if (!dateStr) return null
-  try {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    })
-  } catch {
-    return dateStr
-  }
-}
 
 // Format a contributor date nicely
 function formatContribDate(dateStr) {
