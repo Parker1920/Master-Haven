@@ -284,8 +284,8 @@ async def submit_system(
         # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, galaxy, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
@@ -293,6 +293,7 @@ async def submit_system(
             json.dumps(payload),
             'pending',
             system_name,
+            system_galaxy,
             system_galaxy,
             source,
             api_key_name,
@@ -387,7 +388,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         if is_super:
             # Super admin sees ALL submissions
             cursor.execute('''
-                SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
                        reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
                        personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                 FROM pending_systems
@@ -443,7 +444,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         else:
             # Partners and partner sub-admins only see submissions tagged with their discord_tag
             cursor.execute('''
-                SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
                        reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
                        personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                 FROM pending_systems
@@ -1250,6 +1251,11 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
                 planet_id = cursor.lastrowid
                 if is_edit:
                     logger.info(f"Added new planet '{planet_name}' (ID: {planet_id}) to existing system")
+
+            # For edits: clear existing moons on this planet before re-inserting
+            # to prevent duplication when the same planet is resubmitted
+            if is_edit and planet_name in existing_planets:
+                cursor.execute('DELETE FROM moons WHERE planet_id = ?', (planet_id,))
 
             # Insert moons (nested under planet)
             for moon in planet.get('moons', []):

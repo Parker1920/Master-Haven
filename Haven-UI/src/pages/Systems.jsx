@@ -66,6 +66,9 @@ export default function Systems() {
   const debouncedQuery = useDebounce(q, 300)
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [searchPage, setSearchPage] = useState(1)
+  const [searchTotalPages, setSearchTotalPages] = useState(1)
+  const [searchTotal, setSearchTotal] = useState(0)
 
   // Discord tag filtering
   const [discordTags, setDiscordTags] = useState([])
@@ -87,19 +90,36 @@ export default function Systems() {
     }).catch(() => {})
   }, [])
 
-  // Backend search when query changes
+  // Reset to page 1 whenever the query changes
+  useEffect(() => {
+    setSearchPage(1)
+  }, [debouncedQuery])
+
+  // Backend search when query or page changes
   useEffect(() => {
     if (!debouncedQuery.trim()) {
       setSearchResults([])
+      setSearchTotalPages(1)
+      setSearchTotal(0)
       return
     }
 
     setIsSearching(true)
-    axios.get(`/api/systems/search?q=${encodeURIComponent(debouncedQuery)}&limit=20`)
-      .then(r => setSearchResults(r.data.results || []))
-      .catch(() => setSearchResults([]))
+    axios.get('/api/systems/search', {
+      params: { q: debouncedQuery, page: searchPage, limit: 20 }
+    })
+      .then(r => {
+        setSearchResults(r.data.results || [])
+        setSearchTotalPages(r.data.total_pages || 1)
+        setSearchTotal(r.data.total || 0)
+      })
+      .catch(() => {
+        setSearchResults([])
+        setSearchTotalPages(1)
+        setSearchTotal(0)
+      })
       .finally(() => setIsSearching(false))
-  }, [debouncedQuery])
+  }, [debouncedQuery, searchPage])
 
   // Update URL when selection changes
   useEffect(() => {
@@ -335,7 +355,7 @@ export default function Systems() {
       {debouncedQuery.trim() && (searchResults.length > 0 || isSearching) && (
         <Card className="border-cyan-500/50">
           <h3 className="text-lg font-semibold mb-3 text-cyan-400">
-            Search Results {searchResults.length > 0 && `(${searchResults.length})`}
+            Search Results {searchTotal > 0 && `(${searchTotal} match${searchTotal === 1 ? '' : 'es'})`}
           </h3>
           {isSearching ? (
             <div className="text-gray-400 py-4 text-center">Searching...</div>
@@ -380,6 +400,29 @@ export default function Systems() {
                   <Button variant="ghost" className="text-sm shrink-0">View →</Button>
                 </div>
               ))}
+            </div>
+          )}
+          {!isSearching && searchTotalPages > 1 && (
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700">
+              <Button
+                variant="ghost"
+                className="text-sm"
+                onClick={() => setSearchPage(p => Math.max(1, p - 1))}
+                disabled={searchPage <= 1}
+              >
+                ← Prev
+              </Button>
+              <span className="text-sm text-gray-400">
+                Page {searchPage} of {searchTotalPages}
+              </span>
+              <Button
+                variant="ghost"
+                className="text-sm"
+                onClick={() => setSearchPage(p => Math.min(searchTotalPages, p + 1))}
+                disabled={searchPage >= searchTotalPages}
+              >
+                Next →
+              </Button>
             </div>
           )}
         </Card>

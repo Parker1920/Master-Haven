@@ -828,7 +828,7 @@ export default function SystemApprovalTab({
                       )}
                     </div>
                     <div className="text-sm text-gray-300 mt-1">
-                      <span>Galaxy: {submission.system_galaxy || 'Euclid'}</span>
+                      <span>Galaxy: {submission.galaxy || submission.system_data?.galaxy || 'Euclid'}</span>
                       <span className="mx-2">•</span>
                       <span className={submission.system_data?.reality === 'Permadeath' ? 'text-red-400' : 'text-green-400'}>
                         {submission.system_data?.reality || 'Normal'}

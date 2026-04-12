@@ -5021,3 +5021,96 @@ def migration_1_65_0(conn):
 
     logger.info(f"Backfilled data for {updated} of {len(moon_rows)} moons from pending_systems JSON")
     conn.commit()
+
+
+@register_migration("1.66.0", "Backfill profile_id, personal_discord_username, source on systems from discovered_by")
+def migration_1_66_0(conn):
+    """
+    The save_system endpoint (used by admins/partners for direct system creation) was
+    not setting profile_id, personal_discord_username, or source. This caused the
+    My Profile submissions count to undercount direct-created systems.
+
+    This migration:
+    1. Backfills profile_id on systems where NULL by matching discovered_by/personal_discord_username
+       against user_profiles.username_normalized (via same normalization as the runtime helper).
+    2. Defaults source to 'manual' where NULL (only for systems that aren't 'haven_extractor' or
+       'companion_app').
+    """
+    import unicodedata
+    cursor = conn.cursor()
+
+    def _normalize(u: str) -> str:
+        if not u:
+            return ''
+        n = unicodedata.normalize('NFKD', u)
+        n = ''.join(ch for ch in n if not unicodedata.combining(ch))
+        n = n.strip().lower().replace('#', '').replace(' ', '').replace('_', '').replace('-', '')
+        if len(n) > 4 and n[-4:].isdigit():
+            prefix = n[:-4]
+            if prefix and not prefix[-1].isdigit():
+                n = prefix
+        return n
+
+    # Build a username_normalized -> profile_id lookup
+    cursor.execute("SELECT id, username_normalized FROM user_profiles WHERE username_normalized IS NOT NULL")
+    profile_lookup = {row[1]: row[0] for row in cursor.fetchall() if row[1]}
+
+    # Find systems missing profile_id
+    cursor.execute("""
+        SELECT id, discovered_by, personal_discord_username
+        FROM systems WHERE profile_id IS NULL
+    """)
+    rows = cursor.fetchall()
+
+    matched = 0
+    for sys_id, discovered_by, pdu in rows:
+        candidate = pdu or discovered_by
+        if not candidate:
+            continue
+        key = _normalize(candidate)
+        pid = profile_lookup.get(key)
+        if pid:
+            cursor.execute('UPDATE systems SET profile_id = ? WHERE id = ?', (pid, sys_id))
+            matched += 1
+
+    logger.info(f"Backfilled profile_id on {matched} of {len(rows)} systems without profile_id")
+
+    # Default source to 'manual' where NULL
+    cursor.execute("""
+        UPDATE systems SET source = 'manual'
+        WHERE source IS NULL
+    """)
+    logger.info(f"Set source='manual' on {cursor.rowcount} systems where source was NULL")
+
+    conn.commit()
+
+
+@register_migration("1.67.0", "Backfill pending_systems.galaxy from system_data JSON so approval list shows correct galaxy")
+def migration_1_67_0(conn):
+    """
+    Pre-1.66.0 the submit_system INSERT never populated the galaxy column on pending_systems
+    (galaxy value was stored in system_region instead). This caused the approval tab to show
+    "Euclid" for every non-Euclid submission. 1.66.0 fixed the INSERT going forward; this
+    migration backfills historical rows by reading galaxy from the system_data JSON blob.
+    """
+    import json as _json
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, system_data FROM pending_systems
+        WHERE galaxy IS NULL AND system_data IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    backfilled = 0
+    for row_id, sys_data_json in rows:
+        try:
+            sd = _json.loads(sys_data_json) if sys_data_json else {}
+            g = sd.get('galaxy')
+            if g:
+                cursor.execute("UPDATE pending_systems SET galaxy = ? WHERE id = ?", (g, row_id))
+                backfilled += 1
+        except (ValueError, TypeError):
+            continue
+
+    logger.info(f"Backfilled galaxy on {backfilled} of {len(rows)} pending_systems rows")
+    conn.commit()

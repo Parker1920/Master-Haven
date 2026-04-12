@@ -151,12 +151,15 @@ export default function PendingApprovals() {
       alert('Admin authentication required')
       navigate('/systems')
     } else {
-      loadSubmissions()
+      loadSubmissions(true)
     }
   }, [authLoading, isAdmin, navigate])
 
-  async function loadSubmissions() {
-    setLoading(true)
+  async function loadSubmissions(isInitial = false) {
+    // Only show full loading spinner on initial load, not on refreshes after actions.
+    // Showing loading unmounts the tab components, destroying their local state
+    // (batch results modal, selected submission, etc.)
+    if (isInitial) setLoading(true)
     try {
       const [systemsResponse, regionsResponse, editRequestsResponse, discoveriesResponse] = await Promise.all([
         axios.get('/api/pending_systems'),
@@ -171,7 +174,7 @@ export default function PendingApprovals() {
     } catch (err) {
       alert('Failed to load submissions: ' + (err.response?.data?.detail || err.message))
     } finally {
-      setLoading(false)
+      if (isInitial) setLoading(false)
     }
   }
 

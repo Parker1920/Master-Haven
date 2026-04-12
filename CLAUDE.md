@@ -22,9 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.50.0 | 2026-03-23 | Codebase Refactoring - modular backend, shared frontend hooks |
-| Haven-UI | 1.48.0 | 2026-03-23 | Shared hooks, data-driven Navbar, unified CelestialBodyEditor |
-| Backend API | 1.48.0 | 2026-03-23 | Modular architecture: 12 route modules, 3 service modules, shared constants |
+| **Master Haven** | 1.50.1 | 2026-04-11 | Voyagers Map HIGH-severity bug fixes |
+| Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
+| Backend API | 1.48.1 | 2026-04-11 | Search pagination, moon dedup on edit, profile_id on save_system |
 | Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
@@ -81,6 +81,25 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.1 (2026-04-11) - Voyagers Map HIGH-severity Bug Fixes
+Six HIGH-severity bugs from the Voyagers Map board fixed.
+
+**Haven-UI 1.48.1**
+- Wizard: Space station checkbox (`hasStation`) now syncs from loaded system data on edit — previously it always rendered unchecked even when the system had a station (Bug-013)
+- SystemApprovalTab: Approval list card now reads galaxy from the `galaxy` column (with `system_data.galaxy` fallback) instead of the always-undefined `system_galaxy` — non-Euclid submissions no longer display as "Euclid" during review (Bug-009)
+- Systems page: Search bar now supports paginated results — added `searchPage`/`searchTotalPages`/`searchTotal` state, Prev/Next buttons, and page reset on new query. Real match count displayed (Bug-002)
+
+**Backend API 1.48.1**
+- `/api/systems/search`: Added `page` parameter, COUNT query for totals, `LIMIT ? OFFSET ?` pagination. Response now includes `page` and `total_pages`. Map 3D search pagination starts working automatically since it already sent `page` (Bug-002, Bug-003)
+- `approve_system`: Added targeted `DELETE FROM moons WHERE planet_id = ?` before the moon INSERT loop on edit — previously moons were INSERTed without deleting existing ones, causing duplication on every resubmit (Bug-005)
+- `submit_system` INSERT now populates the `galaxy` column in `pending_systems` (previously galaxy was accidentally stored in `system_region` only) (Bug-009)
+- All four `/api/pending_systems` list SELECTs now include the `galaxy` column (Bug-009)
+- `save_system` INSERT now populates `profile_id`, `personal_discord_username`, and `source='manual'` columns on the systems row — admin/partner direct-create no longer produces orphan rows that My Profile can't match (Bug-014)
+- Migration v1.66.0: Backfills `profile_id` on historical systems via `discovered_by`/`personal_discord_username` → `user_profiles.username_normalized` lookup, defaults `source='manual'` where NULL
+- Migration v1.67.0: Backfills `pending_systems.galaxy` from `system_data` JSON for all legacy rows — approval view now shows correct galaxy for historical submissions
+
+---
 
 #### Master Haven 1.50.0 (2026-03-23) - Codebase Refactoring
 Major structural refactoring to improve maintainability and reduce duplication. No functional changes.

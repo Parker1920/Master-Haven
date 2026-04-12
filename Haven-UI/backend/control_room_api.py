@@ -2453,8 +2453,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag,
-                    stellar_classification, discovered_by, discovered_at, contributors)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stellar_classification, discovered_by, discovered_at, contributors,
+                    profile_id, personal_discord_username, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
@@ -2482,7 +2483,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 payload.get('stellar_classification'),
                 editor_username,
                 now_iso,
-                json.dumps([{"name": editor_username, "action": "upload", "date": now_iso}])
+                json.dumps([{"name": editor_username, "action": "upload", "date": now_iso}]),
+                session_data.get('profile_id'),
+                session_data.get('username') or payload.get('personal_discord_username'),
+                'manual'
             ))
             logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 

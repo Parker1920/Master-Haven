@@ -1053,6 +1053,7 @@ async def api_systems(
 @router.get('/api/systems/search')
 async def api_search(
     q: str = '',
+    page: int = 1,
     limit: int = 20,
     star_type: str = None,
     economy_type: str = None,
@@ -1072,12 +1073,13 @@ async def api_search(
 ):
     """Search systems by name, glyph code, galaxy, or description with optional advanced filters.
 
-    Uses efficient SQL LIKE queries and returns results with region info.
+    Uses efficient SQL LIKE queries and returns paginated results with region info.
     Applies data restrictions based on viewer permissions.
 
     Args:
         q: Search query (matches system name, glyph_code, galaxy, description)
-        limit: Max results to return (default 20, max 50)
+        page: Page number (1-indexed, default 1)
+        limit: Max results per page (default 20, max 50)
         star_type..is_complete: Advanced filter parameters
         session: Session cookie for permission checking
 
@@ -1085,6 +1087,8 @@ async def api_search(
         {
             "results": [...],
             "total": 42,
+            "page": 1,
+            "total_pages": 3,
             "query": "search term"
         }
     """
@@ -1092,9 +1096,11 @@ async def api_search(
     q = q.strip()
 
     if not q:
-        return {'results': [], 'total': 0, 'query': ''}
+        return {'results': [], 'total': 0, 'page': 1, 'total_pages': 1, 'query': ''}
 
     limit = max(1, min(limit, 50))  # Clamp between 1 and 50
+    page = max(1, page)
+    offset = (page - 1) * limit
 
     conn = None
     try:
@@ -1132,8 +1138,18 @@ async def api_search(
         if adv_where_clauses:
             adv_sql = " AND " + " AND ".join(adv_where_clauses)
 
-        # Efficient SQL search across multiple fields
-        # Fetch more than limit to account for filtering by data restrictions
+        # Count total matches first (for pagination metadata)
+        cursor.execute(f'''
+            SELECT COUNT(*) FROM systems s
+            WHERE (s.name LIKE ? COLLATE NOCASE
+               OR s.glyph_code LIKE ? COLLATE NOCASE
+               OR s.galaxy LIKE ? COLLATE NOCASE
+               OR s.description LIKE ? COLLATE NOCASE)
+            {adv_sql}
+        ''', (search_pattern, search_pattern, search_pattern, search_pattern, *adv_params))
+        total = cursor.fetchone()[0]
+
+        # Efficient SQL search across multiple fields with pagination
         # Include x, y, z for map display positioning
         cursor.execute(f'''
             SELECT s.id, s.name, s.region_x, s.region_y, s.region_z,
@@ -1157,9 +1173,9 @@ async def api_search(
                      ELSE 2
                 END,
                 s.name ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
         ''', (search_pattern, search_pattern, search_pattern, search_pattern,
-              *adv_params, q, f'{q}%', limit * 2))
+              *adv_params, q, f'{q}%', limit, offset))
 
         rows = cursor.fetchall()
         systems = [dict(row) for row in rows]
@@ -1178,14 +1194,15 @@ async def api_search(
             sys['completeness_score'] = score
 
         # Apply data restrictions
-        systems = apply_data_restrictions(systems, session_data)
+        results = apply_data_restrictions(systems, session_data)
 
-        # Limit to requested amount
-        results = systems[:limit]
+        total_pages = max(1, (total + limit - 1) // limit)
 
         return {
             'results': results,
-            'total': len(results),
+            'total': total,
+            'page': page,
+            'total_pages': total_pages,
             'query': q
         }
 

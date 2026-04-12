@@ -106,6 +106,7 @@ export default function Wizard(){
       axios.get(`/api/systems/${encodeURIComponent(edit)}`).then(r=>{
         setSystem(r.data)
         setOriginalTag(r.data.discord_tag)
+        setHasStation(!!(r.data.space_station && Object.keys(r.data.space_station).length > 0))
       }).catch(()=>{})
     }
   }, [edit])
