@@ -22,10 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.50.8 | 2026-04-13 | Option B no-data handling: extractor omits fields, backend stores NULL for no-data systems, no_trade_data flag preserved |
+| **Master Haven** | 1.50.9 | 2026-04-13 | Galaxy defaulting-to-Euclid bug fix (player_state fallback silent clamp removed, coord upgrade retry added) |
 | Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
 | Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
-| Haven Extractor | 1.8.0 | 2026-04-13 | Rolled-up Voyagers compatibility release (coord fix, planet/moon match-by-name, refresh timing, Option B no-data handling) |
+| Haven Extractor | 1.8.1 | 2026-04-13 | Galaxy fixes: reject out-of-range RealityIndex, log raw universe_addr hex, scope dedup by batch galaxy, coord upgrade retry |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -81,6 +81,21 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.9 (2026-04-13) - Galaxy Defaulting-to-Euclid Bug Fix
+Ekimo reported a system uploaded while in galaxy 256 (Odyalutai) but the admin page showed Euclid. Code audit turned up four issues combining to produce the symptom — the primary culprit was a silent galaxy-clamping default in the player_state fallback path.
+
+**The root-cause chain**: (1) Player warps to non-Euclid galaxy → (2) `on_system_generate` fires before NMS populates `mPlanetDiscoveryData.mUniverseAddress` → (3) primary decode returns None → (4) player_state fallback runs, reads broken post-Voyagers struct → (5) `location.RealityIndex` returns garbage out of 0-255 range → (6) **code silently clamped galaxy_idx to 0 (Euclid)** instead of rejecting the read → (7) fabricated coords cached as `self._current_system_coords` → (8) retry guards elsewhere only ran if coords were None, so the bogus cached result was never replaced when mUniverseAddress became readable a beat later → (9) batch save used the cached fake-Euclid coords → (10) submission went out with `galaxy_name="Euclid"`.
+
+**Haven Extractor 1.8.1**
+- **Fix 1 (root cause)**: `_get_coords_from_player_state` no longer silently clamps out-of-range `RealityIndex` to 0. If the raw value is outside 0-255 the whole read is rejected (returns None), letting the caller retry or fall through without fabricating Euclid.
+- **Fix 2**: `_check_duplicates` now receives the actual batch galaxy instead of defaulting to Euclid. Pulled from the batch's unique `galaxy_name`; if the batch spans multiple galaxies (unusual), per-system galaxy is handled by the backend.
+- **Fix 3 (diagnostics)**: `_get_coords_from_universe_address` now logs the raw `universe_addr` hex value on every successful decode. `_get_coords_from_player_state` logs the raw `RealityIndex` value and the full GalacticAddress field contents before deciding. Any future galaxy-mismatch report can be diagnosed from the log alone.
+- **Fix 4 (race recovery)**: New `_maybe_upgrade_coords()` helper replaces the `if self._current_system_coords is None` retry guard at every coord retry site (`on_system_generate`, `on_creature_roles_generate` early + post-capture, and APPVIEW). The helper re-attempts resolution whenever the cached coords are `None` OR have `from_fallback=True`, and promotes primary mUniverseAddress results over stale fallback results with a visible `[COORD UPGRADE]` log line.
+- Player_state fallback results are now tagged `from_fallback=True` in the returned dict; mUniverseAddress results aren't.
+- `on_system_generate` explicitly clears `self._current_system_coords = None` before running the first resolution attempt, so stale coords from a prior system can't carry over if the new resolution fails.
+
+---
 
 #### Master Haven 1.50.8 (2026-04-13) - Option B: Omit No-Data Fields, Preserve Real Game Data
 Replaces v1.50.7's "send Unknown strings" approach with a cleaner payload omission. When NMS itself reports no data for economy/conflict/lifeform (race_raw > 6 signal, unchanged from v1.6.14), the extractor now leaves those four fields OUT of the submission payload entirely and adds a `no_trade_data: true` flag. The backend detects the flag and stores `NULL` for those columns in the `systems` table, so they're distinguishable from "Unknown" / unset at the data layer. Haven UI frontend can key off the null values (or the flag in `pending_systems.submission_data`) to render `-Data Unavailable-` / `Uncharted` specifically for those systems — future frontend follow-up.

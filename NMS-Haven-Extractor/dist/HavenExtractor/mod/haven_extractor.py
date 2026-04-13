@@ -805,7 +805,7 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.8.0"
+    __version__ = "1.8.1"
     __description__ = "Batch mode planet data extraction - game mode tracking & biome subtype plant fix"
 
     # ==========================================================================
@@ -1610,11 +1610,17 @@ class HavenExtractorMod(Mod):
             # Coord resolution: mUniverseAddress primary, player_state secondary.
             # System name is procedurally generated from seed, not stored in Name field.
             # The Name field is only populated for user-renamed systems.
+            # v1.8.1 (Fix 4): Clear prior coords on new-system event so _maybe_upgrade_coords
+            # doesn't hold onto stale Euclid-from-previous-system data if this initial
+            # resolution fails.
             self._current_system_name = None
-            self._current_system_coords = self._resolve_current_coordinates()
+            self._current_system_coords = None
+            self._maybe_upgrade_coords()
 
             if self._current_system_coords is None:
                 logger.info("  [DEBUG] No coordinates yet - will try again during planet capture")
+            elif self._current_system_coords.get('from_fallback', False):
+                logger.info("  [DEBUG] Initial coords came from fallback — will keep retrying primary in subsequent hooks")
 
             # =====================================================
             # Clear captured planets for new system
@@ -1659,9 +1665,11 @@ class HavenExtractorMod(Mod):
         if not self._capture_enabled:
             return
 
-        # Coord resolution retry (in case on_system_generate ran before planet data was populated)
-        if self._current_system_coords is None and len(self._captured_planets) == 0:
-            self._current_system_coords = self._resolve_current_coordinates()
+        # v1.8.1 (Fix 4): Always attempt upgrade — even if we already have coords from the
+        # fallback path, try to replace them with primary mUniverseAddress data as soon as
+        # it becomes readable. Guard on "not yet captured any planets" removed because the
+        # race window can extend past the first capture.
+        self._maybe_upgrade_coords()
 
         # v1.6.11: Hook-fire limit enforced below per unique planet name to handle
         # the case where the hook fires for the same planet twice (was filling the
@@ -2121,9 +2129,9 @@ class HavenExtractorMod(Mod):
             logger.info("*" * 60)
             logger.info("")
 
-            # Coord resolution retry after first planet captured (mUniverseAddress primary)
-            if self._current_system_coords is None:
-                self._current_system_coords = self._resolve_current_coordinates()
+            # v1.8.1 (Fix 4): Coord upgrade attempt after each planet capture. Replaces any
+            # from_fallback coords with primary mUniverseAddress data once available.
+            self._maybe_upgrade_coords()
 
         except Exception as e:
             logger.error(f"GenerateCreatureRoles capture failed: {e}")
@@ -2152,12 +2160,12 @@ class HavenExtractorMod(Mod):
         logger.info("=== APPVIEW STATE - SYSTEM READY ===")
         logger.info("=" * 40)
 
-        # Coord resolution at APPVIEW (mUniverseAddress primary, player_state fallback)
+        # v1.8.1 (Fix 4): Coord upgrade at APPVIEW — by this point mUniverseAddress should
+        # definitely be populated. Replaces any from_fallback coords with primary data.
+        logger.info("[APPVIEW] Resolving / upgrading coordinates...")
+        self._maybe_upgrade_coords()
         if self._current_system_coords is None:
-            logger.info("[APPVIEW] Resolving coordinates...")
-            self._current_system_coords = self._resolve_current_coordinates()
-            if self._current_system_coords is None:
-                logger.warning("[APPVIEW] Could not resolve coordinates from any source")
+            logger.warning("[APPVIEW] Could not resolve coordinates from any source")
 
         # Auto-save to batch when APPVIEW fires (if not already saved)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
@@ -2561,7 +2569,17 @@ class HavenExtractorMod(Mod):
         logger.info("[EXPORT] Running pre-flight duplicate check...")
         glyph_codes = [sys.get('glyph_code') for sys in systems_to_export if sys.get('glyph_code')]
 
-        check_result = self._check_duplicates(glyph_codes)
+        # v1.8.1 (Fix 2): Pass the actual galaxy from the batch so dedup is scoped correctly.
+        # The prior default of "Euclid" meant non-Euclid uploads were checked against the wrong
+        # galaxy, which could mask duplicates or fabricate false collisions.
+        batch_galaxies = {s.get('galaxy_name') for s in systems_to_export if s.get('galaxy_name')}
+        if len(batch_galaxies) == 1:
+            batch_galaxy = next(iter(batch_galaxies))
+        else:
+            batch_galaxy = None  # mixed-galaxy batch — backend will per-system scope via payload
+            if len(batch_galaxies) > 1:
+                logger.info(f"[EXPORT] Batch spans multiple galaxies: {sorted(batch_galaxies)} — dedup check uses per-system galaxy")
+        check_result = self._check_duplicates(glyph_codes, galaxy=batch_galaxy)
         if not check_result:
             logger.warning("[EXPORT] Could not verify duplicates with Haven UI")
             logger.info("[EXPORT] Proceeding with export anyway...")
@@ -3690,7 +3708,9 @@ class HavenExtractorMod(Mod):
                 return None
             system_name = self._get_actual_system_name() or f"System_{decoded['glyph_code']}"
             region_name = f"Region_{decoded['glyph_code'][:4]}"
-            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({decoded['galaxy_name']})")
+            # v1.8.1 (Fix 3): Log the raw hex address alongside the decoded galaxy so any
+            # galaxy-mismatch report can be diagnosed by inspecting the raw bytes directly.
+            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({decoded['galaxy_name']}) raw=0x{universe_addr:016X}")
             return {
                 "system_name": system_name,
                 "region_name": region_name,
@@ -3710,7 +3730,10 @@ class HavenExtractorMod(Mod):
             return None
 
     def _get_coords_from_player_state(self, source_label="player_state"):
-        """Secondary fallback. Vulnerable to NMS struct shifts — only used if mUniverseAddress failed."""
+        """Secondary fallback. Vulnerable to NMS struct shifts (Voyagers broke GalacticAddress
+        and may have affected RealityIndex too) — only used when mUniverseAddress is unavailable.
+        Any result from this path is tagged with from_fallback=True so the caller can retry later.
+        """
         try:
             player_state = gameData.player_state
             if not player_state:
@@ -3722,9 +3745,16 @@ class HavenExtractorMod(Mod):
             voxel_z = self._safe_int(galactic_addr.VoxelZ)
             system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
             planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-            galaxy_idx = self._safe_int(location.RealityIndex)
-            if galaxy_idx < 0 or galaxy_idx > 255:
-                galaxy_idx = 0
+            raw_reality = self._safe_int(location.RealityIndex)
+            # v1.8.1 (Fix 1+3): Log the raw RealityIndex value for forensic debugging AND
+            # reject out-of-range reads instead of silently defaulting to 0 (Euclid).
+            # Silent clamping was producing fake Euclid submissions for players warping to
+            # non-Euclid galaxies when the Voyagers-broken struct returned garbage.
+            logger.debug(f"  [{source_label}] raw RealityIndex={raw_reality}, voxel=[{voxel_x},{voxel_y},{voxel_z}], sys={system_idx}")
+            if raw_reality < 0 or raw_reality > 255:
+                logger.info(f"  [{source_label}] rejected: RealityIndex={raw_reality} out of range (0-255) — not fabricating Euclid")
+                return None
+            galaxy_idx = raw_reality
             if not self._coords_look_valid(voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
                 logger.debug(f"  [{source_label}] failed sanity: X={voxel_x},Y={voxel_y},Z={voxel_z},Sys={system_idx},Galaxy={galaxy_idx}")
                 return None
@@ -3732,7 +3762,7 @@ class HavenExtractorMod(Mod):
             galaxy_name = get_galaxy_name(galaxy_idx)
             system_name = self._get_actual_system_name() or f"System_{glyph_code}"
             region_name = f"Region_{glyph_code[:4]}"
-            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {glyph_code} ({galaxy_name})")
+            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {glyph_code} ({galaxy_name}) [FALLBACK — will retry primary]")
             return {
                 "system_name": system_name,
                 "region_name": region_name,
@@ -3743,18 +3773,54 @@ class HavenExtractorMod(Mod):
                 "voxel_y": voxel_y,
                 "voxel_z": voxel_z,
                 "solar_system_index": system_idx,
+                "from_fallback": True,  # v1.8.1 (Fix 4): mark as fallback so caller retries
             }
         except Exception as e:
             logger.debug(f"  [{source_label}] exception: {e}")
             return None
 
     def _resolve_current_coordinates(self):
-        """Canonical resolver: mUniverseAddress primary, player_state secondary."""
+        """Canonical resolver: mUniverseAddress primary, player_state secondary.
+        v1.8.1 (Fix 4): player_state results carry from_fallback=True — callers should keep
+        retrying this resolver on subsequent hook fires until a non-fallback result arrives.
+        """
         coords = self._get_coords_from_universe_address()
         if coords:
             return coords
         logger.debug("  mUniverseAddress unavailable, trying player_state fallback")
         return self._get_coords_from_player_state()
+
+    def _maybe_upgrade_coords(self):
+        """v1.8.1 (Fix 4): try to upgrade self._current_system_coords if we currently have
+        None or a from_fallback result. Prefer a primary (mUniverseAddress) result when it
+        becomes available. This catches the race where on_system_generate fires before NMS
+        has populated mUniverseAddress and we initially only got player_state data with a
+        potentially-bogus galaxy. On subsequent hook fires the primary becomes readable and
+        we swap in the correct galaxy.
+        """
+        existing = self._current_system_coords
+        if existing is not None and not existing.get('from_fallback', False):
+            return  # already have a solid primary result — nothing to do
+
+        new_coords = self._resolve_current_coordinates()
+        if not new_coords:
+            return  # neither path worked; keep whatever we had
+
+        if new_coords.get('from_fallback', False):
+            # Only accept a fallback if we had nothing at all before — prevents stale
+            # fallback from a prior resolution being replaced with equally-unreliable data.
+            if existing is None:
+                self._current_system_coords = new_coords
+            return
+
+        # Primary (non-fallback) result — always use it, and flag the upgrade visibly.
+        if existing is not None and existing.get('from_fallback', False):
+            logger.info(
+                f"  [COORD UPGRADE] Primary mUniverseAddress now available — "
+                f"replacing fallback galaxy='{existing.get('galaxy_name')}' "
+                f"with '{new_coords.get('galaxy_name')}'"
+            )
+        self._current_system_coords = new_coords
 
     def _clean_resource_string(self, val: str) -> str:
         """Clean a resource string, removing garbage characters."""
