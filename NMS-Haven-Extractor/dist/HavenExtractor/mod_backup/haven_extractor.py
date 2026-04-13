@@ -805,7 +805,7 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.8.0"
+    __version__ = "1.6.0"
     __description__ = "Batch mode planet data extraction - game mode tracking & biome subtype plant fix"
 
     # ==========================================================================

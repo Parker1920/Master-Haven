@@ -2477,16 +2477,30 @@ async def receive_extraction(
         'region_z': region_z,
         'glyph_solar_system': payload.get('solar_system_index', 1),
         'star_color': star_color,
-        'economy_type': payload.get('economy_type', 'Unknown'),
-        'economy_level': payload.get('economy_strength', 'Unknown'),
-        'conflict_level': payload.get('conflict_level', 'Unknown'),
-        'dominant_lifeform': payload.get('dominant_lifeform', 'Unknown'),
         'discovered_by': payload.get('discoverer_name', 'HavenExtractor'),
         'discovered_at': payload.get('extraction_time'),
         'source': 'haven_extractor',
         'extractor_version': payload.get('extractor_version', 'unknown'),
         'game_mode': game_mode,
+        # v1.48.2: Flag from extractor indicating NMS itself reports "-Data Unavailable-" /
+        # "Uncharted" for economy/conflict/lifeform. When True, the four fields below are
+        # set to None (NULL in DB) so the frontend can render them as unavailable rather
+        # than as literal "Unknown" strings.
+        'no_trade_data': bool(payload.get('no_trade_data', False)),
     }
+
+    # Populate economy/conflict/lifeform only when NMS has data for them.
+    # Extractor omits these keys from the payload for no-data systems (race_raw > 6).
+    if submission_data['no_trade_data']:
+        submission_data['economy_type'] = None
+        submission_data['economy_level'] = None
+        submission_data['conflict_level'] = None
+        submission_data['dominant_lifeform'] = None
+    else:
+        submission_data['economy_type'] = payload.get('economy_type', 'Unknown')
+        submission_data['economy_level'] = payload.get('economy_strength', 'Unknown')
+        submission_data['conflict_level'] = payload.get('conflict_level', 'Unknown')
+        submission_data['dominant_lifeform'] = payload.get('dominant_lifeform', 'Unknown')
 
     # Convert planets array
     planets = []

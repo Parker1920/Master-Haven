@@ -22,10 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.50.1 | 2026-04-11 | Voyagers Map HIGH-severity bug fixes |
+| **Master Haven** | 1.50.8 | 2026-04-13 | Option B no-data handling: extractor omits fields, backend stores NULL for no-data systems, no_trade_data flag preserved |
 | Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
-| Backend API | 1.48.1 | 2026-04-11 | Search pagination, moon dedup on edit, profile_id on save_system |
-| Haven Extractor | 1.6.8 | 2026-03-12 | Auto-detect game mode, fix Swamp/Waterworld plant resource |
+| Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
+| Haven Extractor | 1.8.0 | 2026-04-13 | Rolled-up Voyagers compatibility release (coord fix, planet/moon match-by-name, refresh timing, Option B no-data handling) |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -81,6 +81,97 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.8 (2026-04-13) - Option B: Omit No-Data Fields, Preserve Real Game Data
+Replaces v1.50.7's "send Unknown strings" approach with a cleaner payload omission. When NMS itself reports no data for economy/conflict/lifeform (race_raw > 6 signal, unchanged from v1.6.14), the extractor now leaves those four fields OUT of the submission payload entirely and adds a `no_trade_data: true` flag. The backend detects the flag and stores `NULL` for those columns in the `systems` table, so they're distinguishable from "Unknown" / unset at the data layer. Haven UI frontend can key off the null values (or the flag in `pending_systems.submission_data`) to render `-Data Unavailable-` / `Uncharted` specifically for those systems — future frontend follow-up.
+
+**Haven Extractor 1.6.15**
+- `_extract_system_properties()` pops `economy_type`, `economy_strength`, `conflict_level`, `dominant_lifeform` from `sys_props` when `system_no_data` is set, and adds `no_trade_data: True`. Payload sent to `/api/extraction` simply lacks those keys.
+- Normal systems (race 0-6) keep all four fields as before — no change to scanned-system behavior.
+
+**Backend API 1.48.2**
+- `/api/extraction` accepts `no_trade_data` boolean from payload and stores it in `pending_systems.submission_data` JSON.
+- When `no_trade_data` is `True`, backend sets `economy_type`/`economy_level`/`conflict_level`/`dominant_lifeform` to `None` in `submission_data` so approval inserts NULL into `systems` (not the literal string `"Unknown"`). Fields in the `systems` table for no-data systems are now genuinely null.
+- When `no_trade_data` is `False` (or absent), existing `payload.get(..., 'Unknown')` default behavior is preserved — zero regression for manual submissions and pre-1.6.15 extractors.
+
+---
+
+#### Master Haven 1.50.7 (2026-04-13) - Extractor Respects No-Data System State
+Fixes extractor submitting fabricated economy/conflict/lifeform data for systems that **legitimately have no values** for those fields in-game. Not a scan-progress issue — even after a full freighter scanner-room scan (which normally gets everything NMS can give), some systems categorically show `-Data Unavailable-` for economy/conflict and `Uncharted` for lifeform. The extractor was sending fake `Fusion / Low / None`-type data instead of honoring that state.
+
+**The signal**: `INHABITING_RACE` raw value > 6 (real enum is 0-6: Gek, Vy'keen, Korvax, Robots, Atlas, Diplomats, Uninhabited). Value 7+ is NMS's in-memory marker for "no race data available for this system". The adjacent `TRADING_DATA` (0x2240) and `CONFLICT_DATA` (0x2250) fields in these systems still decode to valid-looking enum values like `Fusion / Poor / Low / Gek` — which we were accepting as real data. Wander Respite's log consistently showed `[DIRECT] Race: Unknown(7) (raw: 7)` — that's the marker.
+
+**Haven Extractor 1.6.14**
+- `_read_system_data_direct()` now clears `economy_type`, `economy_strength`, `conflict_level`, `dominant_lifeform` to `"Unknown"` when `race_val > 6`. Logs `System reports no economy/conflict/lifeform data (race=N) — matches in-game '-Data Unavailable-' / 'Uncharted'`.
+- `_extract_system_properties()` tracks `system_no_data` flag and **suppresses the struct fallback** for economy/conflict/lifeform in that state. Struct access would read the same memory region and silently re-fabricate the fake values the direct read just cleared.
+- Star color struct fallback still runs unconditionally (star type is visible regardless of scan state, independent signal).
+- Submissions for no-data systems now correctly send `"Unknown"` / empty values, matching what the game shows in-game rather than fake `Fusion (Poor)` etc.
+
+---
+
+#### Master Haven 1.50.6 (2026-04-13) - Extractor Cleanup Pass (Log Spam, Alien Race, Cosmetic Output)
+Housekeeping pass after v1.6.12 verified the refresh-timing fix works in production (Tython + Wander Respit VH both uploaded with correct per-planet adjectives — `Ample/Full/Observant` on Witheusian Dachi, `Empty/Not Present/Enforcing` on dead Ilminst VIII, varied adjectives across all planets).
+
+**Haven Extractor 1.6.13**
+- **Log spam eliminated**: `[HINTS] ExtraResourceHints: empty`, `Planet: '<name>'`, `[HINTS] HasScrap=True (hook time, deferred to extraction)` and hint enumeration lines demoted from INFO to DEBUG. The GenerateCreatureRoles hook fires ~60×/sec during galaxy map browsing on Voyagers — previously produced 10,000+ INFO-level lines per session from these three messages alone. The final `CAPTURED PLANET '<name>' DATA!` block still logs at INFO so actual captures remain visible.
+- **`ALIEN_RACES` extended to cover post-Voyagers race enum value 7** (observed consistently for abandoned/no-race systems). Added entries for 7 and 8 as `"None"` to prevent `Unknown(7)` from reaching the submission payload. The 0-6 values are unchanged.
+- **`Expected: N planets + M moons` log line suppressed when the values are untrustworthy**: Voyagers broke `PrimePlanets` at offset `0x2268` (returns 0 for every system). Previously produced misleading `Expected: 0 planets + 6 moons` on planet-heavy systems. The line only prints now when the direct read matches the extracted count.
+- **Redundant `result["planet_name"] = captured['planet_name']` assignment removed** in `_extract_single_planet`. The memory name read at the top of the name-lookup block is the source of truth; captured name would be identical for name-matched entries (stale overwrite risk for any edge case where memory read returns a slightly-different name).
+- **`[NOCAPTURE]` warning** now shows memory slot name instead of just array index.
+
+---
+
+#### Master Haven 1.50.5 (2026-04-13) - Extractor Refresh Timing + Dead-Code Cleanup
+Fixes the batched-system regression where the *first* system in a multi-system batch uploaded with generic `Bountiful/Copious/Limited` enum-level flora/fauna/sentinel instead of the biome-appropriate per-planet display adjectives.
+
+**Root cause**: `planet_data.PlanetInfo.Flora` (and Fauna/Sentinel/Weather) is *empty* at hook capture time — it's only populated later by the game. The sole way to get proper display strings is `_auto_refresh_for_export()`, which reads live memory. Pre-Voyagers the APPVIEW hook would fire when the player fully entered the system and trigger this refresh; on Voyagers the APPVIEW hook no longer fires. That left the export-time refresh as the only live path, which works for the *currently-loaded* system but not for already-queued batched systems (their memory has been overwritten by the time export runs).
+
+**Haven Extractor 1.6.12**
+- **Apply Name button now triggers `_auto_refresh_for_export()`**: the user clicking Apply Name is a strong "I am currently in this system" signal, and memory is guaranteed live at that moment. This guarantees batched systems get proper display strings as long as the user names them.
+- **`_save_current_system_to_batch()` runs a safety-net refresh first**: harmless if memory has already transitioned (the name-match inside the refresh silently skips entries whose names don't exist in `_captured_planets`, which they won't when memory shows a new system).
+- **Debug `check_planet_data` GUI button** updated from index-based `_captured_planets[i]` lookups to name-matching (memory slot name → captured entry). Previously reported stale garbage in logs after the name-keying change.
+- **`_extract_single_planet` back-compat `elif index in self._captured_planets` branch removed** — all captures are name-keyed now, the fallback never ran.
+- **Plant-resource derivation uses `captured is not None`** instead of re-checking index membership. Fixes a dead-code path that was always returning flora_raw=-1.
+- Renamed stale `planet_index = len(self._captured_planets)` placeholder in the hook to use `planet_key` throughout (no behavioral change, just removes a misleading variable name).
+
+---
+
+#### Master Haven 1.50.4 (2026-04-13) - Name-Keyed Planet Capture (Voyagers Stride-Shift Recovery)
+Fixes the 1.6.10 regression where per-planet biome/size/is_moon showed `Unknown(254)`/garbage for slots 1-5. Voyagers shifted the `PLANET_GEN_INPUTS` per-slot stride (`0x53` bytes no longer correct), so direct reads beyond slot 0 grab wrong memory. Solution: trust the GenerateCreatureRoles hook (which receives the actual `lPlanetData` per fire), but match captured entries to memory slots by **planet name** instead of array index.
+
+**Haven Extractor 1.6.11**
+- **`_captured_planets` now keyed by planet name** (was: hook-fire counter index). Duplicate hook fires for the same planet update the existing entry instead of consuming a new slot — this also fixed the case where hook fired twice for Sycihris T1 and dropped Roqeqchiq Isshi from the capture set.
+- **6-planet quota is now per unique name** — updates always allowed, only new unique names count against the limit.
+- **`_extract_single_planet` reads memory slot's name first, looks up captured data by name** — biome, biome_subtype, planet_size, is_moon come from the matching captured entry. Per-planet correct for all 6 slots.
+- **`_auto_refresh_for_export` matches by name** before writing flora/fauna/sentinel/weather display strings — previously stomped wrong entries when hook order != memory order.
+- **Direct PLANET_GEN_INPUTS reads made tolerant**: `Unknown(N)` values from shifted stride are now discarded rather than propagated, so slots without a name-match show clean `Unknown` instead of raw enum numbers.
+- Restored the biome/size/is_moon captured override that 1.6.10 removed — it was correct, the bug was the index-based lookup.
+
+---
+
+#### Master Haven 1.50.3 (2026-04-13) - Extractor Planet/Moon Swap + Economy/Conflict Fixes
+Follow-up to the Voyagers struct break — fixes the remaining struct-path regressions in per-planet and per-system extraction.
+
+**Haven Extractor 1.6.10**
+- **Planet/moon swap fix**: Removed the captured-hook-data override for `biome`, `biome_subtype`, `planet_size`, `is_moon` in `_extract_single_planet`. The hook fires in GenerateCreatureRoles order (not memory slot order) and sometimes fires for adjacent systems during galaxy discovery, so `_captured_planets[i]` did not reliably map to `maPlanets[i]`. Direct memory reads from the per-slot `PLANET_GEN_INPUTS` array (already present) are now authoritative for these fields. Captured flora/fauna/sentinel/weather are retained (they're refreshed per-memory-slot by `_auto_refresh_for_export`).
+- **Economy/conflict/dominant-lifeform fix**: Wired up the previously-dead `_read_system_data_direct()` helper as primary in `_extract_system_properties`. Direct-offset reads for `TRADING_DATA` (0x2240), `CONFLICT_DATA` (0x2250), and `INHABITING_RACE` (0x2254) replace broken struct-access like `sys_data.TradingData.TradingClass`. Struct path retained as fallback.
+- **PlanetCount/PrimePlanets fix**: `_extract_planets` now reads `PLANETS_COUNT` (0x2264) and `PRIME_PLANETS` (0x2268) via direct offsets first, falling back to struct access. Resolves `Expected: 0 planets + 6 moons` cosmetic log error.
+- **Unknown-prefix detection**: The `_is_unresolved()` helper treats both `"Unknown"` and `"Unknown(N)"` as failure, so struct fallbacks actually trigger when direct reads return unmapped enum values (previously the `== "Unknown"` checks missed the `"Unknown(5)"` case).
+
+---
+
+#### Master Haven 1.50.2 (2026-04-12) - Extractor Coord Resolution Fix (NMS Voyagers Struct Break)
+Structural fix for silent glyph-zero uploads after NMS Voyagers update shifted `cGcPlayerState.mLocation.GalacticAddress` struct offsets.
+
+**Haven Extractor 1.6.9**
+- **Primary coord source switched from `player_state.mLocation.GalacticAddress` to `mPlanetDiscoveryData.mUniverseAddress`**. The nested `GalacticAddress.VoxelX/Y/Z/SolarSystemIndex/RealityIndex` fields all returned 0 after Voyagers because NMS.py struct offsets shifted. `mUniverseAddress` is a single packed uint64 with a documented bit layout (X/Y/Z regions, system idx, planet idx, galaxy idx) — one offset vs. five, much less exposure to future NMS struct reshuffling.
+- New helpers: `_coords_look_valid()`, `_decode_universe_address()`, `_get_coords_from_universe_address()`, `_get_coords_from_player_state()`, `_resolve_current_coordinates()`
+- Consolidated 4 duplicate coord-extraction code blocks (~200 lines) into a single canonical resolver: mUniverseAddress primary → player_state fallback → cached tertiary
+- `_coords_look_valid()` rejects all-zero coords (universe origin is impossible in practice) and out-of-range galaxy indices — prevents silent bad-data propagation
+- Export-time hard stop in `_run_export_flow`: filters any system with glyph `000000000000` or empty, logs a clear error instead of submitting. Aborts if no valid systems remain.
+- Removed obsolete player_state-first logic from `on_system_generate`, `on_creature_roles_generate` (both coord blocks), `on_appview`, and `_get_current_coordinates`
+
+---
 
 #### Master Haven 1.50.1 (2026-04-11) - Voyagers Map HIGH-severity Bug Fixes
 Six HIGH-severity bugs from the Voyagers Map board fixed.
