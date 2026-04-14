@@ -22,8 +22,9 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.50.9 | 2026-04-13 | Galaxy defaulting-to-Euclid bug fix (player_state fallback silent clamp removed, coord upgrade retry added) |
+| **Master Haven** | 1.50.10 | 2026-04-14 | Keeper Discord bot discovery uploads now route through approval queue |
 | Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
+| Backend API | 1.48.3 | 2026-04-14 | `/api/discoveries` + `/discoveries` POST now enqueue to `pending_discoveries` instead of inserting directly (closes bot approval-bypass) |
 | Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
 | Haven Extractor | 1.8.1 | 2026-04-13 | Galaxy fixes: reject out-of-range RealityIndex, log raw universe_addr hex, scope dedup by batch galaxy, coord upgrade retry |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
@@ -81,6 +82,18 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.10 (2026-04-14) - Keeper Discord Bot Discovery Approval Bypass Fix
+Community-maintained Keeper Discord bot was uploading discoveries straight into the live `discoveries` table via `POST /api/discoveries` (and its legacy `/discoveries` alias), skipping the approval queue that every other submission path uses. Root cause: those two endpoints predated the discovery approval workflow introduced in v1.33.0 and were never retrofitted — they did a direct `INSERT INTO discoveries` with no auth, no self-approval check, and no discord_tag scoping.
+
+**Backend API 1.48.3**
+- `POST /api/discoveries` and `POST /discoveries` rewritten to insert into `pending_discoveries` with `status='pending'` instead of the live table. Same approval workflow (`/api/approve_discovery/{id}`, `/api/reject_discovery/{id}`) that covers web-UI submissions now covers Keeper bot uploads.
+- Bot payload shape preserved: `discovered_by` still accepted as fallback for `discord_username`, `discord_tag`/`discord_user_id`/`discord_guild_id` stored in the payload JSON blob. Bot requires no code change.
+- Response keeps backward-compatible `discovery_id` field (aliased to the new pending submission id) alongside the new `submission_id` + `status: 'pending'` fields so existing bot response parsing still works.
+- Duplicate detection extended: now checks both live `discoveries` and `pending_discoveries` (prevents bot re-submitting while a prior submission sits in the queue).
+- Activity log entry switched from `discovery_added` to `discovery_submitted` to match the rest of the pending-queue flow.
+
+---
 
 #### Master Haven 1.50.9 (2026-04-13) - Galaxy Defaulting-to-Euclid Bug Fix
 Ekimo reported a system uploaded while in galaxy 256 (Odyalutai) but the admin page showed Euclid. Code audit turned up four issues combining to produce the symptom — the primary culprit was a silent galaxy-clamping default in the player_state fallback path.

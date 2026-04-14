@@ -85,92 +85,141 @@ async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
             conn.close()
 
 @router.post('/api/discoveries')
-async def create_discovery(payload: dict):
-    """Accept a discovery submission and store in the database."""
+async def create_discovery(payload: dict, request: Request):
+    """Accept a discovery submission.
+
+    Routes into the pending_discoveries approval queue instead of inserting
+    directly into the live discoveries table. The bot's existing payload
+    shape is preserved (discovered_by → discord_username fallback) and the
+    response still contains `discovery_id` aliased to the pending submission
+    id so existing clients don't break.
+    """
     conn = None
     try:
-        db_path = get_db_path()
-        logger.info(f"Received discovery submission: {payload.get('discovery_type', 'unknown')} from {payload.get('discovered_by', 'anonymous')}")
+        discovery_name = (payload.get('discovery_name') or '').strip() or 'Unnamed Discovery'
+        system_id = payload.get('system_id')
+        discovery_type = payload.get('discovery_type') or 'Unknown'
+        type_slug = get_discovery_type_slug(discovery_type)
+        discord_username = (
+            payload.get('discord_username')
+            or payload.get('discovered_by')
+            or 'anonymous'
+        )
+        discord_tag = payload.get('discord_tag')
+        location_name = payload.get('location_name') or 'Unknown Location'
+        client_ip = request.client.host if request.client else 'unknown'
 
-        # Always use database (initialized on startup)
-        # Use standardized connection settings to avoid database locks
+        logger.info(
+            f"Received discovery submission (routed to approval queue): "
+            f"{discovery_type} from {discord_username}"
+        )
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check for duplicate discovery (same name, system, and location)
-        discovery_name = payload.get('discovery_name') or 'Unnamed Discovery'
-        system_id = payload.get('system_id')
-        location_name = payload.get('location_name') or 'Unknown Location'
-
-        cursor.execute('''
-            SELECT id FROM discoveries
-            WHERE discovery_name = ? AND system_id = ? AND location_name = ?
-        ''', (discovery_name, system_id, location_name))
-
+        # Duplicate check against both the live table and the pending queue
+        cursor.execute(
+            '''SELECT id FROM discoveries
+               WHERE discovery_name = ? AND system_id = ? AND location_name = ?''',
+            (discovery_name, system_id, location_name),
+        )
         existing = cursor.fetchone()
         if existing:
-            logger.info(f"Duplicate discovery rejected: {discovery_name} at {location_name} in system {system_id}")
+            logger.info(
+                f"Duplicate discovery rejected: {discovery_name} at "
+                f"{location_name} in system {system_id}"
+            )
             return JSONResponse({
                 'status': 'duplicate',
                 'message': f'Discovery "{discovery_name}" at "{location_name}" already exists',
-                'existing_id': existing[0]
+                'existing_id': existing[0],
             }, status_code=409)
 
-        # Get submission timestamp
-        submission_ts = payload.get('submission_timestamp') or datetime.now().isoformat()
+        cursor.execute(
+            '''SELECT id FROM pending_discoveries
+               WHERE discovery_name = ? AND system_id = ? AND status = 'pending' ''',
+            (discovery_name, str(system_id) if system_id else None),
+        )
+        existing_pending = cursor.fetchone()
+        if existing_pending:
+            return JSONResponse({
+                'status': 'duplicate',
+                'message': f'Discovery "{discovery_name}" is already awaiting approval',
+                'existing_id': existing_pending[0],
+            }, status_code=409)
 
-        # Get discovery type and compute slug
-        discovery_type = payload.get('discovery_type') or 'Unknown'
-        type_slug = get_discovery_type_slug(discovery_type)
+        # Denormalize names for display in approval UI
+        system_name = None
+        if system_id is not None:
+            cursor.execute('SELECT name FROM systems WHERE id = ?', (str(system_id),))
+            sys_row = cursor.fetchone()
+            if sys_row:
+                system_name = sys_row['name']
 
-        # Serialize type_metadata to JSON if provided
-        type_metadata_raw = payload.get('type_metadata')
-        type_metadata_json = json.dumps(type_metadata_raw) if type_metadata_raw and isinstance(type_metadata_raw, dict) else None
+        planet_name = None
+        if payload.get('planet_id'):
+            cursor.execute('SELECT name FROM planets WHERE id = ?', (payload['planet_id'],))
+            p_row = cursor.fetchone()
+            if p_row:
+                planet_name = p_row['name']
+
+        moon_name = None
+        if payload.get('moon_id'):
+            cursor.execute('SELECT name FROM moons WHERE id = ?', (payload['moon_id'],))
+            m_row = cursor.fetchone()
+            if m_row:
+                moon_name = m_row['name']
 
         cursor.execute('''
-            INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id, location_type, location_name, description, significance, discovered_by, submission_timestamp, mystery_tier, analysis_status, pattern_matches, discord_user_id, discord_guild_id, photo_url, evidence_url, type_slug, discord_tag, type_metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pending_discoveries (
+                discovery_data, discovery_name, discovery_type, type_slug,
+                system_id, system_name, planet_name, moon_name, location_type,
+                discord_tag, submitted_by, submitted_by_ip,
+                submitter_account_id, submitter_account_type, submitter_profile_id,
+                submission_date, photo_url, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
-            discovery_type,
+            json.dumps(payload),
             discovery_name,
-            system_id,
-            payload.get('planet_id'),
-            payload.get('moon_id'),
-            payload.get('location_type') or 'space',
-            location_name,
-            payload.get('description') or '',
-            payload.get('significance') or 'Notable',
-            payload.get('discord_username') or payload.get('discovered_by') or 'anonymous',
-            submission_ts,
-            payload.get('mystery_tier') or 1,
-            payload.get('analysis_status') or 'pending',
-            payload.get('pattern_matches') or 0,
-            payload.get('discord_user_id'),
-            payload.get('discord_guild_id'),
-            payload.get('photo_url'),
-            payload.get('evidence_urls'),
+            discovery_type,
             type_slug,
-            payload.get('discord_tag'),
-            type_metadata_json,
+            str(system_id) if system_id is not None else None,
+            system_name,
+            planet_name,
+            moon_name,
+            payload.get('location_type') or 'space',
+            discord_tag,
+            discord_username,
+            client_ip,
+            None,
+            None,
+            None,
+            datetime.now(timezone.utc).isoformat(),
+            payload.get('photo_url'),
         ))
         conn.commit()
-        discovery_id = cursor.lastrowid
+        submission_id = cursor.lastrowid
 
-        logger.info(f"Discovery saved with ID: {discovery_id}")
-
-        # Add activity log
+        logger.info(
+            f"Discovery '{discovery_name}' queued for approval (pending id: {submission_id})"
+        )
         add_activity_log(
-            'discovery_added',
-            f"Discovery '{discovery_name}' added",
-            details=f"Type: {payload.get('discovery_type', 'Unknown')}",
-            user_name=payload.get('discovered_by', 'Anonymous')
+            'discovery_submitted',
+            f"Discovery '{discovery_name}' submitted for approval",
+            details=f"Type: {discovery_type}, Community: {discord_tag}",
+            user_name=discord_username,
         )
 
-        return JSONResponse({'status': 'ok', 'discovery_id': discovery_id}, status_code=201)
+        # `discovery_id` kept for backward compat with the Keeper bot's response parsing
+        return JSONResponse({
+            'status': 'pending',
+            'message': 'Discovery submitted for approval!',
+            'submission_id': submission_id,
+            'discovery_id': submission_id,
+        }, status_code=201)
 
     except Exception as e:
-        logger.error(f"Error saving discovery: {e}")
+        logger.error(f"Error queueing discovery: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
@@ -179,17 +228,10 @@ async def create_discovery(payload: dict):
 
 
 @router.post('/discoveries')
-async def legacy_discoveries(payload: dict):
-    """Legacy endpoint redirect for Keeper bot compatibility."""
-    # Return the same 201 created response as /api/discoveries
-    result = await create_discovery(payload)
-    if isinstance(result, JSONResponse):
-        # If inner function already returned a JSONResponse with 201, just return it
-        return result
-    # Normalize response to include discovery_id
-    if isinstance(result, dict) and 'id' in result:
-        return JSONResponse({'status': result.get('status', 'ok'), 'discovery_id': result['id']}, status_code=201)
-    return JSONResponse(result, status_code=201)
+async def legacy_discoveries(payload: dict, request: Request):
+    """Legacy endpoint alias for Keeper bot compatibility — routes to the same
+    pending_discoveries approval queue as /api/discoveries."""
+    return await create_discovery(payload, request)
 
 
 # =============================================================================
