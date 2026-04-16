@@ -1519,3 +1519,121 @@ async def public_community_regions(community: str):
     finally:
         if conn:
             conn.close()
+
+
+@router.get('/api/public/user-stats')
+async def public_user_stats(username: str):
+    """
+    Public endpoint: contribution stats for a single user by username.
+    Returns manual systems, extractor systems, discoveries, and last activity.
+    Designed for Discord bot integration.
+    """
+    username = username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Normalize the input username (same logic as leaderboard)
+        input_clean = username.replace('#', '').strip()
+        # Strip trailing 4-digit Discord discriminator
+        if (len(input_clean) > 4
+                and input_clean[-4:].isdigit()
+                and (len(input_clean) == 4 or not input_clean[-5].isdigit())):
+            input_clean = input_clean[:-4]
+        input_normalized = input_clean.lower().strip()
+
+        if not input_normalized:
+            raise HTTPException(status_code=400, detail="Invalid username")
+
+        # Username normalization SQL (matches /api/public/contributors exactly)
+        raw_username = '''COALESCE(
+            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+            personal_discord_username,
+            json_extract(system_data, '$.discovered_by'),
+            'Unknown'
+        )'''
+        trimmed_username = f"TRIM(REPLACE({raw_username}, '#', ''))"
+        normalized_username = f"""LOWER(TRIM(
+            CASE
+                WHEN LENGTH({trimmed_username}) > 4
+                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({trimmed_username}) = 4
+                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
+                ELSE {trimmed_username}
+            END
+        ))"""
+
+        # Systems stats from pending_systems (approved only)
+        cursor.execute(f'''
+            SELECT
+                MAX({raw_username}) as display_name,
+                GROUP_CONCAT(DISTINCT COALESCE(NULLIF(discord_tag, ''), 'Personal')) as communities,
+                COUNT(*) as total_systems,
+                SUM(CASE WHEN COALESCE(source, 'manual') = 'manual' THEN 1 ELSE 0 END) as manual_count,
+                SUM(CASE WHEN source = 'haven_extractor' THEN 1 ELSE 0 END) as extractor_count,
+                MAX(submission_date) as last_system_activity
+            FROM pending_systems
+            WHERE status = 'approved' AND {normalized_username} = ?
+        ''', (input_normalized,))
+        sys_row = cursor.fetchone()
+
+        total_systems = sys_row['total_systems'] if sys_row and sys_row['total_systems'] else 0
+
+        # Discovery stats
+        disc_raw = "COALESCE(NULLIF(NULLIF(discovered_by, 'Anonymous'), 'anonymous'), 'Unknown')"
+        disc_trimmed = f"TRIM(REPLACE({disc_raw}, '#', ''))"
+        disc_normalized = f"""LOWER(TRIM(
+            CASE
+                WHEN LENGTH({disc_trimmed}) > 4
+                    AND SUBSTR({disc_trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({disc_trimmed}) = 4
+                        OR SUBSTR({disc_trimmed}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({disc_trimmed}, 1, LENGTH({disc_trimmed}) - 4)
+                ELSE {disc_trimmed}
+            END
+        ))"""
+
+        cursor.execute(f'''
+            SELECT COUNT(*) as total_discoveries,
+                   MAX(submission_timestamp) as last_discovery_activity
+            FROM discoveries
+            WHERE {disc_normalized} = ?
+        ''', (input_normalized,))
+        disc_row = cursor.fetchone()
+
+        total_discoveries = disc_row['total_discoveries'] if disc_row and disc_row['total_discoveries'] else 0
+
+        if total_systems == 0 and total_discoveries == 0:
+            raise HTTPException(status_code=404, detail="No contributions found for that username")
+
+        # Pick the best display name and most recent activity
+        display_name = (sys_row['display_name'] if sys_row and sys_row['display_name'] else username)
+        communities = (sys_row['communities'] if sys_row and sys_row['communities'] else None)
+        last_system = sys_row['last_system_activity'] if sys_row else None
+        last_disc = disc_row['last_discovery_activity'] if disc_row else None
+        last_activity = max(filter(None, [last_system, last_disc]), default=None)
+
+        return {
+            'username': display_name,
+            'communities': communities.split(',') if communities else [],
+            'systems': {
+                'total': total_systems,
+                'manual': sys_row['manual_count'] or 0 if sys_row else 0,
+                'extractor': sys_row['extractor_count'] or 0 if sys_row else 0,
+            },
+            'discoveries': total_discoveries,
+            'last_activity': last_activity,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"User stats lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to look up user stats")
+    finally:
+        if conn:
+            conn.close()

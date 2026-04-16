@@ -24,6 +24,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.50.10 | 2026-04-14 | Keeper Discord bot discovery uploads now route through approval queue |
 | Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
+| Backend API | 1.48.4 | 2026-04-15 | New `GET /api/public/user-stats?username=X` endpoint for Discord bot personal stat lookups |
 | Backend API | 1.48.3 | 2026-04-14 | `/api/discoveries` + `/discoveries` POST now enqueue to `pending_discoveries` instead of inserting directly (closes bot approval-bypass) |
 | Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
 | Haven Extractor | 1.8.1 | 2026-04-13 | Galaxy fixes: reject out-of-range RealityIndex, log raw universe_addr hex, scope dedup by batch galaxy, coord upgrade retry |
@@ -82,6 +83,18 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Backend API 1.48.4 (2026-04-15) - Public User Stats Endpoint for Discord Bot
+New public endpoint for Discord bots (or any HTTP client) to look up a player's contribution stats by username.
+
+**Backend API 1.48.4**
+- New `GET /api/public/user-stats?username=X`: returns manual system count, extractor system count, discovery count, community list, and last activity date for a given username
+- No authentication required — designed for Discord bot slash commands
+- Username normalization matches the contributor leaderboard: strips `#`, removes trailing 4-digit Discord discriminators, case-insensitive
+- Systems counted from `pending_systems` (approved only), discoveries from `discoveries` table
+- Returns 404 if no contributions found for that username
+
+---
 
 #### Master Haven 1.50.10 (2026-04-14) - Keeper Discord Bot Discovery Approval Bypass Fix
 Community-maintained Keeper Discord bot was uploading discoveries straight into the live `discoveries` table via `POST /api/discoveries` (and its legacy `/discoveries` alias), skipping the approval queue that every other submission path uses. Root cause: those two endpoints predated the discovery approval workflow introduced in v1.33.0 and were never retrofitted — they did a direct `INSERT INTO discoveries` with no auth, no self-approval check, and no discord_tag scoping.
