@@ -1302,3 +1302,54 @@ async def api_systems_by_region(rx: int = 0, ry: int = 0, rz: int = 0,
     finally:
         if conn:
             conn.close()
+
+
+@router.get('/api/namegen')
+async def api_namegen(glyph: str, galaxy: str = 'Euclid'):
+    """Generate procedural system and region names from a glyph code and galaxy.
+
+    Public endpoint — used by the Wizard to pre-populate name fields so users
+    can verify the procedural name before submitting.
+
+    Returns:
+        system_name: Procedural system name
+        region_name: Procedural region name
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    if not glyph or len(glyph) != 12:
+        raise HTTPException(status_code=400, detail="glyph must be a 12-character hex string")
+
+    try:
+        portal_code = int(glyph, 16)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="glyph must be valid hexadecimal")
+
+    # Resolve galaxy name to index
+    galaxies_path = _Path(__file__).parent.parent / 'data' / 'galaxies.json'
+    try:
+        with open(galaxies_path) as f:
+            galaxies = _json.load(f)
+        galaxy_to_idx = {v: int(k) for k, v in galaxies.items()}
+    except Exception:
+        galaxy_to_idx = {'Euclid': 0}
+
+    galaxy_idx = galaxy_to_idx.get(galaxy, 0)
+
+    try:
+        from nms_namegen.system import systemName
+        from nms_namegen.region import regionName
+
+        system_name = systemName(portal_code, galaxy_idx)
+        region_name = regionName(portal_code, galaxy_idx)
+
+        return {
+            'system_name': system_name,
+            'region_name': region_name,
+        }
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Name generation library not available")
+    except Exception as e:
+        logger.error(f"Name generation failed for glyph={glyph} galaxy={galaxy}: {e}")
+        raise HTTPException(status_code=500, detail="Name generation failed")

@@ -127,7 +127,15 @@ export default function Wizard(){
     axios.get(`/api/regions/${system.region_x}/${system.region_y}/${system.region_z}`, {
       params: { reality, galaxy }
     })
-      .then(r => setRegionInfo(r.data))
+      .then(r => {
+        setRegionInfo(r.data)
+        // If region is unnamed and we have glyphs, pre-fill with procedural name
+        if (!r.data?.custom_name && system.glyph_code?.length === 12) {
+          axios.get('/api/namegen', { params: { glyph: system.glyph_code, galaxy } })
+            .then(ng => setProposedRegionName(ng.data.region_name || ''))
+            .catch(() => {})
+        }
+      })
       .catch(() => setRegionInfo(null))
       .finally(() => setRegionLoading(false))
   }, [system.region_x, system.region_y, system.region_z, system.reality, system.galaxy])
@@ -399,6 +407,23 @@ export default function Wizard(){
       glyph_solar_system: decodedData.solar_system,
       glyph_code: decodedData.glyph
     }))
+
+    // Generate procedural names from glyphs
+    if (decodedData.glyph && decodedData.glyph.length === 12) {
+      const galaxy = system.galaxy || 'Euclid'
+      axios.get('/api/namegen', { params: { glyph: decodedData.glyph, galaxy } })
+        .then(r => {
+          // Pre-fill system name only if user hasn't typed one yet
+          if (!system.name || system.name.trim() === '') {
+            setSystem(s => ({ ...s, name: r.data.system_name }))
+          }
+          // Pre-fill proposed region name for unnamed regions
+          if (r.data.region_name) {
+            setProposedRegionName(prev => prev || r.data.region_name)
+          }
+        })
+        .catch(() => {}) // Silent fail — manual entry still works
+    }
   }
 
   function addPlanet(){
@@ -501,7 +526,7 @@ export default function Wizard(){
     <div>
       <Card className="max-w-4xl">
         <form onSubmit={submit} onKeyDown={handleKeyDown}>
-        <label className="block mb-2">System Name <input placeholder="Name" aria-label="Name" className="w-full mt-1" value={system.name || ''} onChange={e=>setField('name', e.target.value)} required/></label>
+        <label className="block mb-2">System Name <input placeholder="Auto-generated from glyphs — verify in-game" aria-label="Name" className="w-full mt-1" value={system.name || ''} onChange={e=>setField('name', e.target.value)} required/></label>
 
         <div className="mt-4">
           <h3 className="text-lg font-semibold mb-2 text-purple-300">Portal Glyph Coordinates <span className="text-red-400 text-sm">*</span></h3>

@@ -5114,3 +5114,145 @@ def migration_1_67_0(conn):
 
     logger.info(f"Backfilled galaxy on {backfilled} of {len(rows)} pending_systems rows")
     conn.commit()
+
+
+@register_migration("1.68.0", "Backfill procedural system names and create missing region entries via nms_namegen")
+def migration_1_68_0(conn):
+    """
+    Uses the vendored nms_namegen library to:
+    1. Replace System_XXXX placeholder names on approved systems with procedural names
+    2. Replace System_XXXX placeholder names on non-rejected pending systems
+    3. Create regions table entries (with procedural names) for regions that have systems
+       but no entry in the regions table
+    4. Clean up 'RealityMode.Normal' → 'Normal' in reality columns
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    cursor = conn.cursor()
+
+    # Load galaxy name → index lookup
+    galaxies_path = _Path(__file__).parent / 'data' / 'galaxies.json'
+    try:
+        with open(galaxies_path) as f:
+            _galaxies = _json.load(f)
+        galaxy_to_idx = {v: int(k) for k, v in _galaxies.items()}
+    except Exception as e:
+        logger.error(f"Could not load galaxies.json: {e}")
+        return
+
+    # Import nms_namegen (vendored in backend directory)
+    try:
+        from nms_namegen.system import systemName as _systemName
+        from nms_namegen.region import regionName as _regionName
+    except ImportError as e:
+        logger.error(f"nms_namegen not available for migration: {e}")
+        return
+
+    def _galaxy_idx(name):
+        return galaxy_to_idx.get(name, 0)
+
+    def _glyph_to_portal(glyph):
+        try:
+            return int(glyph, 16)
+        except (ValueError, TypeError):
+            return 0
+
+    def _region_portal(rx, ry, rz):
+        """Build portal code from region coords for regionName(). Only lower 32 bits matter."""
+        return (ry << 24) | (rz << 12) | rx
+
+    # --- Step 1: Fix RealityMode.Normal → Normal ---
+    cursor.execute("UPDATE systems SET reality = 'Normal' WHERE reality = 'RealityMode.Normal'")
+    reality_fixed = cursor.rowcount
+    cursor.execute("UPDATE pending_systems SET reality = 'Normal' WHERE reality = 'RealityMode.Normal'")
+    reality_fixed += cursor.rowcount
+    cursor.execute("UPDATE regions SET reality = 'Normal' WHERE reality = 'RealityMode.Normal'")
+    reality_fixed += cursor.rowcount
+    if reality_fixed:
+        logger.info(f"Fixed {reality_fixed} 'RealityMode.Normal' → 'Normal' across tables")
+
+    # --- Step 2: Backfill approved system placeholder names ---
+    cursor.execute("""
+        SELECT id, name, glyph_code, galaxy FROM systems
+        WHERE name = 'System_' || glyph_code
+          AND glyph_code IS NOT NULL AND length(glyph_code) = 12
+    """)
+    systems = cursor.fetchall()
+    sys_updated = 0
+    for sys_id, old_name, glyph, galaxy in systems:
+        portal = _glyph_to_portal(glyph)
+        if portal == 0:
+            continue
+        try:
+            new_name = _systemName(portal, _galaxy_idx(galaxy))
+            cursor.execute("UPDATE systems SET name = ? WHERE id = ?", (new_name, sys_id))
+            logger.info(f"  System '{old_name}' → '{new_name}' (galaxy={galaxy})")
+            sys_updated += 1
+        except Exception as e:
+            logger.warning(f"  System {sys_id} name gen failed: {e}")
+    logger.info(f"Backfilled {sys_updated} of {len(systems)} system placeholder names")
+
+    # --- Step 3: Backfill pending system placeholder names ---
+    cursor.execute("""
+        SELECT id, system_name, glyph_code, galaxy, system_data FROM pending_systems
+        WHERE system_name LIKE 'System_%'
+          AND glyph_code IS NOT NULL AND length(glyph_code) = 12
+          AND status != 'rejected'
+    """)
+    pending = cursor.fetchall()
+    pend_updated = 0
+    for pend_id, old_name, glyph, galaxy, sys_data_json in pending:
+        # Skip if the name doesn't look like a hex placeholder
+        suffix = old_name[7:] if old_name.startswith('System_') else ''
+        if not all(c in '0123456789ABCDEFabcdef' for c in suffix):
+            continue
+        portal = _glyph_to_portal(glyph)
+        if portal == 0:
+            continue
+        try:
+            new_name = _systemName(portal, _galaxy_idx(galaxy or 'Euclid'))
+            cursor.execute("UPDATE pending_systems SET system_name = ? WHERE id = ?", (new_name, pend_id))
+            # Also update system_data JSON if present
+            if sys_data_json:
+                try:
+                    sd = _json.loads(sys_data_json)
+                    sd['name'] = new_name
+                    cursor.execute("UPDATE pending_systems SET system_data = ? WHERE id = ?",
+                                   (_json.dumps(sd), pend_id))
+                except (ValueError, TypeError):
+                    pass
+            pend_updated += 1
+        except Exception as e:
+            logger.warning(f"  Pending {pend_id} name gen failed: {e}")
+    logger.info(f"Backfilled {pend_updated} of {len(pending)} pending system placeholder names")
+
+    # --- Step 4: Create missing region entries with procedural names ---
+    cursor.execute("""
+        SELECT DISTINCT s.region_x, s.region_y, s.region_z,
+               COALESCE(s.galaxy, 'Euclid') as galaxy,
+               COALESCE(s.reality, 'Normal') as reality
+        FROM systems s
+        LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+                               AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+                               AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
+        WHERE r.region_x IS NULL
+          AND s.region_x IS NOT NULL
+    """)
+    missing_regions = cursor.fetchall()
+    regions_created = 0
+    for rx, ry, rz, galaxy, reality in missing_regions:
+        portal = _region_portal(rx, ry, rz)
+        try:
+            name = _regionName(portal, _galaxy_idx(galaxy))
+            cursor.execute("""
+                INSERT OR IGNORE INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (rx, ry, rz, name, reality, galaxy))
+            if cursor.rowcount > 0:
+                regions_created += 1
+        except Exception as e:
+            logger.warning(f"  Region [{rx},{ry},{rz}] name gen failed: {e}")
+    logger.info(f"Created {regions_created} of {len(missing_regions)} missing region entries with procedural names")
+
+    conn.commit()
