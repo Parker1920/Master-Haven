@@ -55,10 +55,11 @@ from nmspy.common import gameData
 from ctypes import c_uint64, c_int64, c_void_p, pointer, sizeof
 import nmspy.data.basic_types as basic
 
-# NMS procedural name generation (ported from nms_namegen)
+# NMS procedural name generation (vendored from https://github.com/stuart/nms_namegen, MIT license)
 try:
     from nms_namegen.system import systemName as nms_system_name
     from nms_namegen.region import regionName as nms_region_name
+    from nms_namegen.planet import planetName as nms_planet_name
     NMS_NAMEGEN_AVAILABLE = True
 except ImportError:
     NMS_NAMEGEN_AVAILABLE = False
@@ -805,7 +806,7 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.8.1"
+    __version__ = "1.9.0"
     __description__ = "Batch mode planet data extraction - game mode tracking & biome subtype plant fix"
 
     # ==========================================================================
@@ -880,59 +881,18 @@ class HavenExtractorMod(Mod):
         logger.info(f"[CONFIG] Reality mode set to: {reality}")
 
     # =========================================================================
-    # MANUAL SYSTEM NAME INPUT
-    # Since automatic name extraction doesn't work reliably, users can manually
-    # enter the system name they see in-game.
+    # STATUS NOTIFICATION
+    # Read-only field showing last export result or current status.
     # =========================================================================
 
     @property
-    @gui_variable.STRING(label="System Name")
-    def manual_system_name(self) -> str:
-        return getattr(self, '_manual_system_name', '')
+    @gui_variable.STRING(label="Status", readonly=True)
+    def status_display(self) -> str:
+        return getattr(self, '_status_display', 'Ready')
 
-    @manual_system_name.setter
-    def manual_system_name(self, value: str):
-        self._manual_system_name = value
-
-    @gui_button("Apply Name")
-    def apply_manual_system_name(self):
-        """Apply the manually entered system name to the current system."""
-        name = getattr(self, '_manual_system_name', '').strip()
-        if not name:
-            logger.warning("[MANUAL] No system name entered. Type the name in 'Manual System Name' field first.")
-            return
-
-        # Update the current system coordinates
-        if self._current_system_coords:
-            old_name = self._current_system_coords.get('system_name', 'Unknown')
-            self._current_system_coords['system_name'] = name
-            logger.info(f"[MANUAL] System name updated: '{old_name}' -> '{name}'")
-        else:
-            logger.warning("[MANUAL] No current system data. Warp to a system first.")
-            return
-
-        # v1.6.12: Refresh adjectives NOW while we're still in-system and PlanetInfo is live.
-        # This is the only reliable trigger on Voyagers (APPVIEW hook no longer fires).
-        # Without this, batched systems auto-save with bare enum-level fallbacks (all planets
-        # show generic "Bountiful/Copious" instead of per-planet display strings).
-        if self._captured_planets and self._cached_solar_system:
-            logger.info("[MANUAL] Refreshing adjectives from live memory for name-tagged system...")
-            self._auto_refresh_for_export()
-
-        # v1.4.6: If the system was already auto-saved to batch (APPVIEW fires before
-        # user can type a name), update the batch entry with the manual name now
-        if self._system_saved_to_batch and self._current_system_coords:
-            glyph = self._current_system_coords.get('glyph_code', '')
-            if glyph:
-                for batch_sys in self._batch_systems:
-                    if batch_sys.get('glyph_code') == glyph:
-                        batch_sys['system_name'] = name
-                        logger.info(f"[MANUAL] Updated batch entry {glyph} with name: '{name}'")
-                        break
-
-        # Clear the input field
-        self._manual_system_name = ''
-        logger.info(f"[MANUAL] System name '{name}' applied successfully!")
+    @status_display.setter
+    def status_display(self, value: str):
+        self._status_display = value
 
     def _save_config_to_file(self):
         """Save current config to file."""
@@ -1024,7 +984,7 @@ class HavenExtractorMod(Mod):
         self._discord_tag = USER_DISCORD_TAG
         self._reality = USER_REALITY
         self._game_mode = "Normal"  # Auto-detected from memory at extraction time
-        self._manual_system_name = ''  # For manual system name input
+        self._status_display = 'Ready'  # GUI status notification
 
         self._pending_extraction = False
         self._last_extracted_seed = None
@@ -1070,23 +1030,8 @@ class HavenExtractorMod(Mod):
         # Load adjective cache from disk (if exists)
         self._load_adjective_cache()
 
-        logger.info("=" * 60)
-        logger.info(f"Haven Extractor v{self.__version__}")
-        logger.info(f"Local backup: {self._output_dir}")
-        logger.info("=" * 60)
-        logger.info("")
-        logger.info("*** CONFIGURATION ***")
-        logger.info("Use the text fields and dropdowns above to set:")
-        logger.info("  - Discord Username (required)")
-        logger.info("  - Discord ID (18-digit, optional)")
-        logger.info("  - Community Tag (dropdown)")
-        logger.info("  - Reality Mode (dropdown)")
-        logger.info("")
-        logger.info("*** WORKFLOW ***")
-        logger.info("1. Enter your Discord username above")
-        logger.info("2. Warp to systems - data captured automatically")
-        logger.info("3. Click 'Export to Haven UI' when ready")
-        logger.info("=" * 60)
+        logger.info(f"Haven Extractor v{self.__version__} ready")
+        logger.info("  Warp to systems → data captured automatically → Export when ready")
 
 
     # =========================================================================
@@ -1293,17 +1238,17 @@ class HavenExtractorMod(Mod):
             system_name = self._read_string(sys_data_addr, SolarSystemDataOffsets.NAME, max_len=128)
             if system_name:
                 result["system_name"] = system_name
-                logger.info(f"  [DIRECT] System name: {system_name}")
+                logger.debug(f"  [DIRECT] System name: {system_name}")
 
             # Read planet counts
             result["planet_count"] = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PLANETS_COUNT)
             result["prime_planets"] = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PRIME_PLANETS)
-            logger.info(f"  [DIRECT] Planet count: {result['planet_count']}, Prime: {result['prime_planets']}")
+            logger.debug(f"  [DIRECT] Planet count: {result['planet_count']}, Prime: {result['prime_planets']}")
 
             # Read star type (now called star_color)
             star_type_val = self._read_uint32(sys_data_addr, SolarSystemDataOffsets.STAR_TYPE)
             result["star_color"] = STAR_TYPES.get(star_type_val, f"Unknown({star_type_val})")
-            logger.info(f"  [DIRECT] Star color: {result['star_color']} (raw: {star_type_val})")
+            logger.debug(f"  [DIRECT] Star color: {result['star_color']} (raw: {star_type_val})")
 
             # Read trading data (economy)
             trading_addr = sys_data_addr + SolarSystemDataOffsets.TRADING_DATA
@@ -1311,18 +1256,18 @@ class HavenExtractorMod(Mod):
             wealth_class = self._read_uint32(trading_addr, TradingDataOffsets.WEALTH_CLASS)
             result["economy_type"] = TRADING_CLASSES.get(trading_class, f"Unknown({trading_class})")
             result["economy_strength"] = WEALTH_CLASSES.get(wealth_class, f"Unknown({wealth_class})")
-            logger.info(f"  [DIRECT] Economy: {result['economy_type']} / {result['economy_strength']} (raw: {trading_class}/{wealth_class})")
+            logger.debug(f"  [DIRECT] Economy: {result['economy_type']} / {result['economy_strength']} (raw: {trading_class}/{wealth_class})")
 
             # Read conflict data
             conflict_addr = sys_data_addr + SolarSystemDataOffsets.CONFLICT_DATA
             conflict_val = self._read_uint32(conflict_addr, ConflictDataOffsets.CONFLICT_LEVEL)
             result["conflict_level"] = CONFLICT_LEVELS.get(conflict_val, f"Unknown({conflict_val})")
-            logger.info(f"  [DIRECT] Conflict: {result['conflict_level']} (raw: {conflict_val})")
+            logger.debug(f"  [DIRECT] Conflict: {result['conflict_level']} (raw: {conflict_val})")
 
             # Read dominant race
             race_val = self._read_uint32(sys_data_addr, SolarSystemDataOffsets.INHABITING_RACE)
             result["dominant_lifeform"] = ALIEN_RACES.get(race_val, f"Unknown({race_val})")
-            logger.info(f"  [DIRECT] Race: {result['dominant_lifeform']} (raw: {race_val})")
+            logger.debug(f"  [DIRECT] Race: {result['dominant_lifeform']} (raw: {race_val})")
 
             # v1.6.14: Detect systems where NMS itself reports no data. Some systems
             # are legitimately "-Data Unavailable-" for economy/conflict and "Uncharted"
@@ -1336,7 +1281,7 @@ class HavenExtractorMod(Mod):
             # that, clear the co-located fields so Haven shows them as missing rather
             # than fabricated.
             if race_val > 6:
-                logger.info(f"  [DIRECT] System reports no economy/conflict/lifeform data (race={race_val}) — matches in-game '-Data Unavailable-' / 'Uncharted'")
+                logger.debug(f"  [DIRECT] System reports no economy/conflict/lifeform data (race={race_val})")
                 result["economy_type"] = "Unknown"
                 result["economy_strength"] = "Unknown"
                 result["conflict_level"] = "Unknown"
@@ -1361,6 +1306,7 @@ class HavenExtractorMod(Mod):
             "is_moon": False,
             "common_resource": "",
             "rare_resource": "",
+            "planet_seed": 0,
         }
 
         try:
@@ -1401,6 +1347,12 @@ class HavenExtractorMod(Mod):
             result["common_resource"] = translate_resource(raw_common) if raw_common else ""
             result["rare_resource"] = translate_resource(raw_rare) if raw_rare else ""
             logger.debug(f"    [DIRECT] Resources: common={result['common_resource']} ({raw_common}), rare={result['rare_resource']} ({raw_rare})")
+
+            # Read planet seed (GcSeed at offset 0x20, 8 bytes)
+            seed_val = self._read_uint64(planet_gen_addr, PlanetGenInputOffsets.SEED)
+            if seed_val and seed_val != 0:
+                result["planet_seed"] = seed_val
+                logger.debug(f"    [DIRECT] Planet seed: 0x{seed_val:016X}")
 
         except Exception as e:
             logger.error(f"Direct planet gen input read failed: {e}")
@@ -1474,7 +1426,7 @@ class HavenExtractorMod(Mod):
                 manual = self._current_system_coords.get('system_name', '')
                 if manual and not manual.startswith('System_'):
                     coords['system_name'] = manual
-                    logger.info(f"[BATCH] Preserving manual system name: '{manual}'")
+                    logger.debug(f"[BATCH] Preserving manual system name: '{manual}'")
 
             # Check if this system is already in batch (by glyph code)
             glyph_code = coords.get('glyph_code', '')
@@ -1486,7 +1438,7 @@ class HavenExtractorMod(Mod):
 
             if existing_entry is not None:
                 if not force_update:
-                    logger.info(f"[BATCH] System {glyph_code} already in batch, skipping duplicate")
+                    logger.debug(f"[BATCH] System {glyph_code} already in batch, skipping duplicate")
                     return
                 else:
                     # Force-update: refresh planets and system name in existing batch entry
@@ -1496,8 +1448,8 @@ class HavenExtractorMod(Mod):
                     name = coords.get('system_name', '')
                     if name and not name.startswith('System_'):
                         existing_entry['system_name'] = name
-                        logger.info(f"[BATCH] Updated system name to: '{name}'")
-                    logger.info(f"[BATCH] Updated {glyph_code} with refreshed adjectives and name")
+                        logger.debug(f"[BATCH] Updated system name to: '{name}'")
+                    logger.debug(f"[BATCH] Updated {glyph_code} with refreshed adjectives and name")
                     return
 
             # Get system data
@@ -1543,14 +1495,14 @@ class HavenExtractorMod(Mod):
             # If we have a manual name, use it and skip other lookups
             if has_manual_name:
                 system_data['system_name'] = manual_name
-                logger.info(f"[BATCH] Using manual system name: '{manual_name}'")
+                logger.debug(f"[BATCH] Using manual system name: '{manual_name}'")
             # Otherwise try to get actual system name (might be populated by batch save time)
             elif not system_data.get('system_name') or system_data['system_name'].startswith('System_'):
                 # Try reading from Name field (might be populated now)
                 actual_name = self._get_actual_system_name()
                 if actual_name:
                     system_data['system_name'] = actual_name
-                    logger.info(f"[BATCH] Got actual system name: '{actual_name}'")
+                    logger.debug(f"[BATCH] Got actual system name: '{actual_name}'")
                 else:
                     # Try game state notification string
                     try:
@@ -1563,25 +1515,24 @@ class HavenExtractorMod(Mod):
                                     match = re.match(r"In the (.+) system", notif)
                                     if match:
                                         system_data['system_name'] = match.group(1).strip()
-                                        logger.info(f"[BATCH] Got name from game state: '{system_data['system_name']}'")
+                                        logger.debug(f"[BATCH] Got name from game state: '{system_data['system_name']}'")
                     except Exception:
                         pass
 
-            # Use glyph-based fallback if system_name is still empty
+            # Use procedural name generation as fallback if system_name is still empty
             if not system_data.get('system_name') or system_data['system_name'].startswith('System_'):
-                system_data['system_name'] = f"System_{glyph_code}"
+                system_data['system_name'] = self._generate_system_name(
+                    glyph_code, coords.get('galaxy_index', 0),
+                    system_idx=coords.get('solar_system_index'),
+                    x=coords.get('voxel_x'), y=coords.get('voxel_y'), z=coords.get('voxel_z')
+                )
 
             # Add to batch
             self._batch_systems.append(system_data)
 
-            logger.info("")
-            logger.info("*" * 60)
-            logger.info(f">>> [BATCH] SYSTEM SAVED TO BATCH! <<<")
-            logger.info(f"    Glyph: {glyph_code}")
-            logger.info(f"    Planets: {system_data['planet_count']}")
-            logger.info(f"    Total systems in batch: {len(self._batch_systems)}")
-            logger.info("*" * 60)
-            logger.info("")
+            # Clean summary block
+            self._log_system_summary(system_data)
+            self._status_display = f"Batch: {len(self._batch_systems)} system(s)"
 
         except Exception as e:
             logger.error(f"[BATCH] Failed to save system to batch: {e}")
@@ -1592,11 +1543,11 @@ class HavenExtractorMod(Mod):
     def on_system_generate(self, this, lbUseSettingsFile, lSeed):
         """Fires AFTER solar system generation - data is now ready."""
         logger.info("")
-        logger.info("=== NEW SYSTEM DETECTED ===")
+        logger.info("--- Warp detected ---")
+        self._status_display = "Capturing..."
 
         # Save previous system to batch BEFORE clearing (preserves data from system we just left)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
-            logger.info("  Saving previous system to batch...")
             self._save_current_system_to_batch()
 
         addr = get_addressof(this)
@@ -1618,25 +1569,15 @@ class HavenExtractorMod(Mod):
             self._maybe_upgrade_coords()
 
             if self._current_system_coords is None:
-                logger.info("  [DEBUG] No coordinates yet - will try again during planet capture")
+                logger.debug("  No coordinates yet - will try again during planet capture")
             elif self._current_system_coords.get('from_fallback', False):
-                logger.info("  [DEBUG] Initial coords came from fallback — will keep retrying primary in subsequent hooks")
+                logger.debug("  Initial coords from fallback — will retry primary")
 
-            # =====================================================
-            # Clear captured planets for new system
-            # =====================================================
             self._captured_planets.clear()
             self._capture_enabled = True
             self._system_saved_to_batch = False
-            logger.info("  Captured planet data cleared for new system")
-            logger.info("  Capture ENABLED - GenerateCreatureRoles hook active")
 
-            logger.info("")
-            logger.info("=" * 60)
-            logger.info(">>> NEW SYSTEM - Planet data will be captured automatically <<<")
-            logger.info(f">>> Systems in batch: {len(self._batch_systems)} <<<")
-            logger.info(">>> System saves on next warp or Export Batch <<<")
-            logger.info("=" * 60)
+            logger.info(f"  Capturing planets... (batch: {len(self._batch_systems)})")
         except Exception as e:
             logger.error(f"Failed to cache solar system: {e}")
             import traceback
@@ -2097,37 +2038,22 @@ class HavenExtractorMod(Mod):
                 self._captured_planets[planet_key]['infested'] = 1
                 self._captured_planets[planet_key]['vile_brood'] = 1
 
-            logger.info("")
-            logger.info("*" * 60)
-            logger.info(f">>> CAPTURED PLANET '{planet_key}' DATA! <<<")
-            logger.info(f"    Name: {planet_name or '(not set)'}")
-            logger.info(f"    Biome: {biome_name} ({biome_raw})")
-            logger.info(f"    BiomeSubType: {biome_subtype_name} ({biome_subtype_raw})")
-            logger.info(f"    Size: {planet_size_name} ({planet_size_raw}) [is_moon={is_moon}]")
-            logger.info(f"    Flora: {flora_name} ({flora_raw})")
-            logger.info(f"    Fauna: {fauna_name} ({fauna_raw})")
-            logger.info(f"    Sentinels: {sentinel_name} ({sentinel_raw})")
-            logger.info(f"    Weather: {weather} (raw: {weather_raw}, storms: {storm_frequency})")
-            logger.info(f"    Resources: {common_resource}, {uncommon_resource}, {rare_resource}")
+            # Compact capture log — full details print at batch save time
+            moon_tag = " (moon)" if is_moon else ""
+            count = len(self._captured_planets)
+            logger.info(f"  Captured {count}: {planet_name or '(unnamed)'}{moon_tag} — {biome_name}")
+
+            # Verbose details at DEBUG for diagnostics
+            logger.debug(f"    BiomeSubType: {biome_subtype_name} ({biome_subtype_raw})")
+            logger.debug(f"    Size: {planet_size_name} ({planet_size_raw})")
+            logger.debug(f"    Flora: {flora_name} ({flora_raw}), Fauna: {fauna_name} ({fauna_raw})")
+            logger.debug(f"    Sentinels: {sentinel_name} ({sentinel_raw})")
+            logger.debug(f"    Weather: {weather} (raw: {weather_raw}, storms: {storm_frequency})")
+            logger.debug(f"    Resources: {common_resource}, {uncommon_resource}, {rare_resource}")
             if planet_description:
-                logger.info(f"    PlanetDescription: '{planet_description}'")
-            if planet_type_display:
-                logger.info(f"    PlanetType: '{planet_type_display}'")
-            if is_weather_extreme:
-                logger.info(f"    IsWeatherExtreme: True")
+                logger.debug(f"    PlanetDescription: '{planet_description}'")
             if extra_resource_hints:
-                logger.info(f"    ExtraResourceHints: {extra_resource_hints}")
-            if has_scrap:
-                logger.info(f"    HasScrap: True")
-            # Log detected special flags
-            special_flags = [k for k in ["ancient_bones", "salvageable_scrap", "storm_crystals",
-                                         "gravitino_balls", "vile_brood", "infested"]
-                             if self._captured_planets[planet_key].get(k)]
-            if special_flags:
-                logger.info(f"    Special: {', '.join(special_flags)}")
-            logger.info(f"    Total captured: {len(self._captured_planets)} planets")
-            logger.info("*" * 60)
-            logger.info("")
+                logger.debug(f"    ExtraResourceHints: {extra_resource_hints}")
 
             # v1.8.1 (Fix 4): Coord upgrade attempt after each planet capture. Replaces any
             # from_fallback coords with primary mUniverseAddress data once available.
@@ -2169,20 +2095,12 @@ class HavenExtractorMod(Mod):
 
         # Auto-save to batch when APPVIEW fires (if not already saved)
         if self._batch_mode_enabled and self._captured_planets and not self._system_saved_to_batch:
-            logger.info("[BATCH] Refreshing adjectives before batch save...")
             self._auto_refresh_for_export()
-            logger.info("[BATCH] Auto-saving system to batch...")
             self._save_current_system_to_batch()
             self._system_saved_to_batch = True
-            self._capture_enabled = False  # v1.4.5: Lock out further captures until next warp
-            logger.info(f"[BATCH] Systems in batch: {len(self._batch_systems)}")
-            logger.info("[BATCH] Capture locked - will re-enable on next warp")
+            self._capture_enabled = False
         elif self._system_saved_to_batch:
-            logger.info("[BATCH] System already saved")
-            logger.info(f"[BATCH] Systems in batch: {len(self._batch_systems)}")
-
-        logger.info(">>> Click 'Export Batch' to save all systems <<<")
-        logger.info("=" * 40)
+            logger.debug(f"[BATCH] Already saved, {len(self._batch_systems)} in batch")
 
     # =========================================================================
     # GUI BUTTONS
@@ -2489,37 +2407,35 @@ class HavenExtractorMod(Mod):
 
         # Check if config is complete
         if not self._discord_username:
-            logger.error("[EXPORT] Configuration incomplete!")
-            logger.error("[EXPORT] Please enter your Discord Username in the text field above.")
-            logger.info("[EXPORT] Use the 'Show Config Status' button to verify your settings.")
+            self._status_display = "Set Discord Username first"
+            logger.error("Set your Discord Username before exporting.")
             return
 
         # Auto-register if no personal API key or still using the old shared key
         if not API_KEY or API_KEY == _OLD_SHARED_KEY:
-            logger.info("[EXPORT] No personal API key found. Registering with Haven...")
+            logger.info("Registering with Haven...")
             if not self._register_api_key():
-                logger.error("[EXPORT] Registration failed — cannot export without a personal API key.")
-                logger.info("[EXPORT] Check your internet connection or contact a Haven admin.")
+                self._status_display = "Registration failed"
+                logger.error("Registration failed — check internet connection.")
                 return
 
         # Auto-refresh adjectives from game memory if planets are captured
         if self._captured_planets:
-            logger.info("[EXPORT] Auto-refreshing adjectives from game memory...")
             self._auto_refresh_for_export()
 
         # Always force-update the current system's batch entry (applies manual name even if
         # _captured_planets was cleared by a game event like on_system_generate re-firing)
         if self._cached_solar_system:
-            logger.info("[EXPORT] Updating batch with latest data...")
             self._save_current_system_to_batch(force_update=True)
 
         if not self._batch_systems:
-            logger.warning("[EXPORT] No systems to export!")
-            logger.info("[EXPORT] Visit some systems first, then click 'Export to Haven UI'")
+            self._status_display = "No systems in batch"
+            logger.warning("No systems to export! Visit some systems first.")
             return
 
         total = len(self._batch_systems)
-        logger.info(f"[EXPORT] Preparing to export {total} system(s)...")
+        self._status_display = f"Exporting {total} system(s)..."
+        logger.info(f"Exporting {total} system(s)...")
 
         # Run export in a thread to avoid blocking the game
         def run_export():
@@ -2588,42 +2504,25 @@ class HavenExtractorMod(Mod):
         summary = check_result.get("summary", {})
         results = check_result.get("results", {})
 
-        available_count = summary.get("available", 0)
         charted_count = summary.get("already_charted", 0)
         pending_count = summary.get("pending_review", 0)
 
-        logger.info("")
-        logger.info("--- DUPLICATE CHECK RESULTS ---")
-        logger.info(f"  Ready to submit: {available_count}")
-        logger.info(f"  Already charted: {charted_count}")
-        logger.info(f"  Pending review:  {pending_count}")
-        logger.info("")
-
-        # Show details for duplicates
+        # Show duplicate check results only if there are duplicates
         if charted_count > 0 or pending_count > 0:
+            logger.info(f"  Duplicates: {charted_count} charted, {pending_count} pending")
             for glyph, info in results.items():
                 status = info.get('status', 'unknown')
                 if status == 'already_charted':
-                    name = info.get('system_name', 'Unknown')
-                    logger.info(f"  [CHARTED] {glyph} - \"{name}\"")
+                    logger.info(f"    [SKIP] {glyph} — already charted as \"{info.get('system_name', '?')}\"")
                 elif status == 'pending_review':
-                    by = info.get('submitted_by', 'Unknown')
-                    logger.info(f"  [PENDING] {glyph} - by {by}")
-            logger.info("")
+                    logger.info(f"    [UPDATE] {glyph} — pending, will merge")
 
-        # Step 2: Filter out only already_charted systems (approved duplicates)
-        # Pending systems are allowed through - server will update them
+        # Filter out already_charted systems
         if charted_count > 0:
             systems_to_export = [
                 sys for sys in systems_to_export
                 if results.get(sys.get('glyph_code'), {}).get('status') != 'already_charted'
             ]
-            logger.info(f"[EXPORT] Exporting {len(systems_to_export)} systems (skipping {charted_count} already charted)")
-        else:
-            logger.info(f"[EXPORT] Exporting all {len(systems_to_export)} systems")
-
-        if pending_count > 0:
-            logger.info(f"[EXPORT] Note: {pending_count} pending system(s) will be updated with new data")
 
         # Step 3: Upload systems
         if not systems_to_export:
@@ -2703,22 +2602,97 @@ class HavenExtractorMod(Mod):
                 results["failed"] += 1
                 results["errors"].append(f"{glyph}: {str(e)}")
 
-        # Show final results
+        # Final results
         logger.info("")
-        logger.info("=" * 60)
-        logger.info(">>> EXPORT COMPLETE <<<")
-        logger.info("=" * 60)
-        logger.info(f"  Submitted: {results['submitted']}")
-        logger.info(f"  Skipped:   {results['skipped']}")
-        logger.info(f"  Failed:    {results['failed']}")
-        logger.info("=" * 60)
+        logger.info(f"=== EXPORT: {results['submitted']} submitted, {results['skipped']} skipped, {results['failed']} failed ===")
 
-        # Clear batch after successful export
+        # Update status notification
+        if results["failed"] > 0:
+            errors = results.get("errors", [])
+            first_err = errors[0] if errors else "unknown error"
+            self._status_display = f"Failed: {first_err}"
+        elif results["submitted"] > 0:
+            self._status_display = f"Uploaded {results['submitted']} system(s)"
+        else:
+            self._status_display = "Nothing to upload"
+
+        # Submit procedural region names for any new regions
         if results["submitted"] > 0:
+            self._submit_region_names(systems)
             self._batch_systems.clear()
-            logger.info("[EXPORT] Batch cleared after successful export")
-            logger.info("[EXPORT] Your submissions are now pending admin review!")
+            logger.info("Batch cleared. Submissions pending admin review.")
         logger.info("")
+
+    def _submit_region_names(self, systems: list):
+        """Submit procedural region names for regions that don't have names yet.
+
+        Collects unique regions from the exported systems, checks if each already
+        has a name or pending submission, and submits the nms_namegen-generated name
+        to the pending_region_names queue for admin approval.
+        """
+        if not NMS_NAMEGEN_AVAILABLE:
+            return
+
+        # Collect unique regions from exported systems
+        regions = {}
+        for sys in systems:
+            region_name = sys.get('region_name', '')
+            rx = sys.get('region_x')
+            ry = sys.get('region_y')
+            rz = sys.get('region_z')
+            if not region_name or rx is None or ry is None or rz is None:
+                continue
+            # Skip placeholder names
+            if region_name.startswith('Region_'):
+                continue
+            key = (rx, ry, rz, sys.get('galaxy_name', 'Euclid'), sys.get('reality', 'Normal'))
+            if key not in regions:
+                regions[key] = region_name
+
+        if not regions:
+            return
+
+        logger.info(f"[REGIONS] Submitting {len(regions)} procedural region name(s)...")
+
+        for (rx, ry, rz, galaxy, reality), name in regions.items():
+            try:
+                url = f"{API_BASE_URL}/api/regions/{rx}/{ry}/{rz}/submit"
+                payload = json.dumps({
+                    "proposed_name": name,
+                    "submitted_by": self._discord_username or "HavenExtractor",
+                    "personal_discord_username": self._discord_username,
+                    "discord_tag": self._discord_tag,
+                    "reality": reality,
+                    "galaxy": galaxy,
+                }).encode('utf-8')
+
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
+                req = urllib.request.Request(url, data=payload, headers={
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_KEY,
+                    'User-Agent': f'HavenExtractor/{self.__version__}',
+                })
+
+                with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    logger.info(f"  [REGION] '{name}' [{rx},{ry},{rz}] — submitted for approval")
+
+            except urllib.error.HTTPError as e:
+                try:
+                    err = json.loads(e.read().decode('utf-8'))
+                    detail = err.get('detail', f'HTTP {e.code}')
+                except Exception:
+                    detail = f'HTTP {e.code}'
+                # 409 = already named or pending — not an error
+                if e.code == 409:
+                    logger.info(f"  [REGION] '{name}' [{rx},{ry},{rz}] — {detail}")
+                else:
+                    logger.warning(f"  [REGION] '{name}' [{rx},{ry},{rz}] — failed: {detail}")
+            except Exception as e:
+                logger.warning(f"  [REGION] '{name}' [{rx},{ry},{rz}] — failed: {e}")
 
     def _send_single_system_to_api(self, system: dict) -> dict:
         """Send a single system to the Haven UI API."""
@@ -2952,7 +2926,7 @@ class HavenExtractorMod(Mod):
                 direct_race_raw = self._read_uint32(sys_data_addr, SolarSystemDataOffsets.INHABITING_RACE)
                 if direct_race_raw > 6:
                     system_no_data = True
-                    logger.info(f"  System has no economy/conflict/lifeform data (race_raw={direct_race_raw}) — leaving these fields Unknown to match game")
+                    logger.debug(f"  System has no economy/conflict/lifeform data (race_raw={direct_race_raw})")
 
                 if not _is_unresolved(direct.get("star_color")):
                     result["star_color"] = direct["star_color"]
@@ -3024,7 +2998,7 @@ class HavenExtractorMod(Mod):
             for key in ("economy_type", "economy_strength", "conflict_level", "dominant_lifeform"):
                 result.pop(key, None)
             result["no_trade_data"] = True
-            logger.info("  System properties: economy/conflict/lifeform omitted (no_trade_data=True)")
+            logger.debug("  System properties: economy/conflict/lifeform omitted (no_trade_data=True)")
 
         return result
 
@@ -3032,9 +3006,7 @@ class HavenExtractorMod(Mod):
         """Extract planet data - ONLY valid slots based on Planets count."""
         planets = []
 
-        logger.info("=" * 30)
-        logger.info("EXTRACTING PLANETS")
-        logger.info("=" * 30)
+        logger.debug("Extracting planets from memory...")
 
         # Get actual planet count from system data - THIS IS CRITICAL
         # maPlanets is always a 6-slot array, but only first N have valid data
@@ -3108,7 +3080,7 @@ class HavenExtractorMod(Mod):
                     if planet_data:
                         planets.append(planet_data)
                         body_type = "MOON" if planet_data.get('is_moon', False) else "PLANET"
-                        logger.info(f"  Slot {i}: [{body_type}] {planet_data.get('planet_name', 'Unknown')} - {planet_data.get('biome', 'Unknown')}")
+                        logger.debug(f"  Slot {i}: [{body_type}] {planet_data.get('planet_name', 'Unknown')} - {planet_data.get('biome', 'Unknown')}")
                     else:
                         logger.warning(f"  Slot {i}: Failed to extract data")
 
@@ -3123,18 +3095,9 @@ class HavenExtractorMod(Mod):
             import traceback
             logger.error(traceback.format_exc())
 
-        # Count results
         moon_count = sum(1 for p in planets if p.get('is_moon', False))
         planet_count = len(planets) - moon_count
-        logger.info("=" * 30)
-        logger.info(f"EXTRACTION COMPLETE: {planet_count} planets + {moon_count} moons = {len(planets)} total")
-        # v1.6.12: Only show "Expected" line when the system-data counts look trustworthy.
-        # Post-Voyagers, PrimePlanets (0x2268) reliably returns 0 even when prime planets exist,
-        # producing misleading output like "Expected: 0 planets + 6 moons" for a 4-planet-2-moon
-        # system. Suppress unless direct read matches extracted count.
-        if prime_planet_count > 0 and actual_planet_count == len(planets):
-            logger.info(f"Expected: {prime_planet_count} planets + {expected_moons} moons = {actual_planet_count} total")
-        logger.info("=" * 30)
+        logger.debug(f"Extraction done: {planet_count} planets + {moon_count} moons = {len(planets)} total")
         return planets
 
     def _extract_single_planet(self, planet, index: int) -> Optional[dict]:
@@ -3166,6 +3129,7 @@ class HavenExtractorMod(Mod):
             # enum values are valid. Voyagers shifted the per-slot stride so slots 1-5 give
             # garbage like Unknown(254). When values look valid we use them, otherwise the
             # name-matched captured block below is authoritative.
+            direct_data = {}
             if self._cached_sys_data_addr:
                 direct_data = self._read_planet_gen_input_direct(self._cached_sys_data_addr, index)
 
@@ -3313,7 +3277,7 @@ class HavenExtractorMod(Mod):
                 # block (source of truth). Captured planet_name would be identical for name-matched
                 # entries, so the redundant assignment is removed.
 
-                logger.info(f"    [CAPTURED] Applied: flora={result['flora_level']}, fauna={result['fauna_level']}, sentinel={result['sentinel_level']}")
+                logger.debug(f"    [CAPTURED] Applied: flora={result['flora_level']}, fauna={result['fauna_level']}, sentinel={result['sentinel_level']}")
             else:
                 # Planet not in captured data - hook didn't fire for this planet
                 logger.warning(f"    [NOCAPTURE] Slot {index} name='{memory_name or 'unknown'}' - hook never fired for this planet")
@@ -3451,7 +3415,7 @@ class HavenExtractorMod(Mod):
                     if hasattr(planet_data, 'ExtraResourceHints'):
                         hints_arr = planet_data.ExtraResourceHints
                         if hints_arr is not None and hasattr(hints_arr, '__len__') and len(hints_arr) > 0:
-                            logger.info(f"    [HINTS-EXTRACT] Struct read: {len(hints_arr)} hints")
+                            logger.debug(f"    [HINTS-EXTRACT] Struct read: {len(hints_arr)} hints")
                             for hi in range(len(hints_arr)):
                                 try:
                                     hint = hints_arr[hi]
@@ -3460,7 +3424,7 @@ class HavenExtractorMod(Mod):
                                         hint_id = ''.join(c for c in hint_id if c.isprintable() and ord(c) < 128).strip().upper()
                                         if hint_id and len(hint_id) >= 2:
                                             extraction_hints.append(hint_id)
-                                            logger.info(f"    [HINTS-EXTRACT] [{hi}] Hint='{hint_id}'")
+                                            logger.debug(f"    [HINTS-EXTRACT] [{hi}] Hint='{hint_id}'")
                                 except Exception:
                                     pass
 
@@ -3472,16 +3436,16 @@ class HavenExtractorMod(Mod):
                                 arr_ptr = self._read_uint64(pd_addr, 0x3310)
                                 arr_count = self._read_uint32(pd_addr, 0x3310 + 8)
                                 if arr_ptr and arr_ptr > 0x10000 and 0 < arr_count <= 10:
-                                    logger.info(f"    [HINTS-EXTRACT] Direct read: {arr_count} hints at 0x3310")
+                                    logger.debug(f"    [HINTS-EXTRACT] Direct read: {arr_count} hints at 0x3310")
                                     for hi in range(arr_count):
                                         elem_addr = arr_ptr + (hi * 32)
                                         hint_str = self._read_string(elem_addr, 0, max_len=16)
                                         if hint_str:
                                             hint_str = hint_str.upper().strip()
                                             extraction_hints.append(hint_str)
-                                            logger.info(f"    [HINTS-EXTRACT] [{hi}] Direct Hint='{hint_str}'")
+                                            logger.debug(f"    [HINTS-EXTRACT] [{hi}] Direct Hint='{hint_str}'")
                                 else:
-                                    logger.info(f"    [HINTS-EXTRACT] Direct read at 0x3310: ptr=0x{arr_ptr:X if arr_ptr else 0}, count={arr_count if arr_count else 0} (empty)")
+                                    logger.debug(f"    [HINTS-EXTRACT] Direct read at 0x3310: ptr=0x{arr_ptr:X if arr_ptr else 0}, count={arr_count if arr_count else 0} (empty)")
                         except Exception as e:
                             logger.debug(f"    [HINTS-EXTRACT] Direct read failed: {e}")
 
@@ -3514,7 +3478,7 @@ class HavenExtractorMod(Mod):
                             em = bool(in_empty[0]) if in_empty else False
                             gg = bool(in_gas_giant[0]) if in_gas_giant else False
                             if hs or ab or em or gg:
-                                logger.info(f"    [HINTS-EXTRACT] Bools@0x39EE: HasScrap={hs}, Abandoned={ab}, Empty={em}, GasGiant={gg}")
+                                logger.debug(f"    [HINTS-EXTRACT] Bools@0x39EE: HasScrap={hs}, Abandoned={ab}, Empty={em}, GasGiant={gg}")
                             if hs:
                                 result["salvageable_scrap"] = 1
                     except Exception:
@@ -3534,9 +3498,9 @@ class HavenExtractorMod(Mod):
                 flora_raw_val = captured.get('flora_raw', -1) if captured is not None else -1
                 if flora_raw_val > 0:
                     result["plant_resource"] = plant_resource
-                    logger.info(f"    [PLANT] {biome}/{biome_subtype} -> {plant_resource} (flora_raw={flora_raw_val})")
+                    logger.debug(f"    [PLANT] {biome}/{biome_subtype} -> {plant_resource} (flora_raw={flora_raw_val})")
                 else:
-                    logger.info(f"    [PLANT] Skipped {biome}/{biome_subtype} -> {plant_resource}: flora_raw={flora_raw_val} (no flora)")
+                    logger.debug(f"    [PLANT] Skipped {biome}/{biome_subtype} -> {plant_resource}: flora_raw={flora_raw_val} (no flora)")
 
             # v1.4.5: Fix dead/airless moon resources - replace hidden SPACEGUNK
             # with Rusted Metal (what the discovery screen actually shows)
@@ -3545,10 +3509,9 @@ class HavenExtractorMod(Mod):
                 res_val = result.get(res_key, "")
                 if res_val in HIDDEN_SUBSTANCE_NAMES or res_val in HIDDEN_SUBSTANCE_IDS:
                     result[res_key] = "Rusted Metal"
-                    logger.info(f"    [RESOURCE FIX] {res_key}: '{res_val}' -> 'Rusted Metal'")
+                    logger.debug(f"    [RESOURCE FIX] {res_key}: '{res_val}' -> 'Rusted Metal'")
 
-            # Log final resources for debugging
-            logger.info(f"    [RESOURCES] common={result.get('common_resource')}, "
+            logger.debug(f"    [RESOURCES] common={result.get('common_resource')}, "
                          f"uncommon={result.get('uncommon_resource')}, "
                          f"rare={result.get('rare_resource')}, "
                          f"plant={result.get('plant_resource', 'N/A')}")
@@ -3558,7 +3521,17 @@ class HavenExtractorMod(Mod):
                                      "vile_brood", "gravitino_balls", "infested", "dissonance"]
                          if result.get(k)]
             if all_flags:
-                logger.info(f"    [SPECIAL-FINAL] {', '.join(all_flags)}")
+                logger.debug(f"    [SPECIAL-FINAL] {', '.join(all_flags)}")
+
+            # Procedural name fallback: if planet name is still a placeholder, generate
+            # from the planet seed read during direct memory access
+            if result["planet_name"].startswith("Planet_"):
+                planet_seed = direct_data.get("planet_seed", 0)
+                if planet_seed:
+                    proc_name = self._generate_planet_name(planet_seed)
+                    if proc_name:
+                        result["planet_name"] = proc_name
+                        logger.debug(f"    [NAMEGEN] Procedural planet name: '{proc_name}'")
 
             return result
 
@@ -3706,11 +3679,20 @@ class HavenExtractorMod(Mod):
             if not decoded:
                 logger.debug(f"  [{source_label}] invalid decode (addr=0x{universe_addr:016X})")
                 return None
-            system_name = self._get_actual_system_name() or f"System_{decoded['glyph_code']}"
-            region_name = f"Region_{decoded['glyph_code'][:4]}"
+            system_name = self._get_actual_system_name() or self._generate_system_name(
+                decoded['glyph_code'], decoded['galaxy_index'],
+                system_idx=decoded['solar_system_index'],
+                x=decoded['voxel_x'], y=decoded['voxel_y'], z=decoded['voxel_z']
+            )
+            region_name = self._generate_region_name(
+                decoded['glyph_code'], decoded['galaxy_index'],
+                system_idx=decoded['solar_system_index'],
+                x=decoded['voxel_x'], y=decoded['voxel_y'], z=decoded['voxel_z']
+            )
             # v1.8.1 (Fix 3): Log the raw hex address alongside the decoded galaxy so any
             # galaxy-mismatch report can be diagnosed by inspecting the raw bytes directly.
-            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({decoded['galaxy_name']}) raw=0x{universe_addr:016X}")
+            logger.debug(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({decoded['galaxy_name']}) raw=0x{universe_addr:016X}")
+            logger.debug(f"  [NAMEGEN] Region: '{region_name}'")
             return {
                 "system_name": system_name,
                 "region_name": region_name,
@@ -3760,9 +3742,16 @@ class HavenExtractorMod(Mod):
                 return None
             glyph_code = self._coords_to_glyphs(planet_idx, system_idx, voxel_x, voxel_y, voxel_z)
             galaxy_name = get_galaxy_name(galaxy_idx)
-            system_name = self._get_actual_system_name() or f"System_{glyph_code}"
-            region_name = f"Region_{glyph_code[:4]}"
-            logger.info(f"  [SUCCESS via {source_label}] '{system_name}' @ {glyph_code} ({galaxy_name}) [FALLBACK — will retry primary]")
+            system_name = self._get_actual_system_name() or self._generate_system_name(
+                glyph_code, galaxy_idx,
+                system_idx=system_idx, x=voxel_x, y=voxel_y, z=voxel_z
+            )
+            region_name = self._generate_region_name(
+                glyph_code, galaxy_idx,
+                system_idx=system_idx, x=voxel_x, y=voxel_y, z=voxel_z
+            )
+            logger.debug(f"  [SUCCESS via {source_label}] '{system_name}' @ {glyph_code} ({galaxy_name}) [FALLBACK]")
+            logger.debug(f"  [NAMEGEN] Region: '{region_name}'")
             return {
                 "system_name": system_name,
                 "region_name": region_name,
@@ -3821,6 +3810,49 @@ class HavenExtractorMod(Mod):
                 f"with '{new_coords.get('galaxy_name')}'"
             )
         self._current_system_coords = new_coords
+
+    def _log_system_summary(self, system_data: dict):
+        """Print a clean, aligned summary block for a saved system."""
+        name = system_data.get('system_name', 'Unknown')
+        glyph = system_data.get('glyph_code', '????????????')
+        galaxy = system_data.get('galaxy_name', 'Unknown')
+        region = system_data.get('region_name', '')
+        star = system_data.get('star_color', 'Unknown')
+        no_data = system_data.get('no_trade_data', False)
+
+        if no_data:
+            economy = '-Data Unavailable-'
+            conflict = '-Data Unavailable-'
+        else:
+            eco_type = system_data.get('economy_type', 'Unknown')
+            eco_str = system_data.get('economy_strength', '')
+            economy = f"{eco_type} ({eco_str})" if eco_str and eco_str != 'Unknown' else eco_type
+            conflict = system_data.get('conflict_level', 'Unknown')
+
+        planets = system_data.get('planets', [])
+        total = len(planets)
+        batch_count = len(self._batch_systems)
+
+        logger.info("")
+        logger.info(f"=== SYSTEM: {name} ===")
+        logger.info(f"  Glyph: {glyph} | Galaxy: {galaxy} | Region: {region}")
+        logger.info(f"  Star: {star} | Economy: {economy} | Conflict: {conflict}")
+        logger.info("")
+
+        for i, p in enumerate(planets):
+            p_name = p.get('planet_name', f'Planet_{i+1}')
+            moon = " (moon)" if p.get('is_moon', False) else ""
+            biome = p.get('biome', 'Unknown')
+            flora = p.get('flora_level', '?')
+            fauna = p.get('fauna_level', '?')
+            sentinel = p.get('sentinel_level', '?')
+
+            # Align columns
+            label = f"{p_name}{moon}"
+            logger.info(f"  [{i+1}/{total}] {label:<24s} {biome:<14s} Flora: {flora:<12s} Fauna: {fauna:<12s} Sentinel: {sentinel}")
+
+        logger.info(f"=== Saved to batch ({batch_count} total) ===")
+        logger.info("")
 
     def _clean_resource_string(self, val: str) -> str:
         """Clean a resource string, removing garbage characters."""
@@ -3990,6 +4022,29 @@ class HavenExtractorMod(Mod):
         except Exception as e:
             logger.debug(f"  Region name generation failed: {e}")
             return f"Region_{glyph_code[:8]}"
+
+    def _generate_planet_name(self, planet_seed: int) -> str:
+        """Generate procedural planet name using NMS algorithm.
+
+        Args:
+            planet_seed: 64-bit planet seed integer
+
+        Returns:
+            Procedurally generated planet name, or empty string if generation fails
+        """
+        if not NMS_NAMEGEN_AVAILABLE:
+            return ""
+
+        try:
+            if not planet_seed or planet_seed == 0:
+                return ""
+
+            name = nms_planet_name(planet_seed)
+            logger.debug(f"  Generated planet name: '{name}' (seed=0x{planet_seed:016X})")
+            return name
+        except Exception as e:
+            logger.debug(f"  Planet name generation failed: {e}")
+            return ""
 
     def _write_extraction(self, data: dict):
         """Save extraction data locally (NO auto-send to API - use Save Watcher for manual upload)."""

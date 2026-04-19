@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v1.6.7 - First Time Setup
+title Haven Extractor v1.9.0 - First Time Setup
 echo ============================================================
-echo   HAVEN EXTRACTOR v1.6.7 - Installation Verification
+echo   HAVEN EXTRACTOR v1.9.0 - Installation Verification
 echo ============================================================
 echo.
 
@@ -71,7 +71,20 @@ if errorlevel 1 (
 )
 
 echo.
-echo [7/7] Checking output directory...
+echo [7/8] Checking numpy (procedural name generation)...
+python\python.exe -c "import numpy; print('       numpy version:', numpy.__version__)" 2>nul
+if errorlevel 1 (
+    echo       numpy not found - installing...
+    python\python.exe -m pip install numpy --quiet
+    if errorlevel 1 (
+        echo       WARNING: numpy install failed. Procedural name generation will be unavailable.
+    ) else (
+        echo       numpy installed successfully!
+    )
+)
+
+echo.
+echo [8/8] Checking output directory...
 python\python.exe -c "import pathlib; p = pathlib.Path.home() / 'Documents' / 'Haven-Extractor'; print('       Output will go to:', p)"
 
 echo.

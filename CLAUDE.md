@@ -24,10 +24,11 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 |-----------|---------|--------------|-------|
 | **Master Haven** | 1.50.10 | 2026-04-14 | Keeper Discord bot discovery uploads now route through approval queue |
 | Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
+| Backend API | 1.48.5 | 2026-04-18 | Fix galaxy column missing from Haven sub-admin pending_systems queries (always showed Euclid) |
 | Backend API | 1.48.4 | 2026-04-15 | New `GET /api/public/user-stats?username=X` endpoint for Discord bot personal stat lookups |
 | Backend API | 1.48.3 | 2026-04-14 | `/api/discoveries` + `/discoveries` POST now enqueue to `pending_discoveries` instead of inserting directly (closes bot approval-bypass) |
 | Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
-| Haven Extractor | 1.8.1 | 2026-04-13 | Galaxy fixes: reject out-of-range RealityIndex, log raw universe_addr hex, scope dedup by batch galaxy, coord upgrade retry |
+| Haven Extractor | 1.9.0 | 2026-04-18 | Vendored nms_namegen: procedural system, region, and planet name generation from portal codes |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -71,7 +72,7 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 
 When updating the Haven Extractor mod, a new mod-only zip must be created for GitHub Releases:
 
-1. **Create the new zip** from `NMS-Haven-Extractor/dist/HavenExtractor/mod/` containing only: `haven_extractor.py`, `nms_language.py`, `structs.py`, `pymhf.toml`, `__init__.py`, `haven_config.json.example`
+1. **Create the new zip** from `NMS-Haven-Extractor/dist/HavenExtractor/mod/` containing only: `haven_extractor.py`, `nms_language.py`, `structs.py`, `pymhf.toml`, `__init__.py`, `haven_config.json.example`, and the entire `nms_namegen/` directory
 2. **Name it** `HavenExtractor-mod-v{VERSION}.zip` and place it in the repo root
 3. **Archive the old zip** by moving the previous version's zip to `NMS-Haven-Extractor/archive/`
 4. **Upload** the new zip to the GitHub Release (edit the existing release or create a new one with tag `v{VERSION}`)
@@ -93,6 +94,29 @@ New public endpoint for Discord bots (or any HTTP client) to look up a player's 
 - Username normalization matches the contributor leaderboard: strips `#`, removes trailing 4-digit Discord discriminators, case-insensitive
 - Systems counted from `pending_systems` (approved only), discoveries from `discoveries` table
 - Returns 404 if no contributions found for that username
+
+---
+
+#### Haven Extractor 1.9.0 (2026-04-18) - Procedural Name Generation via Vendored nms_namegen
+Vendored the `nms_namegen` library (MIT, https://github.com/stuart/nms_namegen) into the extractor as a native Python module. Generates canonical NMS procedural names for systems, regions, and planets from portal codes and planet seeds — matching the game's actual output. Previously, systems without a memory-readable name fell back to `System_{glyph}` and regions to `Region_{glyph[:4]}`.
+
+**Haven Extractor 1.9.0**
+- Vendored `nms_namegen` v2.0.0 at `mod/nms_namegen/` (8 Python files + 5.4 MB `letter_map.json` + MIT LICENCE). No modifications to upstream source.
+- `_generate_system_name()` now called as fallback when game memory doesn't provide a system name (replaces `System_{glyph_code}` placeholder)
+- `_generate_region_name()` now called in both `_get_coords_from_universe_address()` and `_get_coords_from_player_state()` (replaces `Region_{glyph_code[:4]}` placeholder)
+- New `_generate_planet_name()` wrapper: generates planet names from seed when memory name read fails (replaces `Planet_{index}` placeholder)
+- Planet seed (`GcSeed` at offset 0x20 in `PlanetGenInputData`) now read in `_read_planet_gen_input_direct()`
+- Added `planetName` to the nms_namegen import block alongside existing `systemName` and `regionName`
+- All name generation gracefully degrades: if nms_namegen import fails (e.g., missing numpy), falls back to glyph-based placeholders as before
+- Added `numpy>=2.0` to `pyproject.toml` dependencies
+- `FIRST_TIME_SETUP.bat` updated with numpy check/install step
+- GUI: Removed "System Name" text field and "Apply Name" button (procedural names replace manual entry)
+- GUI: Added read-only "Status" field showing upload results, batch count, and error messages
+- Region auto-submit: export flow now submits procedural region names to `POST /api/regions/{rx}/{ry}/{rz}/submit` for admin approval
+- Terminal output: condensed from ~120 lines to ~15 lines per system with aligned columns
+
+**Backend API 1.48.5**
+- Fixed: Haven sub-admin `pending_systems` SELECT queries missing `galaxy` column — galaxy always displayed as "Euclid" for Haven sub-admins (super admin and partner queries were correct)
 
 ---
 

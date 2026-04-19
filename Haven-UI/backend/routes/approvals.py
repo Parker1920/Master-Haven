@@ -412,7 +412,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
             # If can_approve_personal_uploads, also include submissions with discord_tag = 'personal' (personal uploads)
             if can_approve_personal:
                 cursor.execute(f'''
-                    SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                    SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
                            reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
                            personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                     FROM pending_systems
@@ -428,7 +428,7 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
                 ''', all_tags)
             else:
                 cursor.execute(f'''
-                    SELECT id, submitted_by, submission_date, status, system_name, system_region,
+                    SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
                            reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
                            personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
                     FROM pending_systems
