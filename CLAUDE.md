@@ -22,13 +22,16 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
-| **Master Haven** | 1.50.10 | 2026-04-14 | Keeper Discord bot discovery uploads now route through approval queue |
-| Haven-UI | 1.48.1 | 2026-04-11 | Search pagination, station checkbox, galaxy display fixes |
+| **Master Haven** | 1.50.12 | 2026-04-21 | Custom system name field re-added to extractor for renamed systems; procgen preserved in description |
+| Haven Extractor | 1.9.2 | 2026-04-21 | "Custom System Name" field + "Apply Custom Name" button; procgen name stashed in `description` when user overrides |
+| Backend API | 1.48.7 | 2026-04-21 | `/api/extraction` accepts `description` field (carries procgen name for renamed systems) |
+| Master Haven | 1.50.11 | 2026-04-21 | Super admin can reissue extractor API keys for users who lost theirs |
+| Haven-UI | 1.48.2 | 2026-04-21 | Reissue Key button + new-key display modal on Extractor Users admin page |
+| Backend API | 1.48.6 | 2026-04-21 | New `POST /api/extractor/users/{id}/reissue-key` super admin endpoint |
 | Backend API | 1.48.5 | 2026-04-18 | Fix galaxy column missing from Haven sub-admin pending_systems queries (always showed Euclid) |
 | Backend API | 1.48.4 | 2026-04-15 | New `GET /api/public/user-stats?username=X` endpoint for Discord bot personal stat lookups |
 | Backend API | 1.48.3 | 2026-04-14 | `/api/discoveries` + `/discoveries` POST now enqueue to `pending_discoveries` instead of inserting directly (closes bot approval-bypass) |
 | Backend API | 1.48.2 | 2026-04-13 | Accept no_trade_data flag, store NULL (not "Unknown") for economy/conflict/lifeform when NMS reports no data |
-| Haven Extractor | 1.9.0 | 2026-04-18 | Vendored nms_namegen: procedural system, region, and planet name generation from portal codes |
 | Debug Enabler | 1.0.0 | 2026-02-27 | NMS debug flag mod |
 | Planet Atlas | 1.25.1 | 2026-01-27 | 3D cartography (submodule) |
 | Memory Browser | 3.8.5 | 2026-01-27 | PyQt6 memory inspector |
@@ -84,6 +87,46 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.12 (2026-04-21) - Custom System Name Field Restored (Extractor)
+Re-adds the "Custom System Name" text field and "Apply Custom Name" button to the Haven Extractor GUI. Removed in v1.9.0 when procgen name generation was added — but procgen can't capture **renamed** systems (players can rename any system they visit in-game, and that name lives in save state, not the procgen algorithm). With procgen-only, any renamed system got uploaded under its canonical name, erasing the community-assigned one. The restored flow preserves both names: custom name becomes the system name, procgen name is stuffed into the `description` field so the canonical name isn't lost for downstream tooling.
+
+**Haven Extractor 1.9.2**
+- New GUI field `custom_system_name` (STRING, editable) in the extractor config panel, positioned right above the read-only Status field.
+- New `Apply Custom Name` button. Pressing it:
+  - Validates the field is non-empty and that a current system is loaded (has a glyph code)
+  - Sets `system_name` on `_current_system_coords` so the next `_save_current_system_to_batch` picks it up
+  - If the current system is already in `_batch_systems` (e.g., warp triggered auto-save before Apply), patches that entry in place — updates `system_name`, ensures `procedural_name` is populated, and appends `Procedural name: <procgen>` to the `description` field (dedup-safe, won't repeat on multiple presses)
+  - Clears the input field so the next system starts fresh
+  - Updates status display with the applied name
+- `_save_current_system_to_batch` now **always** computes the procgen name (previously only computed as fallback). Result stored as `procedural_name` on the batch entry regardless of which name wins.
+- When the final `system_name` differs from the procgen name (user override path), `description` gets `Procedural name: <procgen>` appended. `custom_name_applied` flag also set on the batch entry for downstream consumers.
+- No behavior change for systems the user doesn't rename — flow is identical to 1.9.0 (memory read → game state string → procgen fallback).
+
+**Backend API 1.48.7**
+- `/api/extraction` endpoint now accepts a `description` field from the extractor payload and passes it through to `submission_data['description']`. That flows into the existing `systems.description` column on approval ([approvals.py:1072, 1846](Haven-UI/backend/routes/approvals.py)) — no schema migration needed, the column already existed and was just never wired to extractor submissions.
+
+**Why the description column (not a dedicated `procedural_name` column)**: `systems.description` already exists and is the only free-form text field on the system row that's visible in the Haven-UI SystemDetail page. Approvers see the procgen name at review time as a natural prose annotation ("Procedural name: Uhdeon VIII"), and historical tooling/exports that concatenate system fields keep working without migration. Cheaper than a new column with equivalent function.
+
+---
+
+#### Master Haven 1.50.11 (2026-04-21) - Reissue Extractor API Key (Super Admin Tool)
+Super admin can now reissue an API key for any registered extractor user from the admin UI. Use case: a user loses their key (deleted config, bad update, swapped machines) and has no way to recover it — keys are SHA256 hashed one-way at storage so plaintext was never retrievable.
+
+**Root cause of typical "lost key" reports (observed with member "dreams of a dark")**: The Haven Extractor 1.9.0 update added a numpy dependency. If numpy wasn't already installed, the `nms_namegen` import chain can fail, which on some pyMHF configurations leaves the mod partially loaded. Any subsequent GUI setter (discord_username, community_tag, reality_mode) calls `_save_config_to_file()` which writes `"api_key": API_KEY` where `API_KEY` is the module-level global. If `load_config_from_file()` didn't populate it (silent failure path), the setter writes an empty string back to `Documents/Haven-Extractor/config.json`, wiping the previously-saved key. Manually installing numpy afterward fixes the mod but the config is already empty, and the registration endpoint refuses to re-issue because `api_keys` already has a row for that username (`'already_registered'` branch, [extractor.py:296-321](Haven-UI/backend/routes/extractor.py#L296-L321)). The reissue endpoint is the recovery path.
+
+**Backend API 1.48.6**
+- New `POST /api/extractor/users/{key_id}/reissue-key`: super admin only. Generates a fresh `vh_live_...` key, overwrites `key_hash` + `key_prefix` on the existing `api_keys` row, re-activates the row, and returns the plaintext key exactly once. Preserves `total_submissions`, `profile_id`, `rate_limit`, `discord_username`, and all community linkage — the user's submission history stays intact.
+- Writes an `approval_audit_log` entry with `action='reissue_api_key'`, `submission_type='extractor_user'`, recording which super admin performed the reissue.
+- 404 if the key_id doesn't exist, 400 if the row isn't an extractor-type key, 403 if the session isn't super admin.
+
+**Haven-UI 1.48.2**
+- ExtractorUsers page: new **Reissue Key** button (amber) on every user card (super admin only), next to Edit/Suspend.
+- Confirmation modal explains the action invalidates the user's current key and preserves submission history.
+- Post-reissue modal displays the new plaintext key once in a monospace field with a Copy button (falls back to `window.prompt` on non-HTTPS where `navigator.clipboard` is blocked).
+- Modal includes instructions for the user on how to restore the key on their side: either paste into `%USERPROFILE%\Documents\Haven-Extractor\config.json` under `"api_key"`, or delete that file and let the extractor auto-register (which now succeeds since the DB row has been refreshed).
+
+---
 
 #### Backend API 1.48.4 (2026-04-15) - Public User Stats Endpoint for Discord Bot
 New public endpoint for Discord bots (or any HTTP client) to look up a player's contribution stats by username.

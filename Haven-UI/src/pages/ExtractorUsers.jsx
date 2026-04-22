@@ -35,6 +35,11 @@ export default function ExtractorUsers() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [editRateLimit, setEditRateLimit] = useState(100)
 
+  // Reissue key flow
+  const [reissueConfirmUser, setReissueConfirmUser] = useState(null)
+  const [reissuedKey, setReissuedKey] = useState(null) // { username, key, key_prefix }
+  const [copied, setCopied] = useState(false)
+
   useEffect(() => {
     if (!auth.isAdmin) {
       navigate('/')
@@ -98,6 +103,38 @@ export default function ExtractorUsers() {
       alert('Failed to update: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
+    }
+  }
+
+  async function confirmReissueKey() {
+    if (!reissueConfirmUser) return
+    setActionInProgress(true)
+    try {
+      const res = await axios.post(`/api/extractor/users/${reissueConfirmUser.id}/reissue-key`)
+      setReissuedKey({
+        username: res.data.discord_username || reissueConfirmUser.discord_username,
+        key: res.data.key,
+        key_prefix: res.data.key_prefix
+      })
+      setReissueConfirmUser(null)
+      setCopied(false)
+      loadUsers()
+    } catch (err) {
+      alert('Failed to reissue key: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
+  async function copyKeyToClipboard() {
+    if (!reissuedKey) return
+    try {
+      await navigator.clipboard.writeText(reissuedKey.key)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard can fail on non-HTTPS; fall back to selecting via prompt
+      window.prompt('Copy the API key:', reissuedKey.key)
     }
   }
 
@@ -273,6 +310,14 @@ export default function ExtractorUsers() {
                         Edit
                       </Button>
                       <Button
+                        onClick={() => { setReissueConfirmUser(user); setCopied(false) }}
+                        disabled={actionInProgress}
+                        className="text-xs px-3 py-1.5 bg-amber-700 hover:bg-amber-600"
+                        title="Generate a new API key (invalidates the old one)"
+                      >
+                        Reissue Key
+                      </Button>
+                      <Button
                         onClick={() => toggleActive(user)}
                         disabled={actionInProgress}
                         className={`text-xs px-3 py-1.5 ${
@@ -290,6 +335,81 @@ export default function ExtractorUsers() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* Reissue Confirm Modal */}
+      {reissueConfirmUser && (
+        <Modal title={`Reissue API Key - ${reissueConfirmUser.discord_username}`} onClose={() => setReissueConfirmUser(null)}>
+          <div className="space-y-4">
+            <div className="bg-amber-900/30 border border-amber-700/50 rounded-lg p-3 text-sm text-amber-200">
+              <p className="font-medium mb-1">This will invalidate the user's current API key.</p>
+              <p className="text-xs">
+                Use this when a user has lost their key. Their previous key will stop working
+                immediately, and a new plaintext key will be shown to you once — copy it and
+                send it to the user securely. Submission history, rate limit, and profile
+                link are preserved.
+              </p>
+            </div>
+
+            <div className="bg-gray-800/50 rounded-lg p-3 text-sm space-y-1">
+              <div><span className="text-gray-500">Username:</span> <span className="text-white">{reissueConfirmUser.discord_username}</span></div>
+              <div><span className="text-gray-500">Current Key Prefix:</span> <code className="text-gray-400">{reissueConfirmUser.key_prefix}...</code></div>
+              <div><span className="text-gray-500">Total Submissions:</span> <span className="text-white">{(reissueConfirmUser.total_submissions || 0).toLocaleString()}</span></div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button onClick={() => setReissueConfirmUser(null)} className="bg-gray-600 hover:bg-gray-500">
+                Cancel
+              </Button>
+              <Button onClick={confirmReissueKey} disabled={actionInProgress} className="bg-amber-600 hover:bg-amber-500">
+                {actionInProgress ? 'Reissuing...' : 'Reissue Key'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* New Key Display Modal (shown once after reissue) */}
+      {reissuedKey && (
+        <Modal title="New API Key Generated" onClose={() => setReissuedKey(null)}>
+          <div className="space-y-4">
+            <div className="bg-red-900/30 border border-red-700/50 rounded-lg p-3 text-sm text-red-200">
+              <p className="font-medium mb-1">Copy this key now - it cannot be retrieved later!</p>
+              <p className="text-xs">
+                This is the only time you will see the full key. Send it securely to{' '}
+                <span className="font-medium text-white">{reissuedKey.username}</span>.
+                They should paste it into <code>%USERPROFILE%\Documents\Haven-Extractor\config.json</code>{' '}
+                under the <code>"api_key"</code> field, or delete that config file and re-register
+                from the extractor GUI (the auto-register flow will now generate a fresh key on their side).
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">API Key</label>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={reissuedKey.key}
+                  onFocus={e => e.target.select()}
+                  className="flex-1 px-3 py-2 rounded-lg text-white text-sm font-mono"
+                  style={{ background: 'var(--app-card)', border: '1px solid rgba(255,255,255,0.15)' }}
+                />
+                <Button
+                  onClick={copyKeyToClipboard}
+                  className={copied ? 'bg-green-600 hover:bg-green-500' : 'bg-cyan-600 hover:bg-cyan-500'}
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={() => setReissuedKey(null)} className="bg-gray-600 hover:bg-gray-500">
+                Done
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Edit Modal */}

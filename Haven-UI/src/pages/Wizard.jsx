@@ -129,10 +129,25 @@ export default function Wizard(){
     })
       .then(r => {
         setRegionInfo(r.data)
-        // If region is unnamed and we have glyphs, pre-fill with procedural name
-        if (!r.data?.custom_name && system.glyph_code?.length === 12) {
+        // Generate procedural names when we have glyphs
+        if (system.glyph_code?.length === 12) {
           axios.get('/api/namegen', { params: { glyph: system.glyph_code, galaxy } })
-            .then(ng => setProposedRegionName(ng.data.region_name || ''))
+            .then(ng => {
+              // Update system name if it was auto-generated (not user-edited)
+              setSystem(s => {
+                const currentName = s.name || ''
+                // Only overwrite if empty or if it matches a previous procedural name
+                // (user hasn't manually typed something different)
+                if (!currentName || currentName === s._lastProceduralName) {
+                  return { ...s, name: ng.data.system_name, _lastProceduralName: ng.data.system_name }
+                }
+                return s
+              })
+              // Pre-fill region name for unnamed regions
+              if (!r.data?.custom_name) {
+                setProposedRegionName(ng.data.region_name || '')
+              }
+            })
             .catch(() => {})
         }
       })
@@ -413,16 +428,18 @@ export default function Wizard(){
       const galaxy = system.galaxy || 'Euclid'
       axios.get('/api/namegen', { params: { glyph: decodedData.glyph, galaxy } })
         .then(r => {
-          // Pre-fill system name only if user hasn't typed one yet
-          if (!system.name || system.name.trim() === '') {
-            setSystem(s => ({ ...s, name: r.data.system_name }))
-          }
-          // Pre-fill proposed region name for unnamed regions
+          setSystem(s => {
+            const currentName = s.name || ''
+            if (!currentName || currentName === s._lastProceduralName) {
+              return { ...s, name: r.data.system_name, _lastProceduralName: r.data.system_name }
+            }
+            return { ...s, _lastProceduralName: r.data.system_name }
+          })
           if (r.data.region_name) {
             setProposedRegionName(prev => prev || r.data.region_name)
           }
         })
-        .catch(() => {}) // Silent fail — manual entry still works
+        .catch(() => {})
     }
   }
 

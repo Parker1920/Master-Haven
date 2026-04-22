@@ -1408,7 +1408,8 @@ export default function SystemApprovalTab({
                 <p><strong>Source:</strong> <span className={`px-2 py-0.5 rounded text-xs ${
                   selectedSubmission.source === 'haven_extractor' ? 'bg-purple-600 text-white' :
                   selectedSubmission.source === 'companion_app' ? 'bg-cyan-600 text-white' :
-                  'bg-gray-600 text-white'
+                  selectedSubmission.source === 'manual' ? 'bg-gray-600 text-white' :
+                  'bg-blue-600 text-white'
                 }`}>{selectedSubmission.source === 'haven_extractor' ? 'Haven Extractor' : selectedSubmission.source}</span></p>
               )}
               {/* Game mode indicator */}

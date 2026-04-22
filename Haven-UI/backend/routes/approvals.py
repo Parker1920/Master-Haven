@@ -2482,6 +2482,10 @@ async def receive_extraction(
         'source': 'haven_extractor',
         'extractor_version': payload.get('extractor_version', 'unknown'),
         'game_mode': game_mode,
+        # v1.48.7: Accept description from extractor. Haven Extractor 1.9.2+ stuffs the
+        # procedural name here when the user applies a custom name for renamed systems,
+        # so the canonical procgen name isn't lost on approval.
+        'description': payload.get('description', '') or '',
         # v1.48.2: Flag from extractor indicating NMS itself reports "-Data Unavailable-" /
         # "Uncharted" for economy/conflict/lifeform. When True, the four fields below are
         # set to None (NULL in DB) so the frontend can render them as unavailable rather
@@ -2670,6 +2674,15 @@ async def receive_extraction(
             api_key_name = f"{api_key_info['name']} (unregistered)"
 
         submitter_display = discord_username if discord_username else 'HavenExtractor'
+
+        # Determine source: real Haven Extractor keys keep 'haven_extractor' so
+        # analytics source-split stays correct. Non-extractor keys (e.g. Keeper 2.0)
+        # use their API key name so reviewers can tell where the submission came from.
+        if api_key_info and api_key_info.get('key_type') not in ('extractor', 'extractor_user'):
+            submission_source = api_key_info.get('name') or 'haven_extractor'
+        else:
+            submission_source = 'haven_extractor'
+
         cursor.execute('''
             INSERT INTO pending_systems (
                 system_name, glyph_code, galaxy, reality, x, y, z,
@@ -2694,7 +2707,7 @@ async def receive_extraction(
             now,
             now,  # submission_date
             'pending',
-            'haven_extractor',
+            submission_source,
             raw_json_str,
             raw_json_str,  # system_data (same as raw_json)
             discord_tag if discord_tag else None,

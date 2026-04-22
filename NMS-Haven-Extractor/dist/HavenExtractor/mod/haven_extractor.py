@@ -806,8 +806,8 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.9.0"
-    __description__ = "Batch mode planet data extraction - game mode tracking & biome subtype plant fix"
+    __version__ = "1.9.2"
+    __description__ = "Custom system name field for renamed systems (procgen preserved in description)"
 
     # ==========================================================================
     # VALID ADJECTIVE LISTS FROM adjectives.js
@@ -879,6 +879,21 @@ class HavenExtractorMod(Mod):
         USER_REALITY = reality
         self._save_config_to_file()
         logger.info(f"[CONFIG] Reality mode set to: {reality}")
+
+    # =========================================================================
+    # CUSTOM SYSTEM NAME
+    # User-entered name for renamed systems (overrides procgen fallback).
+    # Applies to the current system via the "Apply Custom Name" button.
+    # =========================================================================
+
+    @property
+    @gui_variable.STRING(label="Custom System Name (for renamed systems)")
+    def custom_system_name(self) -> str:
+        return getattr(self, '_custom_system_name', '')
+
+    @custom_system_name.setter
+    def custom_system_name(self, value: str):
+        self._custom_system_name = value or ''
 
     # =========================================================================
     # STATUS NOTIFICATION
@@ -985,6 +1000,7 @@ class HavenExtractorMod(Mod):
         self._reality = USER_REALITY
         self._game_mode = "Normal"  # Auto-detected from memory at extraction time
         self._status_display = 'Ready'  # GUI status notification
+        self._custom_system_name = ''  # User-entered custom name for renamed systems
 
         self._pending_extraction = False
         self._last_extracted_seed = None
@@ -1519,13 +1535,30 @@ class HavenExtractorMod(Mod):
                     except Exception:
                         pass
 
-            # Use procedural name generation as fallback if system_name is still empty
+            # Always compute the procgen name — used as fallback AND preserved in description
+            # whenever the user overrides with a custom name (renamed systems).
+            procgen_name = self._generate_system_name(
+                glyph_code, coords.get('galaxy_index', 0),
+                system_idx=coords.get('solar_system_index'),
+                x=coords.get('voxel_x'), y=coords.get('voxel_y'), z=coords.get('voxel_z')
+            )
+            system_data['procedural_name'] = procgen_name
+
+            # Use procedural name as fallback if system_name is still empty
             if not system_data.get('system_name') or system_data['system_name'].startswith('System_'):
-                system_data['system_name'] = self._generate_system_name(
-                    glyph_code, coords.get('galaxy_index', 0),
-                    system_idx=coords.get('solar_system_index'),
-                    x=coords.get('voxel_x'), y=coords.get('voxel_y'), z=coords.get('voxel_z')
-                )
+                system_data['system_name'] = procgen_name
+
+            # Whenever the final name differs from procgen (GUI custom name, in-game rename
+            # read from memory, or game-state notification string), stash the procgen name
+            # in description so the canonical name isn't lost on the archive side.
+            final_name = system_data.get('system_name', '')
+            if procgen_name and final_name and final_name != procgen_name:
+                existing_desc = system_data.get('description', '') or ''
+                marker = f"Procedural name: {procgen_name}"
+                if marker not in existing_desc:
+                    system_data['description'] = (existing_desc + ("\n" if existing_desc else "") + marker).strip()
+                if has_manual_name or coords.get('custom_name_applied'):
+                    system_data['custom_name_applied'] = True
 
             # Add to batch
             self._batch_systems.append(system_data)
@@ -2283,6 +2316,68 @@ class HavenExtractorMod(Mod):
 
         logger.info("=" * 60)
         logger.info("")
+
+    @gui_button("Apply Custom Name")
+    def apply_custom_system_name(self):
+        """
+        Apply the custom system name to the current system.
+        Overrides the procgen name for renamed systems. The procgen name is
+        preserved in the submission's description field so the info isn't lost.
+        """
+        name = (getattr(self, '_custom_system_name', '') or '').strip()
+        if not name:
+            self._status_display = "Enter a custom name first"
+            logger.warning("[CUSTOM NAME] No name entered — type in the field above and click again.")
+            return
+
+        # Must have a current system
+        if not self._current_system_coords:
+            self._status_display = "No current system - warp first"
+            logger.warning("[CUSTOM NAME] No current system detected. Warp into a system first.")
+            return
+
+        glyph = self._current_system_coords.get('glyph_code', '')
+        if not glyph:
+            self._status_display = "Current system has no glyph"
+            logger.warning("[CUSTOM NAME] Current system has no glyph code — cannot apply.")
+            return
+
+        # Set on current coords so the next _save_current_system_to_batch picks it up
+        self._current_system_coords['system_name'] = name
+        self._current_system_coords['custom_name_applied'] = True
+
+        # If this system is already in the batch, patch it in place
+        patched = False
+        for entry in self._batch_systems:
+            if entry.get('glyph_code') == glyph:
+                old_name = entry.get('system_name', '')
+                entry['system_name'] = name
+                entry['custom_name_applied'] = True
+
+                # Preserve procgen name in description so the info isn't lost on approval
+                procgen = entry.get('procedural_name') or self._generate_system_name(
+                    glyph,
+                    entry.get('galaxy_index', 0),
+                    system_idx=entry.get('solar_system_index'),
+                    x=entry.get('voxel_x'), y=entry.get('voxel_y'), z=entry.get('voxel_z'),
+                )
+                entry['procedural_name'] = procgen
+                existing_desc = entry.get('description', '') or ''
+                marker = f"Procedural name: {procgen}"
+                if marker not in existing_desc:
+                    entry['description'] = (existing_desc + ("\n" if existing_desc else "") + marker).strip()
+
+                logger.info(f"[CUSTOM NAME] Updated batch entry: '{old_name}' -> '{name}' (procgen '{procgen}' preserved in description)")
+                patched = True
+                break
+
+        if not patched:
+            # Not yet saved — will be picked up on next batch save via _current_system_coords
+            logger.info(f"[CUSTOM NAME] Queued '{name}' for current system (glyph {glyph}). Will apply at next batch save.")
+
+        self._status_display = f"Custom name: {name}"
+        # Clear the input so the next system starts fresh
+        self._custom_system_name = ''
 
     @gui_button("Config Status")
     def show_config_status(self):
@@ -3626,6 +3721,30 @@ class HavenExtractorMod(Mod):
     # is a single packed uint64 on mPlanetDiscoveryData — one offset vs. five, so
     # far more resilient to NMS updates.
 
+    def _read_galaxy_from_player_state(self) -> int:
+        """Read galaxy index from player_state.mLocation.RealityIndex.
+
+        mUniverseAddress (packed uint64 on cGcDiscoveryData) does NOT contain the galaxy —
+        it's just the packed GalacticAddress (coords + system + planet). The galaxy is only
+        available from the player state's RealityIndex field, which is a separate int32 at
+        offset 0x14 in the full cGcUniverseAddressData struct.
+
+        Returns 0 (Euclid) if the read fails.
+        """
+        try:
+            player_state = gameData.player_state
+            if not player_state:
+                return 0
+            location = player_state.mLocation
+            raw_reality = self._safe_int(location.RealityIndex)
+            if 0 <= raw_reality <= 255:
+                return raw_reality
+            logger.debug(f"  [GALAXY] RealityIndex out of range: {raw_reality}")
+            return 0
+        except Exception as e:
+            logger.debug(f"  [GALAXY] Failed to read RealityIndex: {e}")
+            return 0
+
     def _coords_look_valid(self, voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
         """Reject all-zero (impossible universe origin) and out-of-range galaxy."""
         if voxel_x == 0 and voxel_y == 0 and voxel_z == 0 and system_idx == 0:
@@ -3637,10 +3756,15 @@ class HavenExtractorMod(Mod):
     def _decode_universe_address(self, universe_addr):
         """Decode packed uint64 mUniverseAddress into coord dict, or None if invalid.
 
-        Bit layout (verified):
+        Bit layout (cGcDiscoveryData.mUniverseAddress — packed GalacticAddress only):
           0-11:  X region (0-4095)    12-23: Z region (0-4095)
           24-31: Y region (0-255)     40-51: SolarSystemIndex (12 bits)
-          52-55: PlanetIndex + 1      56-63: Galaxy index (8 bits)
+          52-55: PlanetIndex + 1
+
+        NOTE: Galaxy is NOT in this field. mUniverseAddress is a uint64 containing
+        only the packed GalacticAddress. The galaxy (RealityIndex) is a separate
+        int32 in the full cGcUniverseAddressData struct — read it from player_state
+        via _read_galaxy_from_player_state() instead.
         """
         if universe_addr == 0 or universe_addr == 0xFFFFFFFFFFFFFFFF:
             return None
@@ -3649,13 +3773,12 @@ class HavenExtractorMod(Mod):
         y_region = (universe_addr >> 24) & 0xFF
         system_idx = (universe_addr >> 40) & 0xFFF
         planet_idx = max(0, ((universe_addr >> 52) & 0xF) - 1)
-        galaxy_idx = (universe_addr >> 56) & 0xFF
 
         voxel_x = x_region if x_region <= 0x7FF else x_region - 0x1000
         voxel_y = y_region if y_region <= 0x7F else y_region - 0x100
         voxel_z = z_region if z_region <= 0x7FF else z_region - 0x1000
 
-        if not self._coords_look_valid(voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
+        if voxel_x == 0 and voxel_y == 0 and voxel_z == 0 and system_idx == 0:
             return None
 
         glyph_code = f"{planet_idx:01X}{system_idx:03X}{y_region:02X}{z_region:03X}{x_region:03X}".upper()
@@ -3663,7 +3786,6 @@ class HavenExtractorMod(Mod):
             "voxel_x": voxel_x, "voxel_y": voxel_y, "voxel_z": voxel_z,
             "region_x": x_region, "region_y": y_region, "region_z": z_region,
             "solar_system_index": system_idx, "planet_index": planet_idx,
-            "galaxy_index": galaxy_idx, "galaxy_name": get_galaxy_name(galaxy_idx),
             "glyph_code": glyph_code,
         }
 
@@ -3679,26 +3801,30 @@ class HavenExtractorMod(Mod):
             if not decoded:
                 logger.debug(f"  [{source_label}] invalid decode (addr=0x{universe_addr:016X})")
                 return None
+
+            # v1.9.0: Galaxy is NOT in mUniverseAddress (it's only the packed GalacticAddress).
+            # Read galaxy separately from player_state.mLocation.RealityIndex.
+            galaxy_idx = self._read_galaxy_from_player_state()
+            galaxy_name = get_galaxy_name(galaxy_idx)
+
             system_name = self._get_actual_system_name() or self._generate_system_name(
-                decoded['glyph_code'], decoded['galaxy_index'],
+                decoded['glyph_code'], galaxy_idx,
                 system_idx=decoded['solar_system_index'],
                 x=decoded['voxel_x'], y=decoded['voxel_y'], z=decoded['voxel_z']
             )
             region_name = self._generate_region_name(
-                decoded['glyph_code'], decoded['galaxy_index'],
+                decoded['glyph_code'], galaxy_idx,
                 system_idx=decoded['solar_system_index'],
                 x=decoded['voxel_x'], y=decoded['voxel_y'], z=decoded['voxel_z']
             )
-            # v1.8.1 (Fix 3): Log the raw hex address alongside the decoded galaxy so any
-            # galaxy-mismatch report can be diagnosed by inspecting the raw bytes directly.
-            logger.debug(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({decoded['galaxy_name']}) raw=0x{universe_addr:016X}")
+            logger.debug(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({galaxy_name}) raw=0x{universe_addr:016X}")
             logger.debug(f"  [NAMEGEN] Region: '{region_name}'")
             return {
                 "system_name": system_name,
                 "region_name": region_name,
                 "glyph_code": decoded["glyph_code"],
-                "galaxy_name": decoded["galaxy_name"],
-                "galaxy_index": decoded["galaxy_index"],
+                "galaxy_name": galaxy_name,
+                "galaxy_index": galaxy_idx,
                 "voxel_x": decoded["voxel_x"],
                 "voxel_y": decoded["voxel_y"],
                 "voxel_z": decoded["voxel_z"],

@@ -496,6 +496,92 @@ async def list_extractor_users(session: Optional[str] = Cookie(None)):
             conn.close()
 
 
+@router.post('/api/extractor/users/{key_id}/reissue-key')
+async def reissue_extractor_key(key_id: int, session: Optional[str] = Cookie(None)):
+    """
+    Reissue an API key for an extractor user (super admin only).
+    Generates a fresh plaintext key, overwrites key_hash/key_prefix on the existing
+    row (preserves total_submissions, profile_id, rate_limit, communities used).
+    Returns the plaintext key once — same "save this now" contract as registration.
+    The user's previous key is immediately invalidated.
+    """
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, name, key_type, discord_username, is_active FROM api_keys WHERE id = ?",
+            (key_id,)
+        )
+        key_row = cursor.fetchone()
+        if not key_row:
+            raise HTTPException(status_code=404, detail="Extractor user not found")
+        if key_row['key_type'] != 'extractor':
+            raise HTTPException(status_code=400, detail="This is not an extractor user key")
+
+        new_key = generate_api_key()
+        new_hash = hash_api_key(new_key)
+        new_prefix = new_key[:16]
+
+        cursor.execute(
+            "UPDATE api_keys SET key_hash = ?, key_prefix = ?, is_active = 1 WHERE id = ?",
+            (new_hash, new_prefix, key_id)
+        )
+
+        try:
+            cursor.execute('''
+                INSERT INTO approval_audit_log
+                (timestamp, action, submission_type, submission_id, submission_name,
+                 approver_username, approver_type, approver_account_id, approver_discord_tag,
+                 submitter_username, submission_discord_tag, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now(timezone.utc).isoformat(),
+                'reissue_api_key',
+                'extractor_user',
+                key_id,
+                key_row['discord_username'] or key_row['name'],
+                session_data.get('username', 'admin'),
+                'super_admin',
+                session_data.get('profile_id'),
+                session_data.get('discord_tag'),
+                key_row['discord_username'],
+                None,
+                'manual'
+            ))
+        except Exception as audit_err:
+            logger.warning(f"Could not write audit log for key reissue: {audit_err}")
+
+        conn.commit()
+
+        logger.info(
+            f"API key reissued for extractor user '{key_row['discord_username']}' "
+            f"(key_id {key_id}) by super admin '{session_data.get('username')}'"
+        )
+
+        return {
+            'status': 'ok',
+            'key': new_key,
+            'key_prefix': new_prefix,
+            'discord_username': key_row['discord_username'],
+            'message': 'Save this key now - it cannot be retrieved later! The previous key has been invalidated.'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reissue extractor key: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reissue API key")
+    finally:
+        if conn:
+            conn.close()
+
+
 @router.put('/api/extractor/users/{key_id}')
 async def update_extractor_user(key_id: int, request: Request, session: Optional[str] = Cookie(None)):
     """
