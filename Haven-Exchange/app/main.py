@@ -96,6 +96,10 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE loan_payments ADD COLUMN principal_portion INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE loan_payments ADD COLUMN is_final_payment BOOLEAN DEFAULT 0 NOT NULL",
         "ALTER TABLE global_settings ADD COLUMN interest_burn_rate_bps INTEGER DEFAULT 8000 NOT NULL",
+        # Treasury lending (Phase 2C)
+        "ALTER TABLE loans ADD COLUMN lender_type TEXT DEFAULT 'bank' NOT NULL",
+        "ALTER TABLE loans ADD COLUMN lender_wallet_address TEXT",
+        "ALTER TABLE loans ADD COLUMN treasury_nation_id INTEGER",
     ]
     for sql in migrations:
         try:
@@ -121,6 +125,27 @@ def _run_schema_migrations() -> None:
         conn.execute(
             "UPDATE loan_payments SET principal_portion = amount "
             "WHERE principal_portion = 0 AND interest_portion = 0 AND amount > 0"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # Phase 2C backfill: pre-treasury-lending loan rows are all bank loans.
+    # Set lender_type to 'bank' and denormalize lender_wallet_address from
+    # the linked banks row so pay_loan can route payments uniformly.
+    try:
+        conn.execute(
+            "UPDATE loans SET lender_type = 'bank' "
+            "WHERE lender_type IS NULL OR lender_type = ''"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "UPDATE loans "
+            "SET lender_wallet_address = ("
+            "  SELECT wallet_address FROM banks WHERE banks.id = loans.bank_id"
+            ") "
+            "WHERE lender_wallet_address IS NULL AND bank_id > 0"
         )
     except sqlite3.OperationalError:
         pass

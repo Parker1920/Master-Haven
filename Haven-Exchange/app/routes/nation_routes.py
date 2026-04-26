@@ -12,11 +12,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timezone
+
 from app.auth import require_login
 from app.blockchain import create_transaction
 from app.config import settings
 from app.database import get_db
-from app.models import Nation, User
+from app.models import GlobalSettings, Loan, Nation, User
 from app.wallet import generate_nation_treasury_address
 
 router = APIRouter(prefix="/api/nations", tags=["nations"])
@@ -443,4 +445,158 @@ def distribute_bulk(
         "success": True,
         "count": count,
         "total_amount": total_amount,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/nations/{nation_id}/loans — Issue a loan from the nation treasury
+# ---------------------------------------------------------------------------
+class TreasuryLoanRequest(BaseModel):
+    borrower_user_id: int
+    amount: int
+    memo: str | None = None
+
+
+@router.post("/{nation_id}/loans")
+def create_treasury_loan(
+    nation_id: int,
+    payload: TreasuryLoanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Issue a loan directly from the nation treasury (Phase 2C).
+
+    Mirrors the bank ``create_loan`` flow but the lender is the nation
+    treasury rather than a bank.  Only the nation leader may invoke this.
+    The borrower must be a member of the nation, must have no other active
+    loan (banks or other treasuries), and the treasury must hold sufficient
+    reserves at its wallet.
+
+    Snapshots current ``GlobalSettings`` rates so the loan terms remain
+    fixed for its lifetime, identically to bank loans.
+    """
+    # Validate: nation exists and is approved
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id, Nation.status == "approved")
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found or not approved.")
+
+    # Validate: only the nation leader can issue treasury loans
+    if current_user.id != nation.leader_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the nation leader can issue treasury loans.",
+        )
+
+    # Validate: amount is positive
+    if payload.amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Loan amount must be greater than zero.",
+        )
+
+    # Validate: borrower exists and is in this nation
+    borrower = db.execute(
+        select(User).where(User.id == payload.borrower_user_id)
+    ).scalar_one_or_none()
+    if borrower is None:
+        raise HTTPException(status_code=404, detail="Borrower not found.")
+    if borrower.nation_id != nation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Borrower must be a member of this nation.",
+        )
+
+    # Validate: borrower has no active loans anywhere
+    active_loan = db.execute(
+        select(Loan).where(Loan.borrower_id == borrower.id, Loan.status == "active")
+    ).scalar_one_or_none()
+    if active_loan is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Borrower already has an active loan. Must repay before taking a new one.",
+        )
+
+    # Validate: treasury has sufficient reserves.  ``Nation.treasury_balance``
+    # is the cached balance maintained by ``blockchain.create_transaction``;
+    # there is no User row for treasury addresses (the address is owned by
+    # the nation entity).
+    if nation.treasury_balance < payload.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Insufficient treasury reserves. "
+                f"Available: {nation.treasury_balance}, requested: {payload.amount}."
+            ),
+        )
+
+    # Snapshot current global settings.
+    gs = db.execute(select(GlobalSettings).where(GlobalSettings.id == 1)).scalar_one_or_none()
+    if gs is None:
+        # Defensive — startup should have seeded this, but recreate if not.
+        gs = GlobalSettings(
+            id=1, burn_rate_bps=1000, interest_rate_cap_bps=2000, interest_burn_rate_bps=8000
+        )
+        db.add(gs)
+        db.flush()
+
+    # Create the LOAN ledger transaction (treasury → borrower).
+    try:
+        tx = create_transaction(
+            db,
+            tx_type="LOAN",
+            from_address=nation.treasury_address,
+            to_address=borrower.wallet_address,
+            amount=payload.amount,
+            memo=f"Treasury loan from {nation.name}: {payload.memo or 'No memo'}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Create the Loan record.  bank_id=0 is the sentinel for treasury loans
+    # (kept NOT NULL at the DB layer to avoid a SQLite table rebuild).
+    now = datetime.now(timezone.utc)
+    loan = Loan(
+        bank_id=0,
+        lender_type="treasury",
+        lender_wallet_address=nation.treasury_address,
+        treasury_nation_id=nation.id,
+        borrower_id=borrower.id,
+        principal=payload.amount,
+        outstanding=payload.amount,
+        accrued_interest=0,
+        cap_amount=payload.amount,
+        interest_frozen=False,
+        last_accrual_at=now,
+        interest_rate=gs.interest_rate_cap_bps,
+        burn_rate_snapshot=gs.burn_rate_bps,
+        interest_burn_rate_snapshot=gs.interest_burn_rate_bps,
+        total_interest_paid=0,
+        total_burned_during_payments=0,
+        final_close_burn=0,
+        status="active",
+        memo=payload.memo,
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+
+    return {
+        "success": True,
+        "loan": {
+            "id": loan.id,
+            "lender_type": loan.lender_type,
+            "lender_wallet_address": loan.lender_wallet_address,
+            "treasury_nation_id": loan.treasury_nation_id,
+            "principal": loan.principal,
+            "outstanding": loan.outstanding,
+            "accrued_interest": loan.accrued_interest,
+            "cap_amount": loan.cap_amount,
+            "interest_frozen": loan.interest_frozen,
+            "interest_rate": loan.interest_rate,
+            "burn_rate_snapshot": loan.burn_rate_snapshot,
+            "status": loan.status,
+            "tx_hash": tx.tx_hash,
+        },
     }

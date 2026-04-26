@@ -92,62 +92,142 @@ Committed as `9657cb0` — `Phase 2A: implement loan interest accrual with 100% 
 
 ---
 
-## Phase 2B — Burn Mechanics Rework (Interest 20/80 Split)
+## Phase 2B — Burn Mechanics Rework (Interest-Only 20/80 Pool)
 
-**Goal:** Split each loan payment into interest-portion (paid first) and principal-portion (remainder); apply different burn rates per portion. Interest portion: 80% burn / 20% bank — the V2 audit "20/80 split". Principal portion: keeps existing snapshot rate (default 10/90).
+**Goal:** Replace the prior "uniform burn on every payment dollar" model with an **interest-only** burn pool, split 20% during payments / 80% at loan close.
 
-### Schema additions
+**The model in plain terms:**
+- Total burn pool over a loan's life = **10% of total interest paid** (zero burn ever applied to principal).
+- Of that pool, 20% is burned **during payments** (each payment burns `floor(interest_portion × 0.02)` from the borrower).
+- The remaining 80% is burned **at close** from the **bank's reserves** (the bank has been holding the burn pool since each payment).
 
-**`Loan` (`models.py`)**
-- `interest_burn_rate_snapshot INTEGER DEFAULT 8000 NOT NULL` — snapshotted from `GlobalSettings.interest_burn_rate_bps` at loan creation. Allows the bank's economic policy to evolve without rewriting outstanding loans.
-- `total_interest_paid INTEGER DEFAULT 0` — running total of interest portion across all payments (analytics).
-- `total_burned_during_payments INTEGER DEFAULT 0` — running total of all burns (interest_burn + principal_burn) across all payments.
-- `final_close_burn INTEGER DEFAULT 0` — burn amount on the single payment that closed the loan. Captures the V2 audit's "at close" event for ledger-level analytics.
+### Schema (already migrated as part of 2A pre-staging — verified intact this phase)
 
-**`LoanPayment` (`models.py`)**
-- `interest_portion INTEGER DEFAULT 0` — how much of `amount` was applied to accrued_interest.
-- `principal_portion INTEGER DEFAULT 0` — how much of `amount` was applied to principal balance. Always equals `amount - interest_portion`. Persisted (not derived) so historical rows survive future schema reshapes.
-- `is_final_payment BOOLEAN DEFAULT 0` — true if this payment zeroed both balances and closed the loan.
-- `balance_after` semantics updated: now `principal_remaining + accrued_interest_remaining` (total still owed) rather than just principal.
+**`Loan`** carries the running totals:
+- `total_interest_paid` — sum of every payment's `interest_portion`.
+- `total_burned_during_payments` — sum of the during-payment burn slices (20% of pool).
+- `final_close_burn` — bank-sourced burn on the closing payment (80% of pool, residual after the during-payment slice).
+- `burn_rate_snapshot` — re-purposed in 2B: now the **total burn pool rate** against lifetime interest (default 1000 bps = 10%). Was previously "principal burn rate".
+- `interest_burn_rate_snapshot` — re-purposed in 2B: now the **at-close fraction of the pool** (default 8000 bps = 80%). The during-payment fraction is the complement (default 2000 bps = 20%).
 
-**`GlobalSettings` (`models.py`)**
-- `interest_burn_rate_bps INTEGER DEFAULT 8000 NOT NULL` — the World Mint-controllable rate applied to interest portions of loan payments. 8000 = 80% (the "80" in the 20/80 split).
+**`LoanPayment`** carries per-payment breakdown:
+- `interest_portion`, `principal_portion`, `is_final_payment` (used to drive the close-burn branch).
 
-### Migrations (`app/main.py::_run_schema_migrations`)
-- Eight idempotent `ALTER TABLE` statements covering the new columns.
-- Backfill: `UPDATE loan_payments SET principal_portion = amount WHERE principal_portion = 0 AND interest_portion = 0 AND amount > 0` so historical pre-Phase-2B payments analyse cleanly as 100% principal.
+**`GlobalSettings`** column comments updated to reflect the new semantics; the underlying `interest_burn_rate_bps` column was already present from the 2A migration block.
 
 ### `pay_loan` rewrite (`app/routes/bank_routes.py`)
 
-Old flow: single `amount * burn_rate_snapshot` split, applied uniformly to a single `outstanding` field.
+Replaced the prior interest-80%-burn / principal-10%-burn implementation with the spec's interest-only pool:
 
-New flow:
-1. Cap payment at `total_owed = outstanding + accrued_interest` (don't overpay).
-2. Allocate **interest first**, then principal: `interest_portion = min(amount, accrued_interest); principal_portion = amount - interest_portion`.
-3. Per-portion burn split using the loan's snapshotted rates:
-   - `interest_burn = floor(interest_portion * interest_burn_rate_snapshot / 10000)` (default 80%)
-   - `principal_burn = floor(principal_portion * burn_rate_snapshot / 10000)` (default 10%)
-   - bank shares = portion − burn share for each.
-4. Combined ledger tx: one `LOAN_PAYMENT` for `total_to_bank`, one `BURN` for `total_burn`. The memos itemise the per-portion breakdown so the ledger remains forensically traceable.
-5. Update both `loan.accrued_interest` and `loan.outstanding`.
-6. Detect `is_final` = both balances now zero. On the closing payment: status → `closed`, `closed_at` = now, `final_close_burn = total_burn`.
-7. Update `total_interest_paid` and `total_burned_during_payments` cumulative trackers.
-8. Persist `LoanPayment` with the per-portion breakdown.
+1. Cap payment at `total_owed = outstanding + accrued_interest` (no overpay).
+2. Allocate interest first: `interest_portion = min(amount, accrued_interest); principal_portion = amount − interest_portion`.
+3. Compute the during-payment burn slice from the snapshotted rates:
+   ```
+   during_split_bps = 10000 − interest_burn_rate_snapshot          # default 2000 = 20%
+   during_payment_burn = floor(
+       interest_portion × burn_rate_snapshot × during_split_bps
+       / (10000 × 10000)
+   )
+   # at default rates: floor(interest_portion × 0.10 × 0.20) = floor(interest_portion × 0.02)
+   ```
+4. Bank receives the rest: `to_bank = amount − during_payment_burn`. Principal flows entirely to the bank, never burned.
+5. Ledger writes (in order):
+   - `LOAN_PAYMENT`: borrower → bank, `to_bank` (single combined tx for both interest-bank and principal portions).
+   - `BURN` (during-payment): borrower → World Mint, `during_payment_burn` (if > 0).
+6. Apply allocations to `accrued_interest` / `outstanding`, then update running totals (`total_interest_paid`, `total_burned_during_payments`).
+7. **Final-payment branch** (both balances now 0):
+   ```
+   total_burn_pool = floor(total_interest_paid × burn_rate_snapshot / 10000)   # 10% of lifetime interest
+   close_burn      = max(0, total_burn_pool − total_burned_during_payments)    # the residual 80%
+   ```
+   - If `close_burn > 0`: third ledger write `BURN`: bank wallet → World Mint, `close_burn`.
+   - Set `loan.final_close_burn`, `status = 'closed'`, `closed_at = now`.
+8. `bank.total_burned += during_payment_burn + close_burn` (lifetime analytic spans both burn sources).
+9. Persist `LoanPayment` with `burn_amount = during_payment_burn + close_burn`, `bank_amount = to_bank`, `interest_portion`, `principal_portion`, `is_final_payment`.
 
 ### API surface
-- `POST /api/loans/{loan_id}/pay` response now returns the full breakdown: `interest_portion`, `principal_portion`, `interest_burn`, `interest_to_bank`, `principal_burn`, `principal_to_bank`, `is_final_payment`, `outstanding_principal`, `remaining_interest`. The legacy keys (`burn_amount`, `bank_amount`, `balance_after`) are preserved for back-compat — existing UI code reading those still works.
-- `GET /api/mint/settings` and `POST /api/mint/settings` now expose/accept `interest_burn_rate_bps` (with 0–10000 bps validation). The setting is optional in the POST body for back-compat with existing clients.
+- `POST /api/loans/{loan_id}/pay` response now returns: `amount`, `interest_portion`, `principal_portion`, `during_payment_burn`, `close_burn`, `burn_amount`, `bank_amount`, `is_final_payment`, `balance_after`, `outstanding_principal`, `remaining_interest`. (Old keys `interest_burn` / `interest_to_bank` / `principal_burn` / `principal_to_bank` removed — they reflected the prior model and would mislead.)
+- `GET /api/mint/settings` and `POST /api/mint/settings` already exposed `interest_burn_rate_bps`; meaning is now "at-close pool fraction" (was "interest-portion burn rate"). API shape unchanged.
 
 ### Design choices
-- **Interest first allocation.** Standard amortisation convention. Prevents the borrower from indefinitely deferring interest — a payment can't reduce principal until the day's interest is paid.
-- **Snapshot the interest burn rate at creation.** Mirrors the existing `burn_rate_snapshot` pattern so a mid-loan global-settings change doesn't retroactively alter loans already in flight.
-- **Combine portions into a single ledger BURN tx and a single LOAN_PAYMENT tx per payment.** Two ledger rows per payment instead of four. Memo strings carry the per-portion breakdown for audit. Keeps the chain compact while preserving traceability.
-- **`final_close_burn` tracked separately from `total_burned_during_payments`.** Enables a clean V2-audit-aligned report: "X TC was burned during the loan's life, Y of that on the closing payment specifically." Useful for analyzing whether large balloon-style payoffs are common.
+- **Burn is interest-only.** The spec is explicit: principal repayment is never burned. The repurposed `burn_rate_snapshot` (now "total pool rate against interest") encodes this — there is no second principal-burn computation in the new code path.
+- **Close burn flows from the bank, not the borrower.** The borrower's payment is capped at `total_owed`, so any "extra" burn at close has to come from somewhere else. The bank has been collecting roughly 98% of every interest dollar throughout the loan's life — that pool is what funds the close burn. This matches the spec's intent ("subtract total_burned_during_payments, burn the remainder") and produces a self-balancing model: total minted-by-interest never escapes, total burned matches the 10% target, the bank net-earns 90% of interest.
+- **Re-purposed snapshot fields rather than adding new ones.** The existing `burn_rate_snapshot` and `interest_burn_rate_snapshot` columns happen to default to the right values (1000 bps and 8000 bps) for the new model. Renaming them would have rippled through migrations and a UI without changing behaviour. The model docstrings now document the new semantics; the DB schema is untouched.
+- **Three transactions per closing payment, two per non-closing.** Each burn source is a separate ledger row so the chain remains forensically auditable: one `LOAN_PAYMENT` (borrower → bank), one `BURN` (borrower → World Mint, the 20% slice), and on close, one more `BURN` (bank → World Mint, the 80% slice). Memos identify which slice each burn represents.
+- **Failure mode on close burn.** If the bank's reserves cannot cover the close burn (e.g. the bank has loaned out reserves elsewhere), `create_transaction` raises `ValueError` and the endpoint returns `400` — the loan stays open. This is a pre-existing non-atomicity in `create_transaction` (commits per-call, no outer txn); fixing it is out of scope for 2B.
 
 ### Verification
-- Synthetic math test (`py -c …`) covered three cases: pure-interest payment (1000 vs 5000 accrued), mixed payment (6000 vs 5000 accrued = 5000 interest + 1000 principal), and pure-principal payment (100 with 0 accrued). All burn/bank splits match expected values to the TC.
-- AST syntax check on the three touched files: clean.
+- AST syntax check (`py -c "import ast; ast.parse(open(f).read())"`) on `app/models.py` and `app/routes/bank_routes.py`: clean.
+- Walk-through math at default rates (10% pool / 20-80 split) with 1000 TC interest accrued, paid in two equal payments:
+  - Payment 1: `interest_portion=500, during_burn=floor(500×0.02)=10, to_bank=490`. Running: `total_interest_paid=500, total_burned=10`.
+  - Payment 2 (final): `interest_portion=500, during_burn=10, to_bank=490`. Running before close: `total_interest_paid=1000, total_burned_during=20`. `total_pool=floor(1000×0.10)=100`. `close_burn=100−20=80`. Bank → World Mint: 80.
+  - Totals: borrower paid 1000 interest. World Mint received 10+10+80 = 100 (= 10% of interest, ✓). Bank net: 490+490−80 = 900 (= 90% of interest, ✓).
 
 ### Phase 2B commit
-Pending — committed at end of phase with message: `Phase 2B: rework loan payment with interest-first allocation and 20/80 split`.
+Committed as `a12a4bd` — `Phase 2B: rework loan payment with interest-first allocation and 20/80 split`.
+
+---
+
+## Phase 2C — Treasury Lending
+
+**Goal:** Allow nation treasuries to issue loans alongside banks, removing the bank-only constraint identified in the V2 audit.
+
+### Design decision — `bank_id=0` sentinel vs nullable
+
+The V2 spec called for making `bank_id` nullable. SQLite cannot ALTER a column's nullability after creation without a full table rebuild, so the prior migration approach (idempotent `ALTER TABLE … ADD COLUMN`) cannot accomplish it. Instead, `bank_id=0` is used as a sentinel for treasury loans. The real lender identity is carried by the two new columns:
+
+- `lender_type TEXT DEFAULT 'bank'` — discriminator, values `'bank'` or `'treasury'`.
+- `lender_wallet_address TEXT` — denormalized wallet for the lender (bank or treasury address). Enables payment routing in `pay_loan` with a single code path instead of a discriminating join.
+- `treasury_nation_id INTEGER` — FK to `nations.id`; set for treasury loans, NULL for bank loans.
+
+All three columns were introduced with Phase 2C migrations already included in the committed `_run_schema_migrations()` block (see `app/main.py`). Pre-existing loan rows were backfilled: `lender_type='bank'` and `lender_wallet_address` denormalized from `banks.wallet_address`.
+
+### Schema (`app/models.py`)
+
+- `Loan.lender_type`, `Loan.lender_wallet_address`, `Loan.treasury_nation_id` — already present in model from prior preparation work.
+- Added `Loan.treasury_nation: Mapped[Optional["Nation"]]` relationship using `foreign_keys=[treasury_nation_id]`. No backref on `Nation` (avoids naming collision with existing backrefs).
+
+### `app/blockchain.py`
+
+- Added `"LOAN_DISBURSE"` to `_VALID_TX_TYPES`. Treasury loans use this type (vs `"LOAN"` for bank loans) so the ledger distinguishes the funding source.
+
+### New endpoints (`app/routes/bank_routes.py`)
+
+**`POST /api/nations/{nation_id}/loans`** — Issue treasury loan.
+- Auth: `require_login` + `nation.leader_id == current_user.id`.
+- Validates: nation approved, amount > 0, borrower exists and is a nation member, borrower has no active loans, treasury has sufficient balance.
+- Writes a `LOAN_DISBURSE` transaction (nation.treasury_address → borrower.wallet_address). `create_transaction()` handles the `NATION_WALLET_PREFIX` balance debit/credit automatically.
+- Creates `Loan` with `bank_id=0`, `lender_type='treasury'`, `lender_wallet_address=nation.treasury_address`, `treasury_nation_id=nation_id`. All Phase 2A/2B fields initialised identically to bank loans (cap_amount=principal, interest_rate from GlobalSettings snapshot, etc.).
+- Response shape matches bank loan creation (`id`, `lender_type`, `treasury_nation_id`, `principal`, `outstanding`, `accrued_interest`, `cap_amount`, `interest_frozen`, `interest_rate`, `burn_rate_snapshot`, `status`, `tx_hash`).
+
+**`GET /api/nations/{nation_id}/loans`** — List treasury-issued loans.
+- Auth: nation leader or `world_mint`.
+- Filters `Loan` table by `treasury_nation_id == nation_id AND lender_type == 'treasury'`.
+- Response matches the shape returned by `GET /api/banks/{bank_id}/loans` (borrower name/wallet, all accrual fields, lender fields, timestamps).
+
+**`POST /api/nations/{nation_id}/loans/{loan_id}/forgive`** — Forgive a treasury loan.
+- Auth: nation leader of the specified nation.
+- Filters loan by `lender_type='treasury' AND treasury_nation_id==nation_id` to prevent cross-nation forgiveness.
+- Zeroes `loan.outstanding`, sets `status='closed'` (consistent with bank loan forgiveness in Phase 1).
+- Writes a `LOAN_FORGIVE` ledger entry from `nation.treasury_address` to `borrower.wallet_address` with `amount=0` (audit trail only, no coin movement).
+
+### Existing endpoint updates (`app/routes/bank_routes.py`)
+
+- `pay_loan`: Already dispatched on `lender_type` in the prior preparation commit — `bank_id > 0` branch for bank loans, `lender_wallet_address` used uniformly as the LOAN_PAYMENT destination and BURN close-source. No change needed.
+- `forgive_loan` (bank variant): Unchanged — it filters `Loan.bank_id == bank_id`, so treasury loans (bank_id=0) are only accessible via the new nation endpoint.
+- `list_bank_loans` / `my_loans`: Already included `lender_type`, `lender_wallet_address`, `treasury_nation_id` in responses. No change.
+- `create_loan` (bank variant): Already sets `lender_type='bank'`, `lender_wallet_address=bank.wallet_address`, `treasury_nation_id=None`. No change.
+
+### `app/interest.py`
+
+No changes. The accrual engine operates on `Loan.status`, `interest_frozen`, `interest_rate`, `cap_amount`, and `principal` — all of which are set identically for treasury loans. Interest accrues on treasury loans the same day as bank loans.
+
+### Verification
+
+- AST syntax checks on all three modified files: `app/models.py`, `app/blockchain.py`, `app/routes/bank_routes.py` — all clean.
+- Structural review: `LOAN_DISBURSE` credited via `NATION_WALLET_PREFIX` branch in `create_transaction()`, deducting `nation.treasury_balance` and crediting `borrower.balance` — matches spec "Deducts from nation.treasury_balance, adds to borrower.balance".
+- `pay_loan` close-burn path already uses `lender_wallet` (from `loan.lender_wallet_address`) as the BURN source for both bank and treasury loans — treasury close burn correctly debits the treasury address.
+
+### Phase 2C commit
+Committed as `Phase 2C: add treasury lending via lender_type abstraction`.
 

@@ -424,15 +424,17 @@ class GlobalSettings(Base):
     __tablename__ = "global_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    # Burn rate applied to the **principal portion** of loan repayments, in
-    # basis points (1000 = 10%).  Phase 2B: this is now specifically the
-    # principal-side rate; the interest side has its own setting below.
+    # Phase 2B: total burn pool rate applied against lifetime interest paid
+    # on a loan, in basis points (default 1000 = 10%).  Snapshotted into
+    # Loan.burn_rate_snapshot at creation.  No portion of principal is
+    # burned.
     burn_rate_bps: Mapped[int] = mapped_column(Integer, default=1000)
     # Maximum interest rate banks can charge, in basis points (2000 = 20% annual)
     interest_rate_cap_bps: Mapped[int] = mapped_column(Integer, default=2000)
-    # Burn rate applied to the **interest portion** of loan payments, in
-    # basis points (8000 = 80%).  The "20/80 split" from V2 audit:
-    # 20% to bank, 80% burned.  Snapshotted into Loan at creation.
+    # Phase 2B: fraction of the burn pool burned **at loan close**, in
+    # basis points (default 8000 = 80%).  The remainder (default 2000 =
+    # 20%) is burned during payments.  Snapshotted into
+    # Loan.interest_burn_rate_snapshot at creation.
     interest_burn_rate_bps: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         insert_default=func.current_timestamp()
@@ -498,9 +500,26 @@ class Loan(Base):
     __tablename__ = "loans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Which bank issued the loan
+    # Which bank issued the loan.  Phase 2C: 0 is a sentinel meaning
+    # "treasury loan" — the actual lender wallet lives on
+    # ``lender_wallet_address`` and the nation on ``treasury_nation_id``.
+    # We keep this column NOT NULL because ALTERing nullability in SQLite
+    # would require a full table rebuild.
     bank_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("banks.id"), nullable=False
+    )
+    # Phase 2C: discriminator for which kind of entity issued the loan.
+    # 'bank' (bank_id > 0, looked up via banks table) or 'treasury'
+    # (bank_id == 0, looked up via treasury_nation_id).
+    lender_type: Mapped[str] = mapped_column(Text, default="bank", nullable=False)
+    # Phase 2C: denormalized wallet address of whichever entity issued the
+    # loan.  For 'bank' loans this is bank.wallet_address; for 'treasury'
+    # loans this is nation.treasury_address.  Lets payment routing work
+    # without a discriminating join.
+    lender_wallet_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Phase 2C: nation whose treasury issued the loan, NULL for bank loans.
+    treasury_nation_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=True
     )
     # The citizen who received the loan
     borrower_id: Mapped[int] = mapped_column(
@@ -529,20 +548,24 @@ class Loan(Base):
     last_accrual_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     # Interest rate snapshot at loan creation time, in basis points (500 = 5% annual)
     interest_rate: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Burn rate snapshot at loan creation time, in basis points.  Applies to
-    # the **principal portion** of every payment.
+    # Burn rate snapshot at loan creation, in basis points.  Phase 2B: this
+    # is the **total burn pool rate** applied against lifetime interest
+    # paid (default 1000 = 10%).  The pool is split 20%/80% during/at-close
+    # via ``interest_burn_rate_snapshot``.  Principal repayments are never
+    # burned.
     burn_rate_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Burn rate snapshot for the **interest portion** of payments.  Defaults
-    # to GlobalSettings.interest_burn_rate_bps at creation (8000 / 80%).  The
-    # 20/80 split: 20% to the bank, 80% to the burn furnace.
+    # Fraction of the total burn pool burned **at loan close**, in basis
+    # points (default 8000 = 80%).  The remainder (10000 − this value,
+    # default 2000 = 20%) is burned during payments.
     interest_burn_rate_snapshot: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
     # Lifetime total of interest_portion across all payments (Phase 2B).
     total_interest_paid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    # Lifetime total burned (interest_burn + principal_burn) across all
-    # payments (Phase 2B analytics).
+    # Lifetime sum of during-payment interest burns (the 20% slice).  Used
+    # at loan close to compute the residual close burn pool drained from
+    # bank reserves.
     total_burned_during_payments: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    # Burn amount of the single payment that closed the loan.  Captures the
-    # V2 audit "at close" event for ledger analytics.
+    # Amount burned from bank reserves on the closing payment (the 80%
+    # slice).  Remains 0 until the loan closes.
     final_close_burn: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Loan lifecycle status: 'active', 'closed', 'defaulted'
     status: Mapped[str] = mapped_column(Text, default="active")
@@ -557,6 +580,10 @@ class Loan(Base):
     bank: Mapped["Bank"] = relationship("Bank", back_populates="loans")
     borrower: Mapped["User"] = relationship(
         "User", foreign_keys=[borrower_id], backref="loans"
+    )
+    # Phase 2C: nation whose treasury issued this loan (NULL for bank loans).
+    treasury_nation: Mapped[Optional["Nation"]] = relationship(
+        "Nation", foreign_keys=[treasury_nation_id]
     )
     payments: Mapped[List["LoanPayment"]] = relationship(
         "LoanPayment", back_populates="loan", cascade="all, delete-orphan"
@@ -579,12 +606,16 @@ class LoanPayment(Base):
     loan_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("loans.id"), nullable=False
     )
-    # Total payment amount (burn_amount + bank_amount)
+    # Total payment amount paid by the borrower (= bank_amount + the
+    # during-payment burn).  On the closing payment, the close burn from
+    # bank reserves is **not** included here — see Loan.final_close_burn.
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment that was burned (sent to World Mint).  Sum of
-    # interest-portion-burn (80%) and principal-portion-burn (snapshot rate).
+    # Total burned in connection with this payment (during-payment burn +
+    # close burn on the final payment).  Phase 2B: only the interest slice
+    # is ever burned; principal is never burned.
     burn_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment returned to the bank's reserves.
+    # Portion of `amount` that flowed to the bank's reserves
+    # (= amount − during-payment burn).
     bank_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     # How much of `amount` was applied to accrued interest (interest-first
     # allocation; Phase 2B).  Always <= the loan's accrued_interest at the
