@@ -310,6 +310,11 @@ def list_bank_loans(
             "borrower_wallet": borrower.wallet_address if borrower else None,
             "principal": loan.principal,
             "outstanding": loan.outstanding,
+            "accrued_interest": loan.accrued_interest,
+            "total_owed": loan.outstanding + loan.accrued_interest,
+            "cap_amount": loan.cap_amount,
+            "interest_frozen": loan.interest_frozen,
+            "last_accrual_at": loan.last_accrual_at.isoformat() if loan.last_accrual_at else None,
             "interest_rate": loan.interest_rate,
             "burn_rate_snapshot": loan.burn_rate_snapshot,
             "status": loan.status,
@@ -404,12 +409,19 @@ def create_loan(
     # Track lifetime totals on the bank
     bank.total_loaned += payload.amount
 
-    # Create the Loan record with snapshots of current rates
+    # Create the Loan record with snapshots of current rates.
+    # Phase 2A: cap_amount = principal (100% lifetime interest cap),
+    # last_accrual_at seeded to "now" so the daily job has a reference.
+    now = datetime.now(timezone.utc)
     loan = Loan(
         bank_id=bank.id,
         borrower_id=borrower.id,
         principal=payload.amount,
         outstanding=payload.amount,
+        accrued_interest=0,
+        cap_amount=payload.amount,
+        interest_frozen=False,
+        last_accrual_at=now,
         interest_rate=gs.interest_rate_cap_bps,
         burn_rate_snapshot=gs.burn_rate_bps,
         status="active",
@@ -425,6 +437,9 @@ def create_loan(
             "id": loan.id,
             "principal": loan.principal,
             "outstanding": loan.outstanding,
+            "accrued_interest": loan.accrued_interest,
+            "cap_amount": loan.cap_amount,
+            "interest_frozen": loan.interest_frozen,
             "interest_rate": loan.interest_rate,
             "burn_rate_snapshot": loan.burn_rate_snapshot,
             "status": loan.status,
@@ -542,6 +557,11 @@ def my_loans(
             "bank_id": loan.bank_id,
             "principal": loan.principal,
             "outstanding": loan.outstanding,
+            "accrued_interest": loan.accrued_interest,
+            "total_owed": loan.outstanding + loan.accrued_interest,
+            "cap_amount": loan.cap_amount,
+            "interest_frozen": loan.interest_frozen,
+            "last_accrual_at": loan.last_accrual_at.isoformat() if loan.last_accrual_at else None,
             "interest_rate": loan.interest_rate,
             "burn_rate_snapshot": loan.burn_rate_snapshot,
             "status": loan.status,

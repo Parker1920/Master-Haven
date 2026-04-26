@@ -82,12 +82,29 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE nations ADD COLUMN gdp_score INTEGER DEFAULT 50",
         "ALTER TABLE nations ADD COLUMN gdp_multiplier INTEGER DEFAULT 100",
         "ALTER TABLE nations ADD COLUMN gdp_last_calculated DATETIME",
+        # Loan interest accrual columns (Phase 2A)
+        "ALTER TABLE loans ADD COLUMN accrued_interest INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN cap_amount INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN interest_frozen BOOLEAN DEFAULT 0 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN last_accrual_at DATETIME",
     ]
     for sql in migrations:
         try:
             conn.execute(sql)
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # Backfill cap_amount = principal for any existing loan rows where
+    # cap_amount is still 0 (i.e. created before Phase 2A).  Without this,
+    # the accrual job would skip them due to the cap_amount<=0 guard.
+    try:
+        conn.execute(
+            "UPDATE loans SET cap_amount = principal "
+            "WHERE cap_amount = 0 AND principal > 0"
+        )
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -160,6 +177,7 @@ def on_startup() -> None:
 # Background scheduler — GDP and stock price recalculation every 24 hours
 # ---------------------------------------------------------------------------
 from app.gdp import recalculate_all_gdp
+from app.interest import accrue_daily_interest
 from app.valuation import recalculate_all_prices
 
 scheduler = BackgroundScheduler()
@@ -183,9 +201,19 @@ def _scheduled_stock_recalc() -> None:
         db.close()
 
 
+def _scheduled_interest_accrual() -> None:
+    """Apply daily interest to every active, non-frozen loan."""
+    db = SessionLocal()
+    try:
+        accrue_daily_interest(db)
+    finally:
+        db.close()
+
+
 # Add jobs: run every 24 hours (86400 seconds)
 scheduler.add_job(_scheduled_gdp_recalc, "interval", hours=24, id="gdp_recalc")
 scheduler.add_job(_scheduled_stock_recalc, "interval", hours=24, id="stock_recalc")
+scheduler.add_job(_scheduled_interest_accrual, "interval", hours=24, id="interest_accrual")
 
 
 @app.on_event("startup")

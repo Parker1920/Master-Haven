@@ -502,8 +502,25 @@ class Loan(Base):
     )
     # Original loan amount
     principal: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Remaining balance including any accrued interest
+    # Principal balance still owed (decreases with each principal-portion payment).
+    # Phase 2A: this remains the "principal_remaining" tracker.  Total amount
+    # owed by the borrower is (outstanding + accrued_interest).
     outstanding: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Interest accrued but not yet paid.  Grows daily via the accrual job,
+    # capped at cap_amount.  Decreases when payments are applied to interest
+    # portion (Phase 2B).
+    accrued_interest: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Lifetime cap on how much interest can ever accrue on this loan, set to
+    # the principal at creation time (100% cap rule).  Once cumulative accrued
+    # interest reaches this, interest_frozen flips True and no further interest
+    # accrues — even on subsequent days.
+    cap_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # True once total lifetime interest accrued has hit cap_amount.
+    interest_frozen: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Timestamp of the most recent accrual run that touched this loan; used by
+    # the daily job to compute elapsed days since last accrual.  NULL on a
+    # freshly-created loan (initialised to opened_at on first run).
+    last_accrual_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     # Interest rate snapshot at loan creation time, in basis points (500 = 5% annual)
     interest_rate: Mapped[int] = mapped_column(Integer, nullable=False)
     # Burn rate snapshot at loan creation time, in basis points
