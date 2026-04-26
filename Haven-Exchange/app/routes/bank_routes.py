@@ -48,6 +48,7 @@ class LoanPaymentRequest(BaseModel):
 class UpdateSettingsRequest(BaseModel):
     burn_rate_bps: int
     interest_rate_cap_bps: int
+    interest_burn_rate_bps: int | None = None  # Phase 2B; optional for back-compat
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,12 @@ def _get_global_settings(db: Session) -> GlobalSettings:
     """Return the singleton GlobalSettings row, creating it if missing."""
     gs = db.execute(select(GlobalSettings).where(GlobalSettings.id == 1)).scalar_one_or_none()
     if gs is None:
-        gs = GlobalSettings(id=1, burn_rate_bps=1000, interest_rate_cap_bps=2000)
+        gs = GlobalSettings(
+            id=1,
+            burn_rate_bps=1000,
+            interest_rate_cap_bps=2000,
+            interest_burn_rate_bps=8000,
+        )
         db.add(gs)
         db.commit()
         db.refresh(gs)
@@ -412,6 +418,7 @@ def create_loan(
     # Create the Loan record with snapshots of current rates.
     # Phase 2A: cap_amount = principal (100% lifetime interest cap),
     # last_accrual_at seeded to "now" so the daily job has a reference.
+    # Phase 2B: snapshot the interest burn rate (default 8000 bps = 80%).
     now = datetime.now(timezone.utc)
     loan = Loan(
         bank_id=bank.id,
@@ -424,6 +431,10 @@ def create_loan(
         last_accrual_at=now,
         interest_rate=gs.interest_rate_cap_bps,
         burn_rate_snapshot=gs.burn_rate_bps,
+        interest_burn_rate_snapshot=gs.interest_burn_rate_bps,
+        total_interest_paid=0,
+        total_burned_during_payments=0,
+        final_close_burn=0,
         status="active",
         memo=payload.memo,
     )
@@ -583,17 +594,24 @@ def pay_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_login),
 ):
-    """Make a payment on a loan.
+    """Make a payment on a loan with the Phase 2B principal/interest split.
 
-    The payment is split: a percentage (burn_rate_snapshot) goes to the World
-    Mint (burned/destroyed), the rest returns to the bank's reserves.
+    Allocation order (oldest debt first):
+      1. ``interest_portion`` — applied to ``loan.accrued_interest``.
+      2. ``principal_portion`` — applied to ``loan.outstanding``.
 
-    Creates one or two blockchain transactions:
-      1. LOAN_PAYMENT: borrower → bank wallet (bank_amount portion)
-      2. BURN: borrower → World Mint (burn_amount portion, if > 0)
+    Burn split per portion (snapshotted at loan creation):
+      - Interest portion: ``interest_burn_rate_snapshot`` (default 8000 / 80% burn).
+      - Principal portion: ``burn_rate_snapshot`` (default 1000 / 10% burn).
 
-    Updates the loan outstanding balance.  If outstanding reaches 0, the loan
-    is marked as closed.
+    Creates up to two ledger transactions per payment:
+      1. LOAN_PAYMENT: borrower → bank wallet (interest_to_bank + principal_to_bank).
+      2. BURN: borrower → World Mint (interest_burn + principal_burn, if > 0).
+
+    Updates per-loan analytics: ``total_interest_paid``,
+    ``total_burned_during_payments``, ``final_close_burn`` on the closing payment.
+    Marks the loan ``closed`` when both balances reach 0, and tags the closing
+    LoanPayment with ``is_final_payment=True``.
     """
     loan = db.execute(
         select(Loan).where(Loan.id == loan_id)
@@ -613,8 +631,17 @@ def pay_loan(
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Payment amount must be greater than zero.")
 
-    # Cap payment to outstanding balance (don't overpay)
-    amount = min(payload.amount, loan.outstanding)
+    # Total amount owed = principal_remaining + accrued_interest_remaining.
+    # Cap payment to the total owed (don't overpay).
+    total_owed = loan.outstanding + loan.accrued_interest
+    if total_owed <= 0:
+        # Defensive: loan is active but nothing owed.  Close it and bail.
+        loan.status = "closed"
+        loan.closed_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(status_code=400, detail="Loan has no outstanding balance.")
+
+    amount = min(payload.amount, total_owed)
 
     # Validate: user has sufficient balance
     if current_user.balance < amount:
@@ -623,64 +650,97 @@ def pay_loan(
             detail=f"Insufficient balance. Available: {current_user.balance}, required: {amount}.",
         )
 
-    # Calculate burn split using the loan's snapshot burn rate
-    burn_amount = math.floor(amount * loan.burn_rate_snapshot / 10000)
-    bank_amount = amount - burn_amount
+    # Allocate: interest first (oldest debt), then principal.
+    interest_portion = min(amount, loan.accrued_interest)
+    principal_portion = amount - interest_portion
+
+    # Per-portion burn split using the loan's snapshotted rates.
+    interest_burn = math.floor(interest_portion * loan.interest_burn_rate_snapshot / 10000)
+    interest_to_bank = interest_portion - interest_burn
+    principal_burn = math.floor(principal_portion * loan.burn_rate_snapshot / 10000)
+    principal_to_bank = principal_portion - principal_burn
+
+    total_burn = interest_burn + principal_burn
+    total_to_bank = interest_to_bank + principal_to_bank
 
     bank = db.execute(select(Bank).where(Bank.id == loan.bank_id)).scalar_one_or_none()
     if bank is None:
         raise HTTPException(status_code=500, detail="Bank not found for this loan.")
 
-    # Transaction 1: LOAN_PAYMENT — borrower → bank wallet (bank portion)
+    # Transaction 1: LOAN_PAYMENT — borrower → bank wallet (combined bank portion).
     tx_hash = ""
-    if bank_amount > 0:
+    if total_to_bank > 0:
+        memo_parts = []
+        if interest_to_bank > 0:
+            memo_parts.append(f"interest {interest_to_bank}")
+        if principal_to_bank > 0:
+            memo_parts.append(f"principal {principal_to_bank}")
+        memo = f"Loan payment #{loan.id} bank portion ({', '.join(memo_parts)})"
         try:
             tx = create_transaction(
                 db,
                 tx_type="LOAN_PAYMENT",
                 from_address=current_user.wallet_address,
                 to_address=bank.wallet_address,
-                amount=bank_amount,
-                memo=f"Loan payment #{loan.id} (bank portion)",
+                amount=total_to_bank,
+                memo=memo,
             )
             tx_hash = tx.tx_hash
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    # Transaction 2: BURN — borrower → World Mint (burn portion, if > 0)
-    if burn_amount > 0:
+    # Transaction 2: BURN — borrower → World Mint (combined burn portion).
+    if total_burn > 0:
+        memo_parts = []
+        if interest_burn > 0:
+            memo_parts.append(f"interest_burn {interest_burn}@{loan.interest_burn_rate_snapshot}bps")
+        if principal_burn > 0:
+            memo_parts.append(f"principal_burn {principal_burn}@{loan.burn_rate_snapshot}bps")
+        memo = f"Loan payment #{loan.id} burn ({', '.join(memo_parts)})"
         try:
             burn_tx = create_transaction(
                 db,
                 tx_type="BURN",
                 from_address=current_user.wallet_address,
                 to_address=settings.WORLD_MINT_ADDRESS,
-                amount=burn_amount,
-                memo=f"Loan payment #{loan.id} burn split ({loan.burn_rate_snapshot}bps)",
+                amount=total_burn,
+                memo=memo,
             )
-            # Use burn tx hash if we didn't have a bank_amount tx
             if not tx_hash:
                 tx_hash = burn_tx.tx_hash
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    # Update bank lifetime burn tracker
-    bank.total_burned += burn_amount
+    # Update bank lifetime burn tracker (combines interest + principal burns).
+    bank.total_burned += total_burn
 
-    # Update the loan outstanding balance
-    loan.outstanding -= amount
-    if loan.outstanding <= 0:
-        loan.outstanding = 0
+    # Apply allocations to loan balances.
+    loan.accrued_interest -= interest_portion
+    loan.outstanding -= principal_portion
+
+    # Per-loan Phase 2B analytics.
+    loan.total_interest_paid += interest_portion
+    loan.total_burned_during_payments += total_burn
+
+    # Determine if this is the closing payment (zeroes both balances).
+    is_final = (loan.accrued_interest == 0 and loan.outstanding == 0)
+    if is_final:
         loan.status = "closed"
         loan.closed_at = datetime.now(timezone.utc)
+        loan.final_close_burn = total_burn
 
-    # Record the LoanPayment
+    balance_after = loan.outstanding + loan.accrued_interest
+
+    # Record the LoanPayment with the per-portion breakdown.
     payment = LoanPayment(
         loan_id=loan.id,
         amount=amount,
-        burn_amount=burn_amount,
-        bank_amount=bank_amount,
-        balance_after=loan.outstanding,
+        burn_amount=total_burn,
+        bank_amount=total_to_bank,
+        interest_portion=interest_portion,
+        principal_portion=principal_portion,
+        is_final_payment=is_final,
+        balance_after=balance_after,
         tx_hash=tx_hash,
     )
     db.add(payment)
@@ -690,9 +750,18 @@ def pay_loan(
         "success": True,
         "payment": {
             "amount": amount,
-            "burn_amount": burn_amount,
-            "bank_amount": bank_amount,
-            "balance_after": loan.outstanding,
+            "interest_portion": interest_portion,
+            "principal_portion": principal_portion,
+            "interest_burn": interest_burn,
+            "interest_to_bank": interest_to_bank,
+            "principal_burn": principal_burn,
+            "principal_to_bank": principal_to_bank,
+            "burn_amount": total_burn,
+            "bank_amount": total_to_bank,
+            "is_final_payment": is_final,
+            "balance_after": balance_after,
+            "outstanding_principal": loan.outstanding,
+            "remaining_interest": loan.accrued_interest,
         },
         "loan_status": loan.status,
     }
@@ -715,8 +784,10 @@ def get_settings(
     return {
         "burn_rate_bps": gs.burn_rate_bps,
         "interest_rate_cap_bps": gs.interest_rate_cap_bps,
+        "interest_burn_rate_bps": gs.interest_burn_rate_bps,
         "burn_rate_pct": round(gs.burn_rate_bps / 100, 2),
         "interest_rate_cap_pct": round(gs.interest_rate_cap_bps / 100, 2),
+        "interest_burn_rate_pct": round(gs.interest_burn_rate_bps / 100, 2),
         "updated_at": gs.updated_at.isoformat() if gs.updated_at else None,
     }
 
@@ -745,10 +816,19 @@ def update_settings(
             status_code=400,
             detail="Interest rate cap must be between 0 and 10000 basis points.",
         )
+    if payload.interest_burn_rate_bps is not None and not (
+        0 <= payload.interest_burn_rate_bps <= 10000
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Interest burn rate must be between 0 and 10000 basis points.",
+        )
 
     gs = _get_global_settings(db)
     gs.burn_rate_bps = payload.burn_rate_bps
     gs.interest_rate_cap_bps = payload.interest_rate_cap_bps
+    if payload.interest_burn_rate_bps is not None:
+        gs.interest_burn_rate_bps = payload.interest_burn_rate_bps
     gs.updated_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -756,4 +836,5 @@ def update_settings(
         "success": True,
         "burn_rate_bps": gs.burn_rate_bps,
         "interest_rate_cap_bps": gs.interest_rate_cap_bps,
+        "interest_burn_rate_bps": gs.interest_burn_rate_bps,
     }

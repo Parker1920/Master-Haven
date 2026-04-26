@@ -87,6 +87,15 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE loans ADD COLUMN cap_amount INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE loans ADD COLUMN interest_frozen BOOLEAN DEFAULT 0 NOT NULL",
         "ALTER TABLE loans ADD COLUMN last_accrual_at DATETIME",
+        # Loan interest burn split tracking (Phase 2B)
+        "ALTER TABLE loans ADD COLUMN interest_burn_rate_snapshot INTEGER DEFAULT 8000 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN total_interest_paid INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN total_burned_during_payments INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loans ADD COLUMN final_close_burn INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loan_payments ADD COLUMN interest_portion INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loan_payments ADD COLUMN principal_portion INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE loan_payments ADD COLUMN is_final_payment BOOLEAN DEFAULT 0 NOT NULL",
+        "ALTER TABLE global_settings ADD COLUMN interest_burn_rate_bps INTEGER DEFAULT 8000 NOT NULL",
     ]
     for sql in migrations:
         try:
@@ -101,6 +110,17 @@ def _run_schema_migrations() -> None:
         conn.execute(
             "UPDATE loans SET cap_amount = principal "
             "WHERE cap_amount = 0 AND principal > 0"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # Phase 2B backfill: existing LoanPayment rows recorded before the
+    # principal/interest split was a thing — treat them as 100% principal so
+    # historical analytics queries don't see zero-volume rows.
+    try:
+        conn.execute(
+            "UPDATE loan_payments SET principal_portion = amount "
+            "WHERE principal_portion = 0 AND interest_portion = 0 AND amount > 0"
         )
     except sqlite3.OperationalError:
         pass
@@ -163,8 +183,9 @@ def on_startup() -> None:
         if existing_settings is None:
             default_settings = GlobalSettings(
                 id=1,
-                burn_rate_bps=1000,          # 10% burn rate
-                interest_rate_cap_bps=2000,  # 20% annual interest cap
+                burn_rate_bps=1000,            # 10% burn on principal portion
+                interest_rate_cap_bps=2000,    # 20% annual interest cap
+                interest_burn_rate_bps=8000,   # 80% burn on interest portion (Phase 2B 20/80)
             )
             db.add(default_settings)
             db.commit()

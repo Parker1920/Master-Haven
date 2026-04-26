@@ -424,10 +424,16 @@ class GlobalSettings(Base):
     __tablename__ = "global_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    # Burn rate applied to loan repayments, in basis points (1000 = 10%)
+    # Burn rate applied to the **principal portion** of loan repayments, in
+    # basis points (1000 = 10%).  Phase 2B: this is now specifically the
+    # principal-side rate; the interest side has its own setting below.
     burn_rate_bps: Mapped[int] = mapped_column(Integer, default=1000)
     # Maximum interest rate banks can charge, in basis points (2000 = 20% annual)
     interest_rate_cap_bps: Mapped[int] = mapped_column(Integer, default=2000)
+    # Burn rate applied to the **interest portion** of loan payments, in
+    # basis points (8000 = 80%).  The "20/80 split" from V2 audit:
+    # 20% to bank, 80% burned.  Snapshotted into Loan at creation.
+    interest_burn_rate_bps: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         insert_default=func.current_timestamp()
     )
@@ -523,8 +529,21 @@ class Loan(Base):
     last_accrual_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     # Interest rate snapshot at loan creation time, in basis points (500 = 5% annual)
     interest_rate: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Burn rate snapshot at loan creation time, in basis points
+    # Burn rate snapshot at loan creation time, in basis points.  Applies to
+    # the **principal portion** of every payment.
     burn_rate_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Burn rate snapshot for the **interest portion** of payments.  Defaults
+    # to GlobalSettings.interest_burn_rate_bps at creation (8000 / 80%).  The
+    # 20/80 split: 20% to the bank, 80% to the burn furnace.
+    interest_burn_rate_snapshot: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
+    # Lifetime total of interest_portion across all payments (Phase 2B).
+    total_interest_paid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Lifetime total burned (interest_burn + principal_burn) across all
+    # payments (Phase 2B analytics).
+    total_burned_during_payments: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Burn amount of the single payment that closed the loan.  Captures the
+    # V2 audit "at close" event for ledger analytics.
+    final_close_burn: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Loan lifecycle status: 'active', 'closed', 'defaulted'
     status: Mapped[str] = mapped_column(Text, default="active")
     # Borrower's stated purpose for the loan
@@ -562,11 +581,25 @@ class LoanPayment(Base):
     )
     # Total payment amount (burn_amount + bank_amount)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment that was burned (sent to World Mint)
+    # Portion of the payment that was burned (sent to World Mint).  Sum of
+    # interest-portion-burn (80%) and principal-portion-burn (snapshot rate).
     burn_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment returned to the bank's reserves
+    # Portion of the payment returned to the bank's reserves.
     bank_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Outstanding loan balance after this payment
+    # How much of `amount` was applied to accrued interest (interest-first
+    # allocation; Phase 2B).  Always <= the loan's accrued_interest at the
+    # time of the payment.
+    interest_portion: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # How much of `amount` was applied to principal balance.  Equals
+    # `amount - interest_portion`.  Persisted (not derived) so historical
+    # rows survive future schema changes to amount.
+    principal_portion: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # True if this payment closed the loan (zeroed both outstanding and
+    # accrued_interest).
+    is_final_payment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Outstanding loan balance after this payment.  Phase 2B: this is
+    # `principal_remaining + accrued_interest_remaining` so the column
+    # reflects total amount still owed.
     balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
     # Links to the main LOAN_PAYMENT transaction on the ledger
     tx_hash: Mapped[str] = mapped_column(Text, nullable=False)

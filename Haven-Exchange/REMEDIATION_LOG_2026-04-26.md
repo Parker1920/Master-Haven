@@ -88,5 +88,66 @@ Committed as `342a526` — `Phase 1: fix transfer auth, nation stock API path, l
 - AST syntax check on the four touched files: clean.
 
 ### Phase 2A commit
-Pending — committed at end of phase with message: `Phase 2A: implement loan interest accrual with 100% cap`.
+Committed as `9657cb0` — `Phase 2A: implement loan interest accrual with 100% cap`.
+
+---
+
+## Phase 2B — Burn Mechanics Rework (Interest 20/80 Split)
+
+**Goal:** Split each loan payment into interest-portion (paid first) and principal-portion (remainder); apply different burn rates per portion. Interest portion: 80% burn / 20% bank — the V2 audit "20/80 split". Principal portion: keeps existing snapshot rate (default 10/90).
+
+### Schema additions
+
+**`Loan` (`models.py`)**
+- `interest_burn_rate_snapshot INTEGER DEFAULT 8000 NOT NULL` — snapshotted from `GlobalSettings.interest_burn_rate_bps` at loan creation. Allows the bank's economic policy to evolve without rewriting outstanding loans.
+- `total_interest_paid INTEGER DEFAULT 0` — running total of interest portion across all payments (analytics).
+- `total_burned_during_payments INTEGER DEFAULT 0` — running total of all burns (interest_burn + principal_burn) across all payments.
+- `final_close_burn INTEGER DEFAULT 0` — burn amount on the single payment that closed the loan. Captures the V2 audit's "at close" event for ledger-level analytics.
+
+**`LoanPayment` (`models.py`)**
+- `interest_portion INTEGER DEFAULT 0` — how much of `amount` was applied to accrued_interest.
+- `principal_portion INTEGER DEFAULT 0` — how much of `amount` was applied to principal balance. Always equals `amount - interest_portion`. Persisted (not derived) so historical rows survive future schema reshapes.
+- `is_final_payment BOOLEAN DEFAULT 0` — true if this payment zeroed both balances and closed the loan.
+- `balance_after` semantics updated: now `principal_remaining + accrued_interest_remaining` (total still owed) rather than just principal.
+
+**`GlobalSettings` (`models.py`)**
+- `interest_burn_rate_bps INTEGER DEFAULT 8000 NOT NULL` — the World Mint-controllable rate applied to interest portions of loan payments. 8000 = 80% (the "80" in the 20/80 split).
+
+### Migrations (`app/main.py::_run_schema_migrations`)
+- Eight idempotent `ALTER TABLE` statements covering the new columns.
+- Backfill: `UPDATE loan_payments SET principal_portion = amount WHERE principal_portion = 0 AND interest_portion = 0 AND amount > 0` so historical pre-Phase-2B payments analyse cleanly as 100% principal.
+
+### `pay_loan` rewrite (`app/routes/bank_routes.py`)
+
+Old flow: single `amount * burn_rate_snapshot` split, applied uniformly to a single `outstanding` field.
+
+New flow:
+1. Cap payment at `total_owed = outstanding + accrued_interest` (don't overpay).
+2. Allocate **interest first**, then principal: `interest_portion = min(amount, accrued_interest); principal_portion = amount - interest_portion`.
+3. Per-portion burn split using the loan's snapshotted rates:
+   - `interest_burn = floor(interest_portion * interest_burn_rate_snapshot / 10000)` (default 80%)
+   - `principal_burn = floor(principal_portion * burn_rate_snapshot / 10000)` (default 10%)
+   - bank shares = portion − burn share for each.
+4. Combined ledger tx: one `LOAN_PAYMENT` for `total_to_bank`, one `BURN` for `total_burn`. The memos itemise the per-portion breakdown so the ledger remains forensically traceable.
+5. Update both `loan.accrued_interest` and `loan.outstanding`.
+6. Detect `is_final` = both balances now zero. On the closing payment: status → `closed`, `closed_at` = now, `final_close_burn = total_burn`.
+7. Update `total_interest_paid` and `total_burned_during_payments` cumulative trackers.
+8. Persist `LoanPayment` with the per-portion breakdown.
+
+### API surface
+- `POST /api/loans/{loan_id}/pay` response now returns the full breakdown: `interest_portion`, `principal_portion`, `interest_burn`, `interest_to_bank`, `principal_burn`, `principal_to_bank`, `is_final_payment`, `outstanding_principal`, `remaining_interest`. The legacy keys (`burn_amount`, `bank_amount`, `balance_after`) are preserved for back-compat — existing UI code reading those still works.
+- `GET /api/mint/settings` and `POST /api/mint/settings` now expose/accept `interest_burn_rate_bps` (with 0–10000 bps validation). The setting is optional in the POST body for back-compat with existing clients.
+
+### Design choices
+- **Interest first allocation.** Standard amortisation convention. Prevents the borrower from indefinitely deferring interest — a payment can't reduce principal until the day's interest is paid.
+- **Snapshot the interest burn rate at creation.** Mirrors the existing `burn_rate_snapshot` pattern so a mid-loan global-settings change doesn't retroactively alter loans already in flight.
+- **Combine portions into a single ledger BURN tx and a single LOAN_PAYMENT tx per payment.** Two ledger rows per payment instead of four. Memo strings carry the per-portion breakdown for audit. Keeps the chain compact while preserving traceability.
+- **`final_close_burn` tracked separately from `total_burned_during_payments`.** Enables a clean V2-audit-aligned report: "X TC was burned during the loan's life, Y of that on the closing payment specifically." Useful for analyzing whether large balloon-style payoffs are common.
+
+### Verification
+- Synthetic math test (`py -c …`) covered three cases: pure-interest payment (1000 vs 5000 accrued), mixed payment (6000 vs 5000 accrued = 5000 interest + 1000 principal), and pure-principal payment (100 with 0 accrued). All burn/bank splits match expected values to the TC.
+- AST syntax check on the three touched files: clean.
+
+### Phase 2B commit
+Pending — committed at end of phase with message: `Phase 2B: rework loan payment with interest-first allocation and 20/80 split`.
 
