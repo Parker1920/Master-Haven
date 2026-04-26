@@ -470,17 +470,39 @@ def forgive_loan(
     if loan.status != "active":
         raise HTTPException(status_code=400, detail="Loan is not active.")
 
+    # Capture the outstanding balance before zeroing for the audit memo.
+    forgiven_amount = loan.outstanding
+
     # Zero out the loan
     loan.outstanding = 0
     loan.status = "closed"
     loan.closed_at = datetime.now(timezone.utc)
 
-    # Record the forgiveness on the ledger (amount=0 is allowed for LOAN_FORGIVE)
-    # We use MINT type as a placeholder since LOAN_FORGIVE with amount=0 would
-    # fail validation ("amount must be greater than zero").  Instead, record the
-    # forgiveness as a memo on a minimal LOAN_FORGIVE transaction.
-    # NOTE: We skip the blockchain tx for zero-amount forgiveness to avoid
-    # the positive-amount validation.  The loan status change is the record.
+    # Record the forgiveness on the ledger as a LOAN_FORGIVE transaction.
+    # No coin movement occurs — the bank loses a receivable, not balance —
+    # so the tx amount is 0. The forgiven principal is captured in the memo
+    # for audit purposes. blockchain.create_transaction() permits amount=0
+    # for LOAN_FORGIVE specifically.
+    borrower = db.execute(
+        select(User).where(User.id == loan.borrower_id)
+    ).scalar_one_or_none()
+    forgive_memo = (
+        f"Loan #{loan.id} forgiven by NL ({forgiven_amount} TC outstanding)"
+    )
+    if borrower is not None:
+        try:
+            create_transaction(
+                db,
+                tx_type="LOAN_FORGIVE",
+                from_address=bank.wallet_address,
+                to_address=borrower.wallet_address,
+                amount=0,
+                memo=forgive_memo,
+            )
+        except ValueError as exc:
+            # Fail loud — the status change should not commit if the audit
+            # entry can't be written.
+            raise HTTPException(status_code=500, detail=f"Could not record forgiveness on the ledger: {exc}")
 
     db.commit()
 

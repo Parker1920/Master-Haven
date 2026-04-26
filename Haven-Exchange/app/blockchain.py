@@ -108,7 +108,13 @@ def create_transaction(
             )
 
         # -- Validate amount --------------------------------------------------
-        if tx_type != "GENESIS" and amount <= 0:
+        # LOAN_FORGIVE is allowed amount=0 because forgiveness does not move
+        # coins (the bank loses a receivable, but no balance changes hands).
+        # The transaction exists purely as an audit-log entry. Negative
+        # amounts are still rejected for all types.
+        if amount < 0:
+            raise ValueError("Transaction amount cannot be negative.")
+        if tx_type not in ("GENESIS", "LOAN_FORGIVE") and amount == 0:
             raise ValueError("Transaction amount must be greater than zero.")
 
         # -- Validate MINT source ---------------------------------------------

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import require_login
 from app.config import settings
 from app.blockchain import (
     create_transaction,
@@ -39,7 +39,7 @@ class TransferRequest(BaseModel):
 def transfer(
     payload: TransferRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
     """Transfer currency from the authenticated user's wallet to another address."""
     # Validate amount

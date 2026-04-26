@@ -21,6 +21,7 @@ from app.config import settings
 from app.database import get_db
 from app.gdp import recalculate_all_gdp
 from app.models import GdpSnapshot, MintAllocation, Nation, Transaction, User
+from app.valuation import create_nation_stock
 
 router = APIRouter(prefix="/api/mint", tags=["mint"])
 
@@ -332,6 +333,10 @@ def approve_nation(
         nation.member_count += 1
 
     db.commit()
+
+    # Auto-create nation stock (mirrors page route behavior; previously this
+    # was only called from the HTML form handler in page_routes.py).
+    create_nation_stock(db, nation)
 
     return {
         "success": True,
