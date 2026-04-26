@@ -231,3 +231,72 @@ No changes. The accrual engine operates on `Loan.status`, `interest_frozen`, `in
 ### Phase 2C commit
 Committed as `Phase 2C: add treasury lending via lender_type abstraction`.
 
+---
+
+## Phase 2D — Business Approval Workflow
+
+**Goal:** Shops go live immediately on creation with no NL review (V2 audit finding). Introduce a proper approval workflow: new shops start as `pending` and require Nation Leader approval before becoming visible and tradeable.
+
+### Schema additions (`app/models.py` — `Shop`)
+
+- `status TEXT DEFAULT 'pending'` — lifecycle state: `'pending'`, `'approved'`, `'rejected'`, `'suspended'`.
+- `approved_by INTEGER` FK → `users.id` — which NL (or World Mint) approved the shop.
+- `approved_at DATETIME` — timestamp of approval.
+- `rejected_reason TEXT` — optional NL-supplied reason for rejection or suspension.
+- `is_active` default changed from `True` → `False` (new shops start inactive; approval sets it `True`).
+- Added `approver` ORM relationship (`foreign_keys=[approved_by]`) for convenience.
+
+### Migration (`app/main.py::_run_schema_migrations`)
+
+Four idempotent `ALTER TABLE shops ADD COLUMN` statements (Phase 2D block). The `status` column uses `DEFAULT 'approved'` so SQLite backfills existing rows as live, then a dedicated `UPDATE shops SET status = 'approved' WHERE status IS NULL` covers any NULL stragglers — existing shops are grandfathered without disruption.
+
+### New endpoints (`app/routes/shop_routes.py`)
+
+**`GET /api/shops/pending`** — List shops awaiting approval.
+- Auth: `require_login`. NL sees pending shops scoped to their own nation; World Mint sees all pending shops.
+- Returns: `id`, `name`, `description`, `status`, `owner_name`, `nation_id`, `nation_name`, `created_at`.
+
+**`POST /api/shops/{shop_id}/approve`** — NL approves a shop.
+- Auth: NL of the shop's nation, or `world_mint`.
+- Sets `status='approved'`, `is_active=True`, `approved_by`, `approved_at`. Clears `rejected_reason`.
+- 400 if already approved.
+
+**`POST /api/shops/{shop_id}/reject`** — NL rejects a pending shop.
+- Auth: NL of the shop's nation, or `world_mint`. Accepts optional `reason` body.
+- Sets `status='rejected'`, `is_active=False`, `rejected_reason`.
+- 400 if trying to reject an already-approved shop (use suspend instead).
+
+**`POST /api/shops/{shop_id}/suspend`** — NL suspends an approved shop.
+- Auth: NL of the shop's nation, or `world_mint`. Accepts optional `reason` body.
+- Sets `status='suspended'`, `is_active=False`, `rejected_reason`.
+- 400 if already suspended.
+
+### Modified endpoints (`app/routes/shop_routes.py`)
+
+- **`GET /api/shops`**: Added `Shop.status == 'approved'` to the filter conditions — pending/rejected/suspended shops no longer appear in the public browse list.
+- **`POST /api/shops`**: New shops created with `status='pending'`, `is_active=False`. Response now includes `status` and a human-readable `message` explaining the pending state.
+
+### IPO gate (`app/valuation.py::create_business_stock`)
+
+Added `shop.status != 'approved'` check before eligibility validation. A shop in `pending`, `rejected`, or `suspended` status cannot IPO. Raises `ValueError` with the current status so the caller can surface a clear error.
+
+### Route ordering
+
+`GET /api/shops/pending` is registered before `GET /api/shops/{shop_id}` so FastAPI matches the literal segment first and the path parameter does not shadow it.
+
+### Design choices
+
+- **NL as gatekeeper, not World Mint.** Shops are nation-scoped entities — the NL knows their community's members and business standards better than the global admin. World Mint retains override capability (approve/reject/suspend any shop) for abuse cases.
+- **`status` column separate from `is_active`.** `is_active` remains the boolean used by buy/listing flows and existing queries. `status` provides the richer state machine. `is_active` is derived from `status` at every transition: approved → True, all other states → False.
+- **Grandfathering via `DEFAULT 'approved'`.** The migration column default ensures SQLite backfills all pre-existing rows as approved, preserving continuity for already-live shops. The explicit UPDATE covers the NULL-after-add edge case.
+- **Rejected shops cannot be directly rejected again.** The reject endpoint returns 400 if `status == 'approved'` to prevent accidental double-reject. Suspended shops similarly 400 on re-suspend. The NL flow is: pending → approved/rejected; approved → suspended; suspended → approved (re-approve by calling approve again).
+
+### Verification
+
+- AST syntax checks on `app/models.py`, `app/main.py`, `app/routes/shop_routes.py`, `app/valuation.py`: all clean.
+- Reviewed route registration order: `GET /api/shops/pending` appears before `GET /api/shops/{shop_id}` in the file — static segment wins.
+- Cross-checked `create_business_stock` call sites in `page_routes.py` (`POST /shop/ipo`): the `ValueError` raised for non-approved shops propagates through the existing `except ValueError` handler and redirects with an error message — no changes needed to the page route.
+
+### Phase 2D commit
+Committed as `Phase 2D: add shop approval workflow with NL gatekeeping`.
+

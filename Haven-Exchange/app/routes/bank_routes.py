@@ -51,6 +51,12 @@ class UpdateSettingsRequest(BaseModel):
     interest_burn_rate_bps: int | None = None  # Phase 2B; optional for back-compat
 
 
+class CreateTreasuryLoanRequest(BaseModel):
+    borrower_user_id: int
+    amount: int
+    memo: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helper: get the GlobalSettings singleton
 # ---------------------------------------------------------------------------

@@ -190,7 +190,14 @@ class Shop(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Approval workflow (Phase 2D)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    approved_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_sales: Mapped[int] = mapped_column(Integer, default=0)
     total_revenue: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -200,6 +207,9 @@ class Shop(Base):
     # Relationships
     owner: Mapped["User"] = relationship(
         "User", foreign_keys=[owner_id], backref="shop"
+    )
+    approver: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[approved_by]
     )
     nation: Mapped["Nation"] = relationship(
         "Nation", foreign_keys=[nation_id], backref="shops"

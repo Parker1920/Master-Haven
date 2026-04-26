@@ -138,6 +138,12 @@ def create_business_stock(db, shop: Shop, num_shares: int) -> Stock:
     if existing is not None:
         raise ValueError("This shop already has a stock listed")
 
+    # Only approved shops may IPO
+    if shop.status != "approved":
+        raise ValueError(
+            f"Shop must be approved before it can IPO (current status: {shop.status})"
+        )
+
     # Validate eligibility
     if shop.total_sales < IPO_MIN_SALES:
         raise ValueError(

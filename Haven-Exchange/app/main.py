@@ -100,6 +100,12 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE loans ADD COLUMN lender_type TEXT DEFAULT 'bank' NOT NULL",
         "ALTER TABLE loans ADD COLUMN lender_wallet_address TEXT",
         "ALTER TABLE loans ADD COLUMN treasury_nation_id INTEGER",
+        # Shop approval workflow (Phase 2D)
+        # Default 'approved' so existing shops are grandfathered as live.
+        "ALTER TABLE shops ADD COLUMN status TEXT DEFAULT 'approved'",
+        "ALTER TABLE shops ADD COLUMN approved_by INTEGER",
+        "ALTER TABLE shops ADD COLUMN approved_at TEXT",
+        "ALTER TABLE shops ADD COLUMN rejected_reason TEXT",
     ]
     for sql in migrations:
         try:
@@ -146,6 +152,15 @@ def _run_schema_migrations() -> None:
             "  SELECT wallet_address FROM banks WHERE banks.id = loans.bank_id"
             ") "
             "WHERE lender_wallet_address IS NULL AND bank_id > 0"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # Phase 2D backfill: existing shops created before the approval workflow
+    # are grandfathered as 'approved' so they remain live immediately.
+    try:
+        conn.execute(
+            "UPDATE shops SET status = 'approved' WHERE status IS NULL"
         )
     except sqlite3.OperationalError:
         pass
