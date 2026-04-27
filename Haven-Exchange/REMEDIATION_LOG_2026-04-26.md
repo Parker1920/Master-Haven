@@ -229,7 +229,7 @@ No changes. The accrual engine operates on `Loan.status`, `interest_frozen`, `in
 - `pay_loan` close-burn path already uses `lender_wallet` (from `loan.lender_wallet_address`) as the BURN source for both bank and treasury loans — treasury close burn correctly debits the treasury address.
 
 ### Phase 2C commit
-Committed as `Phase 2C: add treasury lending via lender_type abstraction`.
+Committed as `6ce7038` — `Phase 2C: add treasury lending via lender_type abstraction`.
 
 ---
 
@@ -298,7 +298,7 @@ Added `shop.status != 'approved'` check before eligibility validation. A shop in
 - Cross-checked `create_business_stock` call sites in `page_routes.py` (`POST /shop/ipo`): the `ValueError` raised for non-approved shops propagates through the existing `except ValueError` handler and redirects with an error message — no changes needed to the page route.
 
 ### Phase 2D commit
-Committed as `Phase 2D: add shop approval workflow with NL gatekeeping`.
+Committed as `2a764a3` — `Phase 2D: add shop approval workflow with NL gatekeeping`.
 
 
 ---
@@ -437,7 +437,7 @@ Two idempotent `ALTER TABLE stocks ADD COLUMN` statements appended after the Pha
 - Close logic walk-through: 2 holders (100 shares each at price 50). Source wallet has 7,000 TC. First payout: 100×50=5,000, succeeds, balance →2,000. Second payout: 100×50=5,000, fails (2,000 < 5,000), forfeited. Both holdings zeroed. `payouts_issued=5000`, `payouts_forfeited=5000`, `holders_paid=1`.
 
 ### Phase 2E-2G commit
-Committed as `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure`.
+Committed as `b59f8b8` — `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure`.
 
 ---
 
@@ -758,4 +758,42 @@ All 52 scenarios pass. The 6 deprecation warnings are FastAPI `on_event` API dep
 This is a real bug, not a test infrastructure issue — production users hitting `/api/wallet` without a session would have seen 500 errors instead of being redirected to login. Phase 5 caught it; Phase 1 missed it because the V2 audit didn't separately enumerate every protected route.
 
 ### Phase 5 commit
-Committed alongside the REMEDIATION_LOG update with the smoke test directory and the `wallet_routes.py` fix.
+Committed alongside the REMEDIATION_LOG update with the smoke test directory and the `wallet_routes.py` fix. Verified commit hash: `483d521`.
+
+---
+
+## Phase A — Log Verification & Gap Reconstruction (2026-04-27)
+
+**Purpose:** Re-validate the remediation log against actual git history and current code on `audit-v2-remediation`, fill in commit hashes that were omitted from earlier entries, and explicitly mark the categories of context that cannot be recovered after the fact.
+
+### What was verified
+
+- All phase headings (1, 2A–2K, 3, 4, 5) are present in the log.
+- All commit hashes referenced in the log resolve in `git log audit-v2-remediation` and the messages match.
+- Working tree on the branch is clean.
+
+### Commit hashes that were missing from the original entries (now filled in below)
+
+| Phase | Commit | Message |
+|-------|--------|---------|
+| 2C | `6ce7038` | `Phase 2C: add treasury lending via lender_type abstraction` |
+| 2D | `2a764a3` | `Phase 2D: add shop approval workflow with NL gatekeeping` |
+| 2E–2G | `b59f8b8` | `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure` |
+| 5 | `483d521` | `Phase 5: E2E smoke tests (52/52), smoke report, wallet route auth fix` |
+
+The original entries for these phases listed only the commit *message*, not the hash. Hashes added inline above and at the foot of each phase's "commit" subsection.
+
+### Context not recoverable from git/code
+
+The following classes of information were not written down at the time the phases ran and cannot be reconstructed from the artifacts:
+
+- **Real-time decision rationale.** Where a phase entry says "design choice: X over Y", the *alternatives that were considered and rejected on the spot* during implementation are not captured beyond what survived into the entry. Future-me reading the log gets the chosen path with a one-line "why", not the full deliberation.
+- **Edge cases discovered mid-phase that were folded into the same commit.** Examples likely exist (e.g. the route-ordering note in Phase 2D suggests the path-shadowing issue was caught during implementation, not pre-planned), but per-issue notes were not kept.
+- **Failed attempts, scrapped approaches, or test code written and deleted.** Nothing in `git log` other than reflog would surface this, and reflog is local-only.
+- **Timing/duration per phase.** Commit timestamps give wall-clock anchor points but not active-work duration.
+- **Verification scope decisions.** The synthetic tests cited in 2A/2H/2I/2J are described by their inputs and pass/fail outcome, but the *cases that were considered and not tested* aren't enumerated.
+
+These gaps do not block merge — the surviving log is authoritative for what was implemented and why at a structural level. They are flagged here so any future phase that relies on the log for "why didn't we do it this other way?" knows to fall back to code archaeology rather than treating the log as exhaustive.
+
+### Phase A commit
+Documentation-only change. No code touched.
