@@ -4,6 +4,8 @@ Travelers Exchange — Stock Market API Routes
 Provides API endpoints for stock listing, trading, portfolio, and rankings.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -35,6 +37,10 @@ class BuyStockRequest(BaseModel):
 
 class SellStockRequest(BaseModel):
     shares: int
+
+
+class CloseStockRequest(BaseModel):
+    reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -544,4 +550,121 @@ def sell_stock(
             "tx_hash": tx.tx_hash,
             "shares_sold": shares,
             "total_proceeds": total_proceeds,
+        }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/stocks/{stock_id}/close — Close a stock and pay out holders
+# ---------------------------------------------------------------------------
+@router.post("/{stock_id}/close")
+def close_stock(
+    stock_id: int,
+    payload: CloseStockRequest = CloseStockRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    with _stock_lock:
+        stock = db.execute(
+            select(Stock).where(Stock.id == stock_id)
+        ).scalar_one_or_none()
+        if stock is None:
+            raise HTTPException(status_code=404, detail="Stock not found")
+        if not stock.is_active:
+            raise HTTPException(status_code=400, detail="Stock is already closed")
+
+        # Auth: world_mint can close any stock; shop owner can close their business stock
+        if current_user.role != "world_mint":
+            if stock.stock_type == "business":
+                shop = db.execute(
+                    select(Shop).where(Shop.id == stock.entity_id)
+                ).scalar_one_or_none()
+                if shop is None or shop.owner_id != current_user.id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Only the shop owner or World Mint can close this stock",
+                    )
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the World Mint can close nation stocks",
+                )
+
+        # Determine payout source wallet
+        if stock.stock_type == "nation":
+            nation = db.execute(
+                select(Nation).where(Nation.id == stock.entity_id)
+            ).scalar_one_or_none()
+            if nation is None:
+                raise HTTPException(status_code=500, detail="Nation not found for stock")
+            payout_from = nation.treasury_address
+        else:
+            shop = db.execute(
+                select(Shop).where(Shop.id == stock.entity_id)
+            ).scalar_one_or_none()
+            if shop is None:
+                raise HTTPException(status_code=500, detail="Shop not found for stock")
+            owner = db.execute(
+                select(User).where(User.id == shop.owner_id)
+            ).scalar_one_or_none()
+            if owner is None:
+                raise HTTPException(status_code=500, detail="Shop owner not found")
+            payout_from = owner.wallet_address
+
+        price_per_share = stock.current_price
+
+        holdings = list(
+            db.execute(
+                select(StockHolding).where(
+                    StockHolding.stock_id == stock.id,
+                    StockHolding.shares > 0,
+                )
+            ).scalars().all()
+        )
+
+        payouts_issued = 0
+        payouts_forfeited = 0
+        holders_paid = 0
+
+        for holding in holdings:
+            payout_amount = holding.shares * price_per_share
+            holder = db.execute(
+                select(User).where(User.id == holding.user_id)
+            ).scalar_one_or_none()
+
+            if payout_amount > 0 and holder is not None:
+                try:
+                    create_transaction(
+                        db,
+                        tx_type="STOCK_PAYOUT",
+                        from_address=payout_from,
+                        to_address=holder.wallet_address,
+                        amount=payout_amount,
+                        memo=(
+                            f"Stock closure payout: {holding.shares} shares of "
+                            f"{stock.ticker} at {price_per_share} TC/share"
+                        ),
+                    )
+                    payouts_issued += payout_amount
+                    holders_paid += 1
+                except ValueError:
+                    # Insufficient funds — forced closure, holding zeroed without pay
+                    payouts_forfeited += payout_amount
+
+            # Zero out holding regardless of whether payout succeeded
+            holding.shares = 0
+
+        now = datetime.now(timezone.utc)
+        stock.is_active = False
+        stock.closed_at = now
+        stock.closure_reason = payload.reason
+        db.commit()
+
+        return {
+            "success": True,
+            "ticker": stock.ticker,
+            "price_per_share": price_per_share,
+            "payouts_issued": payouts_issued,
+            "payouts_forfeited": payouts_forfeited,
+            "holders_paid": holders_paid,
+            "closed_at": now.isoformat(),
         }

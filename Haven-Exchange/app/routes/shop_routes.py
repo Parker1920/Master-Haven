@@ -25,9 +25,14 @@ VALID_CATEGORIES = {"service", "coordinates", "item", "other"}
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
+VALID_SHOP_TYPES = {"general", "resource_depot"}
+
+
 class CreateShopRequest(BaseModel):
     name: str
     description: str | None = None
+    shop_type: str = "general"
+    mining_setup: str | None = None
 
 
 class CreateListingRequest(BaseModel):
@@ -55,14 +60,25 @@ class RejectShopRequest(BaseModel):
 @router.get("")
 def list_shops(
     nation_id: int | None = Query(None),
+    type: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     conditions = [Shop.status == "approved", Shop.is_active == True]  # noqa: E712
     if nation_id is not None:
         conditions.append(Shop.nation_id == nation_id)
+    if type is not None:
+        conditions.append(Shop.shop_type == type)
 
+    # Phase 2E: rank by 30-day GDP contribution (highest first).  Shops
+    # tied at 0 contribution (newly approved, no sales yet) fall back to
+    # creation order so brand-new shops aren't permanently buried at the
+    # bottom of the listing.
     shops = list(
-        db.execute(select(Shop).where(*conditions).order_by(Shop.created_at.desc()))
+        db.execute(
+            select(Shop)
+            .where(*conditions)
+            .order_by(Shop.gdp_contribution_30d.desc(), Shop.created_at.desc())
+        )
         .scalars()
         .all()
     )
@@ -89,6 +105,7 @@ def list_shops(
                 "id": shop.id,
                 "name": shop.name,
                 "description": shop.description,
+                "shop_type": shop.shop_type,
                 "owner_name": (
                     owner.display_name or owner.username if owner else "Unknown"
                 ),
@@ -96,6 +113,7 @@ def list_shops(
                 "nation_name": nation.name if nation else "Unknown",
                 "total_sales": shop.total_sales,
                 "total_revenue": shop.total_revenue,
+                "gdp_contribution_30d": shop.gdp_contribution_30d,
                 "listing_count": listing_count,
                 "created_at": shop.created_at.isoformat() if shop.created_at else None,
             }
@@ -204,6 +222,8 @@ def get_shop(
         "id": shop.id,
         "name": shop.name,
         "description": shop.description,
+        "shop_type": shop.shop_type,
+        "mining_setup": shop.mining_setup,
         "owner_name": owner.display_name or owner.username if owner else "Unknown",
         "nation_id": shop.nation_id,
         "nation_name": nation.name if nation else "Unknown",
@@ -211,6 +231,10 @@ def get_shop(
         "gdp_multiplier": gdp_mult,
         "total_sales": shop.total_sales,
         "total_revenue": shop.total_revenue,
+        "gdp_contribution_30d": shop.gdp_contribution_30d,
+        "gdp_last_calculated": (
+            shop.gdp_last_calculated.isoformat() if shop.gdp_last_calculated else None
+        ),
         "is_active": shop.is_active,
         "created_at": shop.created_at.isoformat() if shop.created_at else None,
         "listings": [
@@ -261,11 +285,26 @@ def create_shop(
     if not name:
         raise HTTPException(status_code=400, detail="Shop name cannot be empty")
 
+    shop_type = payload.shop_type or "general"
+    if shop_type not in VALID_SHOP_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid shop_type. Must be one of: {', '.join(sorted(VALID_SHOP_TYPES))}",
+        )
+    mining_setup = payload.mining_setup.strip() if payload.mining_setup else None
+    if shop_type == "resource_depot" and not mining_setup:
+        raise HTTPException(
+            status_code=400,
+            detail="mining_setup is required for resource_depot shops",
+        )
+
     shop = Shop(
         owner_id=current_user.id,
         nation_id=current_user.nation_id,
         name=name,
         description=payload.description.strip() if payload.description else None,
+        shop_type=shop_type,
+        mining_setup=mining_setup,
         status="pending",
         is_active=False,
     )
@@ -277,6 +316,7 @@ def create_shop(
         "success": True,
         "shop_id": shop.id,
         "name": shop.name,
+        "shop_type": shop.shop_type,
         "status": "pending",
         "message": "Shop created and is pending Nation Leader approval before going live.",
     }
@@ -384,6 +424,12 @@ def buy_listing(
 
     shop.total_sales += 1
     shop.total_revenue += listing.price
+    # Phase 2E: keep the marketplace ranking warm in real time.  The full
+    # 30-day window is still recomputed by the daily GDP job (which also
+    # decays purchases that age past 30 days); this just means a fresh
+    # sale moves the shop up immediately rather than at the next tick.
+    shop.gdp_contribution_30d = (shop.gdp_contribution_30d or 0) + listing.price
+    shop.gdp_last_calculated = datetime.now(timezone.utc)
     db.commit()
 
     # Cross-nation conversion info

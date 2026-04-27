@@ -300,3 +300,141 @@ Added `shop.status != 'approved'` check before eligibility validation. A shop in
 ### Phase 2D commit
 Committed as `Phase 2D: add shop approval workflow with NL gatekeeping`.
 
+
+---
+
+## Phase 2E — Per-Business GDP Contribution & Marketplace Ranking
+
+**Goal:** Track 30-day GDP contribution per shop (not just per nation) and use it to rank the marketplace listing — so shops surface by economic activity, not by recency.
+
+### Schema (`app/models.py` — `Shop`)
+- `gdp_contribution_30d INTEGER DEFAULT 0 NOT NULL` — running 30-day sum of PURCHASE TC inflow to the shop owner's wallet. Maintained by both the daily GDP job (full recompute over the rolling window) and the `buy_listing` endpoint (real-time increment per purchase).
+- `gdp_last_calculated DATETIME` — most recent recompute timestamp; useful for the marketplace UI to show staleness if the daily job hasn't run.
+
+### Migration (`app/main.py::_run_schema_migrations`)
+Two idempotent `ALTER TABLE shops ADD COLUMN` statements appended after the Phase 2D block. The default of 0 means existing shops correctly start unranked, and the next daily GDP tick (or first new purchase) populates them.
+
+### `app/gdp.py`
+
+- New helper `_calculate_shop_gdp_contribution(db, shop)`: sums `PURCHASE` rows from the `transactions` table that hit the shop owner's wallet within the 30-day window. Returns 0 if the owner is missing (defensive — should never happen after Phase 2D's owner FK guarantee, but the GDP job runs for all shops including any in odd states).
+- New helper `recalculate_all_shop_contributions(db)`: stand-alone refresh job for the per-shop figures only. Not currently scheduled (the daily GDP job already does this in-line), but kept available for ad-hoc admin recalculation if a backfill is ever needed.
+- `recalculate_all_gdp(db)`: extended to also walk every `Shop` row at the end of the nation pass and refresh `gdp_contribution_30d` + `gdp_last_calculated`. The single `db.commit()` at the function tail covers both nation and shop updates.
+
+### `app/routes/shop_routes.py`
+
+- `list_shops`: order changed from `Shop.created_at.desc()` to `Shop.gdp_contribution_30d.desc(), Shop.created_at.desc()`. Tie-breaker on creation order means brand-new shops with 0 contribution don't all collapse to the bottom permanently — they're shown in newest-first order *within* the zero band, so a fresh shop is still discoverable.
+- `list_shops` response: added `gdp_contribution_30d` to each shop dict so the front-end can show the rank metric (or sort client-side if it ever wants a different order).
+- `get_shop` response: added `gdp_contribution_30d` and `gdp_last_calculated` for the shop detail page.
+- `buy_listing`: after the `total_sales` / `total_revenue` increment, also bumps `gdp_contribution_30d += listing.price` and stamps `gdp_last_calculated = now`. This keeps the marketplace ranking warm in real time so a popular shop rises immediately, instead of waiting until the next 24h GDP tick.
+
+### Design choices
+
+- **Real-time bump + daily reconciliation, not just one or the other.** The daily job is needed because purchases age out of the 30-day window (a purchase made 31 days ago should no longer count). The real-time bump is needed so the ranking responds within minutes of new activity. Together they're consistent: the daily tick will overwrite any drift the real-time bumps accumulate (none expected at default rates, but the rounding paths in `tc_to_national` make a defensive recompute cheap insurance).
+- **Per-shop column rather than dynamic SUM-on-read.** A SUM-on-read query would produce the same data, but the marketplace listing endpoint hits the shop list on every page render. With ~10 active shops today and likely ~100s in future, a 30-day window aggregation across `transactions` (which is the most-written table in the system) would be expensive on every request. A cached column with a daily recompute is the standard tradeoff.
+- **Includes pending/rejected shops in the recompute pass.** They have 0 sales by definition (Phase 2D blocks listings until approved), but folding them into the iteration costs nothing and keeps the column meaningful even if a shop is suspended and re-approved later.
+- **No per-business GDP *score* (just contribution).** The audit V2 row called for "per-business GDP contribution" — a TC figure, not a 0-100 score. We store it as raw TC, not normalized. Normalization wouldn't help the marketplace ranking (a 0-100 score loses information at the top of the distribution where the ranking matters most).
+
+### Verification
+
+- Synthetic E2E test (`py -c …`): created two shops in a single nation, three 5,000-TC purchases hit shop1 and one 1,000-TC purchase hit shop2. After `recalculate_all_gdp(db)`:
+  - `shop1.gdp_contribution_30d == 15000` ✓
+  - `shop2.gdp_contribution_30d == 1000` ✓
+  - Sorted query returned `[shop1, shop2]` matching the new ranking ✓
+- AST syntax check on all four touched files: clean.
+
+### Phase 2E commit
+Committed as part of `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure` (single commit with 2F and 2G).
+
+---
+
+## Phase 2F — Resource Depot Shop Subtype
+
+**Goal:** V2 audit finding: no shop subtypes, no `resource_depot` type, no mining disclosure field. Introduce a typed shop classification system so mining shops can identify themselves and disclose their mining method.
+
+### Schema (`app/models.py` — `Shop`)
+- `shop_type TEXT DEFAULT 'general'` — subtype discriminator. Current valid values: `"general"`, `"resource_depot"`. Default `"general"` preserves all existing shops without migration overhead.
+- `mining_setup TEXT NULL` — free-form disclosure of the miner's rig, method, or tool stack. Required only for `resource_depot` shops; NULL for `general` shops.
+
+### Migration (`app/main.py::_run_schema_migrations`)
+Two idempotent `ALTER TABLE shops ADD COLUMN` statements appended after the Phase 2E block. Existing shops get `shop_type='general'` via the column default (SQLite fills on backfill). `mining_setup` defaults to NULL, which is correct for pre-existing general shops.
+
+### `app/routes/shop_routes.py`
+
+**`VALID_SHOP_TYPES`** constant: `{"general", "resource_depot"}` — single source of truth for type validation.
+
+**`CreateShopRequest`**: gained two optional fields: `shop_type: str = "general"` and `mining_setup: str | None = None`.
+
+**`create_shop`**:
+1. Validates `shop_type` against `VALID_SHOP_TYPES`; returns 400 on unknown value.
+2. If `shop_type == "resource_depot"` and `mining_setup` is blank: returns 400 with `"mining_setup is required for resource_depot shops"`.
+3. Both fields written to the new `Shop` row and echoed in the response.
+
+**`GET /api/shops`**: gained `type: str | None = Query(None)` parameter. When supplied, appends `Shop.shop_type == type` to the filter conditions — clients can request `/api/shops?type=resource_depot` to see only mining shops.
+
+**`list_shops` response**: `shop_type` added to each shop dict.
+
+**`get_shop` response**: `shop_type` and `mining_setup` both added.
+
+### Design choices
+
+- **Two values for now, open for extension.** `VALID_SHOP_TYPES` is a module-level set; adding a new type is a one-line change with no migration (the column is TEXT, not an enum constraint). This avoids a premature enum that would require ALTER on every new type.
+- **`mining_setup` required only at creation, not enforced retroactively.** Existing `resource_depot` shops created via direct DB manipulation before this feature would have NULL `mining_setup`. The API only validates on the create path; future PUT/patch endpoints can enforce it if needed.
+- **`type` query param, not `shop_type`.** Matches REST convention of short filter names. The underlying column is named `shop_type` to avoid keyword collision in Python.
+
+### Verification
+- AST syntax checks on `app/models.py`, `app/main.py`, `app/routes/shop_routes.py`: clean.
+- Reviewed: resource_depot with blank mining_setup → 400. resource_depot with mining_setup → 201. general with no mining_setup → 201. Unknown type → 400. `GET /api/shops?type=resource_depot` only returns resource_depot rows (filter clause verified in query).
+
+---
+
+## Phase 2G — Stock Closure Mechanism (Option A Payout)
+
+**Goal:** V2 audit finding: no stock closure or delisting mechanism. No closure endpoint, no payout logic. Introduce a forced closure path where every holder is paid out at the current price and the stock is permanently delisted.
+
+### Schema (`app/models.py` — `Stock`)
+- `closed_at DATETIME NULL` — timestamp when the stock was closed. NULL while active.
+- `closure_reason TEXT NULL` — optional human-readable reason supplied by the closer.
+
+### `app/blockchain.py`
+- `"STOCK_PAYOUT"` added to `_VALID_TX_TYPES`. This is the ledger type for per-holder closure payouts, distinguishing them from normal `STOCK_SELL` transactions.
+
+### Migration (`app/main.py::_run_schema_migrations`)
+Two idempotent `ALTER TABLE stocks ADD COLUMN` statements appended after the Phase 2F block.
+
+### `app/routes/stock_routes.py`
+
+**Added**:
+- `from datetime import datetime, timezone` import.
+- `CloseStockRequest(BaseModel)`: single optional field `reason: str | None = None`.
+- `POST /api/stocks/{stock_id}/close` endpoint (uses integer `stock_id`, not ticker, to avoid collisions with the `/{ticker}` path group on the same router).
+
+**Endpoint logic** (inside `_stock_lock` to prevent race with buy/sell):
+1. Fetch stock by id. Return 404 if not found.
+2. Return 400 if `stock.is_active` is already False (already closed).
+3. **Authorization**:
+   - `world_mint` role may close any stock.
+   - For `business` stocks: the shop's `owner_id` must match `current_user.id`; otherwise 403.
+   - For `nation` stocks: only `world_mint` may close; shop owner path not applicable.
+4. **Payout source**: nation treasury address (for nation stocks) or shop owner's user wallet (for business stocks).
+5. **Per-holder payout**: iterate all `StockHolding` rows with `shares > 0`:
+   - `payout_amount = holding.shares × stock.current_price`
+   - Call `create_transaction(tx_type="STOCK_PAYOUT", from=payout_from, to=holder.wallet, amount=payout_amount, memo=…)`.
+   - On `ValueError` (insufficient funds — forced closure): forfeit payout; log in `payouts_forfeited` counter.
+   - Zero `holding.shares` unconditionally so the stock has no residual claimants regardless of whether the payout succeeded.
+6. Set `stock.is_active = False`, `stock.closed_at = now`, `stock.closure_reason = payload.reason`.
+7. Response: `ticker`, `price_per_share`, `payouts_issued`, `payouts_forfeited`, `holders_paid`, `closed_at`.
+
+### Design choices
+
+- **Option A (current price payout) not Option B (book value).** The audit dispatch designated Option A. Using `current_price` is simple and predictable for holders: they receive exactly what the market last valued their shares at.
+- **Forced closure on insufficient funds.** If the payout source is underfunded (e.g. a nation treasury that has been depleted by other transactions), holdings are still zeroed so the stock can be fully delisted. The `payouts_forfeited` counter in the response makes the shortfall visible for audit. Alternative (abort and 400 if any payout fails) would leave the stock in a half-closed state under concurrent depletion — the forced-closure path is safer for data integrity.
+- **Holdings zeroed, not deleted.** `StockHolding.shares = 0` rather than `db.delete(holding)` preserves audit rows showing who held what before closure. Queries filtering `shares > 0` will naturally skip them.
+- **Integer `stock_id` path param, not ticker.** All existing `/{ticker}/…` routes use the ticker string. An integer `/{stock_id}/close` path resolves cleanly: FastAPI coerces the path segment to `int` for the close route and leaves it as a string for the ticker routes, so there is no ambiguity.
+- **`_stock_lock` held for the full close operation.** Prevents a buyer acquiring shares between the holdings snapshot and the `is_active = False` commit, which would leave new shares un-paid-out.
+
+### Verification
+- AST syntax checks on `app/blockchain.py`, `app/models.py`, `app/routes/stock_routes.py`, `app/main.py`: all clean.
+- Close logic walk-through: 2 holders (100 shares each at price 50). Source wallet has 7,000 TC. First payout: 100×50=5,000, succeeds, balance →2,000. Second payout: 100×50=5,000, fails (2,000 < 5,000), forfeited. Both holdings zeroed. `payouts_issued=5000`, `payouts_forfeited=5000`, `holders_paid=1`.
+
+### Phase 2E-2G commit
+Committed as `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure`.

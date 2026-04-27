@@ -25,7 +25,7 @@ _tx_lock = threading.Lock()   # serialises all writes to the ledger
 
 # Valid transaction types
 # Valid transaction types — includes banking types (LOAN, LOAN_PAYMENT, LOAN_FORGIVE)
-_VALID_TX_TYPES = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL", "LOAN", "LOAN_DISBURSE", "LOAN_PAYMENT", "LOAN_FORGIVE"}
+_VALID_TX_TYPES = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL", "STOCK_PAYOUT", "LOAN", "LOAN_DISBURSE", "LOAN_PAYMENT", "LOAN_FORGIVE"}
 
 
 # ---------------------------------------------------------------------------

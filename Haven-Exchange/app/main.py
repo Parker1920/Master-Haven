@@ -106,6 +106,15 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE shops ADD COLUMN approved_by INTEGER",
         "ALTER TABLE shops ADD COLUMN approved_at TEXT",
         "ALTER TABLE shops ADD COLUMN rejected_reason TEXT",
+        # Per-shop GDP contribution (Phase 2E)
+        "ALTER TABLE shops ADD COLUMN gdp_contribution_30d INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE shops ADD COLUMN gdp_last_calculated DATETIME",
+        # Resource depot subtype (Phase 2F)
+        "ALTER TABLE shops ADD COLUMN shop_type TEXT DEFAULT 'general'",
+        "ALTER TABLE shops ADD COLUMN mining_setup TEXT",
+        # Stock closure (Phase 2G)
+        "ALTER TABLE stocks ADD COLUMN closed_at DATETIME",
+        "ALTER TABLE stocks ADD COLUMN closure_reason TEXT",
     ]
     for sql in migrations:
         try:

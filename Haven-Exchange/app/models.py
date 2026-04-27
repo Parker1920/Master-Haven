@@ -200,6 +200,16 @@ class Shop(Base):
     rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_sales: Mapped[int] = mapped_column(Integer, default=0)
     total_revenue: Mapped[int] = mapped_column(Integer, default=0)
+    # Phase 2E: 30-day rolling GDP contribution (sum of PURCHASE TC paid in
+    # the last 30 days).  Recalculated by the daily GDP job; used to rank
+    # shops in the marketplace.
+    gdp_contribution_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    gdp_last_calculated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    # Phase 2F: shop subtype and mining disclosure
+    shop_type: Mapped[str] = mapped_column(String, default="general")
+    mining_setup: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         insert_default=func.current_timestamp()
     )
@@ -260,6 +270,9 @@ class Stock(Base):
         insert_default=func.current_timestamp()
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Phase 2G: stock closure fields
+    closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    closure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     holdings: Mapped[List["StockHolding"]] = relationship(
