@@ -6301,3 +6301,8 @@ Stouffer_Phase0_v2_Report.md
 Stouffer_Phase0_Closure_Report.md
 Stouffer_Methodology_Paper_Draft.md
 phase0_validation_v3_report.json
+
+# Audit signal dumps — auto-extracted from JSONL transcripts, may contain
+# verbatim credential text quoted by prior security audits. Do not commit.
+audit/work/signals/
+audit/work/timeline.tsv

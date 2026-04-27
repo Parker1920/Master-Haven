@@ -55,16 +55,44 @@ from nmspy.common import gameData
 from ctypes import c_uint64, c_int64, c_void_p, pointer, sizeof
 import nmspy.data.basic_types as basic
 
-# NMS procedural name generation (vendored from https://github.com/stuart/nms_namegen, MIT license)
-try:
-    from nms_namegen.system import systemName as nms_system_name
-    from nms_namegen.region import regionName as nms_region_name
-    from nms_namegen.planet import planetName as nms_planet_name
-    NMS_NAMEGEN_AVAILABLE = True
-except ImportError:
-    NMS_NAMEGEN_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
+
+# NMS procedural name generation (vendored from https://github.com/stuart/nms_namegen, MIT license).
+# Requires numpy. Auto-install if missing so users who updated via the in-app auto-updater
+# (which only swaps the mod/ folder, not the embedded Python's site-packages) don't silently
+# lose procgen names.
+def _import_nms_namegen():
+    try:
+        from nms_namegen.system import systemName as _sys
+        from nms_namegen.region import regionName as _reg
+        from nms_namegen.planet import planetName as _pln
+        return _sys, _reg, _pln
+    except ImportError:
+        return None
+
+_ng = _import_nms_namegen()
+if _ng is None:
+    logger.info("[NAMEGEN] nms_namegen import failed (likely missing numpy) - attempting auto-install...")
+    try:
+        import subprocess
+        _embedded_python = Path(__file__).resolve().parent.parent / "python" / "python.exe"
+        if not _embedded_python.exists():
+            raise FileNotFoundError(f"Embedded Python not found at {_embedded_python}")
+        subprocess.check_call(
+            [str(_embedded_python), '-m', 'pip', 'install', 'numpy'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
+        )
+        logger.info("[NAMEGEN] numpy auto-installed - retrying nms_namegen import")
+        _ng = _import_nms_namegen()
+    except Exception as e:
+        logger.warning(f"[NAMEGEN] numpy auto-install failed: {e}")
+        logger.warning("[NAMEGEN] Procedural name generation unavailable - run FIRST_TIME_SETUP.bat")
+
+if _ng is not None:
+    nms_system_name, nms_region_name, nms_planet_name = _ng
+    NMS_NAMEGEN_AVAILABLE = True
+else:
+    NMS_NAMEGEN_AVAILABLE = False
 
 # =============================================================================
 # API CONFIGURATION
@@ -806,7 +834,7 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.9.2"
+    __version__ = "1.9.3"
     __description__ = "Custom system name field for renamed systems (procgen preserved in description)"
 
     # ==========================================================================
@@ -3737,12 +3765,15 @@ class HavenExtractorMod(Mod):
                 return 0
             location = player_state.mLocation
             raw_reality = self._safe_int(location.RealityIndex)
+            # v1.9.3: INFO-level so production logs show what's being read — needed to
+            # diagnose the "always Euclid" reports where we can't tell if RealityIndex is
+            # genuinely 0 or if the struct offset has shifted post-Voyagers.
+            logger.info(f"  [GALAXY] RealityIndex={raw_reality} -> {get_galaxy_name(raw_reality) if 0 <= raw_reality <= 255 else 'OUT OF RANGE'}")
             if 0 <= raw_reality <= 255:
                 return raw_reality
-            logger.debug(f"  [GALAXY] RealityIndex out of range: {raw_reality}")
             return 0
         except Exception as e:
-            logger.debug(f"  [GALAXY] Failed to read RealityIndex: {e}")
+            logger.info(f"  [GALAXY] Failed to read RealityIndex: {e}")
             return 0
 
     def _coords_look_valid(self, voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
@@ -3817,7 +3848,9 @@ class HavenExtractorMod(Mod):
                 system_idx=decoded['solar_system_index'],
                 x=decoded['voxel_x'], y=decoded['voxel_y'], z=decoded['voxel_z']
             )
-            logger.debug(f"  [SUCCESS via {source_label}] '{system_name}' @ {decoded['glyph_code']} ({galaxy_name}) raw=0x{universe_addr:016X}")
+            # v1.9.3: INFO-level so we can correlate raw universe_addr + resolved galaxy in
+            # production logs without needing debug mode.
+            logger.info(f"  [COORDS] '{system_name}' @ {decoded['glyph_code']} ({galaxy_name}) raw=0x{universe_addr:016X}")
             logger.debug(f"  [NAMEGEN] Region: '{region_name}'")
             return {
                 "system_name": system_name,
@@ -3858,7 +3891,8 @@ class HavenExtractorMod(Mod):
             # reject out-of-range reads instead of silently defaulting to 0 (Euclid).
             # Silent clamping was producing fake Euclid submissions for players warping to
             # non-Euclid galaxies when the Voyagers-broken struct returned garbage.
-            logger.debug(f"  [{source_label}] raw RealityIndex={raw_reality}, voxel=[{voxel_x},{voxel_y},{voxel_z}], sys={system_idx}")
+            # v1.9.3: INFO-level so fallback-path galaxy reads are visible in prod logs.
+            logger.info(f"  [{source_label}] raw RealityIndex={raw_reality}, voxel=[{voxel_x},{voxel_y},{voxel_z}], sys={system_idx}")
             if raw_reality < 0 or raw_reality > 255:
                 logger.info(f"  [{source_label}] rejected: RealityIndex={raw_reality} out of range (0-255) — not fabricating Euclid")
                 return None

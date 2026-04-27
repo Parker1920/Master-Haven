@@ -1,0 +1,38 @@
+# ============================================================
+# The Keeper — Docker Compose
+# ============================================================
+# Joins the Haven UI container's network so that HAVEN_API can
+# resolve `haven-control-room:8005` directly, avoiding the
+# hairpin-NAT failure when reaching havenmap.online from inside
+# the Pi's LAN.
+#
+# First-time setup on the Pi:
+#   1. Create a shared network (once):
+#        docker network create haven-net
+#   2. Attach Haven UI to it (once):
+#        docker network connect haven-net haven-control-room
+#      (or add `networks: [haven-net]` to Haven-UI/docker-compose.yml
+#       and set `haven-net` as external there too).
+#
+# Usage:
+#   docker compose up -d --build
+#   docker compose logs -f
+# ============================================================
+
+services:
+  the-keeper:
+    build: .
+    container_name: the-keeper
+    restart: unless-stopped
+    volumes:
+      # bot.py reads .env from this hardcoded path
+      - ./.env:/storage/emulated/0/Voyage/The_Keeper/.env:ro
+      # Persist xp.db and milestones.json across rebuilds
+      - ./xp.db:/app/xp.db
+      - ./milestones.json:/app/milestones.json
+    networks:
+      - haven-net
+
+networks:
+  haven-net:
+    external: true

@@ -22,6 +22,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.50.13 | 2026-04-21 | Numpy auto-install on mod load + INFO-level galaxy diagnostics for "always Euclid" reports |
+| Haven Extractor | 1.9.3 | 2026-04-21 | Auto-installs numpy if `nms_namegen` import fails; promotes RealityIndex + universe_addr resolution logs from DEBUG to INFO |
 | **Master Haven** | 1.50.12 | 2026-04-21 | Custom system name field re-added to extractor for renamed systems; procgen preserved in description |
 | Haven Extractor | 1.9.2 | 2026-04-21 | "Custom System Name" field + "Apply Custom Name" button; procgen name stashed in `description` when user overrides |
 | Backend API | 1.48.7 | 2026-04-21 | `/api/extraction` accepts `description` field (carries procgen name for renamed systems) |
@@ -87,6 +89,20 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.50.13 (2026-04-21) - Numpy Auto-Install + Galaxy Diagnostic Logs (Extractor)
+Fixes two problems reported from a live user session (user "chris"): (1) procgen system/region names not being generated — log showed `ModuleNotFoundError: No module named 'numpy'` at mod load, causing `nms_namegen` imports to fail and fall back to `System_{glyph}` / `Region_{glyph[:8]}`. Root cause: the auto-updater (`haven_updater.ps1` + `UPDATE_HAVEN_EXTRACTOR.bat`) only swaps the `mod/` folder from the mod-only GitHub release zip — it never touches the embedded Python's `site-packages`. Users who updated from v1.8.x to v1.9.x via the in-app updater silently lost procgen because the v1.9.0 numpy dependency added in `FIRST_TIME_SETUP.bat` never ran on their install. (2) Galaxy always reporting as Euclid in submissions — no INFO-level diagnostics in place to tell whether `player_state.mLocation.RealityIndex` is returning a genuine 0 or a broken struct access reading the wrong bytes post-Voyagers. v1.8.1 fixed out-of-range rejection but `0` is in range and gets accepted blindly.
+
+**Haven Extractor 1.9.3**
+- `nms_namegen` import block rewritten to attempt `python\python.exe -m pip install numpy` on `ImportError`, then retry the import. Mirrors the v1.6.3 hgpaktool auto-install pattern from `nms_language.py` — uses the embedded Python resolved via `Path(__file__).resolve().parent.parent / "python" / "python.exe"` (since `sys.executable` inside pyMHF is `NMS.exe`, not Python). 120s pip timeout.
+- Logger creation moved above the namegen import so the auto-install block can log progress at module load time.
+- `_read_galaxy_from_player_state()` raw-value log promoted from DEBUG to INFO and now includes the resolved galaxy name: `[GALAXY] RealityIndex=N -> Euclid`. Called once per primary-path coord resolution, so no log flooding.
+- `_get_coords_from_universe_address()` success log promoted from DEBUG to INFO and renamed `[COORDS]`, showing raw `universe_addr` hex + resolved glyph/galaxy. Enables post-hoc correlation between packed address and reported galaxy.
+- `_get_coords_from_player_state()` fallback-path raw `RealityIndex` + voxel log promoted from DEBUG to INFO. Rare path (only fires when mUniverseAddress unavailable) so negligible volume cost.
+- `FIRST_TIME_SETUP.bat` title bumped to v1.9.3.
+- **Does not yet fix the galaxy bug itself** — the next chris export will surface the raw RealityIndex value and lets us decide whether to add a direct-offset fallback read (similar to `DifficultySettingPreset` at `player_state + 0x11890`) in a subsequent release, or whether the struct access is fine and something else is wrong.
+
+---
 
 #### Master Haven 1.50.12 (2026-04-21) - Custom System Name Field Restored (Extractor)
 Re-adds the "Custom System Name" text field and "Apply Custom Name" button to the Haven Extractor GUI. Removed in v1.9.0 when procgen name generation was added — but procgen can't capture **renamed** systems (players can rename any system they visit in-game, and that name lives in save state, not the procgen algorithm). With procgen-only, any renamed system got uploaded under its canonical name, erasing the community-assigned one. The restored flow preserves both names: custom name becomes the system name, procgen name is stuffed into the `description` field so the canonical name isn't lost for downstream tooling.
