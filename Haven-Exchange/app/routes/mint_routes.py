@@ -20,7 +20,14 @@ from app.blockchain import create_transaction, verify_chain
 from app.config import settings
 from app.database import get_db
 from app.gdp import recalculate_all_gdp
-from app.models import GdpSnapshot, MintAllocation, Nation, Transaction, User
+from app.models import (
+    GdpSnapshot,
+    MintAllocation,
+    Nation,
+    StimulusProposal,
+    Transaction,
+    User,
+)
 from app.valuation import create_nation_stock
 
 router = APIRouter(prefix="/api/mint", tags=["mint"])
@@ -44,6 +51,13 @@ class AllocationApproveRequest(BaseModel):
 
 class CalculateAllocationsRequest(BaseModel):
     period: str | None = None
+
+
+class StimulusReviewRequest(BaseModel):
+    """Optional override for the proposed mint amount on approval."""
+
+    approved_amount: int | None = None
+    reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +176,7 @@ def mint_execute(
     if payload.amount <= 0:
         return {"success": False, "error": "Amount must be greater than zero."}
 
-    # Validate that the target address exists
+    # Validate that the target address exists and enforce mint_cap for nations
     if payload.to_address.startswith(settings.NATION_WALLET_PREFIX):
         recipient = db.execute(
             select(Nation).where(Nation.treasury_address == payload.to_address)
@@ -172,6 +186,26 @@ def mint_execute(
                 "success": False,
                 "error": f"Nation treasury '{payload.to_address}' not found.",
             }
+
+        # Phase 2K: mint_cap enforcement — total MINT txs to this treasury
+        # must not exceed nation.mint_cap after this mint.
+        total_minted_to_nation = db.execute(
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                Transaction.tx_type == "MINT",
+                Transaction.from_address == settings.WORLD_MINT_ADDRESS,
+                Transaction.to_address == payload.to_address,
+            )
+        ).scalar() or 0
+        cap = getattr(recipient, "mint_cap", 1_000_000_000)
+        if total_minted_to_nation + payload.amount > cap:
+            remaining = max(0, cap - total_minted_to_nation)
+            return {
+                "success": False,
+                "error": (
+                    f"Mint cap exceeded: {total_minted_to_nation} TC already minted to "
+                    f"{recipient.name} (cap={cap} TC). Only {remaining} TC remaining."
+                ),
+            }
     else:
         recipient = db.execute(
             select(User).where(User.wallet_address == payload.to_address)
@@ -180,6 +214,12 @@ def mint_execute(
             return {
                 "success": False,
                 "error": f"Wallet '{payload.to_address}' not found.",
+            }
+        # Phase 2K: World Mint wallet cannot mint directly to itself
+        if payload.to_address == settings.WORLD_MINT_ADDRESS:
+            return {
+                "success": False,
+                "error": "World Mint cannot mint directly to its own wallet.",
             }
 
     try:
@@ -632,4 +672,163 @@ def gdp_history(
             }
             for s in snapshots
         ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2J — Stimulus proposal review endpoints
+# ---------------------------------------------------------------------------
+# The daily GDP job (``run_stimulus_checks``) creates ``StimulusProposal`` rows
+# whenever a nation's composite GDP score drops 10/20/30% from the previous
+# snapshot.  Proposals are *never* auto-executed — the World Mint reviews them
+# here and explicitly approves (mint into the nation treasury) or rejects.
+
+
+@router.get("/stimulus-proposals")
+def list_stimulus_proposals(
+    status: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Return stimulus proposals for World Mint review.
+
+    Default returns only ``pending`` proposals.  Pass ``status=all`` to see
+    the full history (approved + rejected included).
+    """
+
+    stmt = select(StimulusProposal, Nation.name.label("nation_name")).join(
+        Nation, StimulusProposal.nation_id == Nation.id
+    )
+    if status is None or status == "pending":
+        stmt = stmt.where(StimulusProposal.status == "pending")
+    elif status != "all":
+        stmt = stmt.where(StimulusProposal.status == status)
+
+    stmt = stmt.order_by(StimulusProposal.proposed_at.desc()).limit(limit)
+    rows = db.execute(stmt).all()
+
+    return {
+        "proposals": [
+            {
+                "id": p.id,
+                "nation_id": p.nation_id,
+                "nation_name": nation_name,
+                "tier": p.tier,
+                "drop_pct": p.drop_pct,
+                "gdp_score_at_trigger": p.gdp_score_at_trigger,
+                "gdp_score_previous": p.gdp_score_previous,
+                "proposed_amount": p.proposed_amount,
+                "status": p.status,
+                "proposed_at": p.proposed_at.isoformat() if p.proposed_at else None,
+                "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
+                "reviewed_by": p.reviewed_by,
+            }
+            for (p, nation_name) in rows
+        ]
+    }
+
+
+@router.post("/stimulus-proposals/{proposal_id}/approve")
+def approve_stimulus_proposal(
+    proposal_id: int,
+    payload: StimulusReviewRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Approve a pending stimulus proposal and mint into the nation treasury.
+
+    For ``warning`` tier proposals (proposed_amount = 0) approval is recorded
+    without minting — the tier is informational only.
+    """
+
+    proposal = db.execute(
+        select(StimulusProposal).where(StimulusProposal.id == proposal_id)
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Stimulus proposal not found.")
+    if proposal.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Proposal is not pending (current status: {proposal.status}).",
+        )
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == proposal.nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    # World Mint may override the calculated amount (e.g. cap to a smaller
+    # mint than the formula suggests, or zero out a strong-tier mint).
+    final_amount = (
+        payload.approved_amount
+        if payload.approved_amount is not None
+        else proposal.proposed_amount
+    )
+    if final_amount < 0:
+        raise HTTPException(status_code=400, detail="Amount cannot be negative.")
+
+    tx_hash: str | None = None
+    if final_amount > 0:
+        try:
+            tx = create_transaction(
+                db,
+                tx_type="MINT",
+                from_address=settings.WORLD_MINT_ADDRESS,
+                to_address=nation.treasury_address,
+                amount=final_amount,
+                memo=(
+                    f"Stimulus mint ({proposal.tier}, "
+                    f"GDP drop {proposal.drop_pct}%)"
+                ),
+            )
+            tx_hash = f"tx_{tx.tx_hash[:12]}"
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    proposal.status = "approved"
+    proposal.proposed_amount = final_amount
+    proposal.reviewed_by = admin.id
+    proposal.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "proposal_id": proposal.id,
+        "minted": final_amount,
+        "tx_hash": tx_hash,
+        "nation_name": nation.name,
+    }
+
+
+@router.post("/stimulus-proposals/{proposal_id}/reject")
+def reject_stimulus_proposal(
+    proposal_id: int,
+    payload: StimulusReviewRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Reject a pending stimulus proposal without minting."""
+
+    proposal = db.execute(
+        select(StimulusProposal).where(StimulusProposal.id == proposal_id)
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Stimulus proposal not found.")
+    if proposal.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Proposal is not pending (current status: {proposal.status}).",
+        )
+
+    proposal.status = "rejected"
+    proposal.reviewed_by = admin.id
+    proposal.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "proposal_id": proposal.id,
+        "status": "rejected",
     }

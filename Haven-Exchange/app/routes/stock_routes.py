@@ -341,6 +341,13 @@ def buy_stock(
         if not stock.is_active:
             raise HTTPException(status_code=400, detail="This stock is not active")
 
+        # Phase 2K: World Mint is prohibited from buying stocks
+        if current_user.role == "world_mint":
+            raise HTTPException(
+                status_code=403,
+                detail="World Mint cannot purchase stocks.",
+            )
+
         shares = payload.shares
         if shares <= 0:
             raise HTTPException(status_code=400, detail="Must buy at least 1 share")

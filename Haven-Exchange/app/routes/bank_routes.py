@@ -94,8 +94,14 @@ def create_bank(
     Only nation leaders (or world_mint) can create banks.
     Max 4 banks per nation.  The owner_user_id must be a member of the nation.
     """
-    # Validate: requester must be a nation leader or world_mint
-    if current_user.role not in ("nation_leader", "world_mint"):
+    # Validate: requester must be a nation leader (world_mint is explicitly excluded
+    # from creating banks — Phase 2K: WM cannot create banks in nations it doesn't lead)
+    if current_user.role == "world_mint":
+        raise HTTPException(
+            status_code=403,
+            detail="World Mint cannot create banks in other nations.",
+        )
+    if current_user.role not in ("nation_leader", "citizen"):
         raise HTTPException(status_code=403, detail="Only nation leaders can create banks.")
 
     # Find the nation the leader owns

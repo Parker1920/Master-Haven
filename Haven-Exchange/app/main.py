@@ -127,8 +127,8 @@ def _run_schema_migrations() -> None:
         # Auto-stimulus proposals (Phase 2J) — table created by create_all on
         # fresh DBs; ALTER TABLE is only needed for columns added to existing
         # tables.  The stimulus_proposals table itself is created by create_all.
-        # We do need to keep this comment block so the ordering is clear.
-
+        # World Mint authority corrections (Phase 2K)
+        "ALTER TABLE nations ADD COLUMN mint_cap INTEGER DEFAULT 1000000000 NOT NULL",
     ]
     for sql in migrations:
         try:

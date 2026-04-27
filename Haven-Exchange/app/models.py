@@ -125,6 +125,12 @@ class Nation(Base):
     # Rate in basis points (default 50 = 0.5%)
     demurrage_rate_bps: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
 
+    # Phase 2K: World Mint authority corrections — lifetime mint cap per nation.
+    # The World Mint (TRV-00000000) cannot mint more than this amount into any
+    # given nation treasury over the lifetime of the exchange.  Default is
+    # effectively uncapped (1_000_000_000 TC).  Enforced in the mint endpoints.
+    mint_cap: Mapped[int] = mapped_column(Integer, default=1_000_000_000, nullable=False)
+
     # Relationships
     leader: Mapped["User"] = relationship(
         "User",
