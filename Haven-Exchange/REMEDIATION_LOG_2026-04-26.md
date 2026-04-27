@@ -834,4 +834,39 @@ No code modified. Phase B is documentation only — Parker's call which
 interpretation to keep.
 
 ### Phase B commit
-Committed as `Phase B: document interest cap behavior interpretations`.
+Committed as `99460d5` — `Phase B: document interest cap behavior interpretations`.
+
+### Phase B follow-up — Interpretation 2 implementation (2026-04-27)
+
+Parker chose Interpretation 2 (running-balance cap) after reviewing the
+phase B doc. Implementation switched in the same commit as the Phase C
+preflight (see Phase C section below).
+
+**Code changes:**
+- `app/interest.py` — module docstring rewritten to describe running-balance
+  semantics; early-return on `loan.interest_frozen` removed from
+  `_accrue_loan`; daily-job select no longer filters out frozen loans;
+  `interest_frozen` now reset to `False` whenever a normal accrual lands
+  below cap; `last_accrual_at` advanced even when cap is held so days at
+  cap don't bank up into a post-paydown surge.
+- `app/routes/bank_routes.py::pay_loan` — after the `accrued_interest`
+  decrement, flips `interest_frozen` back to False if the post-payment
+  balance is below `cap_amount`.
+
+**Verification:**
+- 52/52 smoke tests still pass — no regression on the existing surface.
+- Synthetic in-memory test confirms the cap-paydown-reaccrue cycle:
+  - Day 100: cap of 100 reached, frozen.
+  - Days 100-150: held at cap, no accrual.
+  - Day 150: paydown of 50 unfreezes; accrued = 50.
+  - Day 151: 1 TC accrued (= 1 elapsed day, not 51).
+  - Day 200: cap re-hit at 100, frozen again.
+  - Same-day rerun adds 0 (idempotency preserved).
+- The cap-hold `last_accrual_at` advance fix was caught by this synthetic
+  test before merge — first attempt had a 2-TC bug because elapsed days
+  banked up while the loan was frozen.
+
+**`INTEREST_CAP_BEHAVIOR.md` updated** to mark Interpretation 2 as the
+current implementation and note the cap-hold time-skip fix that emerged
+during verification.
+

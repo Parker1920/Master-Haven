@@ -1039,6 +1039,12 @@ def pay_loan(
     loan.total_interest_paid += interest_portion
     loan.total_burned_during_payments += during_payment_burn
 
+    # Running-balance cap: if a frozen loan's accrued_interest has been
+    # paid down below cap_amount, unfreeze it so the next daily accrual
+    # run resumes adding interest.  See INTEREST_CAP_BEHAVIOR.md.
+    if loan.interest_frozen and loan.accrued_interest < loan.cap_amount:
+        loan.interest_frozen = False
+
     # ------------------------------------------------------------------
     # Final payment: burn the remaining 80% of the pool from the lender's
     # reserves (bank wallet or nation treasury).

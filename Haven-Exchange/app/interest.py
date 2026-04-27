@@ -12,13 +12,15 @@ Design choices:
   consumer/peer loans creates runaway debt spirals; the audit V2 called for
   a 100% lifetime cap which is naturally enforceable with simple interest.
 
-- **100% lifetime cap.**  ``cap_amount`` is fixed at loan creation to the
-  principal value.  The cumulative interest ever assigned to a loan can never
-  exceed that cap.  Once the cap is hit, ``interest_frozen`` flips to
-  ``True`` and the loan is skipped on subsequent runs.  Note: payments may
-  later draw the cap down by paying interest off; we still don't re-open
-  accrual, because the cap is **lifetime** — it tracks how much interest the
-  borrower has *ever* been charged, not the current balance.
+- **100% running-balance cap.**  ``cap_amount`` is fixed at loan creation
+  to the principal value.  ``accrued_interest`` (the *currently outstanding*
+  unpaid interest) can never exceed that cap.  When the cap is hit,
+  ``interest_frozen`` flips to ``True`` and accrual halts.  But the flag is
+  a real-time "currently at cap" cache, not a permanent latch: when borrower
+  payments reduce ``accrued_interest`` below ``cap_amount``, ``pay_loan``
+  flips the flag back to ``False`` and the next daily run resumes accrual.
+  This is the running-balance interpretation of the 100% cap (see
+  ``INTEREST_CAP_BEHAVIOR.md``).
 
 - **Idempotency by elapsed-day computation.**  The job computes how many full
   days have passed since ``last_accrual_at`` and accrues that many days at
@@ -55,9 +57,11 @@ def _accrue_loan(loan: Loan, now: datetime) -> int:
 
     Capped so cumulative ``accrued_interest`` never exceeds ``cap_amount``.
     """
-    # Skip frozen, non-active, or zero-interest loans.
-    if loan.interest_frozen:
-        return 0
+    # Skip non-active or zero-interest loans.  Note: we no longer skip
+    # frozen loans here — under the running-balance cap, a frozen loan
+    # whose accrued_interest has been paid down below cap_amount needs
+    # to re-enter accrual.  The frozen flag is updated below when the
+    # current accrued_interest is compared against cap_amount.
     if loan.status != "active":
         return 0
     if loan.interest_rate <= 0:
@@ -68,8 +72,12 @@ def _accrue_loan(loan: Loan, now: datetime) -> int:
         # could miss exotic rows.
         return 0
     if loan.accrued_interest >= loan.cap_amount:
-        # Already at cap — flip the flag and stop.
+        # Already at cap — flip the flag, advance last_accrual_at so time
+        # spent at the cap doesn't bank up, and stop.  Under the running-
+        # balance cap, days spent at cap should not retroactively accrue
+        # interest after a paydown.
         loan.interest_frozen = True
+        loan.last_accrual_at = now
         return 0
 
     # Bootstrap last_accrual_at to opened_at on the first run.
@@ -94,11 +102,16 @@ def _accrue_loan(loan: Loan, now: datetime) -> int:
     add_amount = daily_interest * elapsed_days
 
     # Apply the cap.  If adding the full amount would overshoot, fill only
-    # to the cap and flip interest_frozen.
+    # to the cap and flip interest_frozen.  Otherwise, ensure interest_frozen
+    # is False — a previously-frozen loan whose accrued_interest has been
+    # paid down to below the cap re-enters accrual under the running-balance
+    # interpretation.
     headroom = loan.cap_amount - loan.accrued_interest
     if add_amount >= headroom:
         add_amount = headroom
         loan.interest_frozen = True
+    else:
+        loan.interest_frozen = False
 
     loan.accrued_interest += add_amount
     loan.last_accrual_at = now
@@ -122,9 +135,13 @@ def accrue_daily_interest(db: Session, *, now: Optional[datetime] = None) -> dic
     if now is None:
         now = datetime.now(timezone.utc)
 
+    # Note: we no longer filter out frozen loans.  Under the running-balance
+    # cap, a frozen loan whose accrued_interest has dropped below cap_amount
+    # (because the borrower paid interest down) needs to be re-evaluated and
+    # potentially have its frozen flag reset by ``_accrue_loan``.
     loans = list(
         db.execute(
-            select(Loan).where(Loan.status == "active", Loan.interest_frozen.is_(False))
+            select(Loan).where(Loan.status == "active")
         ).scalars().all()
     )
 

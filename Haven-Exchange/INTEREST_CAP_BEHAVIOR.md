@@ -1,7 +1,8 @@
 # Travelers Exchange — Interest Cap Behavior
 
-**Status:** Documentation only. No code change in this phase.
-**Decision required from:** Parker.
+**Status:** Resolved. Parker chose **Interpretation 2 (running-balance cap)**;
+implementation switched on 2026-04-27 (commit applied alongside Phase B).
+This document is now historical reference for both interpretations.
 
 ---
 
@@ -91,7 +92,16 @@ interest down. Under Interpretation 1 it caps at 100 TC and stops.
 
 ## Which is currently implemented
 
-**Interpretation 1.** Specifically:
+**Interpretation 2 (as of 2026-04-27).** Parker chose the running-balance cap.
+The code-level changes documented in the next section have been applied
+plus one additional fix surfaced during verification: when the cap is held
+across multiple daily runs, ``last_accrual_at`` is now advanced on the
+cap-hold path so post-paydown elapsed time does not retroactively bank up
+into a single large accrual.
+
+**Historical: prior to 2026-04-27 the code implemented Interpretation 1.**
+The remediation log's Phase 2A entry committed to it explicitly. The
+specifics of that prior implementation:
 
 - [app/interest.py:59](Haven-Exchange/app/interest.py#L59) — early
   return on `loan.interest_frozen`.
