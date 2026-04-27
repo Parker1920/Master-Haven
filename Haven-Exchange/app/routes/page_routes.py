@@ -638,6 +638,118 @@ def nation_edit_description_post(
 
 
 # ---------------------------------------------------------------------------
+# GET /nation/settings — Nation leader's identity-edit page
+# ---------------------------------------------------------------------------
+@router.get("/nation/settings")
+def nation_settings_page(
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Form letting a nation leader rename their own nation and update its
+    currency display fields. World Mint admin has the same capability via
+    /mint/nations/{id}/edit-identity for any nation; this page is the
+    self-service equivalent for the leader of a single nation.
+    """
+    if user.role != "nation_leader":
+        return RedirectResponse(
+            url="/dashboard?error=You+must+be+a+nation+leader+to+edit+nation+settings",
+            status_code=303,
+        )
+
+    nation = db.execute(
+        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
+    ).scalar_one_or_none()
+
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=No+approved+nation+found+for+your+account",
+            status_code=303,
+        )
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="nation",
+        nation=nation,
+    )
+    return templates.TemplateResponse("nation/settings.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /nation/settings — Save nation identity edits (self-edit)
+# ---------------------------------------------------------------------------
+@router.post("/nation/settings")
+def nation_settings_post(
+    request: Request,
+    name: str = Form(...),
+    currency_name: str = Form(""),
+    currency_code: str = Form(""),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Process the identity-edit form. Same validation rules as the World
+    Mint admin equivalent: name required and unique across nations,
+    currency code 2-8 chars and auto-uppercased, blank currency fields
+    stored as NULL.
+    """
+    if user.role != "nation_leader":
+        return RedirectResponse(
+            url="/dashboard?error=You+must+be+a+nation+leader+to+edit+nation+settings",
+            status_code=303,
+        )
+
+    nation = db.execute(
+        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
+    ).scalar_one_or_none()
+
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=No+approved+nation+found+for+your+account",
+            status_code=303,
+        )
+
+    new_name = (name or "").strip()
+    new_currency_name = (currency_name or "").strip() or None
+    new_currency_code = (currency_code or "").strip().upper() or None
+
+    if not new_name:
+        return RedirectResponse(
+            url="/nation/settings?error=Name+is+required",
+            status_code=303,
+        )
+
+    # Uniqueness guard if the name actually changed.
+    if new_name != nation.name:
+        clash = db.execute(
+            select(Nation).where(Nation.name == new_name, Nation.id != nation.id)
+        ).scalar_one_or_none()
+        if clash is not None:
+            return RedirectResponse(
+                url="/nation/settings?error=Nation+name+already+taken",
+                status_code=303,
+            )
+
+    # Sanity bounds on the currency code (used as a short tag in tables).
+    if new_currency_code and (len(new_currency_code) > 8 or len(new_currency_code) < 2):
+        return RedirectResponse(
+            url="/nation/settings?error=Currency+code+must+be+2-8+characters",
+            status_code=303,
+        )
+
+    nation.name = new_name
+    nation.currency_name = new_currency_name
+    nation.currency_code = new_currency_code
+    db.commit()
+
+    return RedirectResponse(
+        url="/nation/settings?success=Nation+settings+updated",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /nation/treasury — Nation leader treasury dashboard
 # ---------------------------------------------------------------------------
 @router.get("/nation/treasury")
