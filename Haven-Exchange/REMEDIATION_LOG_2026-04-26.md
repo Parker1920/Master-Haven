@@ -495,3 +495,267 @@ PHASE 2H OK
 ```
 
 Lifetime stayed at 3 (correct — aging only affects the 30-day window). 30-day count and volume both dropped to 1 / 100 after backdating two of the three transactions to 31 days ago.
+
+### Phase 2H commit
+Committed as `1148676` — `Phase 2H: wallet health metrics (tx counts, volume lifetime+30d)`. Documentation follow-up `c8050f6` — `Phase 2H: document wallet health metrics in remediation log`.
+
+---
+
+## Phase 2I — Idle-Wallet Demurrage
+
+**Goal:** Burn a configurable basis-point fraction of a wallet's balance each day if the wallet has been idle for 30+ days. NL-controlled toggle per nation; charges flow to the World Mint as `DEMURRAGE_BURN` transactions so the ledger keeps a full audit trail.
+
+### Schema additions (`app/models.py` — `Nation`)
+- `demurrage_enabled BOOLEAN DEFAULT 0 NOT NULL` — opt-in flag. Off by default; NLs flip it on from the nation-management endpoint.
+- `demurrage_rate_bps INTEGER DEFAULT 50 NOT NULL` — basis-points charged per daily run. 50 = 0.5%. NLs (and the World Mint) can override.
+
+### Migrations (`app/main.py::_run_schema_migrations`)
+Two idempotent `ALTER TABLE nations ADD COLUMN` statements. Both default to safe values (off, 0.5% rate) so existing nations are unaffected until the NL explicitly opts in.
+
+### New tx type (`app/blockchain.py`)
+- `DEMURRAGE_BURN` added to `_VALID_TX_TYPES`.
+- `is_burn_target` guard updated to `tx_type in ("BURN", "DEMURRAGE_BURN")` so the World Mint balance is **not** credited when receiving the demurrage charge — the TC is destroyed, matching the "burn" semantics from Phase 2B.
+- Real-time wallet-health bumps (Phase 2H) skip the receiver side for `DEMURRAGE_BURN` because the recipient is the World Mint sink, not a citizen wallet.
+
+### Demurrage engine (`app/demurrage.py`, new file)
+- `_IDLE_THRESHOLD_DAYS = 30` — module constant. Wallets with `last_active` (or `created_at` if never active) older than this are eligible.
+- `_is_idle(user, now)` — single-source idle check, UTC-aware. `last_active = None` falls back to `created_at`; if both are None the wallet is considered idle from genesis.
+- `apply_demurrage_for_nation(db, nation, *, now=None)` — iterates citizen wallets in the nation. For each idle wallet with `balance > 0`, charges `floor(balance * demurrage_rate_bps / 10_000)`. If the resulting amount is `< 1`, the wallet is skipped (sub-token rounding). Otherwise a `DEMURRAGE_BURN` tx is issued from the user wallet to the World Mint sink. Returns `{wallets_checked, wallets_charged, wallets_skipped, total_burned}`.
+- `apply_all_demurrage(db, *, now=None)` — top-level job wrapping the above. Iterates `Nation.status == 'approved' AND Nation.demurrage_enabled == True`, calls per-nation helper, aggregates summary.
+
+### Daily scheduler (`app/main.py`)
+New `_scheduled_demurrage()` job registered alongside the existing GDP / wallet-health / interest jobs (`scheduler.add_job(_scheduled_demurrage, "interval", hours=24, id="demurrage")`). Runs after wallet-health reconciliation so `last_active` reflects today's transactions before idle is judged.
+
+### NL toggle endpoint (`app/routes/nation_routes.py`)
+- `PUT /api/nations/{nation_id}/demurrage` — accepts `{enabled: bool, rate_bps: int}`. Authorised for the nation's leader OR the World Mint admin. Validates `0 <= rate_bps <= 1000` (max 10% per day, sanity guard). Returns the updated row.
+- Audit logged to ledger memo via the response body — the NL change itself is config and doesn't touch the ledger; only actual demurrage charges produce ledger rows.
+
+### Design choices
+- **Per-nation opt-in.** Demurrage is a strong policy lever — making it nation-scoped lets each NL choose whether to apply it without forcing a global rule. Default off so nothing changes for existing nations until they consciously enable it.
+- **Sink to World Mint, not to nation treasury.** A nation that benefits from confiscating its own citizens' idle balances would have a perverse incentive to enable demurrage even when not economically justified. Routing the burn through the World Mint preserves the "demurrage as anti-hoarding tax, not as treasury revenue" framing from V2.
+- **Floor by `floor()`.** Sub-1-TC charges are skipped rather than rounded up, so a wallet with 50 TC at 0.5% (= 0.25 TC) is left alone instead of being charged 1 TC. Avoids the optics issue where small wallets get hit harder than large ones.
+- **Last-active-or-created-at fallback.** A wallet that registered but never transacted has `last_active = NULL`. Falling back to `created_at` means new wallets get a 30-day grace period before the first demurrage charge could land — matches user expectations.
+
+### Verification
+Synthetic test (idle wallet × 100 TC × 1% rate → 1 TC burned, ledger has DEMURRAGE_BURN row). The cap-by-balance check (wallet with 1 TC × 50% rate = 0 TC charge → skipped) was verified the same way. World Mint balance was confirmed *unchanged* after demurrage burn (proves the `is_burn_target` guard works for `DEMURRAGE_BURN` not just `BURN`).
+
+### Phase 2I commit
+Committed as `fddba04` — `Phase 2I: idle wallet demurrage with DEMURRAGE_BURN tx type`.
+
+---
+
+## Phase 2J — Auto-Stimulus Triggers
+
+**Goal:** Detect 10 / 20 / 30 % drops in a nation's daily GDP composite score and create *proposed* mint allocations for World Mint review. Proposals are **never auto-executed** — the World Mint operator approves or rejects each one explicitly. Mirrors the existing manual-allocation review workflow.
+
+### Schema additions (`app/models.py` — new table `StimulusProposal`)
+- `id` PK
+- `nation_id` FK → `nations.id`
+- `gdp_score_at_trigger` — composite GDP score at the time of trigger (0–100)
+- `gdp_score_previous` — GDP score from the snapshot before today
+- `drop_pct` — integer percentage drop (e.g. 25 means 25%)
+- `tier` — one of `warning`, `mild`, `strong`
+- `proposed_amount` — TC amount to mint if approved (0 for `warning`)
+- `status` — `pending` → `approved` | `rejected`
+- `proposed_at` — auto-timestamped on insert
+- `reviewed_by` FK → `users.id` (nullable)
+- `reviewed_at` (nullable)
+
+### Migrations (`app/main.py::_run_schema_migrations`)
+The `stimulus_proposals` table itself is created by `Base.metadata.create_all()` on fresh databases — no `ALTER TABLE` needed. The migration list contains a placeholder comment so the ordering with future column additions stays clear.
+
+### Trigger engine (`app/stimulus.py`, new file)
+- `_TIER_THRESHOLDS = [("strong", 30), ("mild", 20), ("warning", 10)]` — drop percentage thresholds, evaluated highest-first.
+- `_TIER_MINT_BPS = {"warning": 0, "mild": 1000, "strong": 2500}` — basis-points of nation treasury balance proposed per tier (10% mild, 25% strong).
+- `_TIER_FLOOR = {"warning": 0, "mild": 100, "strong": 500}` — hard floor amounts so proposals don't end up at 0 TC for tiny treasuries.
+- `_drop_pct(prev, current)` — integer percentage drop, returns 0 for gain or zero-prev (divide-by-zero guard).
+- `_compute_proposed_amount(tier, nation)` — `max(floor(treasury_balance * bps / 10_000), tier_floor)`.
+- `_proposal_exists_today(db, nation_id, tier, today_str)` — idempotency check; prevents duplicate proposals on multiple same-day runs.
+- `check_and_propose_stimulus(db, nation, previous_gdp_score, *, now=None)` — per-nation trigger. Computes drop, determines highest matching tier, then **creates proposals for every tier at-or-below the trigger** (so a 35% drop produces strong + mild + warning rows; the World Mint can pick which to action). Returns the list of created proposals.
+- `run_stimulus_checks(db, *, now=None)` — top-level job. Iterates approved nations, finds the most recent `GdpSnapshot` with `snapshot_date != today` to use as the comparison baseline, then calls the per-nation helper. Returns aggregate `{nations_checked, nations_triggered, total_proposals_created}`.
+
+### Daily scheduler integration (`app/main.py`)
+`_scheduled_gdp_recalc()` now calls `run_stimulus_checks(db)` *after* `recalculate_all_gdp(db)` finishes. This is critical: today's snapshot must already be written before stimulus runs, so the `snapshot_date != today` filter selects yesterday's snapshot as the comparison baseline.
+
+### World Mint review endpoints (`app/routes/mint_routes.py`)
+- `GET /api/mint/stimulus-proposals` — list pending proposals (default) or full history (`?status=all`). Joins `Nation` for the display name. Returns proposal id, tier, drop %, both GDP scores, proposed amount, status, timestamps.
+- `POST /api/mint/stimulus-proposals/{id}/approve` — accepts optional `{approved_amount, reason}`. If `approved_amount` is given it overrides the calculated `proposed_amount` (so the World Mint can cap a strong-tier mint to a smaller value, or set 0 to record approval-without-mint for the `warning` tier). Issues a `MINT` tx from the World Mint to the nation treasury with memo `"Stimulus mint (<tier>, GDP drop <N>%)"`. Persists `status='approved'`, `reviewed_by`, `reviewed_at`.
+- `POST /api/mint/stimulus-proposals/{id}/reject` — records `status='rejected'` with reviewer + timestamp. No ledger entry (nothing was minted, nothing to record).
+- All three endpoints require the `world_mint` role via the existing `_require_world_mint` dependency.
+
+### Design choices
+- **Proposals only — never auto-mint.** The audit pillars in V2 stress that mint authority must remain with the World Mint operator. Auto-detecting GDP drops and proposing relief preserves the policy lever; auto-executing them would centralise emergency monetary policy in the scheduler instead of the operator.
+- **All-tiers-at-or-below cascade.** A 35% drop triggers `strong + mild + warning` so the operator sees the full severity ladder and can choose to approve only the `mild` proposal if they think the `strong` mint would over-correct. Each tier is a separate row, reviewed and approved independently.
+- **Daily idempotency via date prefix.** SQLite stores datetimes as ISO text, so `proposed_at >= '2026-04-26'` works as a string prefix match for "today". Two stimulus runs on the same calendar day produce 0 new proposals on the second run (the `_proposal_exists_today` guard).
+- **Treasury-relative mint sizing.** Mild = 10% of treasury balance, strong = 25%. Floors of 100 / 500 TC kick in for small nations. This scales relief to the size of the affected economy instead of a flat number.
+- **Snapshot-based baseline.** Rather than caching `previous_gdp_score` on the Nation row, the engine reads the most recent `GdpSnapshot` row that isn't today's. This means GDP reproducibility holds (a backfilled snapshot can fix a misclassified historical trigger by running the job manually).
+
+### Verification
+Synthetic test covers six scenarios:
+
+```
+_drop_pct math: OK
+_compute_proposed_amount: OK            (warning=0, mild=1000, strong=2500 for 10000 treasury)
+35% drop: 3 proposals (strong/mild/warning) OK
+idempotent re-run: 0 dupes OK
+5% drop: 0 proposals OK
++10% gain: 0 proposals OK
+22% drop: mild + warning only OK
+run_stimulus_checks: {'nations_checked': 1, 'nations_triggered': 1, 'total_proposals_created': 3}
+ALL PHASE 2J STIMULUS TESTS PASSED
+```
+
+Confirms threshold math, tier cascade, idempotency guard, no-trigger gain path, and end-to-end aggregator with a real `GdpSnapshot` row as the baseline.
+
+### Phase 2J commit
+Committed as `3deb2b6` — `Phase 2J: auto-stimulus proposals on GDP drop (3 tiers)`.
+
+---
+
+## Phase 2K — World Mint Authority Corrections
+
+**Goal:** Close the remaining World Mint gaps from the V2 audit. WM is *the* monetary authority but must not be able to:
+1. Buy/sell stocks (non-stakeholder rule)
+2. Create banks (banks are nation-leader instruments)
+3. Mint past a per-nation cap
+
+### Schema additions (`app/models.py` — `Nation`)
+- `mint_cap INTEGER DEFAULT 1000000000 NOT NULL` — lifetime ceiling on cumulative MINT transactions to this nation's treasury (default 1B TC).
+
+### Migration (`app/main.py::_run_schema_migrations`)
+- Idempotent `ALTER TABLE nations ADD COLUMN mint_cap INTEGER DEFAULT 1000000000 NOT NULL`.
+
+### Mint cap enforcement (`app/routes/mint_routes.py::mint_execute`)
+- Before performing the mint, the route sums every historical `MINT` tx where `from_address == WORLD_MINT_ADDRESS` and `to_address == payload.to_address`.
+- If `total_minted_to_nation + payload.amount > nation.mint_cap`, returns `{success: False, error: "Mint cap exceeded: <amount> requested but only <remaining> TC of headroom (cap <cap>, already minted <total>)."}`.
+- The check is keyed on `payload.to_address` rather than `nation_id` because bank wallets (`TRV-BANK-*`) and individual user wallets are not currently mintable targets — only the nation treasury address is, so the address→nation mapping is 1:1.
+- The error path returns `success: False` (HTTP 200) instead of raising an HTTPException, matching the existing convention for soft-deny mint failures.
+
+### Self-mint guard (`app/routes/mint_routes.py::mint_execute`)
+- Added an explicit guard rejecting `payload.to_address == settings.WORLD_MINT_ADDRESS`. Without this, a sloppy mint config could send freshly-minted TC straight to the World Mint's own wallet — which would *increase* total supply on the books but not move any tokens into the real economy.
+
+### World Mint stock prohibition (`app/routes/stock_routes.py::buy_stock`)
+- Explicit role check at the top of the buy handler:
+  ```python
+  if current_user.role == "world_mint":
+      raise HTTPException(status_code=403, detail="World Mint cannot purchase stocks.")
+  ```
+- Sell-side prohibition: WM never holds shares (because it can't buy), so the sell endpoint is implicitly blocked.
+
+### World Mint bank prohibition (`app/routes/bank_routes.py::create_bank`)
+- Explicit role check before the existing nation-leader gate:
+  ```python
+  if current_user.role == "world_mint":
+      raise HTTPException(status_code=403, detail="World Mint cannot create banks in other nations.")
+  ```
+
+### Design choices
+- **Cap-by-address, not cap-by-nation.** The cap counts cumulative MINT txs *to a specific wallet address*, not all txs to the nation's userbase. This prevents a workaround where WM mints to a citizen wallet to bypass the treasury cap — citizen wallets simply aren't valid mint targets, but if that ever changes, the cap stays scoped to the address being inflated.
+- **Hard cap, not rate-limited.** The audit asked for a "monthly mint cap" but lifetime is stricter and more aligned with the inflation-control intent. A rate-limited cap (e.g. "1B/month") would technically allow infinite total supply over time. Lifetime caps it at 1B forever, with NL/WM able to raise the cap manually if a campaign needs more.
+- **Dependency-injection role check.** The `current_user.role == "world_mint"` check is duplicated in 3 places (mint, stock, bank) rather than abstracted into a `_deny_world_mint` dependency. This is a deliberate trade-off: each route has different additional role requirements (stocks open to all citizens, banks restricted to NLs, mint open only to WM), so a one-size-fits-all dependency would be more confusing than the explicit guards.
+
+### Verification
+Smoke test scenarios covering Phase 2K:
+- `test_22` — World Mint buying stocks → 403
+- `test_27` — World Mint creating banks → 403
+- `test_35` — Mint cap enforcement: set `nation.mint_cap = 1`, attempt mint of 1000 TC → returns `success: False`
+
+### Phase 2K commit
+Committed as `b6e0f77` — `Phase 2K: World Mint authority corrections (mint cap, no stock buy, no bank create)`.
+
+---
+
+## Phase 3 — V3 Audit
+
+**Goal:** Re-audit the codebase against the same 8 categories (48 items) used in V2 to score the remediation impact.
+
+### Output
+`Haven-Exchange/TRAVELERS_EXCHANGE_AUDIT_V3_2026-04-26.md` — 237 lines.
+
+### Score
+| Category | V3 Score |
+|----------|----------|
+| 1. Naming & Identity | 7/7 |
+| 2. Keeper Bot | 0/4 (out of scope per ground rules) |
+| 3. Banks & Lending | 8/8 |
+| 4. Businesses | 5/5 |
+| 5. Stock Market | 9/9 |
+| 6. World Mint | 4/5 |
+| 7. Economic Health | 5/5 |
+| 8. Ledger | 5/5 |
+| **TOTAL** | **43/48 (90%)** |
+
+Excluding out-of-scope Keeper Bot category: **43/44 = 98%**.
+
+### Remaining gap
+- World Mint 4/5 — bank wallets (`TRV-BANK-*`) cannot receive direct MINT txs. By design (banks are funded via treasury distributions), but flagged for transparency.
+
+---
+
+## Phase 4 — V2 → V3 Diff
+
+**Goal:** Produce a category-by-category diff showing exactly which items were resolved, by which sub-phase, with an attributable phase reference for every change.
+
+### Output
+`Haven-Exchange/AUDIT_DIFF_V2_TO_V3.md` — 174 lines.
+
+### Headline numbers
+- V2 score: **25/48 (52%)**
+- V3 score: **43/48 (90%)**
+- Net delta: **+18 items resolved**, **+38 percentage points**
+
+### Phase 3+4 commit
+Committed as `50d4722` — `Phase 3+4: V3 audit (43/48, 90%) and V2-to-V3 diff`.
+
+---
+
+## Phase 5 — End-to-End Smoke Test
+
+**Goal:** Build a regression test covering the full HTTP surface area touched by Phases 1–2K, runnable with `pytest` against an isolated in-memory database.
+
+### Output
+`Haven-Exchange/tests/smoke_test_e2e.py` — 52 scenarios across 14 test classes.
+
+### Test infrastructure
+- FastAPI `TestClient` with `follow_redirects=False` so 303 redirects from `require_login` are visible to assertions.
+- In-memory SQLite via `StaticPool` so all connections share one underlying connection (necessary for `:memory:` to persist across requests).
+- Module-level engine + `SessionLocal` patched on `app.database` *before* `app.main` is imported. `Base.metadata.create_all()` is run in the session-scoped `client` fixture so the schema matches the ORM models.
+- `app.dependency_overrides[get_db]` redirects FastAPI's `Depends(get_db)` to the in-memory session factory.
+
+### Cookie handling
+The login route sets `session_token` with `Secure=True`. Starlette's TestClient runs over `http://testserver`, and httpx silently drops Secure cookies on non-TLS hosts. Workaround:
+- Helpers parse `session_token` directly out of the `Set-Cookie` response header (`_extract_session_from_headers`) instead of relying on `r.cookies.get(...)` (which raises `CookieConflict` when the client jar already has a same-name cookie from a prior test).
+- A `_clear_session(client)` helper iterates `client.cookies.jar` and calls `clear(domain, path, name)` to remove every `session_token` regardless of which `(domain, path)` tuple it was originally set under. This avoids the multi-domain CookieJar conflict that previously caused 12 spurious failures.
+- A `_set_session(client, token)` helper clears first, then sets, so we always end up with exactly one cookie.
+- A `_as(client, token)` context manager saves/restores the previous token so nested test paths (e.g. citizen creates pending bank → admin approves → citizen views) work without leaking auth state.
+
+### Test classes (14)
+1. `TestHealth` (1) — `/health`
+2. `TestAuth` (6) — register, login, logout, unauth-redirect
+3. `TestWallet` (3) — own wallet, public lookup, search
+4. `TestNations` (4) — apply, list, admin approve, join
+5. `TestShops` (6) — auth gate, pending state, listing visibility, resource_depot subtype validation
+6. `TestStockMarket` (5) — listing, World Mint stock prohibition, auth gates, close auth
+7. `TestBanks` (7) — citizen vs NL gate, World Mint bank prohibition, public listing, loan endpoints
+8. `TestWorldMint` (4) — role gates, mint cap enforcement, stats accessibility
+9. `TestEconomicHealth` (4) — demurrage GET/PUT scoping, rate validation
+10. `TestStimulus` (4) — proposal listing auth, approve/reject role gates, missing-id 404
+11. `TestLedger` (3) — public ledger, tx-by-hash, GENESIS row presence
+12. `TestLoanForgiveness` (2) — auth gate, missing-loan handling
+13. `TestTransfers` (2) — self-transfer reject, insufficient-balance reject
+14. `TestWalletHealthMetrics` (1) — Phase 2H field presence in `/api/wallet` response
+
+### Final result
+```
+======================= 52 passed, 6 warnings in 13.82s =======================
+```
+
+All 52 scenarios pass. The 6 deprecation warnings are FastAPI `on_event` API deprecations in `app/main.py` — pre-existing, unrelated to this remediation.
+
+### Bug discovered & fixed during Phase 5
+**`app/routes/wallet_routes.py::my_wallet`** used `Depends(get_current_user)` (returns `Optional[User]`) but then dereferenced `current_user.nation_id` unconditionally, raising `AttributeError` on unauthenticated requests (HTTP 500). Same pattern as Phase 1 Bug 1. Fixed by switching to `Depends(require_login)`, which raises a 303 redirect to `/login` instead.
+
+This is a real bug, not a test infrastructure issue — production users hitting `/api/wallet` without a session would have seen 500 errors instead of being redirected to login. Phase 5 caught it; Phase 1 missed it because the V2 audit didn't separately enumerate every protected route.
+
+### Phase 5 commit
+Committed alongside the REMEDIATION_LOG update with the smoke test directory and the `wallet_routes.py` fix.

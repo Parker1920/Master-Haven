@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import require_login
 from app.blockchain import get_transactions_for_address
 from app.config import settings
 from app.database import get_db
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/wallet", tags=["wallets"])
 @router.get("")
 def my_wallet(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
     """Return the authenticated user's wallet details."""
     nation_name = None
