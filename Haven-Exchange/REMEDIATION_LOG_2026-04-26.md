@@ -796,4 +796,42 @@ The following classes of information were not written down at the time the phase
 These gaps do not block merge — the surviving log is authoritative for what was implemented and why at a structural level. They are flagged here so any future phase that relies on the log for "why didn't we do it this other way?" knows to fall back to code archaeology rather than treating the log as exhaustive.
 
 ### Phase A commit
-Documentation-only change. No code touched.
+Documentation-only change. No code touched. Committed as `9905811`.
+
+---
+
+## Phase B — Interest Cap Behavior Verification (2026-04-27)
+
+**Goal:** Resolve the ambiguity in the Locked Decisions doc's "100%
+interest cap" rule. The Phase 2A implementation chose a lifetime cap
+without flagging that a running-balance cap was an equally valid reading
+of the spec. Phase B documents both readings, identifies which is in
+the code today, and describes the minimal patch to switch.
+
+### Output
+`Haven-Exchange/INTEREST_CAP_BEHAVIOR.md`.
+
+### Findings
+
+- **Currently implemented: Interpretation 1 (lifetime cap).** Once
+  `interest_frozen` flips to True it never flips back. Borrower payments
+  reduce `accrued_interest` but no further interest is ever accrued for
+  that loan. Cited code: `app/interest.py:59`, `:70-73`, `:97-101`,
+  `:127`. `pay_loan` in `bank_routes.py:1037` reduces accrued interest
+  but never touches the flag.
+- **Alternative: Interpretation 2 (running-balance cap).** Switching
+  requires two minimal changes: (1) drop the `interest_frozen` filter
+  from the daily-job select and the early-return in `_accrue_loan`,
+  (2) reset `interest_frozen` to False in `pay_loan` after a successful
+  interest payment that moves `accrued_interest` below `cap_amount`.
+- A 100-TC worked example over 200 days shows Interpretation 1 charging
+  the borrower a total of 100 TC in interest (= cap), while
+  Interpretation 2 charges 200 TC and continues climbing as the borrower
+  cycles through pay-downs.
+
+### What was NOT changed
+No code modified. Phase B is documentation only — Parker's call which
+interpretation to keep.
+
+### Phase B commit
+Committed as `Phase B: document interest cap behavior interpretations`.
