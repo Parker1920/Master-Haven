@@ -438,3 +438,60 @@ Two idempotent `ALTER TABLE stocks ADD COLUMN` statements appended after the Pha
 
 ### Phase 2E-2G commit
 Committed as `Phase 2E-2G: per-business GDP, resource depot subtype, stock closure`.
+
+---
+
+## Phase 2H — Wallet Health Metrics
+
+Audit V2 line 287: "`User.last_active` exists and is updated on every authenticated request, but there are no `transaction_count_lifetime`, `transaction_count_30d`, or `volume_30d` fields on the User model. These metrics are computed dynamically only within GDP calculation — not stored per-wallet."
+
+### Schema (User model)
+- `transaction_count_lifetime` (INTEGER, default 0, NOT NULL) — every confirmed user-side transaction increments this.
+- `transaction_count_30d` (INTEGER, default 0, NOT NULL) — kept warm in real time, decayed nightly to drop transactions that aged past the 30-day window.
+- `volume_lifetime` (INTEGER, default 0, NOT NULL) — cumulative TC moved through the wallet on either side since registration.
+- `volume_30d` (INTEGER, default 0, NOT NULL) — sum of TC moved through the wallet in the last 30 days. Same real-time + nightly-decay scheme as the count.
+- `wallet_health_last_calculated` (DATETIME, nullable) — timestamp of the last reconciliation run.
+
+### Migrations (main.py `_run_schema_migrations`)
+Five idempotent ALTER TABLE statements add the columns to existing `users` rows. Existing rows default to 0 / NULL; the daily reconciliation (or first transaction) backfills correct values.
+
+### Real-time bumps (blockchain.py)
+`create_transaction()` now captures `sender_user` and `receiver_user` references during the balance-update pass. Before commit, when the tx_type is anything other than `GENESIS`, both sides (if they are user wallets) receive:
+- `transaction_count_lifetime += 1`
+- `transaction_count_30d += 1`
+- `volume_lifetime += amount`
+- `volume_30d += amount`
+- `last_active = now`
+
+Nation-treasury and bank wallets are intentionally skipped — wallet health tracks per-citizen activity, and treasury/bank sides are summarised separately. `BURN` transactions to the World Mint sink correctly increment the sender side only (because there is no receiver user to credit).
+
+### Daily reconciliation (`app/wallet_health.py`)
+New module owning the decay job. `recalculate_wallet_health(db)`:
+1. Fetches all users.
+2. For each user, sums `count`/`volume` from `transactions` where `created_at >= now - 30d` AND tx_type != GENESIS AND (`from_address == addr` OR `to_address == addr`). Each side the wallet appears on counts independently — matches the real-time bump rule (a TRANSFER from alice to bob bumps both alice's count and bob's count by 1).
+3. For lifetime, runs the same query without the date filter and rewrites `transaction_count_lifetime` from the canonical ledger. Cheap (one extra query per user) and self-healing if the real-time counter ever drifts.
+4. Stamps `wallet_health_last_calculated = now`, commits.
+
+Job scheduled in `main.py` alongside the existing GDP/stock/interest jobs (`scheduler.add_job(_scheduled_wallet_health_recalc, "interval", hours=24, id="wallet_health_recalc")`).
+
+### Wallet route exposure (wallet_routes.py)
+Both `GET /api/wallet` (own wallet) and `GET /api/wallet/{address}` (public lookup) now return `last_active`, `transaction_count_lifetime`, `transaction_count_30d`, and `volume_30d` so the wallet detail page can render an at-a-glance health view.
+
+### Design choices
+
+- **Real-time bump + daily reconciliation, same pattern as Phase 2E.** Keeps the wallet view fresh on every transaction while ensuring counters decay correctly when activity ages past 30 days. Using a SUM-on-read instead would force a full scan of the ledger on every wallet page render — too expensive when this endpoint is hit on every wallet detail link.
+- **Each side counts independently.** A transfer from alice → bob bumps alice's count AND bob's count by 1. This matches the V2 audit phrasing ("transaction count involving nation members") and is what the existing GDP pillar already does (counts both `from_address.in_(addrs)` and `to_address.in_(addrs)`).
+- **Lifetime reconciled too (not just 30d).** Because the real-time counter is mutable, drift could accumulate from concurrent edits or DB crashes. Recomputing lifetime nightly costs one extra query per user and bounds drift to one day. Worth the cost.
+- **Nation/bank wallets excluded.** The audit text frames wallet health as a citizen-level metric. Nation treasuries already have their own activity surface (the GDP pillar). Banks have `total_deposits` / `total_loans` in their own row.
+
+### Verification
+End-to-end synthetic test (3 alice → bob 100-TC transfers, then aging two of them past 30 days):
+
+```
+after 3 tx: alice lifetime=3 30d=3 vol=300
+            bob   lifetime=3 30d=3 vol=300
+aged:       alice 30d=1     vol=100  lifetime=3
+PHASE 2H OK
+```
+
+Lifetime stayed at 3 (correct — aging only affects the 30-day window). 30-day count and volume both dropped to 1 / 100 after backdating two of the three transactions to 31 days ago.
