@@ -90,7 +90,7 @@ New table added via `Base.metadata.create_all`:
 | Loan repayment burn implemented | **IMPLEMENTED** | Phase 2B. Interest-only burn pool. During-payment: `floor(interest_portion × burn_rate × during_split_bps / 10000²)`. Close burn from bank reserves at loan close. `LOAN_PAYMENT` + up to two `BURN` txs per closing payment. |
 | Burn rate is 10% of interest paid | **IMPLEMENTED** | Phase 2B. `burn_rate_snapshot = 1000 bps = 10%` applied against `total_interest_paid` at close. No principal burn. |
 | Burn split is 20% during payments / 80% at close | **IMPLEMENTED** | Phase 2B. `interest_burn_rate_snapshot = 8000 bps` (80% at close). During-payment split = complement `2000 bps` (20%). `total_burned_during_payments` accumulated; close burn = `total_pool − total_burned_during_payments`. |
-| 100% interest cap on loans (max debt = 2× principal) | **IMPLEMENTED** | Phase 2A. `Loan.cap_amount = principal` at creation. `accrued_interest` never exceeds `cap_amount`. `interest_frozen` flips permanently when cap is reached. Daily `accrue_daily_interest()` job in `interest.py`. |
+| 100% interest cap on loans (max debt = 2× principal) | **IMPLEMENTED** | Phase 2A (cap behavior switched to Interpretation 2 in commit `d258b85`). `Loan.cap_amount = principal` at creation. `accrued_interest` never exceeds `cap_amount`. `interest_frozen` toggles based on running balance — flips True when cap is reached, False when payments draw `accrued_interest` below cap. See `INTEREST_CAP_BEHAVIOR.md`. Daily `accrue_daily_interest()` job in `interest.py`. |
 
 **Category score: 8/8 IMPLEMENTED. Previous CONFLICTS (burn split, interest accrual) and MISSING (treasury lending) all resolved.**
 
