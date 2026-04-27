@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Nation — {{ nation.name }} — World Mint{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Edit Nation Identity</h1>
+    <p class="page-subtitle">World Mint admin override</p>
+</div>
+
+<div class="btn-group mb-xl">
+    <a href="/mint/nations" class="btn btn-secondary">Back to Nation Directory</a>
+    <a href="/nations/{{ nation.id }}" class="btn btn-secondary">View Public Page</a>
+</div>
+
+{% if request.query_params.get('error') %}
+<div class="alert alert-danger mb-md">{{ request.query_params.get('error') | replace('+', ' ') }}</div>
+{% endif %}
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-header">
+        <h3>Nation #{{ nation.id }}</h3>
+    </div>
+    <div class="card-body">
+        <div class="stats-grid mb-lg" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value">{{ nation.member_count }}</div>
+                <div class="stat-label">Citizens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ nation.treasury_balance | format_number }}</div>
+                <div class="stat-label">Treasury Balance</div>
+            </div>
+        </div>
+
+        <form action="/mint/nations/{{ nation.id }}/edit-identity" method="POST"
+              data-confirm="Update identity for nation '{{ nation.name }}'? Existing wallet addresses and citizens are unaffected.">
+            <div class="form-group">
+                <label for="name">Nation Name</label>
+                <input type="text" id="name" name="name" required
+                       value="{{ nation.name }}" maxlength="100">
+                <span class="form-hint">
+                    Display name for this nation. Must be unique across all nations.
+                </span>
+            </div>
+
+            <div class="form-group">
+                <label for="currency_name">Currency Name</label>
+                <input type="text" id="currency_name" name="currency_name"
+                       value="{{ nation.currency_name or '' }}" maxlength="60"
+                       placeholder="e.g. Voyager Credits">
+                <span class="form-hint">
+                    Full name of this nation's local currency. Optional &mdash; leave blank to use the global default.
+                </span>
+            </div>
+
+            <div class="form-group">
+                <label for="currency_code">Currency Code (Tag)</label>
+                <input type="text" id="currency_code" name="currency_code"
+                       value="{{ nation.currency_code or '' }}" maxlength="8"
+                       placeholder="e.g. VGC" style="text-transform: uppercase;">
+                <span class="form-hint">
+                    Short ticker / tag (2&ndash;8 characters). Used in tables and ledger displays. Auto-uppercased.
+                </span>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Save Changes</button>
+        </form>
+
+        <hr style="border-color: var(--border); margin: var(--space-lg) 0;">
+
+        <div class="text-muted" style="font-size: 0.875rem;">
+            <p style="margin: 0 0 var(--space-sm) 0;"><strong>What this changes:</strong></p>
+            <ul style="margin: 0; padding-left: 1.25rem;">
+                <li>The nation's display name everywhere it appears.</li>
+                <li>The currency name and tag in shop, ledger, and stock listings.</li>
+            </ul>
+            <p style="margin: var(--space-md) 0 0 0;"><strong>What this does NOT change:</strong></p>
+            <ul style="margin: 0; padding-left: 1.25rem;">
+                <li>Treasury wallet address (still <code>{{ nation.treasury_address }}</code>).</li>
+                <li>Existing transactions, balances, or citizen accounts.</li>
+                <li>Approval status, GDP score, or mint cap.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

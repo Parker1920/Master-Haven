@@ -2146,6 +2146,136 @@ def mint_reject_nation_post(
 
 
 # ---------------------------------------------------------------------------
+# GET /mint/nations — World Mint nation directory (with edit links)
+# ---------------------------------------------------------------------------
+@router.get("/mint/nations")
+def mint_nations_directory(
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    """List every nation with its identity fields and an edit link.
+
+    World Mint admin can rename or re-tag any nation regardless of status.
+    """
+    nations = db.execute(
+        select(Nation).order_by(Nation.status, Nation.name)
+    ).scalars().all()
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="mint",
+        nations=nations,
+    )
+    return templates.TemplateResponse("mint/nations.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /mint/nations/{nation_id}/edit-identity — Identity edit form
+# ---------------------------------------------------------------------------
+@router.get("/mint/nations/{nation_id}/edit-identity")
+def mint_edit_nation_identity_form(
+    nation_id: int,
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        return RedirectResponse(
+            url="/mint/nations?error=Nation+not+found", status_code=303
+        )
+
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="mint",
+        nation=nation,
+    )
+    return templates.TemplateResponse("mint/nation_edit.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /mint/nations/{nation_id}/edit-identity — Process identity edit
+# ---------------------------------------------------------------------------
+@router.post("/mint/nations/{nation_id}/edit-identity")
+def mint_edit_nation_identity_post(
+    nation_id: int,
+    request: Request,
+    name: str = Form(...),
+    currency_name: str = Form(""),
+    currency_code: str = Form(""),
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    """World Mint may rename a nation and/or change its currency display
+    fields.  ``name`` is unique across nations — uniqueness is enforced
+    here so the user gets a clean 303 redirect with an error message
+    instead of a 500 from the constraint violation.
+    """
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        return RedirectResponse(
+            url="/mint/nations?error=Nation+not+found", status_code=303
+        )
+
+    # Normalise inputs.  Empty strings for the optional currency fields
+    # are converted back to NULL so the schema's nullable semantics hold.
+    new_name = (name or "").strip()
+    new_currency_name = (currency_name or "").strip() or None
+    new_currency_code = (currency_code or "").strip().upper() or None
+
+    if not new_name:
+        return RedirectResponse(
+            url=f"/mint/nations/{nation_id}/edit-identity?error=Name+is+required",
+            status_code=303,
+        )
+
+    # Uniqueness guard: if the name changed, ensure no other nation has it.
+    if new_name != nation.name:
+        clash = db.execute(
+            select(Nation).where(Nation.name == new_name, Nation.id != nation_id)
+        ).scalar_one_or_none()
+        if clash is not None:
+            return RedirectResponse(
+                url=(
+                    f"/mint/nations/{nation_id}/edit-identity"
+                    f"?error=Nation+name+already+taken+by+%23{clash.id}"
+                ),
+                status_code=303,
+            )
+
+    # Sanity bounds on the currency code (used as a short tag in tables).
+    if new_currency_code and (len(new_currency_code) > 8 or len(new_currency_code) < 2):
+        return RedirectResponse(
+            url=(
+                f"/mint/nations/{nation_id}/edit-identity"
+                f"?error=Currency+code+must+be+2-8+characters"
+            ),
+            status_code=303,
+        )
+
+    nation.name = new_name
+    nation.currency_name = new_currency_name
+    nation.currency_code = new_currency_code
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/mint/nations?success=Updated+nation+%23{nation_id}",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /mint/calculate-allocations — Calculate monthly allocations (page)
 # ---------------------------------------------------------------------------
 @router.post("/mint/calculate-allocations")

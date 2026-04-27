@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}World Mint — Nation Directory — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Nation Directory</h1>
+    <p class="page-subtitle">World Mint admin: rename or re-tag any nation</p>
+</div>
+
+<div class="btn-group mb-xl">
+    <a href="/mint" class="btn btn-secondary">Back to Mint Dashboard</a>
+</div>
+
+{% if request.query_params.get('success') %}
+<div class="alert alert-success mb-md">{{ request.query_params.get('success') | replace('+', ' ') }}</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+<div class="alert alert-danger mb-md">{{ request.query_params.get('error') | replace('+', ' ') }}</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h3>All Nations ({{ nations | length }})</h3>
+    </div>
+    <div class="card-body">
+        {% if nations %}
+        <div class="table-wrapper" style="border: none; border-radius: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Currency Name</th>
+                        <th>Currency Code (Tag)</th>
+                        <th>Status</th>
+                        <th>Citizens</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for n in nations %}
+                    <tr>
+                        <td>#{{ n.id }}</td>
+                        <td><strong>{{ n.name }}</strong></td>
+                        <td>{{ n.currency_name or '—' }}</td>
+                        <td>
+                            {% if n.currency_code %}
+                                <code>{{ n.currency_code }}</code>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="status-badge status-{{ n.status }}">{{ n.status }}</span>
+                        </td>
+                        <td>{{ n.member_count }}</td>
+                        <td>
+                            <a href="/mint/nations/{{ n.id }}/edit-identity" class="btn btn-sm btn-secondary">Edit</a>
+                            <a href="/nations/{{ n.id }}" class="btn btn-sm btn-secondary">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No nations registered yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
