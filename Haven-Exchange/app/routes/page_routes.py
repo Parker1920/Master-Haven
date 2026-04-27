@@ -738,9 +738,48 @@ def nation_settings_post(
             status_code=303,
         )
 
+    # If the new currency_code would collide with another stock's ticker,
+    # reject before any writes — keeps stocks.ticker globally unique.
+    if new_currency_code:
+        ticker_clash = db.execute(
+            select(Stock).where(
+                Stock.ticker == new_currency_code,
+                ~((Stock.stock_type == "nation") & (Stock.entity_id == nation.id)),
+            )
+        ).scalar_one_or_none()
+        if ticker_clash is not None:
+            return RedirectResponse(
+                url=(
+                    "/nation/settings?error=Ticker+"
+                    + new_currency_code
+                    + "+already+in+use+by+another+stock"
+                ),
+                status_code=303,
+            )
+
     nation.name = new_name
     nation.currency_name = new_currency_name
     nation.currency_code = new_currency_code
+
+    # Keep the matching nation Stock row in sync — `stocks.name` and
+    # `stocks.ticker` are denormalised copies that the exchange page reads
+    # directly, so they have to be updated whenever nation identity changes.
+    nation_stock = db.execute(
+        select(Stock).where(
+            Stock.stock_type == "nation",
+            Stock.entity_id == nation.id,
+        )
+    ).scalar_one_or_none()
+    if nation_stock is not None:
+        nation_stock.name = new_name
+        # Use the configured currency_code as the ticker.  If it's blank,
+        # regenerate from the new name.
+        if new_currency_code:
+            nation_stock.ticker = new_currency_code
+        else:
+            from app.valuation import generate_ticker
+            nation_stock.ticker = generate_ticker(new_name, db)
+
     db.commit()
 
     return RedirectResponse(
@@ -2376,9 +2415,45 @@ def mint_edit_nation_identity_post(
             status_code=303,
         )
 
+    # If the new currency_code would collide with another stock's ticker,
+    # reject before any writes — keeps stocks.ticker globally unique.
+    if new_currency_code:
+        ticker_clash = db.execute(
+            select(Stock).where(
+                Stock.ticker == new_currency_code,
+                ~((Stock.stock_type == "nation") & (Stock.entity_id == nation.id)),
+            )
+        ).scalar_one_or_none()
+        if ticker_clash is not None:
+            return RedirectResponse(
+                url=(
+                    f"/mint/nations/{nation_id}/edit-identity"
+                    f"?error=Ticker+{new_currency_code}+already+in+use+by+another+stock"
+                ),
+                status_code=303,
+            )
+
     nation.name = new_name
     nation.currency_name = new_currency_name
     nation.currency_code = new_currency_code
+
+    # Keep the matching nation Stock row in sync — `stocks.name` and
+    # `stocks.ticker` are denormalised copies that the exchange page reads
+    # directly, so they have to be updated whenever nation identity changes.
+    nation_stock = db.execute(
+        select(Stock).where(
+            Stock.stock_type == "nation",
+            Stock.entity_id == nation.id,
+        )
+    ).scalar_one_or_none()
+    if nation_stock is not None:
+        nation_stock.name = new_name
+        if new_currency_code:
+            nation_stock.ticker = new_currency_code
+        else:
+            from app.valuation import generate_ticker
+            nation_stock.ticker = generate_ticker(new_name, db)
+
     db.commit()
 
     return RedirectResponse(

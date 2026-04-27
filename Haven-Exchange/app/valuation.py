@@ -90,7 +90,21 @@ def create_nation_stock(db, nation: Nation) -> Stock:
     if existing is not None:
         return existing
 
-    ticker = generate_ticker(nation.name, db)
+    # Prefer the nation's configured currency_code as the ticker.  Fall back
+    # to the auto-generated ticker if currency_code is unset, blank, or
+    # collides with another stock's ticker.
+    desired = (nation.currency_code or "").strip().upper()
+    if desired and 2 <= len(desired) <= 8:
+        clash = db.execute(
+            select(Stock).where(Stock.ticker == desired)
+        ).scalar_one_or_none()
+        if clash is None:
+            ticker = desired
+        else:
+            ticker = generate_ticker(nation.name, db)
+    else:
+        ticker = generate_ticker(nation.name, db)
+
     stock = Stock(
         ticker=ticker,
         name=nation.name,
