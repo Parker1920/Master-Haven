@@ -272,11 +272,54 @@ def _gather_gdp_maxes(db: Session) -> dict:
 # ---------------------------------------------------------------------------
 # Recalculate all nations
 # ---------------------------------------------------------------------------
+def _calculate_shop_gdp_contribution(db: Session, shop: Shop) -> int:
+    """Sum 30-day PURCHASE inflow to the given shop's owner wallet.
+
+    Returns the running 30-day GDP contribution in TC.  Used by the daily
+    GDP job to update ``Shop.gdp_contribution_30d`` and to rank shops in
+    the marketplace by economic contribution rather than recency.
+    """
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    owner = db.execute(
+        select(User).where(User.id == shop.owner_id)
+    ).scalar_one_or_none()
+    if owner is None:
+        return 0
+    return (
+        db.execute(
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                Transaction.tx_type == "PURCHASE",
+                Transaction.created_at >= thirty_days_ago,
+                Transaction.to_address == owner.wallet_address,
+            )
+        ).scalar()
+        or 0
+    )
+
+
+def recalculate_all_shop_contributions(db: Session) -> int:
+    """Refresh ``Shop.gdp_contribution_30d`` for every shop in the system.
+
+    Includes pending/rejected shops too — the contribution is purely an
+    audit metric of historical revenue and is independent of approval state.
+    Returns the number of shops touched.
+    """
+    now = datetime.now(timezone.utc)
+    shops = list(db.execute(select(Shop)).scalars().all())
+    for shop in shops:
+        shop.gdp_contribution_30d = _calculate_shop_gdp_contribution(db, shop)
+        shop.gdp_last_calculated = now
+    db.commit()
+    return len(shops)
+
+
 def recalculate_all_gdp(db: Session) -> int:
     """Recalculate GDP for every approved nation.
 
     Saves a GdpSnapshot per nation and updates the cached columns on the
-    Nation row.  Returns the number of nations recalculated.
+    Nation row.  Also refreshes per-shop ``gdp_contribution_30d`` so the
+    marketplace ranking stays in sync.  Returns the number of nations
+    recalculated.
     """
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
@@ -311,6 +354,13 @@ def recalculate_all_gdp(db: Session) -> int:
         )
         db.add(snapshot)
         count += 1
+
+    # Phase 2E: refresh per-shop GDP contribution so the marketplace
+    # ranking reflects the same 30-day window the nation pillar uses.
+    shops = list(db.execute(select(Shop)).scalars().all())
+    for shop in shops:
+        shop.gdp_contribution_30d = _calculate_shop_gdp_contribution(db, shop)
+        shop.gdp_last_calculated = now
 
     db.commit()
     return count

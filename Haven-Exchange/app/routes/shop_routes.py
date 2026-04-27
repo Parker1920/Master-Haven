@@ -4,6 +4,8 @@ Travelers Exchange — Marketplace & Shop Routes
 Provides API endpoints for shop management, listing CRUD, and purchases.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -23,9 +25,14 @@ VALID_CATEGORIES = {"service", "coordinates", "item", "other"}
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
+VALID_SHOP_TYPES = {"general", "resource_depot"}
+
+
 class CreateShopRequest(BaseModel):
     name: str
     description: str | None = None
+    shop_type: str = "general"
+    mining_setup: str | None = None
 
 
 class CreateListingRequest(BaseModel):
@@ -43,20 +50,35 @@ class UpdateListingRequest(BaseModel):
     is_available: bool | None = None
 
 
+class RejectShopRequest(BaseModel):
+    reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # GET /api/shops — list all active shops
 # ---------------------------------------------------------------------------
 @router.get("")
 def list_shops(
     nation_id: int | None = Query(None),
+    type: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    conditions = [Shop.is_active == True]  # noqa: E712
+    conditions = [Shop.status == "approved", Shop.is_active == True]  # noqa: E712
     if nation_id is not None:
         conditions.append(Shop.nation_id == nation_id)
+    if type is not None:
+        conditions.append(Shop.shop_type == type)
 
+    # Phase 2E: rank by 30-day GDP contribution (highest first).  Shops
+    # tied at 0 contribution (newly approved, no sales yet) fall back to
+    # creation order so brand-new shops aren't permanently buried at the
+    # bottom of the listing.
     shops = list(
-        db.execute(select(Shop).where(*conditions).order_by(Shop.created_at.desc()))
+        db.execute(
+            select(Shop)
+            .where(*conditions)
+            .order_by(Shop.gdp_contribution_30d.desc(), Shop.created_at.desc())
+        )
         .scalars()
         .all()
     )
@@ -83,6 +105,7 @@ def list_shops(
                 "id": shop.id,
                 "name": shop.name,
                 "description": shop.description,
+                "shop_type": shop.shop_type,
                 "owner_name": (
                     owner.display_name or owner.username if owner else "Unknown"
                 ),
@@ -90,7 +113,69 @@ def list_shops(
                 "nation_name": nation.name if nation else "Unknown",
                 "total_sales": shop.total_sales,
                 "total_revenue": shop.total_revenue,
+                "gdp_contribution_30d": shop.gdp_contribution_30d,
                 "listing_count": listing_count,
+                "created_at": shop.created_at.isoformat() if shop.created_at else None,
+            }
+        )
+
+    return {"shops": result}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/shops/pending — list shops awaiting NL approval
+# NL sees pending shops for their nation; world_mint sees all pending shops.
+# ---------------------------------------------------------------------------
+@router.get("/pending")
+def list_pending_shops(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    if current_user.role == "world_mint":
+        shops = list(
+            db.execute(
+                select(Shop).where(Shop.status == "pending").order_by(Shop.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+    else:
+        # Must be NL of an approved nation
+        if current_user.nation_id is None:
+            raise HTTPException(status_code=403, detail="Not a nation leader")
+        nation = db.execute(
+            select(Nation).where(Nation.id == current_user.nation_id)
+        ).scalar_one_or_none()
+        if nation is None or nation.leader_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Only nation leaders can view pending shops")
+        shops = list(
+            db.execute(
+                select(Shop).where(
+                    Shop.status == "pending",
+                    Shop.nation_id == current_user.nation_id,
+                ).order_by(Shop.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+
+    result = []
+    for shop in shops:
+        owner = db.execute(
+            select(User).where(User.id == shop.owner_id)
+        ).scalar_one_or_none()
+        nation = db.execute(
+            select(Nation).where(Nation.id == shop.nation_id)
+        ).scalar_one_or_none()
+        result.append(
+            {
+                "id": shop.id,
+                "name": shop.name,
+                "description": shop.description,
+                "status": shop.status,
+                "owner_name": owner.display_name or owner.username if owner else "Unknown",
+                "nation_id": shop.nation_id,
+                "nation_name": nation.name if nation else "Unknown",
                 "created_at": shop.created_at.isoformat() if shop.created_at else None,
             }
         )
@@ -137,6 +222,8 @@ def get_shop(
         "id": shop.id,
         "name": shop.name,
         "description": shop.description,
+        "shop_type": shop.shop_type,
+        "mining_setup": shop.mining_setup,
         "owner_name": owner.display_name or owner.username if owner else "Unknown",
         "nation_id": shop.nation_id,
         "nation_name": nation.name if nation else "Unknown",
@@ -144,6 +231,10 @@ def get_shop(
         "gdp_multiplier": gdp_mult,
         "total_sales": shop.total_sales,
         "total_revenue": shop.total_revenue,
+        "gdp_contribution_30d": shop.gdp_contribution_30d,
+        "gdp_last_calculated": (
+            shop.gdp_last_calculated.isoformat() if shop.gdp_last_calculated else None
+        ),
         "is_active": shop.is_active,
         "created_at": shop.created_at.isoformat() if shop.created_at else None,
         "listings": [
@@ -194,17 +285,41 @@ def create_shop(
     if not name:
         raise HTTPException(status_code=400, detail="Shop name cannot be empty")
 
+    shop_type = payload.shop_type or "general"
+    if shop_type not in VALID_SHOP_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid shop_type. Must be one of: {', '.join(sorted(VALID_SHOP_TYPES))}",
+        )
+    mining_setup = payload.mining_setup.strip() if payload.mining_setup else None
+    if shop_type == "resource_depot" and not mining_setup:
+        raise HTTPException(
+            status_code=400,
+            detail="mining_setup is required for resource_depot shops",
+        )
+
     shop = Shop(
         owner_id=current_user.id,
         nation_id=current_user.nation_id,
         name=name,
         description=payload.description.strip() if payload.description else None,
+        shop_type=shop_type,
+        mining_setup=mining_setup,
+        status="pending",
+        is_active=False,
     )
     db.add(shop)
     db.commit()
     db.refresh(shop)
 
-    return {"success": True, "shop_id": shop.id, "name": shop.name}
+    return {
+        "success": True,
+        "shop_id": shop.id,
+        "name": shop.name,
+        "shop_type": shop.shop_type,
+        "status": "pending",
+        "message": "Shop created and is pending Nation Leader approval before going live.",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +424,12 @@ def buy_listing(
 
     shop.total_sales += 1
     shop.total_revenue += listing.price
+    # Phase 2E: keep the marketplace ranking warm in real time.  The full
+    # 30-day window is still recomputed by the daily GDP job (which also
+    # decays purchases that age past 30 days); this just means a fresh
+    # sale moves the shop up immediately rather than at the next tick.
+    shop.gdp_contribution_30d = (shop.gdp_contribution_30d or 0) + listing.price
+    shop.gdp_last_calculated = datetime.now(timezone.utc)
     db.commit()
 
     # Cross-nation conversion info
@@ -381,3 +502,112 @@ def update_listing(
 
     db.commit()
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shops/{shop_id}/approve — NL approves a pending shop
+# ---------------------------------------------------------------------------
+@router.post("/{shop_id}/approve")
+def approve_shop(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == shop.nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=500, detail="Shop's nation not found")
+
+    if current_user.role != "world_mint" and current_user.id != nation.leader_id:
+        raise HTTPException(
+            status_code=403, detail="Only the nation leader or World Mint can approve shops"
+        )
+
+    if shop.status == "approved":
+        raise HTTPException(status_code=400, detail="Shop is already approved")
+
+    shop.status = "approved"
+    shop.is_active = True
+    shop.approved_by = current_user.id
+    shop.approved_at = datetime.now(timezone.utc)
+    shop.rejected_reason = None
+    db.commit()
+
+    return {"success": True, "shop_id": shop.id, "status": "approved"}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shops/{shop_id}/reject — NL rejects a pending shop
+# ---------------------------------------------------------------------------
+@router.post("/{shop_id}/reject")
+def reject_shop(
+    shop_id: int,
+    payload: RejectShopRequest = RejectShopRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == shop.nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=500, detail="Shop's nation not found")
+
+    if current_user.role != "world_mint" and current_user.id != nation.leader_id:
+        raise HTTPException(
+            status_code=403, detail="Only the nation leader or World Mint can reject shops"
+        )
+
+    if shop.status == "approved":
+        raise HTTPException(status_code=400, detail="Cannot reject an already-approved shop; use suspend instead")
+
+    shop.status = "rejected"
+    shop.is_active = False
+    shop.rejected_reason = payload.reason
+    db.commit()
+
+    return {"success": True, "shop_id": shop.id, "status": "rejected"}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shops/{shop_id}/suspend — NL suspends an approved shop
+# ---------------------------------------------------------------------------
+@router.post("/{shop_id}/suspend")
+def suspend_shop(
+    shop_id: int,
+    payload: RejectShopRequest = RejectShopRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == shop.nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=500, detail="Shop's nation not found")
+
+    if current_user.role != "world_mint" and current_user.id != nation.leader_id:
+        raise HTTPException(
+            status_code=403, detail="Only the nation leader or World Mint can suspend shops"
+        )
+
+    if shop.status == "suspended":
+        raise HTTPException(status_code=400, detail="Shop is already suspended")
+
+    shop.status = "suspended"
+    shop.is_active = False
+    shop.rejected_reason = payload.reason
+    db.commit()
+
+    return {"success": True, "shop_id": shop.id, "status": "suspended"}

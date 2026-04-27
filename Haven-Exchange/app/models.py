@@ -8,6 +8,7 @@ Defines all core tables:
   - MintAllocations
   - Shops
   - ShopListings
+  - StimulusProposal
   - Stocks
   - StockHoldings
   - StockTransactions
@@ -50,6 +51,26 @@ class User(Base):
     )
     last_active: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Phase 2H: wallet health metrics.  transaction_count_lifetime is
+    # incremented on every confirmed tx in/out (real-time).  The 30-day
+    # counters are kept warm by create_transaction() and reconciled by
+    # the daily wallet-health job, which also decays activity that has
+    # aged past the 30-day window.
+    transaction_count_lifetime: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    transaction_count_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    volume_lifetime: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    volume_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    wallet_health_last_calculated: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )
 
     # Relationships
     nation: Mapped[Optional["Nation"]] = relationship(
@@ -95,6 +116,20 @@ class Nation(Base):
     gdp_score: Mapped[int] = mapped_column(Integer, default=50)           # composite 0-100
     gdp_multiplier: Mapped[int] = mapped_column(Integer, default=100)     # stored as int x100 (100 = 1.00x)
     gdp_last_calculated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    # Phase 2I: idle-wallet demurrage — NL-configurable per-nation.
+    # When enabled, wallets with no activity in the last 30 days are charged
+    # ``demurrage_rate_bps`` (in basis points) of their current balance each day.
+    # The burned amount is recorded as a DEMURRAGE_BURN tx on the ledger.
+    demurrage_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Rate in basis points (default 50 = 0.5%)
+    demurrage_rate_bps: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+
+    # Phase 2K: World Mint authority corrections — lifetime mint cap per nation.
+    # The World Mint (TRV-00000000) cannot mint more than this amount into any
+    # given nation treasury over the lifetime of the exchange.  Default is
+    # effectively uncapped (1_000_000_000 TC).  Enforced in the mint endpoints.
+    mint_cap: Mapped[int] = mapped_column(Integer, default=1_000_000_000, nullable=False)
 
     # Relationships
     leader: Mapped["User"] = relationship(
@@ -190,9 +225,26 @@ class Shop(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Approval workflow (Phase 2D)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    approved_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_sales: Mapped[int] = mapped_column(Integer, default=0)
     total_revenue: Mapped[int] = mapped_column(Integer, default=0)
+    # Phase 2E: 30-day rolling GDP contribution (sum of PURCHASE TC paid in
+    # the last 30 days).  Recalculated by the daily GDP job; used to rank
+    # shops in the marketplace.
+    gdp_contribution_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    gdp_last_calculated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    # Phase 2F: shop subtype and mining disclosure
+    shop_type: Mapped[str] = mapped_column(String, default="general")
+    mining_setup: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         insert_default=func.current_timestamp()
     )
@@ -200,6 +252,9 @@ class Shop(Base):
     # Relationships
     owner: Mapped["User"] = relationship(
         "User", foreign_keys=[owner_id], backref="shop"
+    )
+    approver: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[approved_by]
     )
     nation: Mapped["Nation"] = relationship(
         "Nation", foreign_keys=[nation_id], backref="shops"
@@ -250,6 +305,9 @@ class Stock(Base):
         insert_default=func.current_timestamp()
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Phase 2G: stock closure fields
+    closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    closure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     holdings: Mapped[List["StockHolding"]] = relationship(
@@ -424,10 +482,18 @@ class GlobalSettings(Base):
     __tablename__ = "global_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    # Burn rate applied to loan repayments, in basis points (1000 = 10%)
+    # Phase 2B: total burn pool rate applied against lifetime interest paid
+    # on a loan, in basis points (default 1000 = 10%).  Snapshotted into
+    # Loan.burn_rate_snapshot at creation.  No portion of principal is
+    # burned.
     burn_rate_bps: Mapped[int] = mapped_column(Integer, default=1000)
     # Maximum interest rate banks can charge, in basis points (2000 = 20% annual)
     interest_rate_cap_bps: Mapped[int] = mapped_column(Integer, default=2000)
+    # Phase 2B: fraction of the burn pool burned **at loan close**, in
+    # basis points (default 8000 = 80%).  The remainder (default 2000 =
+    # 20%) is burned during payments.  Snapshotted into
+    # Loan.interest_burn_rate_snapshot at creation.
+    interest_burn_rate_bps: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         insert_default=func.current_timestamp()
     )
@@ -492,9 +558,26 @@ class Loan(Base):
     __tablename__ = "loans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Which bank issued the loan
+    # Which bank issued the loan.  Phase 2C: 0 is a sentinel meaning
+    # "treasury loan" — the actual lender wallet lives on
+    # ``lender_wallet_address`` and the nation on ``treasury_nation_id``.
+    # We keep this column NOT NULL because ALTERing nullability in SQLite
+    # would require a full table rebuild.
     bank_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("banks.id"), nullable=False
+    )
+    # Phase 2C: discriminator for which kind of entity issued the loan.
+    # 'bank' (bank_id > 0, looked up via banks table) or 'treasury'
+    # (bank_id == 0, looked up via treasury_nation_id).
+    lender_type: Mapped[str] = mapped_column(Text, default="bank", nullable=False)
+    # Phase 2C: denormalized wallet address of whichever entity issued the
+    # loan.  For 'bank' loans this is bank.wallet_address; for 'treasury'
+    # loans this is nation.treasury_address.  Lets payment routing work
+    # without a discriminating join.
+    lender_wallet_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Phase 2C: nation whose treasury issued the loan, NULL for bank loans.
+    treasury_nation_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=True
     )
     # The citizen who received the loan
     borrower_id: Mapped[int] = mapped_column(
@@ -502,12 +585,46 @@ class Loan(Base):
     )
     # Original loan amount
     principal: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Remaining balance including any accrued interest
+    # Principal balance still owed (decreases with each principal-portion payment).
+    # Phase 2A: this remains the "principal_remaining" tracker.  Total amount
+    # owed by the borrower is (outstanding + accrued_interest).
     outstanding: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Interest accrued but not yet paid.  Grows daily via the accrual job,
+    # capped at cap_amount.  Decreases when payments are applied to interest
+    # portion (Phase 2B).
+    accrued_interest: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Lifetime cap on how much interest can ever accrue on this loan, set to
+    # the principal at creation time (100% cap rule).  Once cumulative accrued
+    # interest reaches this, interest_frozen flips True and no further interest
+    # accrues — even on subsequent days.
+    cap_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # True once total lifetime interest accrued has hit cap_amount.
+    interest_frozen: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Timestamp of the most recent accrual run that touched this loan; used by
+    # the daily job to compute elapsed days since last accrual.  NULL on a
+    # freshly-created loan (initialised to opened_at on first run).
+    last_accrual_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     # Interest rate snapshot at loan creation time, in basis points (500 = 5% annual)
     interest_rate: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Burn rate snapshot at loan creation time, in basis points
+    # Burn rate snapshot at loan creation, in basis points.  Phase 2B: this
+    # is the **total burn pool rate** applied against lifetime interest
+    # paid (default 1000 = 10%).  The pool is split 20%/80% during/at-close
+    # via ``interest_burn_rate_snapshot``.  Principal repayments are never
+    # burned.
     burn_rate_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Fraction of the total burn pool burned **at loan close**, in basis
+    # points (default 8000 = 80%).  The remainder (10000 − this value,
+    # default 2000 = 20%) is burned during payments.
+    interest_burn_rate_snapshot: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
+    # Lifetime total of interest_portion across all payments (Phase 2B).
+    total_interest_paid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Lifetime sum of during-payment interest burns (the 20% slice).  Used
+    # at loan close to compute the residual close burn pool drained from
+    # bank reserves.
+    total_burned_during_payments: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Amount burned from bank reserves on the closing payment (the 80%
+    # slice).  Remains 0 until the loan closes.
+    final_close_burn: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Loan lifecycle status: 'active', 'closed', 'defaulted'
     status: Mapped[str] = mapped_column(Text, default="active")
     # Borrower's stated purpose for the loan
@@ -521,6 +638,10 @@ class Loan(Base):
     bank: Mapped["Bank"] = relationship("Bank", back_populates="loans")
     borrower: Mapped["User"] = relationship(
         "User", foreign_keys=[borrower_id], backref="loans"
+    )
+    # Phase 2C: nation whose treasury issued this loan (NULL for bank loans).
+    treasury_nation: Mapped[Optional["Nation"]] = relationship(
+        "Nation", foreign_keys=[treasury_nation_id]
     )
     payments: Mapped[List["LoanPayment"]] = relationship(
         "LoanPayment", back_populates="loan", cascade="all, delete-orphan"
@@ -543,13 +664,31 @@ class LoanPayment(Base):
     loan_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("loans.id"), nullable=False
     )
-    # Total payment amount (burn_amount + bank_amount)
+    # Total payment amount paid by the borrower (= bank_amount + the
+    # during-payment burn).  On the closing payment, the close burn from
+    # bank reserves is **not** included here — see Loan.final_close_burn.
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment that was burned (sent to World Mint)
+    # Total burned in connection with this payment (during-payment burn +
+    # close burn on the final payment).  Phase 2B: only the interest slice
+    # is ever burned; principal is never burned.
     burn_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Portion of the payment returned to the bank's reserves
+    # Portion of `amount` that flowed to the bank's reserves
+    # (= amount − during-payment burn).
     bank_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Outstanding loan balance after this payment
+    # How much of `amount` was applied to accrued interest (interest-first
+    # allocation; Phase 2B).  Always <= the loan's accrued_interest at the
+    # time of the payment.
+    interest_portion: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # How much of `amount` was applied to principal balance.  Equals
+    # `amount - interest_portion`.  Persisted (not derived) so historical
+    # rows survive future schema changes to amount.
+    principal_portion: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # True if this payment closed the loan (zeroed both outstanding and
+    # accrued_interest).
+    is_final_payment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Outstanding loan balance after this payment.  Phase 2B: this is
+    # `principal_remaining + accrued_interest_remaining` so the column
+    # reflects total amount still owed.
     balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
     # Links to the main LOAN_PAYMENT transaction on the ledger
     tx_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -564,4 +703,56 @@ class LoanPayment(Base):
         return (
             f"<LoanPayment(id={self.id}, loan_id={self.loan_id}, "
             f"amount={self.amount}, balance_after={self.balance_after})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2J: Auto-Stimulus Proposals
+# ---------------------------------------------------------------------------
+
+class StimulusProposal(Base):
+    """A mint proposal triggered automatically when GDP drops below a threshold.
+
+    Three tiers are generated (warning / mild / strong) depending on how far
+    GDP has fallen.  Proposals are never auto-executed — they require explicit
+    approval from the World Mint.  This table records the full lifecycle from
+    proposal to resolution.
+    """
+
+    __tablename__ = "stimulus_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=False
+    )
+    # GDP score at the time the proposal was triggered (0-100)
+    gdp_score_at_trigger: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Previous GDP score (the comparison baseline)
+    gdp_score_previous: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Drop percentage at trigger time (stored as whole-number percent, e.g. 25 = 25%)
+    drop_pct: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Tier: 'warning' (10%+ drop, no auto-mint), 'mild' (20%+ drop), 'strong' (30%+ drop)
+    tier: Mapped[str] = mapped_column(String, nullable=False)
+    # Proposed mint amount in TC (0 for 'warning' tier)
+    proposed_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Status lifecycle: 'pending' → 'approved' | 'rejected'
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    proposed_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+    reviewed_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    # Relationships
+    nation: Mapped["Nation"] = relationship("Nation", foreign_keys=[nation_id])
+    reviewer: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[reviewed_by]
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StimulusProposal(id={self.id}, nation_id={self.nation_id}, "
+            f"tier='{self.tier}', status='{self.status}')>"
         )
