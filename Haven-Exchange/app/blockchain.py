@@ -184,6 +184,7 @@ def create_transaction(
 
         # -- Update cached balances -------------------------------------------
         # Sender side
+        sender_user: Optional[User] = None
         if from_address.startswith("TRV-BANK-"):
             bank = db.execute(
                 select(Bank).where(Bank.wallet_address == from_address)
@@ -197,11 +198,11 @@ def create_transaction(
             if nation is not None:
                 nation.treasury_balance -= amount
         elif from_address != settings.WORLD_MINT_ADDRESS and from_address != "SYSTEM":
-            sender = db.execute(
+            sender_user = db.execute(
                 select(User).where(User.wallet_address == from_address)
             ).scalar_one_or_none()
-            if sender is not None:
-                sender.balance -= amount
+            if sender_user is not None:
+                sender_user.balance -= amount
 
         # Receiver side
         # Skip balance credit only for BURN transactions to the World Mint
@@ -211,6 +212,7 @@ def create_transaction(
             to_address == settings.WORLD_MINT_ADDRESS
             and tx_type == "BURN"
         )
+        receiver_user: Optional[User] = None
         if to_address.startswith("TRV-BANK-"):
             bank = db.execute(
                 select(Bank).where(Bank.wallet_address == to_address)
@@ -224,11 +226,45 @@ def create_transaction(
             if nation is not None:
                 nation.treasury_balance += amount
         elif to_address != "SYSTEM" and not is_burn_target:
-            receiver = db.execute(
+            receiver_user = db.execute(
                 select(User).where(User.wallet_address == to_address)
             ).scalar_one_or_none()
-            if receiver is not None:
-                receiver.balance += amount
+            if receiver_user is not None:
+                receiver_user.balance += amount
+
+        # -- Phase 2H: wallet health real-time bumps --------------------------
+        # Increment lifetime + 30d tx counters and volume on each user side
+        # of the transaction.  The daily wallet-health job decays activity
+        # that ages past 30 days; this just keeps the counters warm in real
+        # time so the wallet view reflects fresh activity immediately.
+        # GENESIS, MINT, and BURN do not move tokens between user wallets in
+        # the way that should count as "wallet activity" for health metrics:
+        #   - GENESIS: synthetic SYSTEM tx, no real wallet
+        #   - MINT:    issuance from the World Mint to the admin staging wallet
+        #   - BURN:    counts on the sender side only (volume out)
+        # We track all confirmed transfers that touch a user wallet.
+        if tx_type not in ("GENESIS",):
+            now = datetime.utcnow()
+            if sender_user is not None:
+                sender_user.transaction_count_lifetime = (
+                    (sender_user.transaction_count_lifetime or 0) + 1
+                )
+                sender_user.transaction_count_30d = (
+                    (sender_user.transaction_count_30d or 0) + 1
+                )
+                sender_user.volume_lifetime = (sender_user.volume_lifetime or 0) + amount
+                sender_user.volume_30d = (sender_user.volume_30d or 0) + amount
+                sender_user.last_active = now
+            if receiver_user is not None:
+                receiver_user.transaction_count_lifetime = (
+                    (receiver_user.transaction_count_lifetime or 0) + 1
+                )
+                receiver_user.transaction_count_30d = (
+                    (receiver_user.transaction_count_30d or 0) + 1
+                )
+                receiver_user.volume_lifetime = (receiver_user.volume_lifetime or 0) + amount
+                receiver_user.volume_30d = (receiver_user.volume_30d or 0) + amount
+                receiver_user.last_active = now
 
         db.commit()
         db.refresh(tx)

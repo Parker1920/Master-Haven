@@ -43,6 +43,13 @@ def my_wallet(
         "created_at": (
             current_user.created_at.isoformat() if current_user.created_at else None
         ),
+        "last_active": (
+            current_user.last_active.isoformat() if current_user.last_active else None
+        ),
+        "transaction_count_lifetime": current_user.transaction_count_lifetime,
+        "transaction_count_30d": current_user.transaction_count_30d,
+        "volume_lifetime": current_user.volume_lifetime,
+        "volume_30d": current_user.volume_30d,
     }
 
 
@@ -146,6 +153,11 @@ def wallet_info(address: str, db: Session = Depends(get_db)):
         "balance": user.balance,
         "display_name": user.display_name,
         "nation": nation_name,
+        "last_active": user.last_active.isoformat() if user.last_active else None,
+        "transaction_count_lifetime": user.transaction_count_lifetime,
+        "transaction_count_30d": user.transaction_count_30d,
+        "volume_lifetime": user.volume_lifetime,
+        "volume_30d": user.volume_30d,
     }
 
 

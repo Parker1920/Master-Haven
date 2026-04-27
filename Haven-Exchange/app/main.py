@@ -115,6 +115,12 @@ def _run_schema_migrations() -> None:
         # Stock closure (Phase 2G)
         "ALTER TABLE stocks ADD COLUMN closed_at DATETIME",
         "ALTER TABLE stocks ADD COLUMN closure_reason TEXT",
+        # Wallet health metrics (Phase 2H)
+        "ALTER TABLE users ADD COLUMN transaction_count_lifetime INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE users ADD COLUMN transaction_count_30d INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE users ADD COLUMN volume_lifetime INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE users ADD COLUMN volume_30d INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE users ADD COLUMN wallet_health_last_calculated DATETIME",
     ]
     for sql in migrations:
         try:
@@ -249,6 +255,7 @@ def on_startup() -> None:
 from app.gdp import recalculate_all_gdp
 from app.interest import accrue_daily_interest
 from app.valuation import recalculate_all_prices
+from app.wallet_health import recalculate_wallet_health
 
 scheduler = BackgroundScheduler()
 
@@ -280,10 +287,22 @@ def _scheduled_interest_accrual() -> None:
         db.close()
 
 
+def _scheduled_wallet_health_recalc() -> None:
+    """Reconcile wallet-health metrics & decay 30-day counters past their window."""
+    db = SessionLocal()
+    try:
+        recalculate_wallet_health(db)
+    finally:
+        db.close()
+
+
 # Add jobs: run every 24 hours (86400 seconds)
 scheduler.add_job(_scheduled_gdp_recalc, "interval", hours=24, id="gdp_recalc")
 scheduler.add_job(_scheduled_stock_recalc, "interval", hours=24, id="stock_recalc")
 scheduler.add_job(_scheduled_interest_accrual, "interval", hours=24, id="interest_accrual")
+scheduler.add_job(
+    _scheduled_wallet_health_recalc, "interval", hours=24, id="wallet_health_recalc"
+)
 
 
 @app.on_event("startup")

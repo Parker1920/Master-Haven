@@ -50,6 +50,26 @@ class User(Base):
     )
     last_active: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Phase 2H: wallet health metrics.  transaction_count_lifetime is
+    # incremented on every confirmed tx in/out (real-time).  The 30-day
+    # counters are kept warm by create_transaction() and reconciled by
+    # the daily wallet-health job, which also decays activity that has
+    # aged past the 30-day window.
+    transaction_count_lifetime: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    transaction_count_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    volume_lifetime: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    volume_30d: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    wallet_health_last_calculated: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )
 
     # Relationships
     nation: Mapped[Optional["Nation"]] = relationship(
