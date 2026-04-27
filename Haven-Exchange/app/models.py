@@ -8,6 +8,7 @@ Defines all core tables:
   - MintAllocations
   - Shops
   - ShopListings
+  - StimulusProposal
   - Stocks
   - StockHoldings
   - StockTransactions
@@ -696,4 +697,56 @@ class LoanPayment(Base):
         return (
             f"<LoanPayment(id={self.id}, loan_id={self.loan_id}, "
             f"amount={self.amount}, balance_after={self.balance_after})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2J: Auto-Stimulus Proposals
+# ---------------------------------------------------------------------------
+
+class StimulusProposal(Base):
+    """A mint proposal triggered automatically when GDP drops below a threshold.
+
+    Three tiers are generated (warning / mild / strong) depending on how far
+    GDP has fallen.  Proposals are never auto-executed — they require explicit
+    approval from the World Mint.  This table records the full lifecycle from
+    proposal to resolution.
+    """
+
+    __tablename__ = "stimulus_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("nations.id"), nullable=False
+    )
+    # GDP score at the time the proposal was triggered (0-100)
+    gdp_score_at_trigger: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Previous GDP score (the comparison baseline)
+    gdp_score_previous: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Drop percentage at trigger time (stored as whole-number percent, e.g. 25 = 25%)
+    drop_pct: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Tier: 'warning' (10%+ drop, no auto-mint), 'mild' (20%+ drop), 'strong' (30%+ drop)
+    tier: Mapped[str] = mapped_column(String, nullable=False)
+    # Proposed mint amount in TC (0 for 'warning' tier)
+    proposed_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Status lifecycle: 'pending' → 'approved' | 'rejected'
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    proposed_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+    reviewed_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    # Relationships
+    nation: Mapped["Nation"] = relationship("Nation", foreign_keys=[nation_id])
+    reviewer: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[reviewed_by]
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StimulusProposal(id={self.id}, nation_id={self.nation_id}, "
+            f"tier='{self.tier}', status='{self.status}')>"
         )

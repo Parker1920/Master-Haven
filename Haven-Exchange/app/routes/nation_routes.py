@@ -532,3 +532,131 @@ def update_demurrage_settings(
         "demurrage_enabled": nation.demurrage_enabled,
         "demurrage_rate_bps": nation.demurrage_rate_bps,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2J: Stimulus Proposal endpoints
+# ---------------------------------------------------------------------------
+from app.models import StimulusProposal  # noqa: E402 — after router setup
+
+
+def _proposal_to_dict(p: StimulusProposal) -> dict:
+    return {
+        "id": p.id,
+        "nation_id": p.nation_id,
+        "gdp_score_at_trigger": p.gdp_score_at_trigger,
+        "gdp_score_previous": p.gdp_score_previous,
+        "drop_pct": p.drop_pct,
+        "tier": p.tier,
+        "proposed_amount": p.proposed_amount,
+        "status": p.status,
+        "proposed_at": p.proposed_at.isoformat() if p.proposed_at else None,
+        "reviewed_by": p.reviewed_by,
+        "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
+    }
+
+
+@router.get("/{nation_id}/stimulus-proposals")
+def list_stimulus_proposals(
+    nation_id: int,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """List stimulus proposals for a nation.
+
+    Auth: nation leader, or world_mint.  Other users receive 403.
+    Optional ``?status=pending|approved|rejected`` filter.
+    """
+    from sqlalchemy import select as _select
+    nation = db.execute(
+        _select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    is_nl = current_user.id == nation.leader_id
+    is_wm = current_user.role == "world_mint"
+    if not (is_nl or is_wm):
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    stmt = _select(StimulusProposal).where(
+        StimulusProposal.nation_id == nation_id
+    ).order_by(StimulusProposal.proposed_at.desc())
+
+    if status is not None:
+        stmt = stmt.where(StimulusProposal.status == status)
+
+    proposals = list(db.execute(stmt).scalars().all())
+    return {"proposals": [_proposal_to_dict(p) for p in proposals]}
+
+
+@router.post("/{nation_id}/stimulus-proposals/{proposal_id}/approve")
+def approve_stimulus_proposal(
+    nation_id: int,
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Approve a stimulus proposal (World Mint only).
+
+    Approval does NOT mint automatically — it marks the proposal as approved
+    so the World Mint can proceed with a separate MINT action if desired.
+    The proposed_amount is returned as a recommended mint quantity.
+    """
+    from sqlalchemy import select as _select
+    from datetime import datetime, timezone
+
+    if current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Only World Mint may approve stimulus proposals.")
+
+    proposal = db.execute(
+        _select(StimulusProposal).where(
+            StimulusProposal.id == proposal_id,
+            StimulusProposal.nation_id == nation_id,
+        )
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Stimulus proposal not found.")
+    if proposal.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Proposal is already {proposal.status}.")
+
+    proposal.status = "approved"
+    proposal.reviewed_by = current_user.id
+    proposal.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return _proposal_to_dict(proposal)
+
+
+@router.post("/{nation_id}/stimulus-proposals/{proposal_id}/reject")
+def reject_stimulus_proposal(
+    nation_id: int,
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Reject a stimulus proposal (World Mint only)."""
+    from sqlalchemy import select as _select
+    from datetime import datetime, timezone
+
+    if current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Only World Mint may reject stimulus proposals.")
+
+    proposal = db.execute(
+        _select(StimulusProposal).where(
+            StimulusProposal.id == proposal_id,
+            StimulusProposal.nation_id == nation_id,
+        )
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Stimulus proposal not found.")
+    if proposal.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Proposal is already {proposal.status}.")
+
+    proposal.status = "rejected"
+    proposal.reviewed_by = current_user.id
+    proposal.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return _proposal_to_dict(proposal)

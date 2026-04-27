@@ -18,7 +18,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.blockchain import create_genesis_block
 from app.config import settings
 from app.database import SessionLocal, init_db
-from app.models import Bank, GdpSnapshot, GlobalSettings, Loan, LoanPayment, User  # noqa: F401  — ensures models are registered with Base
+from app.models import Bank, GdpSnapshot, GlobalSettings, Loan, LoanPayment, StimulusProposal, User  # noqa: F401  — ensures models are registered with Base
 from app.routes.mint_routes import router as mint_router
 from app.routes.nation_routes import router as nation_router
 from app.routes.page_routes import router as page_router
@@ -124,6 +124,11 @@ def _run_schema_migrations() -> None:
         # Idle-wallet demurrage (Phase 2I)
         "ALTER TABLE nations ADD COLUMN demurrage_enabled BOOLEAN DEFAULT 0 NOT NULL",
         "ALTER TABLE nations ADD COLUMN demurrage_rate_bps INTEGER DEFAULT 50 NOT NULL",
+        # Auto-stimulus proposals (Phase 2J) — table created by create_all on
+        # fresh DBs; ALTER TABLE is only needed for columns added to existing
+        # tables.  The stimulus_proposals table itself is created by create_all.
+        # We do need to keep this comment block so the ordering is clear.
+
     ]
     for sql in migrations:
         try:
@@ -258,6 +263,7 @@ def on_startup() -> None:
 from app.demurrage import apply_all_demurrage
 from app.gdp import recalculate_all_gdp
 from app.interest import accrue_daily_interest
+from app.stimulus import run_stimulus_checks
 from app.valuation import recalculate_all_prices
 from app.wallet_health import recalculate_wallet_health
 
@@ -265,10 +271,12 @@ scheduler = BackgroundScheduler()
 
 
 def _scheduled_gdp_recalc() -> None:
-    """Recalculate GDP scores for all approved nations.  Uses its own DB session."""
+    """Recalculate GDP scores for all approved nations, then check stimulus triggers."""
     db = SessionLocal()
     try:
         recalculate_all_gdp(db)
+        # Phase 2J: check for GDP drops and propose stimulus mints if thresholds met
+        run_stimulus_checks(db)
     finally:
         db.close()
 
