@@ -170,4 +170,238 @@ otherwise touched by the merge.
 This commit folds in the Phase 2 and Phase 3 log appendages to
 `MERGE_DEPLOY_PREP_LOG_2026-04-28.md` (per dispatch: Phase 2 had no
 separate commit since the merge was its commit). Commit message:
-`Phase 3: post-merge verification log entries`.
+`Phase 3: post-merge verification log entries`. Committed as `ffb34ee`.
+
+---
+
+## Phase 4 — Deployment Prep
+
+**Verdict: READY FOR scp DEPLOY — with one pre-deploy decision.**
+
+Six checks below. Five are clean. One (the `data/` directory and
+`scp -r` interaction) requires Parker's confirmation about how the Pi's
+docker-compose.yml resolves the `./data:/app/data` bind mount before the
+copy happens — without that confirmation, a naive `scp -r Haven-Exchange/`
+risks overwriting the Pi's production `economy.db`.
+
+### 1. Source folder structure — PASS
+
+`Haven-Exchange/` contents:
+
+- `app/` — present (24 modules including `interest.py`, `demurrage.py`,
+  `stimulus.py`, `wallet_health.py`, plus existing `routes/`, `templates/`,
+  `static/`)
+- `tests/` — present (`smoke_test_e2e.py`, `__init__.py`, `__pycache__`)
+- `Dockerfile` — present (`python:3.11-slim`, `EXPOSE 8010`)
+- `docker-compose.yml` — present (bind mount + healthcheck)
+- `requirements.txt` — present (8 deps)
+- `data/` — present **and contains a 98 KB local dev `economy.db`**.
+  This file is the source of the pre-deploy decision in §6.
+- `.gitignore` — present
+- `.python-version` — present (`3.11`)
+- 8 `.md` documentation files (audit V2/V3, audit diff, smoke report,
+  remediation log, interest cap behavior, merge readiness, this prep
+  log) — sit at the Haven-Exchange root.
+- Cruft also present: `.pytest_cache/`, `app/__pycache__/`,
+  `tests/__pycache__/` — would be copied if the deploy uses raw
+  `cp`/`scp -r` and not a filtered tool.
+
+### 2. .dockerignore / .gitignore state — ATTENTION
+
+- **`Haven-Exchange/.dockerignore` does NOT exist.** The `Dockerfile`
+  uses `COPY . .`, so the build context (the entire `Haven-Exchange/`
+  folder once scp'd to the Pi) gets copied into the image — including
+  `data/economy.db`, all the `.md` docs, `tests/`, `__pycache__/`,
+  `.pytest_cache/`, and `.gitignore`/`.python-version`.
+- The runtime bind mount `./data:/app/data` masks whatever ends up in
+  the image's `/app/data` at container start, so the **runtime** behaviour
+  is correct: the bind-mounted `economy.db` wins. But the image is
+  larger than it needs to be and ships dev-only artifacts.
+- `Haven-Exchange/.gitignore` is sound: excludes `data/*.db`, `__pycache__/`,
+  `.pytest_cache/`, `*.pyc`, IDE files, OS files. (This is git-side, not
+  Docker-side — Docker still copies these unless a `.dockerignore` exists.)
+- **Recommended (post-deploy or before next deploy):** add a
+  `.dockerignore` with at minimum:
+  ```
+  data/
+  __pycache__/
+  *.pyc
+  .pytest_cache/
+  .git
+  .gitignore
+  *.md
+  tests/        # debatable — see check 5
+  ```
+  This is image-hygiene only. It does not block this deploy.
+
+### 3. docker-compose.yml configuration — PASS
+
+```yaml
+services:
+  travelers-exchange:
+    build: .
+    container_name: economy
+    volumes:
+      - ./data:/app/data
+    ports:
+      - '8010:8010'
+    healthcheck: ...
+    restart: unless-stopped
+```
+
+- Bind mount `./data:/app/data` present.
+- Port `8010:8010` exposed.
+- Service name `travelers-exchange`, container name `economy`.
+- Healthcheck hits `http://localhost:8010/health` every 30s.
+- **No environment variables referenced.** SECRET_KEY and admin password
+  are still hardcoded in source (Phase C `MERGE_READINESS_REPORT.md` §8 —
+  pre-existing security debt, deploy-time decision).
+- Inline comment notes the recommended NPM-behind change (`ports` →
+  `expose`) for production. Parker can pick whichever based on his
+  current Pi reverse proxy setup.
+
+### 4. Database migration safety — RECONFIRMED
+
+Re-spot-checked `app/main.py::_run_schema_migrations` (lines 65–131):
+
+- 30+ `ALTER TABLE … ADD COLUMN` statements, all wrapped in a
+  try/except that catches the SQLite "duplicate column" error.
+  Re-running the job on an already-migrated DB is a no-op.
+- New `stimulus_proposals` table (Phase 2J) created via
+  `Base.metadata.create_all()` which is idempotent — no-op if the table
+  already exists.
+- Backfills present and idempotent (`UPDATE … WHERE … = 0` /
+  `WHERE … IS NULL`).
+
+The Pi's existing `economy.db` will migrate forward cleanly on container
+start. No manual intervention needed. (This was verified in Phase C; this
+is a sanity confirm.)
+
+### 5. requirements.txt integrity — ATTENTION
+
+```
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+bcrypt==4.2.1
+jinja2==3.1.5
+python-multipart==0.0.20
+aiofiles==24.1.0
+apscheduler==3.10.4
+```
+
+- ✅ `apscheduler==3.10.4` — used by `main.py` for the daily GDP /
+  interest / wallet-health / demurrage / stimulus jobs.
+- ✅ All other deps look correct for the production runtime.
+- ⚠️ **`pytest` and `httpx` are NOT listed.** The smoke test
+  (`tests/smoke_test_e2e.py`) imports `pytest` and uses FastAPI's
+  `TestClient`, which depends on `httpx`. These are dev-only and should
+  not be in the production `requirements.txt`. **Implication:** the
+  smoke test cannot be run inside the deployed container without
+  `pip install pytest httpx` first. If Parker wants on-Pi smoke
+  verification, either:
+  - Add a `requirements-dev.txt` and run a one-shot
+    `pip install -r requirements-dev.txt` inside the container, or
+  - Run the smoke test from his desktop against the Pi's deployed URL
+    (the test currently uses an in-memory SQLite, not a remote API, so
+    it isn't a remote-testing tool — desktop-only is the natural fit).
+
+Not a blocker.
+
+### 6. Deployment command preview — DECISION REQUIRED
+
+The dispatch's draft command is:
+
+```bash
+scp -r Haven-Exchange/ parker@10.0.0.229:~/docker/haven-exchange/
+ssh parker@10.0.0.229
+cd ~/docker/haven-exchange/
+docker compose up -d --build
+docker compose logs -f exchange    # actual service name is travelers-exchange
+```
+
+**Two issues to address before running.**
+
+#### Issue A — naive `scp -r` will overwrite the Pi's production DB
+
+The local `data/economy.db` (98 KB dev state) sits in
+`Haven-Exchange/data/`. Recursive scp will copy it to
+`~/docker/haven-exchange/data/economy.db` on the Pi. The
+`docker-compose.yml`'s bind mount `./data:/app/data` resolves relative
+to the directory you run `docker compose` from, which is
+`~/docker/haven-exchange/`. So `./data` on the Pi *is*
+`~/docker/haven-exchange/data/`. The dispatch text mentioned
+`~/docker/haven-exchange-data/economy.db` as the bind source; that's
+inconsistent with the docker-compose.yml unless Parker has a different
+compose file on the Pi.
+
+**Three safe paths forward, pick one:**
+
+1. **Exclude `data/` at copy time** (recommended):
+   ```bash
+   rsync -avz --delete \
+     --exclude='data/' \
+     --exclude='__pycache__/' \
+     --exclude='.pytest_cache/' \
+     --exclude='tests/' \
+     --exclude='*.md' \
+     Haven-Exchange/ parker@10.0.0.229:~/docker/haven-exchange/
+   ```
+   `rsync --delete` keeps the Pi's deploy dir clean of stale removed
+   files. The `data/` exclude protects production data. `*.md` and
+   `tests/` excludes are optional (image hygiene; tests aren't
+   exercised in the container).
+
+2. **Stage-and-scp:** clean `Haven-Exchange/data/` locally before
+   scp'ing, scp the whole folder, then on the Pi re-create the empty
+   `data/` directory if needed (the Dockerfile's
+   `RUN mkdir -p /app/data` covers that anyway).
+
+3. **Confirm the Pi runs a different docker-compose.yml** that points
+   the bind mount somewhere outside `~/docker/haven-exchange/data/`.
+   In that case the naive `scp -r` is safe — but you should verify by
+   reading the Pi's compose file first.
+
+#### Issue B — service name in `docker compose logs`
+
+The compose file's service name is `travelers-exchange` (not `exchange`).
+The container name is `economy`. The correct log command is:
+
+```bash
+docker compose logs -f travelers-exchange
+# or, equivalently:
+docker logs -f economy
+```
+
+#### Recommended deploy sequence (assembled)
+
+```bash
+# On Windows desktop, from C:/Master-Haven:
+rsync -avz --delete \
+  --exclude='data/' \
+  --exclude='__pycache__/' \
+  --exclude='.pytest_cache/' \
+  --exclude='tests/' \
+  --exclude='*.md' \
+  Haven-Exchange/ parker@10.0.0.229:~/docker/haven-exchange/
+
+# SSH to Pi:
+ssh parker@10.0.0.229
+
+# On Pi:
+cd ~/docker/haven-exchange/
+docker compose up -d --build
+
+# Verify:
+docker compose logs -f travelers-exchange
+# (or: docker logs -f economy)
+
+# Smoke test: hit the health endpoint
+curl http://localhost:8010/health
+```
+
+Drop the `--exclude='*.md'` and `--exclude='tests/'` lines if Parker
+wants the audit/remediation docs and the smoke test on the Pi.
+
+### Phase 4 commit
+Documentation-only. Commit message: `Phase 4: deployment prep readiness check`.
