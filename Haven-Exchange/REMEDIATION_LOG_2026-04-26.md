@@ -870,3 +870,42 @@ preflight (see Phase C section below).
 current implementation and note the cap-hold time-skip fix that emerged
 during verification.
 
+---
+
+## Phase C — Merge-Readiness Verification (2026-04-27)
+
+**Goal:** Confirm `audit-v2-remediation` is structurally ready to merge to
+main. Eight checks against the dispatch's checklist.
+
+### Output
+`Haven-Exchange/MERGE_READINESS_REPORT.md`.
+
+### Verdict: **READY TO MERGE** (with two non-blocking notes)
+
+### Check results
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | Working tree clean | ✅ PASS |
+| 2 | Commit history integrity (16 linear commits ahead of main) | ✅ PASS |
+| 3 | No merge conflicts (verified via `git merge-tree` in-memory) | ✅ PASS |
+| 4 | Smoke tests 52/52 | ✅ PASS |
+| 5 | V3 audit freshness (5 spot-checks; 4 ✓, 1 stale) | ⚠️ 1 prose-only stale claim |
+| 6 | Dockerfile / docker-compose unchanged from main | ✅ PASS |
+| 7 | DB migrations all idempotent ADD COLUMN | ✅ PASS |
+| 8 | Security debt (SECRET_KEY, admin password) | ℹ️ pre-existing, deploy-time |
+
+### Non-blocking notes carried forward from Phase C
+
+- **V3 audit line 93** still describes the 100% interest cap as
+  `interest_frozen` "flips permanently when cap is reached" — that prose
+  is from before the Phase B follow-up switched to Interpretation 2.
+  Easy doc fix; full text in `MERGE_READINESS_REPORT.md` §5.
+- **Hardcoded `SECRET_KEY`** at `app/config.py:13` and **hardcoded
+  `"changeme"` admin password** at `app/main.py:229` are pre-existing
+  pre-deployment concerns, not merge blockers. Already flagged in V3
+  audit lines 211-213.
+
+### Phase C commit
+Committed as `Phase C: merge-readiness verification`.
+
