@@ -121,6 +121,9 @@ def _run_schema_migrations() -> None:
         "ALTER TABLE users ADD COLUMN volume_lifetime INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE users ADD COLUMN volume_30d INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE users ADD COLUMN wallet_health_last_calculated DATETIME",
+        # Idle-wallet demurrage (Phase 2I)
+        "ALTER TABLE nations ADD COLUMN demurrage_enabled BOOLEAN DEFAULT 0 NOT NULL",
+        "ALTER TABLE nations ADD COLUMN demurrage_rate_bps INTEGER DEFAULT 50 NOT NULL",
     ]
     for sql in migrations:
         try:
@@ -252,6 +255,7 @@ def on_startup() -> None:
 # ---------------------------------------------------------------------------
 # Background scheduler — GDP and stock price recalculation every 24 hours
 # ---------------------------------------------------------------------------
+from app.demurrage import apply_all_demurrage
 from app.gdp import recalculate_all_gdp
 from app.interest import accrue_daily_interest
 from app.valuation import recalculate_all_prices
@@ -296,12 +300,24 @@ def _scheduled_wallet_health_recalc() -> None:
         db.close()
 
 
+def _scheduled_demurrage() -> None:
+    """Apply idle-wallet demurrage for all nations that have it enabled."""
+    db = SessionLocal()
+    try:
+        apply_all_demurrage(db)
+    finally:
+        db.close()
+
+
 # Add jobs: run every 24 hours (86400 seconds)
 scheduler.add_job(_scheduled_gdp_recalc, "interval", hours=24, id="gdp_recalc")
 scheduler.add_job(_scheduled_stock_recalc, "interval", hours=24, id="stock_recalc")
 scheduler.add_job(_scheduled_interest_accrual, "interval", hours=24, id="interest_accrual")
 scheduler.add_job(
     _scheduled_wallet_health_recalc, "interval", hours=24, id="wallet_health_recalc"
+)
+scheduler.add_job(
+    _scheduled_demurrage, "interval", hours=24, id="demurrage"
 )
 
 

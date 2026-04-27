@@ -116,6 +116,14 @@ class Nation(Base):
     gdp_multiplier: Mapped[int] = mapped_column(Integer, default=100)     # stored as int x100 (100 = 1.00x)
     gdp_last_calculated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
+    # Phase 2I: idle-wallet demurrage — NL-configurable per-nation.
+    # When enabled, wallets with no activity in the last 30 days are charged
+    # ``demurrage_rate_bps`` (in basis points) of their current balance each day.
+    # The burned amount is recorded as a DEMURRAGE_BURN tx on the ledger.
+    demurrage_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Rate in basis points (default 50 = 0.5%)
+    demurrage_rate_bps: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+
     # Relationships
     leader: Mapped["User"] = relationship(
         "User",

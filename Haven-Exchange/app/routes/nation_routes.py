@@ -450,3 +450,85 @@ def distribute_bulk(
 # under the absolute /api/nations/{nation_id}/loans path — kept there so the
 # bank-loan and treasury-loan handlers share request/response shapes and the
 # _get_global_settings + lender_type plumbing.
+
+
+# ---------------------------------------------------------------------------
+# Phase 2I: Demurrage configuration endpoints
+# ---------------------------------------------------------------------------
+class DemurrageSettingsRequest(BaseModel):
+    """NL-configurable demurrage settings for a nation."""
+    demurrage_enabled: bool | None = None
+    # Rate in basis points (1–1000; i.e. 0.01%–10%)
+    demurrage_rate_bps: int | None = None
+
+
+@router.get("/{nation_id}/demurrage")
+def get_demurrage_settings(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Return the current demurrage configuration for a nation.
+
+    Visible to any authenticated user (so citizens can see whether their
+    balance may be charged for inactivity).  Mutation requires NL auth.
+    """
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    return {
+        "nation_id": nation.id,
+        "nation_name": nation.name,
+        "demurrage_enabled": nation.demurrage_enabled,
+        "demurrage_rate_bps": nation.demurrage_rate_bps,
+        "idle_threshold_days": 30,
+    }
+
+
+@router.put("/{nation_id}/demurrage")
+def update_demurrage_settings(
+    nation_id: int,
+    payload: DemurrageSettingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Update demurrage settings for a nation.
+
+    Auth: nation leader of that nation, or world_mint.
+    """
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    is_nl = current_user.id == nation.leader_id
+    is_wm = current_user.role == "world_mint"
+    if not (is_nl or is_wm):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the nation leader or World Mint may change demurrage settings.",
+        )
+
+    if payload.demurrage_enabled is not None:
+        nation.demurrage_enabled = payload.demurrage_enabled
+
+    if payload.demurrage_rate_bps is not None:
+        if not (1 <= payload.demurrage_rate_bps <= 1000):
+            raise HTTPException(
+                status_code=400,
+                detail="demurrage_rate_bps must be between 1 and 1000 (0.01%–10%).",
+            )
+        nation.demurrage_rate_bps = payload.demurrage_rate_bps
+
+    db.commit()
+
+    return {
+        "nation_id": nation.id,
+        "nation_name": nation.name,
+        "demurrage_enabled": nation.demurrage_enabled,
+        "demurrage_rate_bps": nation.demurrage_rate_bps,
+    }

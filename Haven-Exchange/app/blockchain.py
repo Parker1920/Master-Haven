@@ -24,8 +24,13 @@ GENESIS_HASH: str = "0" * 64  # previous hash for the very first transaction
 _tx_lock = threading.Lock()   # serialises all writes to the ledger
 
 # Valid transaction types
-# Valid transaction types — includes banking types (LOAN, LOAN_PAYMENT, LOAN_FORGIVE)
-_VALID_TX_TYPES = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL", "STOCK_PAYOUT", "LOAN", "LOAN_DISBURSE", "LOAN_PAYMENT", "LOAN_FORGIVE"}
+# Valid transaction types — includes banking types and demurrage (Phase 2I)
+_VALID_TX_TYPES = {
+    "MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS",
+    "STOCK_BUY", "STOCK_SELL", "STOCK_PAYOUT",
+    "LOAN", "LOAN_DISBURSE", "LOAN_PAYMENT", "LOAN_FORGIVE",
+    "DEMURRAGE_BURN",  # Phase 2I: idle-wallet demurrage charge
+}
 
 
 # ---------------------------------------------------------------------------
@@ -205,12 +210,13 @@ def create_transaction(
                 sender_user.balance -= amount
 
         # Receiver side
-        # Skip balance credit only for BURN transactions to the World Mint
-        # address, or sends to SYSTEM. MINT-to-self (pre-staging) should
-        # still credit the admin's balance.
+        # Skip balance credit for BURN and DEMURRAGE_BURN transactions to the
+        # World Mint address — these are genuine destructions of supply.
+        # Sends to SYSTEM are also skipped.  MINT-to-self (pre-staging) still
+        # credits the admin's balance (MINT tx type, not BURN).
         is_burn_target = (
             to_address == settings.WORLD_MINT_ADDRESS
-            and tx_type == "BURN"
+            and tx_type in ("BURN", "DEMURRAGE_BURN")
         )
         receiver_user: Optional[User] = None
         if to_address.startswith("TRV-BANK-"):
