@@ -1,9 +1,13 @@
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { SparklesIcon, Bars3Icon, XMarkIcon, ChevronDownIcon } from '@heroicons/react/24/solid'
+import { Bars3Icon, XMarkIcon, ChevronDownIcon } from '@heroicons/react/24/solid'
 import AdminLoginModal from './AdminLoginModal'
 import { AuthContext, FEATURES } from '../utils/AuthContext'
 import axios from 'axios'
+
+// Resolved against Vite's base URL so the asset works in both dev and the
+// /haven-ui/ production mount. The actual file lives in public/assets/.
+const HAVEN_MARK_URL = `${import.meta.env.BASE_URL}assets/voyagers-haven-mark.gif`
 
 /**
  * Top navigation bar with auth-aware links, pending count badges, and dropdown menus.
@@ -113,6 +117,7 @@ export default function Navbar() {
     { label: 'Events', to: '/events', visible: isAdmin && !isCorrespondent },
     { label: 'War Room', to: '/war-room', visible: canAccess(FEATURES.WAR_ROOM) || isCorrespondent,
       className: 'text-red-400 font-bold', badge: 'conflict' },
+    { label: 'Changelog', to: '/changelog', visible: true },
   ], [isAdmin, isCorrespondent, canAccess])
 
   // Dropdown groups
@@ -170,8 +175,22 @@ export default function Navbar() {
         <div className="flex items-center justify-between">
           {/* Logo + user info */}
           <div className="flex items-center space-x-4">
-            <div style={{ background: 'linear-gradient(135deg, var(--app-primary), var(--app-accent-2))' }} className="p-2 rounded-lg">
-              <SparklesIcon className="w-7 h-7 text-white" />
+            {/* Haven brand mark. The teal/violet gradient is a fallback shown if
+                the image fails to load (e.g., file missing during deploys). */}
+            <div
+              className="rounded-lg overflow-hidden flex-shrink-0"
+              style={{
+                width: '44px',
+                height: '44px',
+                background: 'linear-gradient(135deg, var(--app-primary), var(--app-accent-2))',
+              }}
+            >
+              <img
+                src={HAVEN_MARK_URL}
+                alt="Voyager's Haven"
+                className="w-full h-full object-cover block"
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
             </div>
             <div>
               <div className="text-xl font-semibold" style={{ color: 'var(--app-text)' }}>Haven Control Room</div>

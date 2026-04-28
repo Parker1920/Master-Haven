@@ -1,0 +1,58 @@
+{
+  "products": [
+    {
+      "id": "haven-control-room",
+      "icon": "🌐",
+      "name": "Haven Control Room",
+      "status": "live",
+      "description": "The central platform for cataloging No Man's Sky exploration. Galaxy maps, system records, planet surveys, fauna sightings — all gathered in one place by the people who found them.",
+      "footerLeft": "12.4K systems · 27.4K planets",
+      "footerRight": { "text": "havenmap.online →", "link": "https://havenmap.online" }
+    },
+    {
+      "id": "haven-extractor",
+      "icon": "🔭",
+      "name": "Haven Extractor",
+      "status": "live",
+      "description": "A companion tool that captures discoveries directly from the game and submits them to Haven automatically. Built for Travelers who'd rather explore than transcribe.",
+      "footerLeft": "Auto-updating",
+      "footerRight": { "text": "PC only", "link": null }
+    },
+    {
+      "id": "travelers-collective",
+      "icon": "🗺️",
+      "name": "Travelers Collective",
+      "status": "live",
+      "description": "Haven's central exploration database. Everything our community has witnessed, organized and cross-referenced. Built to grow as Travelers grow.",
+      "footerLeft": "Phase A · live",
+      "footerRight": { "text": "In works with Had.Sh", "link": null }
+    },
+    {
+      "id": "travelers-exchange",
+      "icon": "💱",
+      "name": "Travelers Exchange",
+      "status": "build",
+      "description": "A cross-community economy where contribution earns currency, and currency moves between businesses run by members. Currently being reshaped after community feedback.",
+      "footerLeft": "Early access",
+      "footerRight": { "text": "travelers-exchange.online →", "link": "https://travelers-exchange.online" }
+    },
+    {
+      "id": "keeper",
+      "icon": "🤖",
+      "name": "Keeper",
+      "status": "build",
+      "description": "A Discord companion built by Stars that bridges the platform and the community — tracking contributions, awarding XP, and giving console players a way to engage without leaving Discord.",
+      "footerLeft": "Active development",
+      "footerRight": { "text": "v1.0", "link": null }
+    },
+    {
+      "id": "viobot",
+      "icon": "🛡️",
+      "name": "Viobot",
+      "status": "live",
+      "description": "A Discord moderation bot built and maintained by art3mis and Goat from the IEA community. Given to us as a side project — we host it, they look after it.",
+      "footerLeft": "Always on",
+      "footerRight": { "text": "IEA · Discord", "link": null }
+    }
+  ]
+}

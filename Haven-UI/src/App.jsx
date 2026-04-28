@@ -31,6 +31,7 @@ const CommunityStats = lazy(() => import('./pages/CommunityStats'))
 const CommunityDetail = lazy(() => import('./pages/CommunityDetail'))
 const Profile = lazy(() => import('./pages/Profile'))
 const UserManagement = lazy(() => import('./pages/UserManagement'))
+const Changelog = lazy(() => import('./pages/Changelog'))
 
 // Heavy components with Three.js - load separately for better code splitting
 const WarRoom = lazy(() => import('./pages/WarRoom'))
@@ -119,6 +120,7 @@ export default function App() {
               <Route path="/db_stats" element={<DBStats />} />
               <Route path="/community-stats" element={<CommunityStats />} />
               <Route path="/community-stats/:tag" element={<CommunityDetail />} />
+              <Route path="/changelog" element={<Changelog />} />
               <Route path="/profile" element={<Profile />} />
 
               {/* Super admin only routes */}

@@ -1,6 +1,6 @@
 {
   "name": "haven-ui",
-  "version": "1.48.2",
+  "version": "1.49.0",
   "private": true,
   "scripts": {
     "dev": "vite --config vite.config.mjs",

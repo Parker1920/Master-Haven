@@ -22,6 +22,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.51.0 | 2026-04-27 | Public `/changelog` page (Voyager's Haven story page) + animated brand-mark swap across the navbar |
+| Haven-UI | 1.49.0 | 2026-04-27 | New public Changelog page, nav link, animated GIF brand mark replaces SparklesIcon, new `--app-accent-amber` token |
 | **Master Haven** | 1.50.13 | 2026-04-21 | Numpy auto-install on mod load + INFO-level galaxy diagnostics for "always Euclid" reports |
 | Haven Extractor | 1.9.3 | 2026-04-21 | Auto-installs numpy if `nms_namegen` import fails; promotes RealityIndex + universe_addr resolution logs from DEBUG to INFO |
 | **Master Haven** | 1.50.12 | 2026-04-21 | Custom system name field re-added to extractor for renamed systems; procgen preserved in description |
@@ -89,6 +91,20 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.51.0 (2026-04-27) - Public Changelog Page + Voyager's Haven Brand Mark
+New public-facing `/changelog` route at `havenmap.online/haven-ui/changelog` — the Voyager's Haven story page. Hero, "What We've Built" product grid, "Recent Witnessing" timeline grouped by month (newest first, computed at render time from `timeline.json`), "What's Still Being Made" three-horizon roadmap, and a footer with a Discord CTA placeholder. Page is publicly readable, no auth.
+
+Same release replaces the global Haven brand mark in the navbar — previously a Heroicons `SparklesIcon` rendered inside a CSS gradient tile — with an animated GIF (`Haven-UI/public/assets/voyagers-haven-mark.gif`). The teal/violet gradient is preserved as a fallback shown if the image fails to load.
+
+**Haven-UI 1.49.0**
+- New page: [Haven-UI/src/pages/Changelog.jsx](Haven-UI/src/pages/Changelog.jsx) — uses existing `--app-primary` (teal) and `--app-accent-2` (violet) tokens; introduces a new `--app-accent-amber` (`#ffb44c`) token in [Haven-UI/src/styles/index.css](Haven-UI/src/styles/index.css) for in-development status pills.
+- Static content lives in [Haven-UI/src/data/changelog/](Haven-UI/src/data/changelog/) — `products.json`, `timeline.json` (oldest-first; component reverses at render), `roadmap.json`. To add a new entry, append to the relevant JSON file and bump versions; no rebuild logic required beyond Vite's standard build.
+- Lazy-loaded route added in [Haven-UI/src/App.jsx](Haven-UI/src/App.jsx); top-level "Changelog" link added to `NAV_LINKS` in [Haven-UI/src/components/Navbar.jsx](Haven-UI/src/components/Navbar.jsx) (renders in both desktop and mobile from a single source).
+- Navbar logo: replaced the `SparklesIcon` JSX with an `<img>` resolved via `import.meta.env.BASE_URL` so the asset path works in both dev (`/assets/...`) and prod (`/haven-ui/assets/...`). Falls back to the existing teal/violet gradient if the GIF can't load.
+- **Follow-up not done in this release**: favicon was left as the existing inline SVG; per the build prompt the favicon could be regenerated as a static PNG of the GIF's first frame, but image extraction tooling wasn't run in this session. The Discord CTA on the page footer is wired to `href="#"` with a `data-todo="discord-invite-url"` marker — needs a real invite URL.
+
+---
 
 #### Master Haven 1.50.13 (2026-04-21) - Numpy Auto-Install + Galaxy Diagnostic Logs (Extractor)
 Fixes two problems reported from a live user session (user "chris"): (1) procgen system/region names not being generated — log showed `ModuleNotFoundError: No module named 'numpy'` at mod load, causing `nms_namegen` imports to fail and fall back to `System_{glyph}` / `Region_{glyph[:8]}`. Root cause: the auto-updater (`haven_updater.ps1` + `UPDATE_HAVEN_EXTRACTOR.bat`) only swaps the `mod/` folder from the mod-only GitHub release zip — it never touches the embedded Python's `site-packages`. Users who updated from v1.8.x to v1.9.x via the in-app updater silently lost procgen because the v1.9.0 numpy dependency added in `FIRST_TIME_SETUP.bat` never ran on their install. (2) Galaxy always reporting as Euclid in submissions — no INFO-level diagnostics in place to tell whether `player_state.mLocation.RealityIndex` is returning a genuine 0 or a broken struct access reading the wrong bytes post-Voyagers. v1.8.1 fixed out-of-range rejection but `0` is in range and gets accepted blindly.

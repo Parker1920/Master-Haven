@@ -1,66 +1,196 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Travelers Exchange</title>
+<link rel="stylesheet" href="/static/css/marketing-base.css">
+<link rel="stylesheet" href="/static/css/landing.css">
+</head>
+<body>
 
-{% block title %}Travelers Exchange — Universal Gaming Economy{% endblock %}
+<!-- ============ NAV ============ -->
+<nav class="marketing-nav">
+  <a href="/" class="marketing-logo">
+    <span class="marketing-logo-diamond"></span>
+    <span class="marketing-logo-text">Travelers<br>Exchange</span>
+  </a>
+  <div class="marketing-nav-links">
+    <a href="/ledger" class="marketing-nav-link">Ledger</a>
+    <a href="/nations" class="marketing-nav-link">Nations</a>
+    <a href="/docs" class="marketing-nav-link">Docs</a>
+  </div>
+  <div class="marketing-nav-actions">
+    <a href="/login" class="btn-mkt btn-mkt-secondary">Login</a>
+    <a href="/register" class="btn-mkt btn-mkt-primary">Register</a>
+  </div>
+</nav>
 
-{% block content %}
-<section class="hero">
-    <h1>Travelers Exchange</h1>
-    <p class="tagline">A universal gaming economy that exists outside any single game. Trade, earn, and manage currency across worlds.</p>
-    <div class="hero-cta">
-        {% if user %}
-            <a href="/dashboard" class="btn btn-primary btn-lg">Go to Dashboard</a>
-            <a href="/ledger" class="btn btn-secondary btn-lg">View Ledger</a>
-        {% else %}
-            <a href="/register" class="btn btn-primary btn-lg">Create Your Wallet</a>
-            <a href="/ledger" class="btn btn-secondary btn-lg">Explore the Ledger</a>
-        {% endif %}
-    </div>
+<!-- ============ HERO ============ -->
+<section class="lp-hero">
+  <h1>Travelers Exchange</h1>
+  <p class="lp-hero-subtitle">
+    A community economy for the No Man's Sky community. Earn coin for what you do in-game. Spend it on stuff other members make. That's it.
+  </p>
+  <div class="lp-hero-cta">
+    <a href="/register" class="btn-mkt btn-mkt-primary">Get Started</a>
+    <a href="/docs" class="btn-mkt btn-mkt-secondary">How It Works</a>
+  </div>
 </section>
 
-<section class="features-grid">
-    <div class="feature-card">
-        <span class="feature-icon">&#9741;</span>
-        <h3>Simulated Blockchain</h3>
-        <p>Every transaction is hash-chained into an immutable ledger. Full transparency with verifiable history for every coin.</p>
+<!-- ============ THE BASICS ============ -->
+<section class="lp-section">
+  <h2 class="lp-section-title">You only need to know three things.</h2>
+  <p class="lp-section-subtitle">Everything else is optional. Start here.</p>
+
+  <div class="lp-basics-grid">
+    <div class="lp-basic-card">
+      <div class="lp-basic-card-number">1</div>
+      <h3>What is this?</h3>
+      <p>A community economy. You earn coin. You spend coin. No real money involved.</p>
     </div>
-    <div class="feature-card">
-        <span class="feature-icon">&#9873;</span>
-        <h3>Nations</h3>
-        <p>Join or lead a Nation. Each receives monthly currency allocations from the World Mint based on active citizen count.</p>
+    <div class="lp-basic-card">
+      <div class="lp-basic-card-number">2</div>
+      <h3>How do I get coin?</h3>
+      <p>Play the game. Submit what you find. The system rewards you automatically.</p>
     </div>
+    <div class="lp-basic-card">
+      <div class="lp-basic-card-number">3</div>
+      <h3>How do I spend it?</h3>
+      <p>Shops, stocks, or banks. Pick one. They're all in the menu when you log in.</p>
+    </div>
+  </div>
 </section>
 
-<section class="hierarchy-section">
-    <h2>How It Works</h2>
-    <div class="hierarchy-flow">
-        <div class="hierarchy-node highlight">World Mint</div>
-        <span class="hierarchy-arrow">&rarr;</span>
-        <div class="hierarchy-node">Nations</div>
-        <span class="hierarchy-arrow">&rarr;</span>
-        <div class="hierarchy-node">Citizens</div>
-    </div>
-    <p class="text-muted" style="max-width: 600px; margin: 0 auto;">
-        The World Mint creates {{ settings.CURRENCY_SHORT }} and distributes it to approved Nations based on their active citizen count.
-        Nation leaders distribute funds to their citizens. Citizens trade freely with each other.
-    </p>
-</section>
+<!-- ============ THE LOOP ============ -->
+<section class="lp-loop-section">
+  <div class="lp-section">
+    <h2 class="lp-section-title">The Loop</h2>
+    <p class="lp-section-subtitle">Here's how the whole thing works.</p>
 
-{% if stats %}
-<section style="margin-top: var(--space-2xl);">
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">{{ stats.total_users | format_number }}</div>
-            <div class="stat-label">Registered Users</div>
+    <div class="lp-loop-container">
+      <div class="lp-loop-step">
+        <div class="lp-loop-icon">&#127918;</div>
+        <div class="lp-loop-text">
+          <div class="lp-loop-text-title">You play No Man's Sky</div>
+          <div class="lp-loop-text-detail">Just like normal. Explore, build, fight, whatever you do.</div>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ stats.total_transactions | format_number }}</div>
-            <div class="stat-label">Transactions</div>
+      </div>
+      <div class="lp-loop-arrow">&#9660;</div>
+
+      <div class="lp-loop-step">
+        <div class="lp-loop-icon">&#128225;</div>
+        <div class="lp-loop-text">
+          <div class="lp-loop-text-title">You submit your discoveries</div>
+          <div class="lp-loop-text-detail">Systems, ships, fauna, bases &mdash; whatever your community tracks.</div>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ stats.total_nations | format_number }}</div>
-            <div class="stat-label">Active Nations</div>
+      </div>
+      <div class="lp-loop-arrow">&#9660;</div>
+
+      <div class="lp-loop-step">
+        <div class="lp-loop-icon">&#129302;</div>
+        <div class="lp-loop-text">
+          <div class="lp-loop-text-title">Keeper Bot rewards you</div>
+          <div class="lp-loop-text-detail">XP for the contribution + coin in your wallet, automatically.</div>
         </div>
+      </div>
+      <div class="lp-loop-arrow">&#9660;</div>
+
+      <div class="lp-loop-step">
+        <div class="lp-loop-icon">&#128722;</div>
+        <div class="lp-loop-text">
+          <div class="lp-loop-text-title">You spend your coin</div>
+          <div class="lp-loop-text-detail">Buy custom builds, region maps, mining services, whatever you need.</div>
+        </div>
+      </div>
+      <div class="lp-loop-arrow">&#9660;</div>
+
+      <div class="lp-loop-step">
+        <div class="lp-loop-icon">&#127978;</div>
+        <div class="lp-loop-text">
+          <div class="lp-loop-text-title">Other members earn from you</div>
+          <div class="lp-loop-text-detail">The shop owners get the coin you spent. The cycle continues.</div>
+        </div>
+      </div>
     </div>
+
+    <div class="lp-highlight-box">
+      <strong>The simple version:</strong> Play &rarr; submit &rarr; earn &rarr; spend &rarr; other people earn &rarr; cycle continues. Forever.
+    </div>
+  </div>
 </section>
-{% endif %}
-{% endblock %}
+
+<!-- ============ THREE PLACES TO SPEND ============ -->
+<section class="lp-section">
+  <h2 class="lp-section-title">Three places to spend.</h2>
+  <p class="lp-section-subtitle">Pick one, or all three. All optional.</p>
+
+  <div class="lp-places-grid">
+    <div class="lp-place-card">
+      <div class="lp-place-icon">&#128722;</div>
+      <h3>Shops</h3>
+      <p>Other members run shops. They sell custom builds, region maps, food buff menus, mining services, whatever they're good at.</p>
+    </div>
+    <div class="lp-place-card">
+      <div class="lp-place-icon">&#128200;</div>
+      <h3>Stocks</h3>
+      <p>Buy a piece of a nation or business. The price tracks how well it's doing. Sell whenever you want.</p>
+    </div>
+    <div class="lp-place-card">
+      <div class="lp-place-icon">&#127974;</div>
+      <h3>Loans</h3>
+      <p>Need coin you don't have? Borrow from a bank or your nation's treasury. Hard cap on what you can ever owe.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GETTING STARTED ============ -->
+<section class="lp-section" style="border-top: 1px solid var(--border);">
+  <h2 class="lp-section-title">Getting started takes 5 minutes.</h2>
+  <p class="lp-section-subtitle">Three steps. That's it.</p>
+
+  <div class="lp-start-grid">
+    <div class="lp-start-step">
+      <div class="lp-start-number">1</div>
+      <h3>Make your account</h3>
+      <p>Pick a username and password. You'll have a wallet immediately.</p>
+    </div>
+    <div class="lp-start-step">
+      <div class="lp-start-number">2</div>
+      <h3>Join your nation</h3>
+      <p>Find your community in the Nations list. Apply. Wait for approval.</p>
+    </div>
+    <div class="lp-start-step">
+      <div class="lp-start-number">3</div>
+      <h3>Start playing</h3>
+      <p>Submit what you find in-game. Coin starts showing up.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="lp-cta-section">
+  <h2>Ready to join?</h2>
+  <p>Registration is free. No real money involved. You can leave anytime.</p>
+  <div class="lp-hero-cta">
+    <a href="/register" class="btn-mkt btn-mkt-primary">Create Your Wallet</a>
+    <a href="/docs" class="btn-mkt btn-mkt-secondary">Read the Docs</a>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="marketing-footer">
+  <div class="marketing-footer-links">
+    <a href="/ledger">Public Ledger</a>
+    <a href="/nations">Browse Nations</a>
+    <a href="/docs">Documentation</a>
+    <a href="/docs/learn">How It Works</a>
+    <a href="/docs/nation-leaders">For Nation Leaders</a>
+  </div>
+  <div class="marketing-footer-meta">
+    Travelers Exchange &mdash; Built by the community, for the community
+  </div>
+</footer>
+
+</body>
+</html>

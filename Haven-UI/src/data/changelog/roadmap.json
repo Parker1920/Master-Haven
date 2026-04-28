@@ -1,0 +1,33 @@
+{
+  "horizons": [
+    {
+      "id": "soon",
+      "label": "Soon",
+      "title": "Already underway",
+      "items": [
+        { "title": "Keeper v2 — coin integration", "body": "The full bridge between Discord and the platform: contributions tracked, XP awarded across all six departments, TRV- coins flowing from the Exchange every time a Traveler does something worth witnessing." },
+        { "title": "Travelers Exchange polishing", "body": "Tightening the Exchange's connection to Keeper, getting the full system tested end-to-end. The moment the contribution loop starts running, the whole ecosystem changes shape." },
+        { "title": "Continuous Haven Control Room work", "body": "What it's always been: ongoing improvements to the platform that holds everything together. New features, better mobile, deeper data, sharper interfaces — the work that never stops." }
+      ]
+    },
+    {
+      "id": "next",
+      "label": "Next",
+      "title": "On the horizon",
+      "items": [
+        { "title": "Extractor for console players", "body": "Exploring whether the Extractor's data pipeline can extend to PlayStation and Xbox Travelers — opening the door for the half of the community who can't run a PC mod." },
+        { "title": "The full coin economy", "body": "Building out the Exchange's currency structure, watching how it actually behaves with real Travelers using it. Possible conversations with AP and their new economic bot to learn from each other." },
+        { "title": "Keeper personality upgrade", "body": "Giving Keeper a real voice and presence. Not just a bot that responds — a member of the community with character of its own." }
+      ]
+    },
+    {
+      "id": "later",
+      "label": "Later",
+      "title": "The long view",
+      "items": [
+        { "title": "The Haven Homelab, fully realized", "body": "The complete vision: rack finished, every service in its proper home, every Pi doing what it was made to do. Local AI inference, dedicated compute, redundant storage. The infrastructure that lets Haven exist on its own terms, indefinitely." },
+        { "title": "The tri-synergy, polished", "body": "The full data flow — manual submission, the Extractor, and Keeper — refined into one cohesive system. Three paths into Haven that feel like one. The architecture that makes the ecosystem feel inevitable instead of assembled." }
+      ]
+    }
+  ]
+}

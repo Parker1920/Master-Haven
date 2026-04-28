@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>For Nation Leaders &mdash; Travelers Exchange</title>
+<link rel="stylesheet" href="/static/css/marketing-base.css">
+<link rel="stylesheet" href="/static/css/docs.css">
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav class="marketing-nav">
+  <a href="/" class="marketing-logo">
+    <span class="marketing-logo-diamond"></span>
+    <span class="marketing-logo-text">Travelers<br>Exchange</span>
+  </a>
+  <div class="marketing-nav-links">
+    <a href="/ledger" class="marketing-nav-link">Ledger</a>
+    <a href="/nations" class="marketing-nav-link">Nations</a>
+    <a href="/docs" class="marketing-nav-link active">Docs</a>
+  </div>
+  <div class="marketing-nav-actions">
+    <a href="/login" class="btn-mkt btn-mkt-secondary">Login</a>
+    <a href="/register" class="btn-mkt btn-mkt-primary">Register</a>
+  </div>
+</nav>
+
+<!-- ============ DOC SWITCHER ============ -->
+<div class="docs-switcher">
+  <span class="docs-switcher-label">Docs:</span>
+  <a href="/docs">All Docs</a>
+  <span class="separator">&middot;</span>
+  <a href="/">Getting Started</a>
+  <span class="separator">&middot;</span>
+  <a href="/docs/learn">Under the Hood</a>
+  <span class="separator">&middot;</span>
+  <a href="/docs/nation-leaders" class="active">For Nation Leaders</a>
+</div>
+
+<!-- ============ LAYOUT ============ -->
+<div class="docs-layout">
+
+  <aside class="docs-sidebar" id="sidebar">
+    <div class="docs-sidebar-header">
+      <div class="docs-sidebar-eyebrow amber">For Leaders</div>
+      <div class="docs-sidebar-title">Nation Leader Pitch</div>
+      <div class="docs-sidebar-meta">~10 min read &middot; 12 sections</div>
+    </div>
+    <nav class="docs-sidebar-nav">
+      <a href="#what-this-is" class="active"><span class="num">01</span>What This Is</a>
+      <a href="#short-version"><span class="num">02</span>The Short Version</a>
+      <a href="#problem"><span class="num">03</span>The Problem We Solve</a>
+      <a href="#sovereignty"><span class="num">04</span>How Sovereignty Works</a>
+      <a href="#money"><span class="num">05</span>The Money</a>
+      <a href="#businesses"><span class="num">06</span>What Members Build</a>
+      <a href="#trade"><span class="num">07</span>Inter-Nation Trade</a>
+      <a href="#keeper"><span class="num">08</span>The Keeper Bot</a>
+      <a href="#protections"><span class="num">09</span>How We Protect You</a>
+      <a href="#joining"><span class="num">10</span>What Joining Looks Like</a>
+      <a href="#questions"><span class="num">11</span>Questions You Have</a>
+      <a href="#fit"><span class="num">12</span>Who This Is Right For</a>
+    </nav>
+  </aside>
+
+  <main class="docs-content">
+
+    <div class="docs-content-header">
+      <div class="docs-content-eyebrow amber">For Discord Community Leaders</div>
+      <h1 class="docs-content-title">A Proposal for Nation Leaders</h1>
+      <p class="docs-content-subtitle">
+        Why your community might want to adopt the Travelers Exchange &mdash; and what you'd actually be agreeing to.
+      </p>
+    </div>
+
+    <section class="docs-section" id="what-this-is">
+      <span class="docs-section-num">01</span>
+      <h2>What This Is</h2>
+      <p>
+        The Travelers Exchange is a community-built economic platform for No Man's Sky communities. It's already running. Voyager's Haven is the launch nation. We're inviting other established communities to join as <strong>sovereign nations</strong> within the same economy.
+      </p>
+      <p>
+        This document explains what you'd be adopting, what you control, what you don't, and why we think it's worth your community's time.
+      </p>
+      <div class="docs-callout amber">
+        <p class="docs-callout-title">No catch.</p>
+        <p>We're not selling anything. There's no fee. There's no token sale. The Exchange is community infrastructure built to be adopted.</p>
+      </div>
+    </section>
+
+    <section class="docs-section" id="short-version">
+      <span class="docs-section-num">02</span>
+      <h2>The Short Version</h2>
+      <p>If you're short on time, here's the pitch in five points:</p>
+
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>Your community gets a working economy</strong> &mdash; wallets, shops, loans, a stock market, a public ledger &mdash; without you having to build any of it</li>
+          <li><strong>You stay sovereign</strong> &mdash; you control your treasury, your members, your businesses, and your community's display name and ticker for the currency</li>
+          <li><strong>The currency is shared</strong> &mdash; your members can transact with members of other nations; the underlying value is uniform across nations</li>
+          <li><strong>The economic model is honest</strong> &mdash; no inflation games, no hidden inflation, no debt traps; the system is designed for sustainable circulation</li>
+          <li><strong>You can leave</strong> &mdash; if it doesn't work for your community, you withdraw your nation; you don't owe anyone anything</li>
+        </ul>
+      </div>
+
+      <p>If that's enough, talk to us. The rest of this document is for leaders who want to understand the details before committing.</p>
+    </section>
+
+    <section class="docs-section" id="problem">
+      <span class="docs-section-num">03</span>
+      <h2>The Problem We're Solving</h2>
+      <p>Most community economies fail. The pattern is consistent:</p>
+
+      <div class="docs-table-wrapper">
+        <table>
+          <thead>
+            <tr><th style="width: 35%;">Failure Mode</th><th>What Happens</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Game-update asymmetry</strong></td><td>A game change makes player effort uneven (e.g., difficulty settings, easy-mode vs hardcore). Easy-mode players can undercut everyone, and the marketplace loses coherence.</td></tr>
+            <tr><td><strong>Decorative shops</strong></td><td>Members create shops just because they can, abandon them in a week, marketplace becomes a graveyard.</td></tr>
+            <tr><td><strong>Hoarding without pressure</strong></td><td>Activity-based currencies with no anti-hoarding mechanisms let top earners accumulate, and the economy stalls.</td></tr>
+            <tr><td><strong>Centralized fragility</strong></td><td>One operator burns out, the whole thing dies.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>We've watched these patterns play out across multiple community economies. The Travelers Exchange is built specifically to <strong>avoid each of these failure modes structurally</strong> &mdash; not through promises or willpower, but through design.</p>
+    </section>
+
+    <section class="docs-section" id="sovereignty">
+      <span class="docs-section-num">04</span>
+      <h2>How Sovereignty Works</h2>
+      <p>Your nation is <strong>yours</strong>. You don't lose authority by adopting the platform.</p>
+
+      <h3>What You Control</h3>
+      <div class="docs-table-wrapper">
+        <table>
+          <thead><tr><th style="width: 35%;">Authority</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Member approval</strong></td><td>Only people you approve become citizens of your nation</td></tr>
+            <tr><td><strong>Currency display</strong></td><td>You name the currency and set the ticker for your community</td></tr>
+            <tr><td><strong>Treasury</strong></td><td>You hold and distribute your nation's funds</td></tr>
+            <tr><td><strong>Business approval</strong></td><td>Members create shops; you approve them or don't</td></tr>
+            <tr><td><strong>Bank operators</strong></td><td>You appoint them &mdash; banks are optional, you don't have to use them</td></tr>
+            <tr><td><strong>Loan rates</strong></td><td>Set within the World Mint's interest cap, you decide what your banks charge</td></tr>
+            <tr><td><strong>Demurrage</strong></td><td>You decide whether to enable it for your nation</td></tr>
+            <tr><td><strong>Distribution policies</strong></td><td>How monthly allocations get split among citizens is your call</td></tr>
+            <tr><td><strong>Discord integration</strong></td><td>The Keeper bot operates on your terms in your Discord</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>What You Don't Control</h3>
+      <div class="docs-table-wrapper">
+        <table>
+          <thead><tr><th style="width: 35%;">Authority</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Burn rate on loans</strong></td><td>World Mint sets globally &mdash; keeps the supply math consistent</td></tr>
+            <tr><td><strong>Mint cap</strong></td><td>World Mint sets &mdash; prevents inflation from any nation</td></tr>
+            <tr><td><strong>Demurrage bounds</strong></td><td>World Mint sets the ceiling and floor; you set within that</td></tr>
+            <tr><td><strong>Stock market mechanics</strong></td><td>Same math applies to all nations &mdash; fairness</td></tr>
+            <tr><td><strong>Public ledger</strong></td><td>Public, immutable; you can't hide your nation's transactions</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>What You Can Do Without Asking Permission</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li>Reject any business application</li>
+          <li>Forgive any loan</li>
+          <li>Suspend any shop in your nation</li>
+          <li>Change your distribution policies</li>
+          <li>Toggle demurrage on or off</li>
+          <li>Promote, demote, or remove members</li>
+          <li>Withdraw your nation entirely</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="docs-section" id="money">
+      <span class="docs-section-num">05</span>
+      <h2>The Money</h2>
+
+      <h3>Where the Coin Comes From</h3>
+      <p>There are two ways coin enters your nation's economy:</p>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>World Mint allocation</strong> &mdash; The World Mint mints coin to your treasury based on your member count and activity. You distribute it to members per your policies.</li>
+          <li><strong>Member earnings</strong> &mdash; Citizens earn coin from each other through transactions, business sales, stock appreciation, and loans they later pay back.</li>
+        </ul>
+      </div>
+
+      <h3>Where the Coin Goes (When It's Destroyed)</h3>
+      <p>Some coin is <strong>burned</strong> (permanently destroyed) by design:</p>
+      <div class="docs-key-points">
+        <ul>
+          <li>10% of total interest paid on loans, split 20% during payments and 80% at close</li>
+          <li>Demurrage on idle wallets, if your nation enables it</li>
+          <li>Various tax mechanisms</li>
+        </ul>
+      </div>
+
+      <div class="docs-callout green">
+        <p class="docs-callout-title">Why this matters</p>
+        <p>This is <strong>counter-inflationary</strong>. The supply doesn't grow uncontrolled. The system has structural deflationary pressure that balances the World Mint's minting authority.</p>
+      </div>
+
+      <h3>What's Worth Knowing</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li>Currency is <strong>integer-only</strong> &mdash; no fractional coin (avoids floating-point precision issues)</li>
+          <li>Coin <strong>cannot leave the system</strong> &mdash; there's no cash-out, no exchange to real currency</li>
+          <li>Your community's coin and another community's coin are <strong>the same underlying currency</strong> with different display names</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="docs-section" id="businesses">
+      <span class="docs-section-num">06</span>
+      <h2>What Members Have Built</h2>
+      <p>Once you're a nation, your members can run <strong>businesses</strong>. We've seen these work:</p>
+
+      <div class="docs-table-wrapper">
+        <table>
+          <thead><tr><th style="width: 30%;">Business Type</th><th>What It Sells</th></tr></thead>
+          <tbody>
+            <tr><td><strong>&#128506;&#65039; Charting Services</strong></td><td>Documentation of explored regions in the community's database</td></tr>
+            <tr><td><strong>&#128640; Custom Corvette Shops</strong></td><td>Design and build of custom-spec corvettes for hire</td></tr>
+            <tr><td><strong>&#127857; Restaurants</strong></td><td>Curated food processor menus tuned for specific gameplay buffs</td></tr>
+            <tr><td><strong>&#9935;&#65039; Resource Depots</strong></td><td>Verified mining operations selling specific resources</td></tr>
+            <tr><td><strong>&#129516; Xenobiology Services</strong></td><td>Gene-splicing consulting, xeno-battle coaching</td></tr>
+            <tr><td><strong>&#127959;&#65039; Architects</strong></td><td>Custom base build services and structural designs</td></tr>
+            <tr><td><strong>&#128220; Lore Services</strong></td><td>Historical research and writing for community events</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The pattern: <strong>functional businesses sell skill, time, expertise, or verified work</strong> &mdash; not commodities. We learned this from watching other community economies collapse when commodity-based selling met game-update asymmetry. Resource Depots are the one exception, and they require public mining-setup verification to qualify.</p>
+
+      <div class="docs-callout blue">
+        <p class="docs-callout-title">This is locked in by design</p>
+        <p>It protects your members from the failure mode that destroys other community economies.</p>
+      </div>
+    </section>
+
+    <section class="docs-section" id="trade">
+      <span class="docs-section-num">07</span>
+      <h2>Inter-Nation Trade</h2>
+      <p>Your members can transact with members of other nations. They can buy from another nation's shops. They can hold stock in another nation. The currency works everywhere.</p>
+
+      <p>The one nuance is the <strong>GDP modifier</strong>. Each nation has its own economy strength, calculated daily. When buying from a shop in another nation, the modifier affects the price. A shop in a strong economy charges more (because demand is higher there). A shop in a weak economy charges less.</p>
+
+      <p>This isn't a gotcha &mdash; it's a natural consequence of economies operating at different scales. Your members will see the conversion at purchase time. <strong>Nothing is hidden.</strong></p>
+
+      <div class="docs-callout amber">
+        <p class="docs-callout-title">What this means in practice</p>
+        <p>Your members can always tell whether they're getting a deal by buying from a weaker economy or paying a premium for a stronger one. It's transparent and informative.</p>
+      </div>
+    </section>
+
+    <section class="docs-section" id="keeper">
+      <span class="docs-section-num">08</span>
+      <h2>The Keeper Bot (Optional)</h2>
+      <p>We've built a Discord bot called <strong>Keeper</strong> that integrates with the Travelers Exchange. It does two things:</p>
+
+      <div class="docs-key-points">
+        <ul>
+          <li>Tracks XP for community contributions in your Discord</li>
+          <li>Awards Travelers Coin to your members based on that XP</li>
+        </ul>
+      </div>
+
+      <p>Keeper draws from your nation treasury &mdash; you set the per-XP rates within your community. If your nation runs out of coin, awards stop until you allocate more.</p>
+
+      <p>Keeper is <strong>invitation-only</strong>. Your community has to invite the bot to your Discord, and you control its configuration. Other nations have their own coin-award mechanisms; they don't need Keeper.</p>
+
+      <div class="docs-callout green">
+        <p class="docs-callout-title">Keeper is optional</p>
+        <p>You can adopt Travelers Exchange without Keeper. Many nations might choose to award coin manually through their NL or via their own existing community tools. Keeper makes the process automatic, but it's not required.</p>
+      </div>
+    </section>
+
+    <section class="docs-section" id="protections">
+      <span class="docs-section-num">09</span>
+      <h2>How We Protect Your Community</h2>
+      <p>The Travelers Exchange has structural protections that other systems lack:</p>
+
+      <h3>Against Hoarding</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>GDP-based pricing</strong> rewards velocity &mdash; money that moves makes the system stronger for everyone</li>
+          <li><strong>Optional demurrage</strong> lets you charge a small fee on idle wallets if hoarding becomes a problem</li>
+          <li><strong>Stock market</strong> gives high earners somewhere to put their coin that isn't hoarding</li>
+        </ul>
+      </div>
+
+      <h3>Against Debt Traps</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>100% interest cap</strong> &mdash; a loan can never grow beyond 2&times; the original principal</li>
+          <li><strong>Pay-whenever interest</strong> &mdash; borrowers don't face crushing minimum payments</li>
+          <li><strong>NL forgiveness</strong> &mdash; you can forgive loans for genuine hardship cases</li>
+        </ul>
+      </div>
+
+      <h3>Against Exploitation</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>Public ledger</strong> &mdash; every transaction is visible and verifiable</li>
+          <li><strong>Three-pillar valuation</strong> &mdash; stocks track real performance, not hype</li>
+          <li><strong>No bailouts</strong> &mdash; businesses that fail bear the consequences; this prevents moral hazard</li>
+        </ul>
+      </div>
+
+      <h3>Against Inflation</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>Monthly mint cap</strong> &mdash; the World Mint can't print coin recklessly</li>
+          <li><strong>Burn mechanisms</strong> &mdash; money is destroyed as debts close</li>
+          <li><strong>No fractional banking</strong> &mdash; banks can only lend what they hold</li>
+        </ul>
+      </div>
+
+      <h3>Against Catastrophic Loss</h3>
+      <div class="docs-key-points">
+        <ul>
+          <li><strong>Auto-stimulus</strong> &mdash; automated detection of struggling nations with proposed interventions</li>
+          <li><strong>Counter-cyclical injection</strong> &mdash; the World Mint can issue stimulus to nations whose economies are slowing</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="docs-section" id="joining">
+      <span class="docs-section-num">10</span>
+      <h2>What Joining Looks Like</h2>
+      <p>Joining as a nation is a deliberate process. Here's the path:</p>
+
+      <div class="docs-table-wrapper">
+        <table>
+          <thead><tr><th style="width: 18%;">Step</th><th>What Happens</th></tr></thead>
+          <tbody>
+            <tr><td><strong>1. Conversation</strong></td><td>You and the World Mint operator discuss your community size, goals, fit, and what roles your leadership team would play</td></tr>
+            <tr><td><strong>2. Application</strong></td><td>You submit a nation application &mdash; name, currency name, ticker, leadership</td></tr>
+            <tr><td><strong>3. Review</strong></td><td>We review for fit (no name collisions, etc.)</td></tr>
+            <tr><td><strong>4. Approval</strong></td><td>You're approved. Treasury wallet created, nation stock auto-issued, your nation appears in the network</td></tr>
+            <tr><td><strong>5. Member onboarding</strong></td><td>Your members register, apply to your nation, you approve them</td></tr>
+            <tr><td><strong>6. Calibration</strong></td><td>First month is conservative &mdash; allocations adjust as we see real activity</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>This process takes <strong>about a week</strong> end-to-end if everyone moves quickly.</p>
+    </section>
+
+    <section class="docs-section" id="questions">
+      <span class="docs-section-num">11</span>
+      <h2>Questions You Probably Have</h2>
+
+      <div class="docs-qa-block">
+        <p class="q">"What if our community doesn't like it?"</p>
+        <p class="a">You withdraw your nation. We delist it. Your members keep their wallets but no further activity happens. There's no penalty, no fee, no contractual obligation. Adoption is permission-based, not commitment-based.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"What if the operator (World Mint) burns out or goes inactive?"</p>
+        <p class="a">This is a real risk we're actively mitigating. The codebase is open within our community network, so transitioning operators is technically possible. We're documenting succession protocols. Honest answer: a small system depends on its operator. If you'd want this to outlive any one person, we're working on that.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"What if you change the rules later?"</p>
+        <p class="a">The locked decisions document is canonical and shared with all NLs. Changes to monetary policy go through a public process. You see them coming, you have input, and you can withdraw your nation if a change is unacceptable.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"What about disputes between nations?"</p>
+        <p class="a">There's no formal arbitration process yet because there haven't been formal disputes. As the network grows, this will need formalization. Right now, leaders talk. We'll codify when we need to.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"Will my community's data be safe?"</p>
+        <p class="a">The system is hosted on a Raspberry Pi in a private homelab, accessed via a public domain. The codebase isn't public. Your members' wallet activity is on the public ledger (by design &mdash; the ledger is the trust mechanism), but personal information beyond username isn't exposed.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"What if NMS fundamentally changes?"</p>
+        <p class="a">The Travelers Exchange is designed to survive game changes because it doesn't depend on game-internal economics. Currency is external. XP awards are tied to verifiable submissions, not in-game value. If NMS changes how Sentinels work tomorrow, the Exchange continues unaffected.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"Is this a get-rich-quick thing?"</p>
+        <p class="a">No. The currency is sandboxed. There's no real money. Your members can't sell their TC for USD. This is a community engagement layer, not an investment vehicle. Anyone selling it as the latter is misrepresenting it.</p>
+      </div>
+
+      <div class="docs-qa-block">
+        <p class="q">"What's in it for you (the operator)?"</p>
+        <p class="a">A working community economy that benefits Voyager's Haven and any nation that adopts it. The cost is real (Pi hosting, my time, ongoing maintenance). The benefit is the same as why we built Haven Control Room: better community infrastructure makes everyone's experience better. Not making money from this. Just want it to exist and work.</p>
+      </div>
+    </section>
+
+    <section class="docs-section" id="fit">
+      <span class="docs-section-num">12</span>
+      <h2>Who This Is Right For</h2>
+
+      <h3>Consider joining if:</h3>
+      <ul class="docs-check-list">
+        <li><span class="icon yes">&#10003;</span><span>Your community is established (active members, regular activity)</span></li>
+        <li><span class="icon yes">&#10003;</span><span>You want to give your members an economic layer they don't currently have</span></li>
+        <li><span class="icon yes">&#10003;</span><span>You're willing to do the work of approving members and businesses</span></li>
+        <li><span class="icon yes">&#10003;</span><span>You believe in transparent monetary policy with hard rules</span></li>
+        <li><span class="icon yes">&#10003;</span><span>You want to be part of a network of communities, not just a standalone</span></li>
+      </ul>
+
+      <h3>Probably skip if:</h3>
+      <ul class="docs-check-list">
+        <li><span class="icon no">&#10007;</span><span>You want full control with no shared monetary policy</span></li>
+        <li><span class="icon no">&#10007;</span><span>You want a token sale or real-money currency</span></li>
+        <li><span class="icon no">&#10007;</span><span>Your community is too small or inactive for an economy to make sense</span></li>
+        <li><span class="icon no">&#10007;</span><span>You don't have time to be an active Nation Leader</span></li>
+      </ul>
+
+      <h3>The Honest Bottom Line</h3>
+      <p>The Travelers Exchange is a working system that already serves a real community. We've fixed bugs. We've audited the code three times. We've smoke-tested 52 scenarios. The economic model is grounded in real-world economic principles (W&ouml;rgl-style anti-hoarding, central-bank-style monetary controls, blockchain-style auditability) and is honest about its tradeoffs.</p>
+
+      <div class="docs-pull-quote">
+        It's not perfect. Nothing is. But it's better than building your own from scratch, and it's better than nothing.
+      </div>
+
+      <p>If you've read this far and you're interested, reach out. We'll have a conversation, see if it's a fit, and if it is &mdash; we'll get your nation up and running.</p>
+      <p>If it's not a fit, no harm done. We're glad you considered it.</p>
+    </section>
+
+    <!-- CTA: Discord invite — placeholder per dispatch, Parker to confirm -->
+    <div class="docs-cta-block">
+      <h2>Ready to talk?</h2>
+      <p>Reach out through the Voyager's Haven Discord. We'll have a conversation and see if it's a fit for your community.</p>
+      <a href="#" class="btn-mkt btn-mkt-primary">Get In Touch</a>
+    </div>
+
+  </main>
+</div>
+
+<button class="docs-mobile-toc-toggle" id="tocToggle">&#9776; Sections</button>
+<div class="docs-mobile-toc-overlay" id="tocOverlay"></div>
+
+<footer class="marketing-footer">
+  <div class="marketing-footer-links">
+    <a href="/">Home</a>
+    <a href="/ledger">Public Ledger</a>
+    <a href="/nations">Browse Nations</a>
+    <a href="/docs">Documentation</a>
+    <a href="/docs/learn">Under the Hood</a>
+  </div>
+  <div class="marketing-footer-meta">
+    Travelers Exchange &mdash; Built by the community, for the community
+  </div>
+</footer>
+
+<script>
+  const sections = document.querySelectorAll('.docs-section');
+  const navLinks = document.querySelectorAll('.docs-sidebar-nav a');
+
+  function updateActiveSection() {
+    let current = '';
+    sections.forEach(section => {
+      const rect = section.getBoundingClientRect();
+      if (rect.top <= 150) current = section.id;
+    });
+    navLinks.forEach(link => {
+      link.classList.remove('active');
+      if (link.getAttribute('href') === '#' + current) link.classList.add('active');
+    });
+  }
+
+  window.addEventListener('scroll', updateActiveSection);
+
+  navLinks.forEach(link => {
+    link.addEventListener('click', e => {
+      const target = document.querySelector(link.getAttribute('href'));
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('tocOverlay').classList.remove('open');
+      }
+    });
+  });
+
+  const tocToggle = document.getElementById('tocToggle');
+  const sidebar = document.getElementById('sidebar');
+  const tocOverlay = document.getElementById('tocOverlay');
+
+  tocToggle.addEventListener('click', () => {
+    sidebar.classList.toggle('open');
+    tocOverlay.classList.toggle('open');
+  });
+
+  tocOverlay.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    tocOverlay.classList.remove('open');
+  });
+</script>
+
+</body>
+</html>

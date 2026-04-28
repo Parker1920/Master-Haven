@@ -20,6 +20,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 
 	--app-primary: #00C2B3; /* haven_theme.accent_cyan (teal) */
 	--app-accent-2: #9d4edd; /* accent purple */
 	--app-accent-3: #00C2B3; /* accent cyan (for buttons) */
+	--app-accent-amber: #ffb44c; /* amber — used for in-development status pills */
 	--app-glow: #00C2B3;
 
 	/* Design tokens */
