@@ -162,7 +162,7 @@ def _build_name_map(db: Session) -> dict:
 # =========================================================================
 
 # ---------------------------------------------------------------------------
-# GET / — Landing page
+# GET / — Landing page (public, marketing)
 # ---------------------------------------------------------------------------
 @router.get("/")
 def landing_page(
@@ -170,31 +170,20 @@ def landing_page(
     user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Gather basic stats for the landing page
-    total_users = (
-        db.execute(
-            select(func.count(User.id)).where(User.role != "world_mint")
-        ).scalar()
-        or 0
-    )
-    total_transactions = (
-        db.execute(select(func.count(Transaction.id))).scalar() or 0
-    )
-    total_nations = (
-        db.execute(
-            select(func.count(Nation.id)).where(Nation.status == "approved")
-        ).scalar()
-        or 0
-    )
+    """Public marketing landing page.
 
-    stats = {
-        "total_users": total_users,
-        "total_transactions": total_transactions,
-        "total_nations": total_nations,
-    }
+    Logged-in users are redirected to /dashboard — they've already
+    onboarded and don't need the marketing pitch on every visit.
+    Anonymous users see the full standalone landing template (no
+    base.html nav layered on top).
+    """
+    if user is not None:
+        return RedirectResponse(url="/dashboard", status_code=303)
 
-    ctx = _base_context(request, user, db=db, active_page="home", stats=stats)
-    return templates.TemplateResponse("landing.html", ctx)
+    return templates.TemplateResponse(
+        "landing.html",
+        {"request": request},
+    )
 
 
 # ---------------------------------------------------------------------------

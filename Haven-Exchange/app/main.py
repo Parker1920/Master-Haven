@@ -28,7 +28,14 @@ from app.routes.wallet_routes import router as wallet_router
 # ---------------------------------------------------------------------------
 # Application instance
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Travelers Exchange")
+# Move FastAPI's built-in Swagger / ReDoc out of /docs and /redoc so the
+# user-facing documentation routes registered by docs_routes.py can claim
+# /docs.  API debugging UIs are reachable at /api/docs and /api/redoc.
+app = FastAPI(
+    title="Travelers Exchange",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
 
 # ---------------------------------------------------------------------------
 # Static files & templates
@@ -55,6 +62,8 @@ from app.routes.stock_routes import router as stock_router
 app.include_router(stock_router)
 from app.routes.bank_routes import router as bank_router
 app.include_router(bank_router)
+from app.routes.docs_routes import router as docs_router
+app.include_router(docs_router)
 app.include_router(page_router)
 
 
