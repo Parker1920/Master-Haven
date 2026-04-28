@@ -5,16 +5,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, HTTPException, Request
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from constants import normalize_discord_username
+from constants import normalize_discord_username, resolve_source
 from db import get_db_connection, get_db_path, add_activity_log
 from planet_atlas_wrapper import generate_planet_html
 from services.auth_service import (
     get_session,
     verify_session,
     require_feature,
+    verify_api_key,
 )
 from services.restrictions import (
     get_restriction_for_system,
@@ -893,8 +894,8 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
             )
 
         cursor.execute('''
-            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'manual', CURRENT_TIMESTAMP)
             ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
             DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
         ''', (rx, ry, rz, custom_name, reality, galaxy))
@@ -942,8 +943,18 @@ async def api_delete_region_name(rx: int, ry: int, rz: int, session: Optional[st
 
 
 @router.post('/api/regions/{rx}/{ry}/{rz}/submit')
-async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, request: Request):
-    """Submit a proposed region name for approval. Public, no auth required."""
+async def api_submit_region_name(
+    rx: int, ry: int, rz: int,
+    payload: dict,
+    request: Request,
+    x_api_key: Optional[str] = Header(None, alias='X-API-Key'),
+):
+    """Submit a proposed region name for approval. Public, no auth required.
+
+    Anonymous calls bucket as 'manual'. Authenticated calls (Haven Extractor,
+    Keeper bot) bucket via the source resolver so reviewers can see at a
+    glance where the proposal came from.
+    """
     client_ip = request.client.host if request.client else 'unknown'
     logger.info(f"Region name submission from {client_ip}: region=[{rx},{ry},{rz}], payload={payload}")
 
@@ -954,6 +965,9 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
     reality = payload.get('reality', 'Normal')
     galaxy = payload.get('galaxy', 'Euclid')
     submitter_profile_id = payload.get('submitter_profile_id')
+
+    api_key_info = verify_api_key(x_api_key) if x_api_key else None
+    source = resolve_source(api_key_info['name'] if api_key_info else None)
 
     if not proposed_name:
         logger.warning(f"Region name submission rejected - empty proposed_name. Full payload: {payload}")
@@ -1009,11 +1023,11 @@ async def api_submit_region_name(rx: int, ry: int, rz: int, payload: dict, reque
             INSERT INTO pending_region_names
             (region_x, region_y, region_z, proposed_name, submitted_by, submitted_by_ip,
              submission_date, status, discord_tag, personal_discord_username, reality, galaxy,
-             submitter_profile_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+             submitter_profile_id, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
         ''', (rx, ry, rz, proposed_name, submitted_by, client_ip,
               datetime.now(timezone.utc).isoformat(), discord_tag, personal_discord_username,
-              reality, galaxy, submitter_profile_id))
+              reality, galaxy, submitter_profile_id, source))
 
         conn.commit()
 
@@ -1155,11 +1169,11 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
         reality = submission.get('reality') or 'Normal'
         galaxy = submission.get('galaxy') or 'Euclid'
         cursor.execute('''
-            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
-            DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
-        ''', (rx, ry, rz, proposed_name, reality, galaxy))
+            DO UPDATE SET custom_name = excluded.custom_name, source = excluded.source, updated_at = CURRENT_TIMESTAMP
+        ''', (rx, ry, rz, proposed_name, reality, galaxy, submission.get('source') or 'manual'))
 
         cursor.execute('''
             UPDATE pending_region_names
@@ -1353,11 +1367,11 @@ async def api_batch_approve_region_names(payload: dict, session: Optional[str] =
                     continue
 
                 cursor.execute('''
-                    INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
-                    DO UPDATE SET custom_name = excluded.custom_name, updated_at = CURRENT_TIMESTAMP
-                ''', (rx, ry, rz, proposed_name, reality, galaxy))
+                    DO UPDATE SET custom_name = excluded.custom_name, source = excluded.source, updated_at = CURRENT_TIMESTAMP
+                ''', (rx, ry, rz, proposed_name, reality, galaxy, submission.get('source') or 'manual'))
 
                 cursor.execute('''
                     UPDATE pending_region_names SET status = 'approved', review_date = ?, reviewed_by = ? WHERE id = ?

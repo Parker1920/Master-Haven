@@ -651,8 +651,8 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                 if sys_data.get('region_name') and region_x is not None:
                     try:
                         cursor.execute('''
-                            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, discord_tag)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, discord_tag, source)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')
                             ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
                             DO NOTHING
                         ''', (region_x, region_y, region_z, sys_data['region_name'], reality, galaxy, discord_tag))

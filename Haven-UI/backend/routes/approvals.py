@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from constants import normalize_discord_username, validate_galaxy, validate_reality, GALAXY_BY_INDEX
+from constants import normalize_discord_username, validate_galaxy, validate_reality, GALAXY_BY_INDEX, resolve_source
 from db import (
     get_db_path,
     get_db_connection,
@@ -124,16 +124,9 @@ async def submit_system(
     is_admin = verify_session(session)
     api_key_info = verify_api_key(x_api_key) if x_api_key else None
 
-    # Determine source for tracking
-    if api_key_info:
-        source = 'companion_app'
-        api_key_name = api_key_info['name']
-    elif is_admin:
-        source = 'manual'
-        api_key_name = None
-    else:
-        source = 'manual'
-        api_key_name = None
+    # Determine source for tracking via the canonical resolver in constants.py
+    api_key_name = api_key_info['name'] if api_key_info else None
+    source = resolve_source(api_key_name)
 
     # Validate system data
     is_valid, error_msg = validate_system_data(payload)
@@ -312,7 +305,7 @@ async def submit_system(
         logger.info(f"New system submission: '{system_name}' (ID: {submission_id}) from {client_ip}{source_info}")
 
         # Add activity log - differentiate watcher uploads from manual submissions
-        if source == 'companion_app':
+        if source != 'manual':
             add_activity_log(
                 'watcher_upload',
                 f"System '{system_name}' uploaded via NMS Save Watcher",
@@ -2479,7 +2472,7 @@ async def receive_extraction(
         'star_color': star_color,
         'discovered_by': payload.get('discoverer_name', 'HavenExtractor'),
         'discovered_at': payload.get('extraction_time'),
-        'source': 'haven_extractor',
+        'source': resolve_source(api_key_info.get('name') if api_key_info else None),
         'extractor_version': payload.get('extractor_version', 'unknown'),
         'game_mode': game_mode,
         # v1.48.7: Accept description from extractor. Haven Extractor 1.9.2+ stuffs the
@@ -2675,13 +2668,10 @@ async def receive_extraction(
 
         submitter_display = discord_username if discord_username else 'HavenExtractor'
 
-        # Determine source: real Haven Extractor keys keep 'haven_extractor' so
-        # analytics source-split stays correct. Non-extractor keys (e.g. Keeper 2.0)
-        # use their API key name so reviewers can tell where the submission came from.
-        if api_key_info and api_key_info.get('key_type') not in ('extractor', 'extractor_user'):
-            submission_source = api_key_info.get('name') or 'haven_extractor'
-        else:
-            submission_source = 'haven_extractor'
+        # Source attribution via the canonical resolver. Keeper bot keys
+        # (Keeper 2.0 / Keeper Bot) bucket as 'keeper_bot'; everything else
+        # authenticated buckets as 'haven_extractor'.
+        submission_source = resolve_source(api_key_info.get('name') if api_key_info else None)
 
         cursor.execute('''
             INSERT INTO pending_systems (

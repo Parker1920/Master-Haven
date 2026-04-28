@@ -22,6 +22,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.52.0 | 2026-04-28 | Unified submission source attribution across all pending/approved tables (Stage 1 of pending-card refactor) |
+| Backend API | 1.49.0 | 2026-04-28 | New `source` column on pending_discoveries / discoveries / pending_region_names / regions; canonical `resolve_source()` helper; `keeper_bot` split out of `haven_extractor`; `companion_app` folded into `haven_extractor` |
 | **Master Haven** | 1.51.1 | 2026-04-28 | DB Stats: `populated_regions` now scoped by `(reality, galaxy, rx, ry, rz)` to match `regions` table — fixes Named vs Populated count asymmetry |
 | Backend API | 1.48.8 | 2026-04-28 | `populated_regions` in `/api/db_stats` now distincts on reality + galaxy + (rx,ry,rz) instead of bare coords (matches v1.49.0 regions UNIQUE constraint) |
 | **Master Haven** | 1.51.0 | 2026-04-27 | Public `/changelog` page (Voyager's Haven story page) + animated brand-mark swap across the navbar |
@@ -93,6 +95,39 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.52.0 (2026-04-28) - Unified Submission Source Attribution (Pending-Card Refactor: Stage 1)
+First stage of the pending-approval-card unification work. Backend-only — no UI change yet. Adds a canonical `source` enum to every pending and approved table so the UI (Stage 2) can render consistent source badges and analytics can split keeper-bot uploads out of generic extractor stats.
+
+**The problem this solves**: production had three competing values in `pending_systems.source` (`manual`, `haven_extractor`, `companion_app`) but `haven_extractor` was overloaded — it bucketed per-user extractor mod uploads, the legacy shared `Haven Extractor` system key, AND the live `Keeper 2.0` Discord bot key all together. `pending_discoveries`, `discoveries`, `pending_region_names`, and `regions` had no `source` column at all, so Keeper bot uploads looked identical to web wizard submissions in the data layer. The 30-row `companion_app` bucket turned out to be early extractor prototype data from Dec 2025 (before the dedicated extractor key existed) — verified against the live Pi DB by tracing api_keys.created_at against the row timeline.
+
+**Final source enum** (canonical across all five tables):
+- `manual` — web wizard, no API key on the request
+- `haven_extractor` — every authenticated extractor-style key (per-user `Extractor - <username>` keys, the legacy `Haven Extractor` system key, the prototype `Haven` admin key)
+- `keeper_bot` — dedicated Keeper Discord bot keys (`Keeper 2.0` + dormant `Keeper Bot` v1)
+
+**Backend API 1.49.0**
+- New `resolve_source(api_key_name)` helper + `SOURCE_*` constants + `KEEPER_API_KEY_NAMES` frozenset in [Haven-UI/backend/constants.py](Haven-UI/backend/constants.py). Single source of truth for the enum, used by every submission route.
+- `submit_system` ([approvals.py:127](Haven-UI/backend/routes/approvals.py#L127)): replaced 9-line `if/elif/else` source-decision block with a one-line `resolve_source()` call. The watcher-vs-manual activity-log branch keys off `source != 'manual'` instead of the old `'companion_app'` literal.
+- `/api/extraction` ([approvals.py:2681](Haven-UI/backend/routes/approvals.py#L2681)): replaced the brittle `key_type not in ('extractor','extractor_user')` check (which would store the literal API key name like "Keeper 2.0" in the source column) with the resolver. Also fixed the same pattern in the JSON `submission_data['source']` field at [approvals.py:2475](Haven-UI/backend/routes/approvals.py#L2475) so the JSON blob source matches the column.
+- `/api/discoveries` + `/discoveries` ([discoveries.py:87](Haven-UI/backend/routes/discoveries.py#L87)): now read `X-API-Key` header and resolve source. INSERT statement adds `source` column. Keeper bot continues to work with no client-side change — the resolver maps its key name to `keeper_bot` automatically.
+- `/api/submit_discovery` ([discoveries.py:612](Haven-UI/backend/routes/discoveries.py#L612)): hard-coded `source=SOURCE_MANUAL` since this is the web wizard path.
+- `approve_discovery` ([discoveries.py:907](Haven-UI/backend/routes/discoveries.py#L907)): copies `source` from the pending row to the approved `discoveries` row on approval.
+- `/api/regions/{rx}/{ry}/{rz}/submit` ([regions.py:944](Haven-UI/backend/routes/regions.py#L944)): now reads `X-API-Key` and resolves source. Three INSERT INTO regions sites updated to carry source through approval (single approve, batch approve, and the direct admin update path).
+- CSV import region INSERT ([csv_import.py:653](Haven-UI/backend/routes/csv_import.py#L653)): explicit `source='manual'`.
+
+**Migration 1.69.0** (run automatically on backend startup; takes ~100ms on Pi DB):
+- Adds `source TEXT NOT NULL DEFAULT 'manual'` column to `pending_discoveries`, `discoveries`, `pending_region_names`, and `regions` (skipped if column already exists — idempotent).
+- Backfills all existing `pending_discoveries` (26 rows) and `discoveries` (46 rows) as `keeper_bot` — the only ingest path that's ever existed for those tables is the Keeper Discord bot, confirmed against payload shapes on the live DB.
+- Splits Keeper traffic out of `pending_systems` (12 rows) and `systems` (2 rows) by matching `api_key_name IN ('Keeper 2.0', 'Keeper Bot')`. For approved systems, traces back through `pending_systems` on glyph + galaxy.
+- Folds the 30-row `companion_app` bucket in `pending_systems` (and 1 row in `systems`) into `haven_extractor`. Those rows are early-Dec-2025 extractor prototype data submitted via the `Haven` admin key before `Haven Extractor` (id=4, created 2026-01-18) existed.
+- Logs final source distributions per table for post-migration validation.
+
+**Validated** against a 2026-04-28 Pi snapshot copied locally. Final distributions: pending_systems = `{manual: 4519, haven_extractor: 2791, keeper_bot: 12}`, systems = `{manual: 9331, haven_extractor: 2472, keeper_bot: 2}`, pending_discoveries = `{keeper_bot: 26}`, discoveries = `{keeper_bot: 46}`, pending_region_names = `{manual: 1346}`, regions = `{manual: 2057}`. Row totals preserved across every table.
+
+**What this enables (Stage 2, not in this release)**: a unified `<PendingCard>` React component that renders consistent source badges (slate `manual` / teal `haven_extractor` / Discord-blurple `keeper_bot`) across pending systems, pending discoveries, pending region names, and edit requests — replacing the current per-card-type hardcoded color/layout divergence in [SystemApprovalTab.jsx](Haven-UI/src/components/SystemApprovalTab.jsx) and [DiscoveryApprovalTab.jsx](Haven-UI/src/components/DiscoveryApprovalTab.jsx).
+
+---
 
 #### Master Haven 1.51.1 (2026-04-28) - DB Stats Populated-Regions Scope Fix
 Fixes asymmetric scoping between "Named Regions" and "Populated Regions" on the public DB Stats page. The `regions` table's UNIQUE constraint is `(reality, galaxy, region_x, region_y, region_z)` (set in migration v1.49.0 to support per-reality and per-galaxy region naming), so the same coordinate triple can legitimately have different names in different galaxies/realities and counts as N rows. The `populated_regions` query, however, was doing `SELECT DISTINCT region_x, region_y, region_z FROM systems` — collapsing those same multi-galaxy occurrences into a single populated count and producing an inflated gap between the two stats (e.g., 2,215 named vs 1,893 populated).

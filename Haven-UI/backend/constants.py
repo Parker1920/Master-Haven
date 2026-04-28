@@ -86,6 +86,48 @@ TIER_TO_USER_TYPE = {
 }
 
 # ============================================================================
+# Submission Source Attribution
+# ============================================================================
+#
+# Every pending/approved row carries a `source` enum so the UI can render
+# distinct badges and analytics can split by upload path. Values:
+#
+#   'manual'          - web wizard, no API key on the request
+#   'haven_extractor' - any extractor-style API key submission (per-user
+#                       Extractor keys, the legacy 'Haven Extractor' system
+#                       key, or the prototype 'Haven' admin key from Dec 2025)
+#   'keeper_bot'      - the dedicated Keeper Discord bot keys
+#                       ('Keeper 2.0' and the dormant 'Keeper Bot' v1)
+#
+# Historical 'companion_app' rows were folded into 'haven_extractor' in
+# migration 1.69.0 - they were prototype extractor traffic before the
+# dedicated extractor key was created.
+
+SOURCE_MANUAL = 'manual'
+SOURCE_EXTRACTOR = 'haven_extractor'
+SOURCE_KEEPER_BOT = 'keeper_bot'
+
+# API key names that map to the Keeper bot bucket. Match exactly on
+# api_keys.name; key_type='admin' is too broad (shared with internal admin
+# keys like 'Haven' and 'AP Cartography Bot' that aren't bot integrations).
+KEEPER_API_KEY_NAMES = frozenset({'Keeper 2.0', 'Keeper Bot'})
+
+
+def resolve_source(api_key_name):
+    """Map an api_key_name (or None) to the canonical source enum.
+
+    Anonymous requests (no API key) are 'manual'. Keeper bot keys get their
+    own bucket. Everything else authenticated is bucketed as the extractor
+    family.
+    """
+    if not api_key_name:
+        return SOURCE_MANUAL
+    if api_key_name in KEEPER_API_KEY_NAMES:
+        return SOURCE_KEEPER_BOT
+    return SOURCE_EXTRACTOR
+
+
+# ============================================================================
 # Discovery Constants
 # ============================================================================
 

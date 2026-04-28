@@ -5,13 +5,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, HTTPException, Request
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from constants import (
     normalize_discord_username,
     DISCOVERY_TYPE_SLUGS, DISCOVERY_TYPE_INFO, DISCOVERY_TYPE_FIELDS,
     get_discovery_type_slug,
+    resolve_source, SOURCE_MANUAL,
 )
 from db import get_db_connection, get_db_path, add_activity_log
 from services.auth_service import (
@@ -19,6 +20,7 @@ from services.auth_service import (
     verify_session,
     require_feature,
     check_self_submission,
+    verify_api_key,
 )
 
 logger = logging.getLogger('control.room')
@@ -85,7 +87,11 @@ async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
             conn.close()
 
 @router.post('/api/discoveries')
-async def create_discovery(payload: dict, request: Request):
+async def create_discovery(
+    payload: dict,
+    request: Request,
+    x_api_key: Optional[str] = Header(None, alias='X-API-Key'),
+):
     """Accept a discovery submission.
 
     Routes into the pending_discoveries approval queue instead of inserting
@@ -93,6 +99,10 @@ async def create_discovery(payload: dict, request: Request):
     shape is preserved (discovered_by → discord_username fallback) and the
     response still contains `discovery_id` aliased to the pending submission
     id so existing clients don't break.
+
+    `source` is resolved from the X-API-Key header so Keeper bot uploads
+    are bucketed as 'keeper_bot' and any other authenticated client falls
+    into 'haven_extractor'. Anonymous calls bucket as 'manual'.
     """
     conn = None
     try:
@@ -108,6 +118,9 @@ async def create_discovery(payload: dict, request: Request):
         discord_tag = payload.get('discord_tag')
         location_name = payload.get('location_name') or 'Unknown Location'
         client_ip = request.client.host if request.client else 'unknown'
+
+        api_key_info = verify_api_key(x_api_key) if x_api_key else None
+        source = resolve_source(api_key_info['name'] if api_key_info else None)
 
         logger.info(
             f"Received discovery submission (routed to approval queue): "
@@ -176,8 +189,8 @@ async def create_discovery(payload: dict, request: Request):
                 system_id, system_name, planet_name, moon_name, location_type,
                 discord_tag, submitted_by, submitted_by_ip,
                 submitter_account_id, submitter_account_type, submitter_profile_id,
-                submission_date, photo_url, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                submission_date, photo_url, source, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             json.dumps(payload),
             discovery_name,
@@ -196,12 +209,14 @@ async def create_discovery(payload: dict, request: Request):
             None,
             datetime.now(timezone.utc).isoformat(),
             payload.get('photo_url'),
+            source,
         ))
         conn.commit()
         submission_id = cursor.lastrowid
 
         logger.info(
-            f"Discovery '{discovery_name}' queued for approval (pending id: {submission_id})"
+            f"Discovery '{discovery_name}' queued for approval "
+            f"(pending id: {submission_id}, source: {source})"
         )
         add_activity_log(
             'discovery_submitted',
@@ -228,10 +243,14 @@ async def create_discovery(payload: dict, request: Request):
 
 
 @router.post('/discoveries')
-async def legacy_discoveries(payload: dict, request: Request):
+async def legacy_discoveries(
+    payload: dict,
+    request: Request,
+    x_api_key: Optional[str] = Header(None, alias='X-API-Key'),
+):
     """Legacy endpoint alias for Keeper bot compatibility — routes to the same
     pending_discoveries approval queue as /api/discoveries."""
-    return await create_discovery(payload, request)
+    return await create_discovery(payload, request, x_api_key)
 
 
 # =============================================================================
@@ -697,8 +716,8 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
                 system_id, system_name, planet_name, moon_name, location_type,
                 discord_tag, submitted_by, submitted_by_ip,
                 submitter_account_id, submitter_account_type, submitter_profile_id,
-                submission_date, photo_url, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                submission_date, photo_url, source, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             discovery_data,
             discovery_name,
@@ -717,6 +736,7 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             submitter_profile_id,
             datetime.now(timezone.utc).isoformat(),
             payload.get('photo_url'),
+            SOURCE_MANUAL,
         ))
         conn.commit()
         submission_id = cursor.lastrowid
@@ -948,8 +968,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                 discovered_by, submission_timestamp,
                 mystery_tier, analysis_status, pattern_matches,
                 discord_user_id, discord_guild_id,
-                photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             discovery_type,
             discovery_name,
@@ -973,6 +993,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             discovery_data.get('discord_tag') or submission.get('discord_tag'),
             type_metadata_json,
             submission.get('submitter_profile_id'),
+            submission.get('source') or SOURCE_MANUAL,
         ))
         discovery_id = cursor.lastrowid
 

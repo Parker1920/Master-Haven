@@ -5256,3 +5256,119 @@ def migration_1_68_0(conn):
     logger.info(f"Created {regions_created} of {len(missing_regions)} missing region entries with procedural names")
 
     conn.commit()
+
+
+@register_migration("1.69.0", "Unify submission source attribution: split keeper_bot from haven_extractor, fold companion_app, add source column to pending_discoveries / discoveries / pending_region_names / regions")
+def migration_1_69_0(conn):
+    """
+    Unifies the `source` enum across every pending and approved table so the
+    UI can render consistent badges and analytics can split by upload path.
+
+    Final source values:
+      - 'manual'          web wizard, no API key
+      - 'haven_extractor' any extractor-style API key (per-user keys,
+                          legacy 'Haven Extractor' system key, prototype
+                          'Haven' admin key from Dec 2025)
+      - 'keeper_bot'      dedicated Keeper Discord bot keys
+
+    Steps:
+      1. Add `source TEXT NOT NULL DEFAULT 'manual'` to pending_discoveries,
+         discoveries, pending_region_names, regions if missing.
+      2. Backfill all existing pending_discoveries and discoveries rows as
+         'keeper_bot' (only ingest path that has ever existed for those rows
+         is the Keeper Discord bot - confirmed against Pi snapshot).
+      3. Split keeper_bot off haven_extractor in pending_systems and systems
+         by api_key_name match against KEEPER_API_KEY_NAMES.
+      4. Fold the small 'companion_app' bucket (30 pending + 1 approved) into
+         haven_extractor - those rows are early extractor prototype data from
+         before the dedicated extractor key existed (verified by name pattern
+         and timeline against api_keys.created_at).
+    """
+    cursor = conn.cursor()
+
+    keeper_names = ('Keeper 2.0', 'Keeper Bot')
+
+    # --- Step 1: Add `source` column where missing ----------------------
+
+    def _has_column(table, col):
+        cursor.execute(f"PRAGMA table_info({table})")
+        return col in [row[1] for row in cursor.fetchall()]
+
+    if not _has_column('pending_discoveries', 'source'):
+        cursor.execute("ALTER TABLE pending_discoveries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        logger.info("Added source column to pending_discoveries")
+
+    if not _has_column('discoveries', 'source'):
+        cursor.execute("ALTER TABLE discoveries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        logger.info("Added source column to discoveries")
+
+    if not _has_column('pending_region_names', 'source'):
+        cursor.execute("ALTER TABLE pending_region_names ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        logger.info("Added source column to pending_region_names")
+
+    if not _has_column('regions', 'source'):
+        cursor.execute("ALTER TABLE regions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        logger.info("Added source column to regions")
+
+    # --- Step 2: Backfill discoveries as keeper_bot ---------------------
+    # Every existing row in pending_discoveries / discoveries came in via the
+    # Keeper bot - the web /api/submit_discovery path is recent and produces
+    # rows we'll start tagging 'manual' going forward via the route handler.
+    # We mark all _existing_ rows keeper_bot since that is their actual origin.
+    cursor.execute("UPDATE pending_discoveries SET source = 'keeper_bot' WHERE source = 'manual'")
+    pd_backfill = cursor.rowcount
+    cursor.execute("UPDATE discoveries SET source = 'keeper_bot' WHERE source = 'manual'")
+    d_backfill = cursor.rowcount
+    logger.info(f"Backfilled {pd_backfill} pending_discoveries and {d_backfill} discoveries as 'keeper_bot'")
+
+    # --- Step 3: Split keeper_bot off haven_extractor in pending_systems -
+    cursor.execute(
+        "UPDATE pending_systems SET source = 'keeper_bot' "
+        "WHERE api_key_name IN (?, ?)",
+        keeper_names,
+    )
+    ps_keeper = cursor.rowcount
+
+    # Fold prototype 'companion_app' into haven_extractor
+    cursor.execute(
+        "UPDATE pending_systems SET source = 'haven_extractor' "
+        "WHERE source = 'companion_app'"
+    )
+    ps_legacy = cursor.rowcount
+
+    logger.info(f"pending_systems: {ps_keeper} -> keeper_bot, {ps_legacy} companion_app -> haven_extractor")
+
+    # --- Step 4: Same split on the approved systems table ---------------
+    # Trace approved Keeper systems through pending_systems by glyph + galaxy.
+    cursor.execute("""
+        UPDATE systems
+        SET source = 'keeper_bot'
+        WHERE id IN (
+            SELECT s.id FROM systems s
+            JOIN pending_systems ps
+              ON ps.glyph_code = s.glyph_code
+             AND COALESCE(ps.galaxy, 'Euclid') = COALESCE(s.galaxy, 'Euclid')
+            WHERE ps.api_key_name IN (?, ?)
+              AND ps.status = 'approved'
+        )
+    """, keeper_names)
+    sys_keeper = cursor.rowcount
+
+    cursor.execute(
+        "UPDATE systems SET source = 'haven_extractor' WHERE source = 'companion_app'"
+    )
+    sys_legacy = cursor.rowcount
+
+    logger.info(f"systems: {sys_keeper} -> keeper_bot, {sys_legacy} companion_app -> haven_extractor")
+
+    # --- Sanity: log the final distribution -----------------------------
+    cursor.execute("SELECT source, COUNT(*) FROM pending_systems GROUP BY source")
+    logger.info(f"pending_systems final distribution: {dict(cursor.fetchall())}")
+    cursor.execute("SELECT source, COUNT(*) FROM systems GROUP BY source")
+    logger.info(f"systems final distribution: {dict(cursor.fetchall())}")
+    cursor.execute("SELECT source, COUNT(*) FROM pending_discoveries GROUP BY source")
+    logger.info(f"pending_discoveries final distribution: {dict(cursor.fetchall())}")
+    cursor.execute("SELECT source, COUNT(*) FROM discoveries GROUP BY source")
+    logger.info(f"discoveries final distribution: {dict(cursor.fetchall())}")
+
+    conn.commit()
