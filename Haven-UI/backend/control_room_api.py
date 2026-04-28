@@ -2716,10 +2716,14 @@ async def db_stats(session: Optional[str] = Cookie(None)):
             cursor.execute("SELECT COUNT(*) FROM regions")
             stats['total_regions'] = cursor.fetchone()[0]
 
-            # Count populated regions (distinct region coordinates with at least one system)
+            # Count populated regions, scoped to match the regions table UNIQUE constraint
+            # (reality, galaxy, region_x, region_y, region_z) — set in migration v1.49.0.
             cursor.execute("""
                 SELECT COUNT(*) FROM (
-                    SELECT DISTINCT region_x, region_y, region_z
+                    SELECT DISTINCT
+                        COALESCE(reality, 'Normal') AS reality,
+                        COALESCE(galaxy, 'Euclid') AS galaxy,
+                        region_x, region_y, region_z
                     FROM systems
                     WHERE region_x IS NOT NULL AND region_y IS NOT NULL AND region_z IS NOT NULL
                 )
@@ -2870,10 +2874,14 @@ async def db_stats(session: Optional[str] = Cookie(None)):
             cursor.execute("SELECT COUNT(*) FROM regions")
             stats['regions'] = cursor.fetchone()[0]
 
-            # Count populated regions (distinct region coordinates with at least one system)
+            # Count populated regions, scoped to match the regions table UNIQUE constraint
+            # (reality, galaxy, region_x, region_y, region_z) — set in migration v1.49.0.
             cursor.execute("""
                 SELECT COUNT(*) FROM (
-                    SELECT DISTINCT region_x, region_y, region_z
+                    SELECT DISTINCT
+                        COALESCE(reality, 'Normal') AS reality,
+                        COALESCE(galaxy, 'Euclid') AS galaxy,
+                        region_x, region_y, region_z
                     FROM systems
                     WHERE region_x IS NOT NULL AND region_y IS NOT NULL AND region_z IS NOT NULL
                 )

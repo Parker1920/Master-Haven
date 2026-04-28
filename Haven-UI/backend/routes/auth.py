@@ -54,7 +54,7 @@ router = APIRouter()
 @router.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.48.7', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.48.8', 'api': 'Master Haven'}
 
 
 # ============================================================================

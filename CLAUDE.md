@@ -22,6 +22,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.51.1 | 2026-04-28 | DB Stats: `populated_regions` now scoped by `(reality, galaxy, rx, ry, rz)` to match `regions` table — fixes Named vs Populated count asymmetry |
+| Backend API | 1.48.8 | 2026-04-28 | `populated_regions` in `/api/db_stats` now distincts on reality + galaxy + (rx,ry,rz) instead of bare coords (matches v1.49.0 regions UNIQUE constraint) |
 | **Master Haven** | 1.51.0 | 2026-04-27 | Public `/changelog` page (Voyager's Haven story page) + animated brand-mark swap across the navbar |
 | Haven-UI | 1.49.0 | 2026-04-27 | New public Changelog page, nav link, animated GIF brand mark replaces SparklesIcon, new `--app-accent-amber` token |
 | **Master Haven** | 1.50.13 | 2026-04-21 | Numpy auto-install on mod load + INFO-level galaxy diagnostics for "always Euclid" reports |
@@ -91,6 +93,16 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.51.1 (2026-04-28) - DB Stats Populated-Regions Scope Fix
+Fixes asymmetric scoping between "Named Regions" and "Populated Regions" on the public DB Stats page. The `regions` table's UNIQUE constraint is `(reality, galaxy, region_x, region_y, region_z)` (set in migration v1.49.0 to support per-reality and per-galaxy region naming), so the same coordinate triple can legitimately have different names in different galaxies/realities and counts as N rows. The `populated_regions` query, however, was doing `SELECT DISTINCT region_x, region_y, region_z FROM systems` — collapsing those same multi-galaxy occurrences into a single populated count and producing an inflated gap between the two stats (e.g., 2,215 named vs 1,893 populated).
+
+**Backend API 1.48.8**
+- Both `populated_regions` queries in [Haven-UI/backend/control_room_api.py](Haven-UI/backend/control_room_api.py) (super admin path at line 2719 and public path at line 2873) now distinct on `(COALESCE(reality, 'Normal'), COALESCE(galaxy, 'Euclid'), region_x, region_y, region_z)`. `COALESCE` keeps legacy rows where reality/galaxy are NULL from being silently dropped — they bucket into `Normal`/`Euclid` which matches the historical default.
+- No schema change, no migration. Pure read-side query update.
+- Partner/sub-admin path unaffected (it doesn't compute `populated_regions`; it counts rows in the `regions` table directly via `SELECT COUNT(*) FROM regions WHERE discord_tag = ?`, which is already correctly scoped).
+
+---
 
 #### Master Haven 1.51.0 (2026-04-27) - Public Changelog Page + Voyager's Haven Brand Mark
 New public-facing `/changelog` route at `havenmap.online/haven-ui/changelog` — the Voyager's Haven story page. Hero, "What We've Built" product grid, "Recent Witnessing" timeline grouped by month (newest first, computed at render time from `timeline.json`), "What's Still Being Made" three-horizon roadmap, and a footer with a Discord CTA placeholder. Page is publicly readable, no auth.
