@@ -104,11 +104,10 @@ class PersonalityCog(commands.Cog):
         elif content in ["stats", "show me the stars"] or content.startswith("best"):
             stats_cog = self.bot.get_cog("Haven_statsCog")
             if stats_cog:
-                ctx = await self.bot.get_context(message)
                 if content == "stats":
-                    await stats_cog.stats(ctx)
+                    await stats_cog.send_stats(message.channel)
                 elif content == "show me the stars":
-                    await stats_cog.map_command(ctx)
+                    await stats_cog.send_map(message.channel)
                 elif content.startswith("best"):
                     parts = message.content.split()
                     count = 10
@@ -119,7 +118,7 @@ class PersonalityCog(commands.Cog):
                             community = parts[2].upper()
                     elif len(parts) >= 2:
                         community = parts[1].upper()
-                    await stats_cog.best(ctx, count=count, community=community)
+                    await stats_cog.send_best(message.channel, count=count, community=community)
             else:
                 await message.channel.send("Haven stats commands are currently unavailable.")
             valid_command = True
