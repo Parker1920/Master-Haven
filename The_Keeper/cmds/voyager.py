@@ -5,12 +5,26 @@ Voyager poster slash commands.
 /atlas [galaxy]                  — drops a Galaxy Atlas into chat
 
 Both commands embed PNGs served by the Haven backend at:
-    {HAVEN_API}/api/posters/voyager_og/{username}.png
-    {HAVEN_API}/api/posters/atlas/{galaxy}.png
+    {HAVEN_PUBLIC_URL}/api/posters/voyager_og/{username}.png
+    {HAVEN_PUBLIC_URL}/api/posters/atlas/{galaxy}.png
 
 The bot doesn't render anything itself — it's a thin client of the Haven
 backend's poster service. Same source of truth as Discord/Twitter link
 embeds, in-UI thumbnails, and direct shares.
+
+Three URL env vars matter here, and they have different audiences:
+  - HAVEN_API: the URL the bot uses to call the Haven backend itself.
+    On the Pi this is the internal docker network address
+    (http://haven:8005) because hairpin NAT means the public
+    https://havenmap.online doesn't resolve back to itself from inside
+    the Pi's LAN.
+  - HAVEN_PUBLIC_URL: the URL embedded in messages that get sent OUT to
+    Discord — image URLs, page links, anything Discord's CDN or the user's
+    browser will fetch from the public internet. Must be the public site
+    URL. Defaults to https://havenmap.online.
+  - HAVEN_URL: legacy variable used by other cogs (the Haven_stats button).
+    Kept as a fallback for HAVEN_PUBLIC_URL so single-host deploys can
+    still set just one variable.
 """
 
 import os
@@ -25,8 +39,29 @@ from discord.ext import commands
 
 log = logging.getLogger("commands.voyager")
 
-HAVEN_API = os.getenv("HAVEN_API", "https://havenmap.online")
-HAVEN_WEB = os.getenv("HAVEN_URL", HAVEN_API)
+# Public URL — anything that ends up in a Discord embed must use this.
+# Falls back to HAVEN_URL (used elsewhere) and finally to the public domain.
+HAVEN_PUBLIC_URL = (
+    os.getenv("HAVEN_PUBLIC_URL")
+    or os.getenv("HAVEN_URL")
+    or "https://havenmap.online"
+)
+
+# Defensive: if HAVEN_PUBLIC_URL still looks like the internal docker address
+# (someone copied HAVEN_API into HAVEN_PUBLIC_URL by mistake), fall back to
+# the public default. Discord can't fetch from `haven:8005`, so an embed
+# built from that URL gets rejected with a 400 "Not a well formed URL".
+if HAVEN_PUBLIC_URL.startswith("http://haven:") or "://haven:" in HAVEN_PUBLIC_URL:
+    log.warning(
+        "HAVEN_PUBLIC_URL=%r looks like an internal docker URL; "
+        "falling back to https://havenmap.online for Discord embeds.",
+        HAVEN_PUBLIC_URL,
+    )
+    HAVEN_PUBLIC_URL = "https://havenmap.online"
+
+# Strip any trailing path/slashes so f"{HAVEN_PUBLIC_URL}/voyager/x" doesn't
+# end up with a doubled slash or a leftover suffix like "/map/latest".
+HAVEN_PUBLIC_URL = HAVEN_PUBLIC_URL.rstrip("/")
 
 # Galaxies that should appear in the /atlas autocomplete.
 # (Top-explored galaxies in our DB, hardcoded for fast autocomplete.)
@@ -100,8 +135,8 @@ class VoyagerCog(commands.Cog):
         # showing a stale image after invalidation. Discord caches embed
         # images for ~1 hour anyway; 1-min granularity is plenty.
         cache_buster = int(time.time() // 60)
-        png_url = f"{HAVEN_API}/api/posters/voyager_og/{slug}.png?v={cache_buster}"
-        page_url = f"{HAVEN_WEB}/voyager/{slug}"
+        png_url = f"{HAVEN_PUBLIC_URL}/api/posters/voyager_og/{slug}.png?v={cache_buster}"
+        page_url = f"{HAVEN_PUBLIC_URL}/voyager/{slug}"
 
         embed = discord.Embed(
             title=f"{target_name}'s Voyager Card",
@@ -152,8 +187,8 @@ class VoyagerCog(commands.Cog):
         # Atlas URL needs the galaxy name URL-encoded (some have spaces)
         from urllib.parse import quote
         galaxy_path = quote(galaxy, safe="")
-        png_url = f"{HAVEN_API}/api/posters/atlas/{galaxy_path}.png?v={cache_buster}"
-        page_url = f"{HAVEN_WEB}/atlas/{galaxy_path}"
+        png_url = f"{HAVEN_PUBLIC_URL}/api/posters/atlas/{galaxy_path}.png?v={cache_buster}"
+        page_url = f"{HAVEN_PUBLIC_URL}/atlas/{galaxy_path}"
 
         embed = discord.Embed(
             title=f"{galaxy} — Galactic Atlas",

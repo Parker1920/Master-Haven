@@ -8,18 +8,22 @@
     <meta name="theme-color" content="#00C2B3">
 
     <!-- Open Graph Meta Tags for Discord/Social Embeds -->
-    <meta property="og:title" content="Haven Control Room">
+    <!-- og:image points at the dynamic global site poster rendered by the
+         backend's poster service. Bots that don't run JS get this generic
+         shell's tags; the SSR shim in routes/ssr.py overrides per-route
+         (e.g. /voyager/<slug>) for share URLs that warrant a tailored card. -->
+    <meta property="og:title" content="Voyager's Haven">
     <meta property="og:description" content="No Man's Sky discovery management system. Track systems, planets, and civilizations across the galaxy.">
-    <meta property="og:image" content="https://havenmap.online/haven-ui/assets/haven-preview.png">
-    <meta property="og:url" content="https://havenmap.online/haven-ui/">
+    <meta property="og:image" content="https://havenmap.online/api/posters/og_site/global.png">
+    <meta property="og:url" content="https://havenmap.online/">
     <meta property="og:type" content="website">
-    <meta property="og:site_name" content="Haven Control Room">
+    <meta property="og:site_name" content="Voyager's Haven">
 
     <!-- Twitter Card (Discord also uses this) -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Haven Control Room">
+    <meta name="twitter:title" content="Voyager's Haven">
     <meta name="twitter:description" content="No Man's Sky discovery management system. Track systems, planets, and civilizations across the galaxy.">
-    <meta name="twitter:image" content="https://havenmap.online/haven-ui/assets/haven-preview.png">
+    <meta name="twitter:image" content="https://havenmap.online/api/posters/og_site/global.png">
     <!-- Prevent aggressive caching of HTML -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />

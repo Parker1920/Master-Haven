@@ -10,9 +10,19 @@ import App from './App'
 import ThemeProvider from './components/ThemeProvider'
 import './styles/index.css'
 
+// Poster routes (/voyager/:user, /atlas/:galaxy, /poster/:type/:key) are also
+// served at the bare path by the backend's SSR shim so share URLs stay clean
+// (e.g. havenmap.online/voyager/hiroki-rinn). When that's how the page was
+// loaded, drop the /haven-ui basename so React Router actually matches the
+// route definitions in App.jsx. Asset URLs are absolute (Vite base=/haven-ui)
+// so they keep loading regardless. See Haven-UI/backend/routes/ssr.py.
+const POSTER_PREFIXES = ['/voyager/', '/atlas/', '/poster/']
+const isPosterPath = POSTER_PREFIXES.some((p) => window.location.pathname.startsWith(p))
+const routerBasename = isPosterPath ? '' : '/haven-ui'
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/haven-ui">
+    <BrowserRouter basename={routerBasename}>
       <ThemeProvider>
         <App />
       </ThemeProvider>
