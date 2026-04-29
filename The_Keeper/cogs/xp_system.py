@@ -248,10 +248,7 @@ async def process_discovery_xp(user_id, discovery_type, channel_id):
         xp += get_cfg("xp_bonus.role_match", 5)
     else:
         xp += get_cfg("xp_bonus.cross_role_penalty", -1)
-
-    dept_channels = get_channels(primary_role, "dept")
-    office_channels = get_channels(primary_role, "office")
-
+    
     if channel_id in dept_channels:
         xp += get_cfg("xp_bonus.channel_match", 5)
 
