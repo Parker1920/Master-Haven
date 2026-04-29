@@ -38,6 +38,18 @@ def _ogcard(poster_type: str, key: str, w: int = 1200, h: int = 630) -> str:
     return f'/api/posters/{poster_type}/{safe_key}.png'
 
 
+def build_site_og() -> dict:
+    """Root domain OG payload — havenmap.online itself shows the site card."""
+    return {
+        'title': "Voyager's Haven — a community atlas of No Man's Sky",
+        'description': "Browse, name, and map No Man's Sky discoveries together. Live data from havenmap.online.",
+        'image': _ogcard('og_site', 'global'),
+        'image_w': 1200,
+        'image_h': 630,
+        'url': '/',
+    }
+
+
 def build_voyager_og(username: str) -> dict:
     return {
         'title': f"{username} — Voyager's Haven",
@@ -182,6 +194,16 @@ def _html_escape(s: str) -> str:
 # the inline JS redirects them to /haven-ui/voyager/:user etc. — perceptually
 # instant for any non-headless browser.
 # ============================================================================
+
+@router.get('/', response_class=HTMLResponse)
+async def og_root(request: Request):
+    """Serves OG meta tags + JS redirect to /haven-ui/ for the root domain.
+
+    Discord/Twitter scrapers see the og_site card; real browsers run the
+    inline redirect and land on the SPA shell.
+    """
+    return _render_og(build_site_og(), request)
+
 
 @router.get('/voyager/{username}', response_class=HTMLResponse)
 async def og_voyager(username: str, request: Request):

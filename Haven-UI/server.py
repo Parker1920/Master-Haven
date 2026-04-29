@@ -45,4 +45,17 @@ except Exception as exc:
 if __name__ == '__main__':
     import uvicorn
     print("Starting Haven Control Room Web Server on 0.0.0.0:8005")
-    uvicorn.run(app, host='0.0.0.0', port=8005, log_level='info')
+    # proxy_headers + forwarded_allow_ips: in production Haven runs behind
+    # Nginx Proxy Manager which terminates TLS and forwards via plain HTTP
+    # internally. Without trusting X-Forwarded-Proto, request.url.scheme is
+    # 'http' even when the public request was 'https' — that breaks og:image
+    # for Discord/Twitter scrapers, which reject mixed-protocol image URLs
+    # on an HTTPS page.
+    uvicorn.run(
+        app,
+        host='0.0.0.0',
+        port=8005,
+        log_level='info',
+        proxy_headers=True,
+        forwarded_allow_ips='*',
+    )
