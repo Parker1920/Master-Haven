@@ -2,14 +2,17 @@
 //
 // The backend's normalize_username_for_dedup (in services/auth_service.py)
 // strips '#', strips trailing 4-digit Discord discriminators, and lowercases.
-// This helper reproduces that exactly so client-built share links match the
-// backend's lookup keys.
+// This helper reproduces that, and also slugifies whitespace to hyphens so the
+// result is safe to drop into a URL path without %20 encoding — anyone can
+// hand-type havenmap.online/voyager/hiroki-rinn and hit the right card.
 //
 // Test cases:
 //   'TurpitZz#9999' → 'turpitzz'
 //   'Parker1920'    → 'parker'   (4-digit suffix stripped)
 //   'X1234567'      → 'x1234567' (suffix not stripped — char before is a digit)
 //   'Ace#1234'      → 'ace'
+//   'Hiroki Rinn'   → 'hiroki-rinn'
+//   '  Two  Spaces' → 'two-spaces'
 
 export function normalizeUsernameForUrl(name) {
   if (!name) return ''
@@ -25,7 +28,12 @@ export function normalizeUsernameForUrl(name) {
   ) {
     clean = clean.slice(0, -4)
   }
-  return clean.toLowerCase().trim()
+  return clean
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 // Build the canonical share URL for a voyager card given a raw username.

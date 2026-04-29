@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getTagColorFromAPI } from '../utils/tagColors'
+import { normalizeUsernameForUrl } from './_shared/identity'
 
 // ============================================================================
 // Voyager Poster — 680×1040 personal "galaxy fingerprint" card.
@@ -214,7 +215,7 @@ function VoyagerCardBody({ data }) {
       </div>
 
       <div style={styles.footerBar}>
-        <div style={styles.footerLeft}>havenmap.online/voyager/{(data.username || '').toLowerCase()}</div>
+        <div style={styles.footerLeft}>havenmap.online/voyager/{normalizeUsernameForUrl(data.username)}</div>
         <div style={styles.footerRight}>share #havengalaxy</div>
       </div>
       <div style={styles.footerBottom}>data pulled live · {fmtDate(new Date().toISOString())}</div>

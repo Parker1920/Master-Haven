@@ -51,9 +51,13 @@ def build_site_og() -> dict:
 
 
 def build_voyager_og(username: str) -> dict:
+    # The URL slug uses hyphens for spaces (e.g. /voyager/hiroki-rinn). For the
+    # human-facing OG title we want "Hiroki Rinn" — image and canonical URLs
+    # stay on the raw slug so scrapers fetch the right card.
+    display_name = username.replace('-', ' ').strip().title() or username
     return {
-        'title': f"{username} — Voyager's Haven",
-        'description': f"{username}'s galaxy fingerprint card. Live data from havenmap.online.",
+        'title': f"{display_name} — Voyager's Haven",
+        'description': f"{display_name}'s galaxy fingerprint card. Live data from havenmap.online.",
         'image': _ogcard('voyager_og', username),
         'image_w': 1200,
         'image_h': 630,
