@@ -12,16 +12,18 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 | **NMS-Debug-Enabler** | Debug flag enabler mod | - | Python, PyMHF, NMS.py |
 | **NMS-Memory-Browser** | Live memory inspection | - | Python, PyQt6, PyMHF |
 | **NMS-Save-Watcher** | Extraction queue manager | 8006 | Python, FastAPI, SQLite |
-| **keeper-discord-bot** | Discord community bot | 8080 (sync API) | Python, discord.py |
+| **The_Keeper** | Discord community bot | - | Python, discord.py |
 | **Planet_Atlas** | 3D planetary cartography | 8050 | Python, Dash, Plotly |
 
-> **Note:** The Keeper Discord bot is being maintained by a community member. HTTP-only is the planned direction.
+> **Note:** The_Keeper is the active Discord bot, maintained by a community member (Stars). The legacy `keeper-discord-bot-main` was retired and archived on 2026-04-28 — see `C:\Master-Haven-Archives\2026-Q2\2026-04-28-keeper-discord-bot-main\`.
 
 ## Version History
 
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.52.1 | 2026-04-28 | Retired `keeper-discord-bot-main`: archived to `C:\Master-Haven-Archives\2026-Q2\2026-04-28-keeper-discord-bot-main\`, GitHub repo `Parker1920/Keeper-bot` tagged `v1.0-archived`. Removed dead keeper resolver code from `paths.py` and 3 obsolete integration test files. |
+| Backend API | 1.49.1 | 2026-04-28 | Removed `_resolve_keeper_bot_dir()`, `_resolve_keeper_db()`, `get_keeper_database()`, and `keeper_bot_dir`/`keeper_db` attrs from [paths.py](Haven-UI/backend/paths.py). Removed `'keeper'` branch from `get_logs_dir()` / `get_data_dir()`. Removed `keeper_bot_dir / 'data'` from `find_database()` and `find_data_file()` search paths. Zero external callers existed for any of this. |
 | **Master Haven** | 1.52.0 | 2026-04-28 | Unified submission source attribution across all pending/approved tables (Stage 1 of pending-card refactor) |
 | Backend API | 1.49.0 | 2026-04-28 | New `source` column on pending_discoveries / discoveries / pending_region_names / regions; canonical `resolve_source()` helper; `keeper_bot` split out of `haven_extractor`; `companion_app` folded into `haven_extractor` |
 | **Master Haven** | 1.51.1 | 2026-04-28 | DB Stats: `populated_regions` now scoped by `(reality, galaxy, rx, ry, rz)` to match `regions` table — fixes Named vs Populated count asymmetry |
@@ -95,6 +97,43 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.52.1 (2026-04-28) - Retired keeper-discord-bot-main (Archived)
+The legacy Discord bot `keeper-discord-bot-main` was retired and archived. The active bot is `The_Keeper/` (community-maintained by Stars), which has been the only bot running in production for some time — the legacy folder was unused dead weight.
+
+**What moved**:
+- `C:\Master-Haven\keeper-discord-bot-main\` (78 MB, working tree + `.git`) → `C:\Master-Haven-Archives\2026-Q2\2026-04-28-keeper-discord-bot-main\keeper-discord-bot-main\`
+- `C:\Master-Haven\keeper-discord-bot-main.zip` (1.0 GB, March 2026 backup) → same archive folder
+- ARCHIVE_NOTE.md alongside, explaining what / why / where the live replacement is / GitHub state / restore notes
+
+**GitHub state**:
+- Repo: `https://github.com/Parker1920/Keeper-bot` (separate from `Parker1920/Master-Haven` — the legacy bot was never tracked in Master-Haven; gitignored since the start)
+- Final commit: `92b4e22` "Final snapshot before archival" — preserves uncommitted work that was on disk (new `screenshot_reader.py` cog wired into `main.py`, bulk `.gitignore` import, `requirements.txt` +1, `.claude/settings.json`)
+- Tag: `v1.0-archived` pushed
+- **Manual follow-up needed**: archive the GitHub repo via Settings → Danger Zone → "Archive this repository" (makes it read-only).
+
+**Backend API 1.49.1**
+- Removed `_resolve_keeper_bot_dir()` and `_resolve_keeper_db()` methods from [Haven-UI/backend/paths.py](Haven-UI/backend/paths.py).
+- Removed `self.keeper_bot_dir` and `self.keeper_db` attributes from `HavenPaths.__init__`.
+- Removed `get_keeper_database()` convenience function.
+- Removed `'keeper'` branch from `get_logs_dir()` and `get_data_dir()` — only `'haven-ui'` and `main` (default) remain.
+- Removed `keeper_bot_dir / 'data'` entries from `find_database()` and `find_data_file()` search paths.
+- Removed `keeper_bot_dir` / `keeper_db` lines from `__repr__` and `KEEPER_DB_PATH` from the `__main__` debug block.
+- Zero external callers existed — verified via repo-wide grep for `haven_paths.keeper`, `get_keeper_database`, `get_logs_dir('keeper')`, `get_data_dir('keeper')`. The resolver code was load-bearing for nothing.
+- Bumped `/api/status` version `1.49.0 → 1.49.1` in [routes/auth.py](Haven-UI/backend/routes/auth.py).
+
+**Test cleanup**: Deleted three obsolete integration test files that imported `Path('keeper-discord-bot-main') / 'src'`:
+- `Haven-UI/tests/integration/keeper_test_bot_startup.py`
+- `Haven-UI/tests/integration/keeper_test_integration.py`
+- `Haven-UI/tests/integration/test_keeper_http_integration.py`
+
+These had been broken since the archive move and would have stayed broken — they tested the retired bot, not The_Keeper.
+
+**Quick Reference table**: `keeper-discord-bot` row replaced with `The_Keeper`; the explanatory note now points future-self to the archive location.
+
+**Pi follow-up** (separate task, not done in this release): verify no standalone `Parker1920/Keeper-bot` clone exists on `pi8gb@10.0.0.229` outside `~/docker/haven-ui/Master-Haven/` (that path's clone is fine — `keeper-discord-bot-main` is gitignored in Master-Haven so it should not exist there). Confirm `the-keeper` container is the only Discord bot running.
+
+---
 
 #### Master Haven 1.52.0 (2026-04-28) - Unified Submission Source Attribution (Pending-Card Refactor: Stage 1)
 First stage of the pending-approval-card unification work. Backend-only — no UI change yet. Adds a canonical `source` enum to every pending and approved table so the UI (Stage 2) can render consistent source badges and analytics can split keeper-bot uploads out of generic extractor stats.

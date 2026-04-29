@@ -32,8 +32,6 @@ class HavenPaths:
         # Environment-based overrides (highest priority)
         self.haven_ui_dir = self._resolve_haven_ui_dir()
         self.haven_db = self._resolve_haven_db()
-        self.keeper_bot_dir = self._resolve_keeper_bot_dir()
-        self.keeper_db = self._resolve_keeper_db()
 
     def _resolve_haven_ui_dir(self) -> Path:
         """Resolve Haven UI directory."""
@@ -94,48 +92,6 @@ class HavenPaths:
         logger.warning("Haven database not found in expected locations")
         return None
 
-    def _resolve_keeper_bot_dir(self) -> Path:
-        """Resolve Keeper bot directory."""
-        candidates = [
-            self.root / 'keeper-discord-bot-main',
-            self.root.parent / 'keeper-discord-bot-main',
-        ]
-
-        for path in candidates:
-            if path.exists() and path.is_dir():
-                logger.info(f"Keeper bot directory found: {path}")
-                return path
-
-        # Default
-        default_path = self.root / 'keeper-discord-bot-main'
-        logger.warning(f"Keeper bot directory not found, using default: {default_path}")
-        return default_path
-
-    def _resolve_keeper_db(self) -> Optional[Path]:
-        """Resolve Keeper database path."""
-        # 1. Check environment variable
-        env_path = os.getenv('KEEPER_DB_PATH')
-        if env_path:
-            path = Path(env_path)
-            if path.exists():
-                logger.info(f"Keeper database from env: {path}")
-                return path
-
-        # 2. Check relative to keeper bot directory
-        candidates = [
-            self.keeper_bot_dir / 'data' / 'keeper.db',
-            self.root / 'keeper-discord-bot-main' / 'data' / 'keeper.db',
-        ]
-
-        for path in candidates:
-            if path.exists() and path.is_file():
-                logger.info(f"Keeper database found: {path}")
-                return path
-
-        # Default (may not exist yet)
-        default_path = self.keeper_bot_dir / 'data' / 'keeper.db'
-        return default_path
-
     def find_database(self, preferred_name: str = 'haven_ui.db') -> Optional[Path]:
         """
         Search for a database file in common locations.
@@ -151,8 +107,6 @@ class HavenPaths:
             self.haven_ui_dir / 'data' / preferred_name,
             # Project root data directory
             self.root / 'data' / preferred_name,
-            # Keeper bot data directory
-            self.keeper_bot_dir / 'data' / preferred_name,
             # Current working directory
             Path.cwd() / preferred_name,
             Path.cwd() / 'data' / preferred_name,
@@ -183,7 +137,6 @@ class HavenPaths:
         search_bases = [
             self.haven_ui_dir / 'data',
             self.root / 'data',
-            self.keeper_bot_dir / 'data',
             Path.cwd() / 'data',
         ]
 
@@ -209,9 +162,7 @@ class HavenPaths:
 
     def get_logs_dir(self, component: str = 'main') -> Path:
         """Get logs directory for a specific component, creating it if needed."""
-        if component == 'keeper':
-            logs_dir = self.keeper_bot_dir / 'logs'
-        elif component == 'haven-ui':
+        if component == 'haven-ui':
             logs_dir = self.haven_ui_dir / 'logs'
         else:
             logs_dir = self.root / 'logs'
@@ -221,9 +172,7 @@ class HavenPaths:
 
     def get_data_dir(self, component: str = 'main') -> Path:
         """Get data directory for a specific component, creating it if needed."""
-        if component == 'keeper':
-            data_dir = self.keeper_bot_dir / 'data'
-        elif component == 'haven-ui':
+        if component == 'haven-ui':
             data_dir = self.haven_ui_dir / 'data'
         else:
             data_dir = self.root / 'data'
@@ -237,9 +186,7 @@ class HavenPaths:
             f"HavenPaths(\n"
             f"  root={self.root},\n"
             f"  haven_ui_dir={self.haven_ui_dir},\n"
-            f"  haven_db={self.haven_db},\n"
-            f"  keeper_bot_dir={self.keeper_bot_dir},\n"
-            f"  keeper_db={self.keeper_db}\n"
+            f"  haven_db={self.haven_db}\n"
             f")"
         )
 
@@ -264,11 +211,6 @@ def get_haven_database() -> Optional[Path]:
     return haven_paths.haven_db
 
 
-def get_keeper_database() -> Optional[Path]:
-    """Get the Keeper database path."""
-    return haven_paths.keeper_db
-
-
 def get_project_root() -> Path:
     """Get the Master Haven project root directory."""
     return haven_paths.root
@@ -283,7 +225,5 @@ if __name__ == '__main__':
     print("\nEnvironment Variables:")
     print(f"  HAVEN_UI_DIR: {os.getenv('HAVEN_UI_DIR', '(not set)')}")
     print(f"  HAVEN_DB_PATH: {os.getenv('HAVEN_DB_PATH', '(not set)')}")
-    print(f"  KEEPER_DB_PATH: {os.getenv('KEEPER_DB_PATH', '(not set)')}")
     print("\nDatabase Search:")
     print(f"  Haven DB: {get_haven_database()}")
-    print(f"  Keeper DB: {get_keeper_database()}")

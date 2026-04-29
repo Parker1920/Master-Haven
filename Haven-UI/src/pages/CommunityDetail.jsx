@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import StatCard from '../components/StatCard'
 import { getTagColorStyle as getTagColors } from '../utils/tagColors'
+import { normalizeUsernameForUrl } from '../posters/_shared/identity'
 
 /**
  * Community Detail — Route: /community-stats/:tag
@@ -164,7 +165,12 @@ export default function CommunityDetail() {
                                 <span className="text-xs font-medium pl-1.5" style={{ color: 'var(--app-text)', opacity: 0.4 }}>{c._rank}</span>
                               )}
                             </td>
-                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>{c.username}</td>
+                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>
+                              <Link to={`/voyager/${normalizeUsernameForUrl(c.username)}`}
+                                className="hover:underline hover:text-cyan-400 transition-colors">
+                                {c.username}
+                              </Link>
+                            </td>
                             <td className="py-2.5 px-2 text-right font-semibold" style={{ color: '#06b6d4' }}>{c.manual_count}</td>
                           </tr>
                         )
@@ -226,7 +232,12 @@ export default function CommunityDetail() {
                                 <span className="text-xs font-medium pl-1.5" style={{ color: 'var(--app-text)', opacity: 0.4 }}>{c._rank}</span>
                               )}
                             </td>
-                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>{c.username}</td>
+                            <td className="py-2.5 px-2 font-medium" style={{ color: 'var(--app-text)' }}>
+                              <Link to={`/voyager/${normalizeUsernameForUrl(c.username)}`}
+                                className="hover:underline hover:text-cyan-400 transition-colors">
+                                {c.username}
+                              </Link>
+                            </td>
                             <td className="py-2.5 px-2 text-right font-semibold" style={{ color: '#a855f7' }}>{c.extractor_count}</td>
                           </tr>
                         )

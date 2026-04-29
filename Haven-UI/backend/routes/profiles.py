@@ -356,7 +356,8 @@ async def profile_me(session: Optional[str] = Cookie(None)):
             SELECT id, username, display_name, default_civ_tag, discord_snowflake_id,
                    tier, partner_discord_tag, enabled_features, default_reality,
                    default_galaxy, is_active, created_at, last_login_at,
-                   password_hash IS NOT NULL as has_password
+                   password_hash IS NOT NULL as has_password,
+                   COALESCE(poster_public, 1) as poster_public
             FROM user_profiles WHERE id = ?
         """, (profile_id,))
         row = cursor.fetchone()
@@ -550,8 +551,11 @@ async def profile_update_me(request: Request, session: Optional[str] = Cookie(No
         raise HTTPException(status_code=400, detail="No profile linked to this session")
 
     body = await request.json()
-    allowed_fields = {'display_name', 'default_civ_tag', 'default_reality', 'default_galaxy'}
+    allowed_fields = {'display_name', 'default_civ_tag', 'default_reality', 'default_galaxy', 'poster_public'}
     updates = {k: v for k, v in body.items() if k in allowed_fields and v is not None}
+    # Coerce poster_public to 0/1 since it arrives as bool from the UI
+    if 'poster_public' in updates:
+        updates['poster_public'] = 1 if updates['poster_public'] else 0
 
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")

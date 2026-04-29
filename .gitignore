@@ -6306,3 +6306,6 @@ phase0_validation_v3_report.json
 # verbatim credential text quoted by prior security audits. Do not commit.
 audit/work/signals/
 audit/work/timeline.tsv
+
+# External cloned repo (kept locally, not part of Master Haven)
+Philbert-discord/

@@ -5372,3 +5372,43 @@ def migration_1_69_0(conn):
     logger.info(f"discoveries final distribution: {dict(cursor.fetchall())}")
 
     conn.commit()
+
+
+@register_migration("1.70.0", "Poster service: add poster_public flag to user_profiles + create poster_cache table")
+def migration_1_70_0(conn):
+    """
+    Foundation for the Voyager Card / Galaxy Atlas poster service.
+
+    - Adds `poster_public INTEGER DEFAULT 1` to user_profiles. Default opt-in
+      so the personal voyager card is publicly accessible at /voyager/:username
+      unless the user explicitly toggles it off.
+    - Creates `poster_cache` table tracking generated poster artifacts. Used by
+      the future Playwright-based PNG renderer to skip re-screenshotting when
+      the underlying data hasn't changed.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute("PRAGMA table_info(user_profiles)")
+    cols = [row[1] for row in cursor.fetchall()]
+    if 'poster_public' not in cols:
+        cursor.execute("ALTER TABLE user_profiles ADD COLUMN poster_public INTEGER DEFAULT 1")
+        logger.info("Added poster_public column to user_profiles (default 1 / opt-in)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS poster_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poster_type TEXT NOT NULL,
+            cache_key TEXT NOT NULL,
+            template_version INTEGER NOT NULL DEFAULT 1,
+            generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            data_hash TEXT,
+            file_path TEXT,
+            render_ms INTEGER,
+            UNIQUE(poster_type, cache_key)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_poster_cache_type_key ON poster_cache(poster_type, cache_key)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_poster_cache_generated_at ON poster_cache(generated_at)")
+
+    conn.commit()
+    logger.info("Created poster_cache table + indexes")

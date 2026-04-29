@@ -455,11 +455,33 @@ export default function GalaxyGrid({ reality, onSelect, selectedGalaxy, filters 
                 ${isSelected ? 'from-cyan-600 to-blue-700' : `${typeInfo.color}`}
               `} />
 
+              {/* Atlas thumbnail backdrop — only when galaxy has data */}
+              {g.system_count > 0 && (
+                <img
+                  src={`/api/posters/atlas_thumb/${encodeURIComponent(g.galaxy)}.png`}
+                  alt=""
+                  loading="lazy"
+                  className="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-screen pointer-events-none"
+                />
+              )}
+
               {/* Subtle pattern overlay */}
               <div className="absolute inset-0 opacity-10" style={{
                 backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
                 backgroundSize: '16px 16px'
               }} />
+
+              {/* Open atlas badge — top-right corner */}
+              {g.system_count > 0 && (
+                <a
+                  href={`/haven-ui/atlas/${encodeURIComponent(g.galaxy)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute top-2 right-2 text-[10px] bg-black/50 hover:bg-black/80 text-white/80 hover:text-white px-2 py-1 rounded-full font-medium transition-colors"
+                  title="View galaxy atlas poster"
+                >
+                  atlas →
+                </a>
+              )}
 
               {/* Content */}
               <div className="relative p-4">

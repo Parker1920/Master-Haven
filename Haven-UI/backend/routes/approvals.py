@@ -1415,6 +1415,13 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
             user_name=current_username
         )
 
+        # Invalidate poster cache for the affected user + galaxy
+        # so the next request renders fresh data instead of showing stale state.
+        _invalidate_posters_for_submission(
+            submitted_by=submission.get('submitted_by') or submission.get('personal_discord_username'),
+            galaxy=system_data.get('galaxy', 'Euclid'),
+        )
+
         return {
             'status': 'ok',
             'message': f"System approved and {action} in database",
@@ -1432,6 +1439,32 @@ async def approve_system(submission_id: int, session: Optional[str] = Cookie(Non
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+# Poster cache invalidation helper
+# Drops cached PNGs for the affected voyager + galaxy so next request renders
+# fresh data. Failure is non-fatal — TTL invalidation kicks in within 24h.
+# ============================================================================
+def _invalidate_posters_for_submission(submitted_by: Optional[str], galaxy: Optional[str]):
+    try:
+        from services.poster_service import invalidate
+        if submitted_by:
+            # Same normalization as the share-link slug
+            clean = (submitted_by or '').replace('#', '').strip()
+            if (len(clean) > 4
+                    and clean[-4:].isdigit()
+                    and (len(clean) == 4 or not clean[-5].isdigit())):
+                clean = clean[:-4]
+            slug = clean.lower().strip()
+            if slug:
+                invalidate('voyager', slug)
+                invalidate('voyager_og', slug)
+        if galaxy:
+            invalidate('atlas', galaxy)
+            invalidate('atlas_thumb', galaxy)
+    except Exception as e:
+        logger.warning(f"Poster invalidation failed (non-fatal): {e}")
 
 
 @router.post('/api/reject_system/{submission_id}')
@@ -2038,6 +2071,12 @@ async def batch_approve_systems(payload: dict, session: Optional[str] = Cookie(N
                     'system_id': system_id,
                     'is_edit': is_edit
                 })
+
+                # Invalidate poster cache for this submission's voyager + galaxy
+                _invalidate_posters_for_submission(
+                    submitted_by=submission.get('submitted_by') or submission.get('personal_discord_username'),
+                    galaxy=system_data.get('galaxy', 'Euclid'),
+                )
 
             except Exception as e:
                 logger.error(f"Batch approval: Error processing submission {submission_id}: {e}")

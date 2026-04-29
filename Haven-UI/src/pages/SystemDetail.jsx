@@ -10,6 +10,7 @@ import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjecti
 
 import { getPhotoUrl } from '../utils/api'
 import { formatDate } from '../hooks/useDateFormat'
+import { normalizeUsernameForUrl } from '../posters/_shared/identity'
 
 /**
  * System Detail Page
@@ -81,7 +82,12 @@ function ContributorsModal({ system, onClose }) {
         <div className="mb-4 p-3 bg-gray-900 rounded">
           <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Original Uploader</div>
           <div className="text-lg text-yellow-400 font-medium">
-            {system.discovered_by || 'Unknown'}
+            {system.discovered_by ? (
+              <Link to={`/voyager/${normalizeUsernameForUrl(system.discovered_by)}`}
+                className="hover:underline hover:text-yellow-300 transition-colors">
+                {system.discovered_by}
+              </Link>
+            ) : 'Unknown'}
           </div>
           {(system.discovered_at || (contributors[0] && contributors[0].date)) && (
             <div className="text-xs text-gray-500 mt-1">

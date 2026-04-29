@@ -6,7 +6,7 @@ from discord.ui import Select, Button, TextInput
 import traceback
 import sys, os
 import json
-import xp_system
+
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
@@ -250,7 +250,8 @@ class SystemSubmissionModal(discord.ui.Modal):
         try:
             await self.api.submit_system(payload)
             from cogs import xp_system
-            from cogs.xp_system import get_user, DepartmentView, process_discovery_xp
+            from cogs.xp_system import get_user, process_discovery_xp
+            from cogs.xp_cog import DepartmentView
             
             await process_discovery_xp(
                 user_id=self.user_id,

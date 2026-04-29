@@ -1214,6 +1214,15 @@ async def api_approve_region_name(submission_id: int, session: Optional[str] = C
         except Exception as audit_err:
             logger.warning(f"Failed to add region audit log: {audit_err}")
 
+        # Invalidate atlas cache for the affected galaxy so the next
+        # request renders with the freshly-named region.
+        try:
+            from services.poster_service import invalidate
+            invalidate('atlas', galaxy)
+            invalidate('atlas_thumb', galaxy)
+        except Exception as inv_err:
+            logger.warning(f"Atlas invalidation failed (non-fatal): {inv_err}")
+
         return {'status': 'approved', 'region_x': rx, 'region_y': ry, 'region_z': rz, 'custom_name': proposed_name}
     except HTTPException:
         raise

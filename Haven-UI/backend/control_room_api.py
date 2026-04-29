@@ -1505,6 +1505,28 @@ async def on_startup():
     except Exception as e:
         logger.info('Control Room API started - count query failed: %s', e)
 
+    # Boot the persistent Playwright browser used by the poster service. The
+    # browser stays alive for the process lifetime to amortize the ~3s startup
+    # cost across many renders. Boot is non-fatal: if Playwright isn't
+    # installed (e.g. on a stripped-down deploy) the poster endpoints will
+    # 503, but the rest of the API keeps running.
+    try:
+        from services.poster_service import init_browser
+        await init_browser()
+    except Exception as e:
+        logger.warning('Poster service: Playwright failed to boot at startup (%s) — '
+                       '/api/posters/* endpoints will 503 until restart', e)
+
+
+@app.on_event('shutdown')
+async def on_shutdown():
+    """Tear down Playwright cleanly on app shutdown."""
+    try:
+        from services.poster_service import shutdown_browser
+        await shutdown_browser()
+    except Exception as e:
+        logger.warning('Poster service: shutdown error (non-fatal): %s', e)
+
 
 # ============================================================================
 # Mount Route Modules
@@ -1523,6 +1545,8 @@ from routes.events import router as events_router
 from routes.regions import router as regions_router
 from routes.extractor import router as extractor_router
 from routes.csv_import import router as csv_import_router
+from routes.posters import router as posters_router
+from routes.ssr import router as ssr_router
 
 app.include_router(auth_router)
 app.include_router(systems_router)
@@ -1536,6 +1560,12 @@ app.include_router(regions_router)
 app.include_router(extractor_router)
 app.include_router(csv_import_router)
 app.include_router(warroom_router)
+app.include_router(posters_router)
+
+# SSR shim catches share-friendly URLs like /voyager/:user and /atlas/:galaxy
+# BEFORE the SPA index falls through. Discord/Twitter scrapers stop at the
+# meta tags here; real browsers run the inline JS and continue to the SPA.
+app.include_router(ssr_router)
 
 @app.get('/')
 async def root():
@@ -2893,6 +2923,10 @@ async def db_stats(session: Optional[str] = Cookie(None)):
 
             cursor.execute("SELECT COUNT(*) FROM discoveries")
             stats['discoveries'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(DISTINCT galaxy) FROM systems WHERE galaxy IS NOT NULL")
+            stats['galaxies_explored'] = cursor.fetchone()[0]
+            stats['unique_galaxies'] = stats['galaxies_explored']
 
             return {'stats': stats, 'user_type': 'public'}
 

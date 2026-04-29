@@ -203,7 +203,8 @@ COGS = [
     "cogs.hex",
     "cmds.exclaim",
     "cmds.list",
-    "cmds.slash"    
+    "cmds.slash",
+    "cmds.voyager",
 ]
 channel_id = bot.CHANNELS.get("welcome")
 # -------------------- EVENTS --------------------

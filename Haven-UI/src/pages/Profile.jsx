@@ -5,6 +5,7 @@ import Card from '../components/Card'
 import SearchableSelect from '../components/SearchableSelect'
 import { AuthContext } from '../utils/AuthContext'
 import { GALAXIES } from '../data/galaxies'
+import { normalizeUsernameForUrl } from '../posters/_shared/identity'
 
 const TIER_LABELS = { 1: 'Super Admin', 2: 'Partner', 3: 'Sub-Admin', 4: 'Member', 5: 'Member (Read-Only)' }
 const TIER_COLORS = { 1: 'text-yellow-400', 2: 'text-blue-400', 3: 'text-teal-400', 4: 'text-green-400', 5: 'text-gray-400' }
@@ -132,6 +133,8 @@ export default function Profile() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">My Profile</h1>
+
+      <VoyagerCardSection profile={profile} onUpdate={fetchProfile} />
 
       <Card>
         <div className="space-y-4">
@@ -429,5 +432,132 @@ export default function Profile() {
         </Card>
       )}
     </div>
+  )
+}
+
+// ============================================================================
+// VoyagerCardSection — embeds the user's own Voyager Card poster + actions.
+// PNG is sourced from /api/posters/voyager/:username.png, kept fresh by
+// event-driven invalidation in routes/approvals.py + 24h TTL on the cache.
+// ============================================================================
+
+function VoyagerCardSection({ profile, onUpdate }) {
+  const slug = useMemo(
+    () => normalizeUsernameForUrl(profile?.username || ''),
+    [profile?.username]
+  )
+  const [imgKey, setImgKey] = useState(Date.now())
+  const [refreshing, setRefreshing] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [optOut, setOptOut] = useState(profile?.poster_public === 0 || profile?.poster_public === false)
+  const [savingOptOut, setSavingOptOut] = useState(false)
+
+  // Sync opt-out state when profile reloads
+  useEffect(() => {
+    setOptOut(profile?.poster_public === 0 || profile?.poster_public === false)
+  }, [profile?.poster_public])
+
+  if (!slug) return null
+
+  const pngUrl = `/api/posters/voyager/${encodeURIComponent(slug)}.png?v=${imgKey}`
+  const liveUrl = `/haven-ui/voyager/${encodeURIComponent(slug)}`
+  const shareUrl = `${window.location.origin}/voyager/${encodeURIComponent(slug)}`
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    try {
+      await axios.post(`/api/posters/voyager/${encodeURIComponent(slug)}/refresh`)
+      // Bust browser cache by updating query string
+      setImgKey(Date.now())
+    } catch (err) {
+      // Silent — refresh will happen on next TTL expire
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  function handleCopy() {
+    const ok = (text) => {
+      try { return navigator.clipboard?.writeText(text) } catch { return Promise.reject() }
+    }
+    Promise.resolve(ok(shareUrl))
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800) })
+      .catch(() => { window.prompt('Copy your share link:', shareUrl) })
+  }
+
+  async function handleOptOutToggle(e) {
+    const newVal = e.target.checked  // checked = opted OUT (private)
+    setOptOut(newVal)
+    setSavingOptOut(true)
+    try {
+      await axios.put('/api/profiles/me', { poster_public: newVal ? 0 : 1 })
+      if (onUpdate) await onUpdate()
+      setImgKey(Date.now())
+    } catch {
+      setOptOut(!newVal)  // Revert on failure
+    } finally {
+      setSavingOptOut(false)
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold">Your Voyager Card</h2>
+        <a href={liveUrl} target="_blank" rel="noopener noreferrer"
+          className="text-xs text-cyan-400 hover:text-cyan-300">
+          View live →
+        </a>
+      </div>
+
+      {optOut ? (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 text-center">
+          <div className="text-gray-400 text-sm">Your card is set to private.</div>
+          <div className="text-gray-500 text-xs mt-1">Toggle below to make it public again.</div>
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden flex justify-center">
+          <img
+            src={pngUrl}
+            alt={`${profile.username}'s Voyager Card`}
+            style={{ maxWidth: '100%', display: 'block' }}
+            loading="lazy"
+          />
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mt-3 items-center">
+        <button
+          onClick={handleCopy}
+          className="px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-700 text-white rounded transition"
+        >
+          {copied ? 'Link copied ✓' : 'Copy share link'}
+        </button>
+        <a
+          href={pngUrl}
+          download={`voyager-${slug}.png`}
+          className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition"
+        >
+          Download PNG
+        </a>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition disabled:opacity-50"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh data'}
+        </button>
+        <label className="ml-auto flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={optOut}
+            onChange={handleOptOutToggle}
+            disabled={savingOptOut}
+            className="rounded"
+          />
+          Hide from public
+        </label>
+      </div>
+    </Card>
   )
 }

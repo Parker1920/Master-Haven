@@ -1637,3 +1637,532 @@ async def public_user_stats(username: str):
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+# Poster-driven aggregation endpoints
+# Single-call data fetches sized for the Voyager Card and Galaxy Atlas posters.
+# Composing multiple existing endpoints client-side worked but produced 4-6
+# round-trips; a poster render needs everything in one shot.
+# ============================================================================
+
+@router.get('/api/public/voyager-fingerprint')
+async def public_voyager_fingerprint(username: str):
+    """One-shot fingerprint payload for the Voyager Card poster.
+
+    Returns rank in primary community, total systems, galaxy reach, lifeform
+    balance, top named regions, first-charted system, and completeness
+    distribution — everything a single Voyager poster needs to render.
+
+    Honors `user_profiles.poster_public`. If the matched profile has opted out
+    we still return public-leaderboard counts but flag `poster_public: false`
+    so the frontend can render a privacy placeholder instead of the full card.
+    """
+    username = username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail='username required')
+
+    # Same normalization as /api/public/user-stats and the contributor leaderboard.
+    input_clean = username.replace('#', '').strip()
+    if (len(input_clean) > 4
+            and input_clean[-4:].isdigit()
+            and (len(input_clean) == 4 or not input_clean[-5].isdigit())):
+        input_clean = input_clean[:-4]
+    input_normalized = input_clean.lower().strip()
+    if not input_normalized:
+        raise HTTPException(status_code=400, detail='Invalid username')
+
+    raw_username = '''COALESCE(
+        NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
+        personal_discord_username,
+        json_extract(system_data, '$.discovered_by'),
+        'Unknown'
+    )'''
+    trimmed = f"TRIM(REPLACE({raw_username}, '#', ''))"
+    norm = f"""LOWER(TRIM(
+        CASE
+            WHEN LENGTH({trimmed}) > 4
+                AND SUBSTR({trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                AND (LENGTH({trimmed}) = 4
+                    OR SUBSTR({trimmed}, -5, 1) NOT GLOB '[0-9]')
+            THEN SUBSTR({trimmed}, 1, LENGTH({trimmed}) - 4)
+            ELSE {trimmed}
+        END
+    ))"""
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # ----- Aggregate per-community submission counts (approved only) -----
+        cursor.execute(f'''
+            SELECT
+                MAX({raw_username}) as display_name,
+                COALESCE(NULLIF(discord_tag, ''), 'Personal') as community,
+                COUNT(*) as systems,
+                SUM(CASE WHEN COALESCE(source, 'manual') = 'manual' THEN 1 ELSE 0 END) as manual_count,
+                SUM(CASE WHEN source = 'haven_extractor' THEN 1 ELSE 0 END) as extractor_count,
+                MIN(submission_date) as first_submission,
+                MAX(submission_date) as last_submission
+            FROM pending_systems
+            WHERE status = 'approved' AND {norm} = ?
+            GROUP BY community
+        ''', (input_normalized,))
+        community_rows = [dict(r) for r in cursor.fetchall()]
+
+        if not community_rows:
+            raise HTTPException(status_code=404, detail='No contributions found for that username')
+
+        display_name = next((r['display_name'] for r in community_rows if r['display_name']), username)
+        total_systems = sum(r['systems'] for r in community_rows)
+        total_manual = sum(r['manual_count'] or 0 for r in community_rows)
+        total_extractor = sum(r['extractor_count'] or 0 for r in community_rows)
+        first_submission = min((r['first_submission'] for r in community_rows if r['first_submission']), default=None)
+        last_submission = max((r['last_submission'] for r in community_rows if r['last_submission']), default=None)
+
+        # Pick primary community: most systems, ties broken by earliest activity.
+        primary = max(community_rows, key=lambda r: (r['systems'], -1 if not r['first_submission'] else 0))
+
+        # ----- Rank within primary community -----
+        cursor.execute(f'''
+            SELECT {norm} as nname, COUNT(*) as cnt
+            FROM pending_systems
+            WHERE status = 'approved'
+              AND COALESCE(NULLIF(discord_tag, ''), 'Personal') = ?
+            GROUP BY {norm}
+            ORDER BY cnt DESC
+        ''', (primary['community'],))
+        primary_ranks = [(r['nname'], r['cnt']) for r in cursor.fetchall()]
+        rank_in_primary = next((i + 1 for i, (n, _) in enumerate(primary_ranks) if n == input_normalized), None)
+        community_total = sum(c for _, c in primary_ranks)
+        primary_pct = round(primary['systems'] / community_total * 100, 1) if community_total else 0
+
+        # ----- Global rank across all communities -----
+        cursor.execute(f'''
+            SELECT {norm} as nname, COUNT(*) as cnt
+            FROM pending_systems
+            WHERE status = 'approved'
+            GROUP BY {norm}
+            HAVING {norm} != 'unknown'
+            ORDER BY cnt DESC
+        ''')
+        global_ranks = [(r['nname'], r['cnt']) for r in cursor.fetchall()]
+        global_rank = next((i + 1 for i, (n, _) in enumerate(global_ranks) if n == input_normalized), None)
+        community_count = len(community_rows)
+
+        # ----- Galaxy reach (top 5 by system count + tail count) -----
+        cursor.execute(f'''
+            SELECT COALESCE(galaxy, 'Euclid') as galaxy, COUNT(*) as systems
+            FROM pending_systems
+            WHERE status = 'approved' AND {norm} = ?
+            GROUP BY galaxy
+            ORDER BY systems DESC
+        ''', (input_normalized,))
+        galaxy_rows = cursor.fetchall()
+        galaxy_reach = [{'galaxy': r['galaxy'], 'systems': r['systems']} for r in galaxy_rows]
+
+        # ----- Per-user identifier on the systems table -----
+        # Most pending_systems rows for legacy CSV imports have NULL glyph_code/region_x,
+        # so joining ps→systems via glyph yields nothing. Identify the user's systems
+        # directly via discovered_by/personal_discord_username on the systems row,
+        # using the same normalization. Counts here are independent of the leaderboard
+        # (which is why we keep pending_systems as the canonical "systems contributed"
+        # number) but they're correct for region/lifeform/completeness analysis.
+        sys_raw = "COALESCE(NULLIF(NULLIF(s.discovered_by, 'Anonymous'), 'anonymous'), s.personal_discord_username, s.last_updated_by, 'Unknown')"
+        sys_trimmed = f"TRIM(REPLACE({sys_raw}, '#', ''))"
+        sys_norm = f"""LOWER(TRIM(
+            CASE
+                WHEN LENGTH({sys_trimmed}) > 4
+                    AND SUBSTR({sys_trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                    AND (LENGTH({sys_trimmed}) = 4
+                        OR SUBSTR({sys_trimmed}, -5, 1) NOT GLOB '[0-9]')
+                THEN SUBSTR({sys_trimmed}, 1, LENGTH({sys_trimmed}) - 4)
+                ELSE {sys_trimmed}
+            END
+        ))"""
+
+        # ----- Lifeform balance (from systems table directly) -----
+        cursor.execute(f'''
+            SELECT
+                LOWER(COALESCE(s.dominant_lifeform, 'Unknown')) as lifeform,
+                COUNT(*) as cnt
+            FROM systems s
+            WHERE {sys_norm} = ?
+              AND s.dominant_lifeform IS NOT NULL
+              AND s.dominant_lifeform NOT IN ('Unknown', 'None', '')
+            GROUP BY LOWER(s.dominant_lifeform)
+            ORDER BY cnt DESC
+        ''', (input_normalized,))
+        lifeform_rows = cursor.fetchall()
+        inhabited_total = sum(r['cnt'] for r in lifeform_rows)
+        lifeforms = []
+        for r in lifeform_rows:
+            pct = round(r['cnt'] / inhabited_total * 100, 1) if inhabited_total else 0
+            lifeforms.append({'name': r['lifeform'].title(), 'systems': r['cnt'], 'pct': pct})
+
+        # ----- Top named regions (from systems → regions JOIN) -----
+        cursor.execute(f'''
+            SELECT
+                r.custom_name as region_name,
+                COUNT(*) as systems
+            FROM systems s
+            JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
+                AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            WHERE r.custom_name IS NOT NULL AND r.custom_name != ''
+              AND {sys_norm} = ?
+            GROUP BY s.region_x, s.region_y, s.region_z
+            ORDER BY systems DESC
+        ''', (input_normalized,))
+        named_region_rows = cursor.fetchall()
+        named_regions_count = len(named_region_rows)
+        top_regions = [{'name': r['region_name'], 'systems': r['systems']} for r in named_region_rows[:3]]
+
+        # ----- First-charted system (from systems table) -----
+        cursor.execute(f'''
+            SELECT
+                COALESCE(s.name, 'Unknown') as name,
+                r.custom_name as region,
+                COALESCE(s.galaxy, 'Euclid') as galaxy,
+                COALESCE(s.created_at, s.discovered_at) as charted_at
+            FROM systems s
+            LEFT JOIN regions r ON s.region_x = r.region_x
+                AND s.region_y = r.region_y AND s.region_z = r.region_z
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
+                AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            WHERE {sys_norm} = ?
+              AND COALESCE(s.created_at, s.discovered_at) IS NOT NULL
+            ORDER BY COALESCE(s.created_at, s.discovered_at) ASC
+            LIMIT 1
+        ''', (input_normalized,))
+        row = cursor.fetchone()
+        first_charted = dict(row) if row else None
+
+        # ----- Completeness grade distribution (from systems table) -----
+        # Thresholds match score_to_grade() in constants.py: S>=85, A 65-84, B 40-64, C<40.
+        cursor.execute(f'''
+            SELECT
+                AVG(COALESCE(s.is_complete, 0)) as avg_score,
+                SUM(CASE WHEN s.is_complete >= 85 THEN 1 ELSE 0 END) as grade_s,
+                SUM(CASE WHEN s.is_complete >= 65 AND s.is_complete < 85 THEN 1 ELSE 0 END) as grade_a,
+                SUM(CASE WHEN s.is_complete >= 40 AND s.is_complete < 65 THEN 1 ELSE 0 END) as grade_b,
+                SUM(CASE WHEN s.is_complete < 40 THEN 1 ELSE 0 END) as grade_c,
+                COUNT(*) as total_scored
+            FROM systems s
+            WHERE {sys_norm} = ?
+        ''', (input_normalized,))
+        grades = dict(cursor.fetchone() or {})
+        avg_score = round(grades.get('avg_score') or 0, 1)
+        completeness_grade = score_to_grade(avg_score)
+
+        # ----- Privacy flag from user_profiles -----
+        cursor.execute('''
+            SELECT poster_public FROM user_profiles
+            WHERE username_normalized = ?
+            LIMIT 1
+        ''', (input_normalized,))
+        prof = cursor.fetchone()
+        poster_public = bool(prof['poster_public']) if prof and 'poster_public' in prof.keys() else True
+
+        return {
+            'username': display_name,
+            'poster_public': poster_public,
+            'first_submission': first_submission,
+            'last_submission': last_submission,
+            'primary_community': {
+                'name': primary['community'],
+                'systems': primary['systems'],
+                'pct_of_community': primary_pct,
+                'manual': primary['manual_count'] or 0,
+                'extractor': primary['extractor_count'] or 0,
+                'rank': rank_in_primary,
+            },
+            'totals': {
+                'systems': total_systems,
+                'manual': total_manual,
+                'extractor': total_extractor,
+                'communities': community_count,
+                'global_rank': global_rank,
+            },
+            'galaxy_reach': galaxy_reach,
+            'lifeforms': lifeforms,
+            'inhabited_systems': inhabited_total,
+            'named_regions': named_regions_count,
+            'top_regions': top_regions,
+            'first_charted': first_charted,
+            'completeness': {
+                'avg_score': avg_score,
+                'grade': completeness_grade,
+                'grade_s': grades.get('grade_s') or 0,
+                'grade_a': grades.get('grade_a') or 0,
+                'grade_b': grades.get('grade_b') or 0,
+                'grade_c': grades.get('grade_c') or 0,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Voyager fingerprint lookup failed: {e}")
+        raise HTTPException(status_code=500, detail='Failed to build voyager fingerprint')
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get('/api/public/galaxy-atlas')
+async def public_galaxy_atlas(galaxy: str = 'Euclid', reality: str = 'Normal'):
+    """One-shot atlas payload for the Galaxy Atlas poster.
+
+    Returns total system/region/faction counts plus a region list with
+    coordinates, name, system count, and the dominant `discord_tag` color
+    bucket. Builds on the same aggregation logic as /api/map/regions-aggregated
+    but adds named-region indexing and faction tallies needed by the poster.
+    """
+    galaxy = (galaxy or 'Euclid').strip()
+    reality = (reality or 'Normal').strip()
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Per-region aggregation (named regions only get an index marker on
+        # the poster, but unnamed regions still contribute the dot density).
+        cursor.execute('''
+            SELECT
+                s.region_x,
+                s.region_y,
+                s.region_z,
+                r.custom_name as region_name,
+                COUNT(*) as system_count,
+                AVG(s.x) as cx,
+                AVG(s.y) as cy,
+                AVG(s.z) as cz,
+                GROUP_CONCAT(COALESCE(NULLIF(s.discord_tag, ''), 'Personal')) as tag_list
+            FROM systems s
+            LEFT JOIN regions r
+              ON s.region_x = r.region_x
+              AND s.region_y = r.region_y
+              AND s.region_z = r.region_z
+              AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
+              AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+            WHERE COALESCE(s.galaxy, 'Euclid') = ?
+              AND COALESCE(s.reality, 'Normal') = ?
+              AND s.region_x IS NOT NULL
+              AND s.region_y IS NOT NULL
+              AND s.region_z IS NOT NULL
+            GROUP BY s.region_x, s.region_y, s.region_z
+            ORDER BY system_count DESC
+        ''', (galaxy, reality))
+
+        rows = cursor.fetchall()
+        regions = []
+        faction_counts = {}        # lowercase tag -> system count (case-insensitive merge)
+        faction_canon_case = {}    # lowercase tag -> first-seen canonical case (for display fallback)
+        total_systems = 0
+
+        for row in rows:
+            entry = dict(row)
+            raw_tags = [t for t in (entry.pop('tag_list') or '').split(',') if t]
+            # Dedupe tags case-insensitively. 'Personal' and 'personal' merge.
+            # Within a region: pick most-frequent capitalization as canonical.
+            tag_freq = {}        # canonical-case-for-this-region -> count
+            tag_canon_case = {}
+            for t in raw_tags:
+                lower = t.lower()
+                canonical = tag_canon_case.setdefault(lower, t)
+                tag_freq[canonical] = tag_freq.get(canonical, 0) + 1
+                # Track the most-canonical case across the entire galaxy
+                if lower not in faction_canon_case:
+                    faction_canon_case[lower] = t
+            dominant = max(tag_freq.items(), key=lambda kv: kv[1])[0] if tag_freq else 'Personal'
+            entry['dominant_tag'] = dominant
+            entry['tag_breakdown'] = tag_freq
+            regions.append(entry)
+            total_systems += entry['system_count']
+            # Accumulate into faction_counts by LOWERCASE key so Personal/personal merge.
+            for t, c in tag_freq.items():
+                key = t.lower()
+                faction_counts[key] = faction_counts.get(key, 0) + c
+
+        # Lookup display names from discord_tag_colors (in super_admin_settings).
+        display_name_map = _load_tag_display_names(cursor)
+
+        # ----- Option C region picker -----
+        # Faction-first with spatial deduplication. See poster-system-plan.md.
+        named_pool = [r for r in regions if r['region_name']]
+        picked = _pick_atlas_regions(named_pool, max_picks=9)
+        for i, r in enumerate(picked, 1):
+            r['index_number'] = i
+
+        # faction_counts is now keyed by lowercase tag. Render with the canonical
+        # case (first-seen capitalization) and resolve display_name via API → hardcoded fallback.
+        factions = sorted(
+            [{
+                'tag': faction_canon_case.get(lk, lk),
+                'systems': v,
+                'display_name': display_name_map.get(lk) or _ATLAS_HARDCODED_DISPLAY_NAMES.get(lk) or faction_canon_case.get(lk, lk),
+            } for lk, v in faction_counts.items()],
+            key=lambda f: f['systems'],
+            reverse=True,
+        )
+
+        return {
+            'galaxy': galaxy,
+            'reality': reality,
+            'total_systems': total_systems,
+            'total_regions': len(regions),
+            'total_named_regions': len(named_pool),
+            'total_factions': len(factions),
+            'regions': regions,
+            'named_regions': picked,
+            'factions': factions,
+        }
+    except Exception as e:
+        logger.exception(f"Galaxy atlas lookup failed: {e}")
+        raise HTTPException(status_code=500, detail='Failed to build galaxy atlas')
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Galaxy atlas helpers — region picker + display-name lookup
+# ============================================================================
+
+# Hardcoded display-name fallbacks for tags that pre-date the discord_tag_colors API.
+# Mirrors Haven-UI/src/posters/_shared/colors.js HARDCODED_DISPLAY_NAMES so the bot
+# and any non-frontend consumer get the same display strings the UI shows.
+_ATLAS_HARDCODED_DISPLAY_NAMES = {
+    'ghub': 'Galactic Hub',
+    'haven': 'Haven',
+    'evrn': 'Everion Empire',
+    'tgc': 'Tugarv Compendium',
+    'acsd': 'Atlas-CSD',
+    'shdw': 'Shadow Worlds',
+    'tps': 'TPS',
+    'tbh': 'Mourning Amity',
+    'hg': 'Hilbert Group',
+    'iea': 'IEA',
+    'b.e.s': 'B.E.S',
+    'bes': 'B.E.S',
+    'arch': 'ARCH',
+    'personal': 'Personal',
+    'rss': 'RSS',
+}
+
+
+def _load_tag_display_names(cursor) -> dict:
+    """Return {lowercase_tag: display_name} from super_admin_settings.discord_tag_colors.
+
+    The settings JSON is the source of truth for tag → display name. Falls back
+    to an empty dict if the setting doesn't exist; callers should default to
+    the raw tag name.
+    """
+    try:
+        cursor.execute(
+            "SELECT setting_value FROM super_admin_settings WHERE setting_key = 'discord_tag_colors' LIMIT 1"
+        )
+        row = cursor.fetchone()
+        if not row or not row['setting_value']:
+            return {}
+        import json as _json
+        data = _json.loads(row['setting_value'])
+        if not isinstance(data, dict):
+            return {}
+        out = {}
+        for tag, info in data.items():
+            if isinstance(info, dict) and info.get('name'):
+                out[str(tag).lower()] = info['name']
+        return out
+    except Exception as e:
+        logger.warning(f"_load_tag_display_names failed: {e}")
+        return {}
+
+
+def _pick_atlas_regions(named_pool: list, max_picks: int = 9) -> list:
+    """Option C: faction-first with spatial deduplication.
+
+    Algorithm:
+      1. Group named regions by dominant_tag.
+      2. For each tag, take its single biggest region (the civ's "flagship").
+      3. Sort flagship list by system_count desc.
+      4. Walk the sorted list. For each candidate, if it's too close to an
+         already-picked marker, skip it and try the next-best region of a
+         still-unrepresented civ.
+      5. If <max_picks chosen after one pass, fill from the next-largest
+         unpicked regions (any civ), still respecting the distance threshold.
+      6. Return up to max_picks regions in the order they were picked.
+
+    Distance threshold = 10% of the bounding-box diagonal of named regions.
+    """
+    if not named_pool:
+        return []
+
+    # Sort the pool once by size (largest first) to make picking deterministic
+    pool_sorted = sorted(named_pool, key=lambda r: r['system_count'], reverse=True)
+
+    # Compute spatial threshold from bounding box
+    min_x = min(r['region_x'] for r in pool_sorted)
+    max_x = max(r['region_x'] for r in pool_sorted)
+    min_z = min(r['region_z'] for r in pool_sorted)
+    max_z = max(r['region_z'] for r in pool_sorted)
+    diag = ((max_x - min_x) ** 2 + (max_z - min_z) ** 2) ** 0.5
+    threshold = max(diag * 0.1, 5.0)  # ~10% of diagonal, floor at 5 region units
+
+    def too_close(candidate, picked_list):
+        for p in picked_list:
+            dx = candidate['region_x'] - p['region_x']
+            dz = candidate['region_z'] - p['region_z']
+            if (dx * dx + dz * dz) ** 0.5 < threshold:
+                return True
+        return False
+
+    picked = []
+    seen_tags = set()
+
+    # Pass 1: faction-first — top region per civ, in size order
+    # Build a dict: lowercase_tag -> [regions (sorted by size desc)]
+    by_tag = {}
+    for r in pool_sorted:
+        tag = (r.get('dominant_tag') or 'Personal').lower()
+        by_tag.setdefault(tag, []).append(r)
+
+    # Sort civs by their flagship region's size (largest first)
+    civ_flagships = sorted(
+        [(tag, regions[0]) for tag, regions in by_tag.items()],
+        key=lambda kv: kv[1]['system_count'],
+        reverse=True,
+    )
+
+    for tag, flagship in civ_flagships:
+        if len(picked) >= max_picks:
+            break
+        if too_close(flagship, picked):
+            # Try the next-best region for this civ if any survives the threshold
+            for alt in by_tag[tag][1:]:
+                if not too_close(alt, picked):
+                    picked.append(alt)
+                    seen_tags.add(tag)
+                    break
+            continue
+        picked.append(flagship)
+        seen_tags.add(tag)
+
+    # Pass 2: fill remaining slots from any region (regardless of civ rep)
+    if len(picked) < max_picks:
+        picked_ids = {(r['region_x'], r['region_y'], r['region_z']) for r in picked}
+        for candidate in pool_sorted:
+            if len(picked) >= max_picks:
+                break
+            cid = (candidate['region_x'], candidate['region_y'], candidate['region_z'])
+            if cid in picked_ids:
+                continue
+            if too_close(candidate, picked):
+                continue
+            picked.append(candidate)
+            picked_ids.add(cid)
+
+    return picked

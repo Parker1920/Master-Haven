@@ -1,10 +1,16 @@
 import React, { useEffect, useContext, lazy, Suspense } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 
 // Eagerly load components needed for initial render (Dashboard is the landing page)
 import Dashboard from './pages/Dashboard'
 import Navbar from './components/Navbar'
 import { AuthProvider, AuthContext, FEATURES } from './utils/AuthContext'
+
+// Poster routes are chrome-less (no navbar, no container) so they're rendered
+// outside the main app shell. Lazy-loaded.
+const VoyagerPoster = lazy(() => import('./posters/VoyagerPoster'))
+const GalaxyAtlas = lazy(() => import('./posters/GalaxyAtlas'))
+const PosterRoute = lazy(() => import('./pages/PosterRoute'))
 
 // Lazy load all other pages - they're only loaded when the user navigates to them
 // This reduces initial bundle size from 2.3MB to ~500KB for first paint
@@ -84,30 +90,39 @@ function RequireWarRoomAccess({ children }) {
   return <Navigate to='/' replace />
 }
 
-export default function App() {
-  useEffect(() => {
-    // Fetch server settings and apply server-side theme (if present)
-    fetch('/api/settings')
-      .then(res => res.json())
-      .then(settings => {
-        if (!settings) return
-        const theme = settings.theme || {}
-        // Apply background and text color if provided
-        if (theme.bg) document.documentElement.style.setProperty('--app-bg', theme.bg)
-        if (theme.text) document.documentElement.style.setProperty('--app-text', theme.text)
-        if (theme.card) document.documentElement.style.setProperty('--app-card', theme.card)
-        if (theme.primary) document.documentElement.style.setProperty('--app-primary', theme.primary)
-      })
-      .catch(() => {})
-  }, [])
+// Routes that render WITHOUT the navbar/container chrome — chrome-less poster
+// surfaces meant to be screenshotted or shared as images.
+const POSTER_ROUTE_PREFIXES = ['/voyager/', '/atlas/', '/poster/']
+
+function isPosterRoute(pathname) {
+  return POSTER_ROUTE_PREFIXES.some(prefix => pathname.startsWith(prefix))
+}
+
+function AppShell() {
+  const location = useLocation()
+  const chromeless = isPosterRoute(location.pathname)
+
+  if (chromeless) {
+    // Poster mode: no navbar, no container, just the poster filling viewport.
+    // /poster/:type/:key is the registry-driven route opened by Playwright.
+    // /voyager/:user and /atlas/:galaxy are friendly aliases for direct sharing.
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/voyager/:username" element={<VoyagerPoster />} />
+          <Route path="/atlas/:galaxy" element={<GalaxyAtlas />} />
+          <Route path="/poster/:type/:key" element={<PosterRoute />} />
+        </Routes>
+      </Suspense>
+    )
+  }
 
   return (
-    <AuthProvider>
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--app-bg, #f8fafc)', color: 'var(--app-text, #111827)' }}>
-        <Navbar />
-        <main className="container mx-auto p-6">
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--app-bg, #f8fafc)', color: 'var(--app-text, #111827)' }}>
+      <Navbar />
+      <main className="container mx-auto p-6">
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
               {/* Public routes */}
               <Route path="/" element={<Dashboard />} />
               <Route path="/systems" element={<Systems />} />
@@ -154,6 +169,28 @@ export default function App() {
           </Suspense>
         </main>
       </div>
+  )
+}
+
+export default function App() {
+  useEffect(() => {
+    // Fetch server settings and apply server-side theme (if present)
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(settings => {
+        if (!settings) return
+        const theme = settings.theme || {}
+        if (theme.bg) document.documentElement.style.setProperty('--app-bg', theme.bg)
+        if (theme.text) document.documentElement.style.setProperty('--app-text', theme.text)
+        if (theme.card) document.documentElement.style.setProperty('--app-card', theme.card)
+        if (theme.primary) document.documentElement.style.setProperty('--app-primary', theme.primary)
+      })
+      .catch(() => {})
+  }, [])
+
+  return (
+    <AuthProvider>
+      <AppShell />
     </AuthProvider>
   )
 }
