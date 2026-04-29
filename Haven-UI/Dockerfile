@@ -43,6 +43,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --no-compile -r requirements.txt
 
+# --- INSTALL PLAYWRIGHT BROWSER ---
+# pip installs the playwright Python package, but the actual Chromium binary
+# is a separate ~150 MB download. The poster service needs headless Chromium
+# to render React poster components to PNG. `--with-deps` also pulls in the
+# Debian system libraries (libnss3, libgbm1, libasound2, etc.) Chromium
+# requires to actually launch — without these, BrowserType.launch fails at
+# runtime even though the binary exists.
+RUN playwright install --with-deps chromium
+
 # --- COPY APPLICATION CODE ---
 COPY . .
 
