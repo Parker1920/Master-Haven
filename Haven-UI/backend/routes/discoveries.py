@@ -45,6 +45,16 @@ def _get_session_from_request(request: Request):
 async def get_discoveries(q: str = '', user_id: str = '', limit: int = 100):
     """List or search discoveries, optionally filtered by user_id"""
     conn = None
+    # Cap caller-supplied limit. user_id-filtered branch passes limit straight to SQL.
+    if limit > 500:
+        limit = 500
+    if limit < 1:
+        limit = 100
+    # Guard short-query LIKE searches: a 1-char `q` becomes `LIKE '%a%'` which scans
+    # every row and matches almost everything. Require >=2 chars; treat shorter as no-q.
+    q = (q or '').strip()
+    if len(q) < 2:
+        q = ''
     try:
         db_path = get_db_path()
         if db_path.exists():

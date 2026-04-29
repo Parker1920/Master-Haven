@@ -95,8 +95,18 @@ def parse_station_data(station_row):
     return station
 
 
+# Per-process counter that throttles activity-log trimming. The trim was previously
+# run on every insert, which under sustained submission load held the SQLite write
+# lock long enough for requests to pile up and OOM the Pi. Trimming once per
+# _ACTIVITY_LOG_TRIM_EVERY inserts is enough to bound table size in practice while
+# keeping the hot path to a single INSERT.
+_ACTIVITY_LOG_TRIM_EVERY = 100
+_activity_log_insert_counter = 0
+
+
 def add_activity_log(event_type: str, message: str, details: str = None, user_name: str = None):
     """Add an activity log entry to the database."""
+    global _activity_log_insert_counter
     conn = None
     try:
         db_path = get_db_path()
@@ -111,13 +121,21 @@ def add_activity_log(event_type: str, message: str, details: str = None, user_na
         ''', (timestamp, event_type, message, details, user_name))
         conn.commit()
 
-        # Keep only the last N logs to prevent unbounded growth
-        cursor.execute(f'''
-            DELETE FROM activity_logs WHERE id NOT IN (
-                SELECT id FROM activity_logs ORDER BY timestamp DESC LIMIT {ACTIVITY_LOG_MAX}
-            )
-        ''')
-        conn.commit()
+        _activity_log_insert_counter += 1
+        if _activity_log_insert_counter >= _ACTIVITY_LOG_TRIM_EVERY:
+            _activity_log_insert_counter = 0
+            # Indexed cutoff-based delete: looks up the timestamp of the Nth-newest row
+            # via idx_activity_logs_timestamp, then deletes everything older. No full
+            # scan, no in-memory sort, no NOT IN subquery.
+            cursor.execute('''
+                DELETE FROM activity_logs
+                WHERE timestamp < COALESCE(
+                    (SELECT timestamp FROM activity_logs
+                     ORDER BY timestamp DESC LIMIT 1 OFFSET ?),
+                    ''
+                )
+            ''', (ACTIVITY_LOG_MAX,))
+            conn.commit()
     except Exception as e:
         logger.error(f"Failed to add activity log: {e}")
     finally:

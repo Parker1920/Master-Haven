@@ -735,6 +735,15 @@ async def get_approval_audit(
     if not is_super_admin(session):
         raise HTTPException(status_code=403, detail='Super admin access required')
 
+    # Cap limit to prevent unbounded result loading — front-end paginates at 50/100,
+    # anything above 500 is either a bug or a misuse that would OOM the Pi.
+    if limit > 500:
+        limit = 500
+    if limit < 1:
+        limit = 100
+    if offset < 0:
+        offset = 0
+
     conn = None
     try:
         conn = get_db_connection()

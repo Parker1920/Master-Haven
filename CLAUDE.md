@@ -22,6 +22,10 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| **Master Haven** | 1.54.0 | 2026-04-29 | Pi freeze mitigation Stages 2 + 3: bounded result sizes on hot endpoints, browser caching for photos, new operational endpoints (`/api/admin/health`, `wal_checkpoint`, `vacuum`), periodic WAL checkpoint background task, Pi-side zram + weekly VACUUM cron via `scripts/pi_setup_stage3.sh`. |
+| Backend API | 1.51.0 | 2026-04-29 | Stage 2: caller-supplied `limit` on `/api/approval_audit` clamped to ≤500; `/api/discoveries?q=` requires ≥2-char query (single-char wildcard searches now no-op); user-photo and war-media static mounts now use `CachedStaticFiles` with `Cache-Control: public, max-age=2592000, immutable`. Stage 3: new `/api/admin/health` returns DB / WAL / freelist sizes, schema version, hot-table row counts, and process memory (psutil → `/proc/meminfo` fallback); new super-admin `/api/admin/maintenance/wal_checkpoint` and `/api/admin/maintenance/vacuum` endpoints; startup task now runs `PRAGMA wal_checkpoint(TRUNCATE)` every 30 minutes to bound WAL growth. Pi-side `scripts/pi_setup_stage3.sh` enables zram-backed swap and installs a weekly VACUUM cron. |
+| **Master Haven** | 1.53.0 | 2026-04-28 | Pi freeze mitigation Stage 1: hot-path indexes on activity_logs / approval_audit_log / pending_systems, and rewritten activity-log trim that no longer holds the write lock on every insert. |
+| Backend API | 1.50.0 | 2026-04-28 | Migration v1.71.0 adds `idx_activity_logs_timestamp`, `idx_audit_submitter` / `idx_audit_action` / `idx_audit_submission_type` / `idx_audit_source` on approval_audit_log, and `idx_pending_systems_status_date` + `idx_pending_systems_discord_status`. `add_activity_log()` rewritten: trim now uses an indexed cutoff lookup (no full scan, no in-memory sort) and only runs every 100th insert via an in-process counter. Together this removes the write-lock pile-up that almost certainly caused the 2026-04-28 Pi hard-freeze under sustained submission load. |
 | **Master Haven** | 1.52.1 | 2026-04-28 | Retired `keeper-discord-bot-main`: archived to `C:\Master-Haven-Archives\2026-Q2\2026-04-28-keeper-discord-bot-main\`, GitHub repo `Parker1920/Keeper-bot` tagged `v1.0-archived`. Removed dead keeper resolver code from `paths.py` and 3 obsolete integration test files. |
 | Backend API | 1.49.1 | 2026-04-28 | Removed `_resolve_keeper_bot_dir()`, `_resolve_keeper_db()`, `get_keeper_database()`, and `keeper_bot_dir`/`keeper_db` attrs from [paths.py](Haven-UI/backend/paths.py). Removed `'keeper'` branch from `get_logs_dir()` / `get_data_dir()`. Removed `keeper_bot_dir / 'data'` from `find_database()` and `find_data_file()` search paths. Zero external callers existed for any of this. |
 | **Master Haven** | 1.52.0 | 2026-04-28 | Unified submission source attribution across all pending/approved tables (Stage 1 of pending-card refactor) |
@@ -97,6 +101,66 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.54.0 (2026-04-29) - Pi Freeze Mitigation, Stages 2 + 3 (Bounded Hot Paths + Operational Hardening)
+Follow-up to v1.53.0's Stage 1 work. Stage 1 ended the write-lock pile-up; Stages 2 and 3 keep individual requests from blowing the memory budget on their own and give us visibility plus operational tools so the next problem (whatever it is) doesn't take the box down.
+
+**Stage 2 — bounded hot paths**
+
+- **Audit-log `limit` clamped** ([routes/partners.py:706-738](Haven-UI/backend/routes/partners.py#L706-L738)). The `/api/approval_audit` endpoint accepted any caller-supplied `limit` and used it directly in the `LIMIT ?` clause. A buggy or malicious request with `?limit=999999` would have pulled the entire growing audit table into Python memory. Now clamped: `limit > 500 → 500`, `limit < 1 → 100`, `offset < 0 → 0`. The frontend paginates at 50/100 so this is invisible to legitimate use.
+- **Short-query guard on discoveries search** ([routes/discoveries.py:44-56](Haven-UI/backend/routes/discoveries.py#L44-L56)). `?q=a` would expand to `LIKE '%a%'` against `discovery_name`, `description`, AND `location_name` — three full-text scans that match almost every row. The endpoint now strips and length-checks `q`; anything under 2 chars is treated as no query at all. The `limit` param on the user-id branch is also clamped (≤500).
+- **`CachedStaticFiles` for user-uploaded images** ([control_room_api.py:21-44, 638-647](Haven-UI/backend/control_room_api.py#L21-L44)). New StaticFiles subclass that adds `Cache-Control: public, max-age=2592000, immutable` to every 200 response. Mounted on `/haven-ui-photos/*` and `/war-media/*`. Filenames are immutable on upload (the WebP pipeline writes a new filename per upload and never overwrites), so a 30-day cache is safe. Browser stops re-fetching every thumbnail on every page load — big win on a page with 20-30 images.
+
+**Stage 3 — operational hardening + visibility**
+
+- **`GET /api/admin/health`** ([control_room_api.py:3404-3502](Haven-UI/backend/control_room_api.py#L3404-L3502)). Authenticated admin endpoint (any tier) returning live operational metrics: DB / WAL / SHM file sizes, SQLite freelist size (how much VACUUM would reclaim), schema version + applied-migration count, hot-table row counts (systems, planets, moons, discoveries, pending_systems, pending_discoveries, activity_logs, approval_audit_log, regions, user_profiles), and process memory (uses psutil if available, falls back to parsing `/proc/meminfo` so the Pi works without a new dependency). Designed to surface the warning signs a freeze produces *before* the freeze happens — runaway WAL, table-row growth without retention, low free RAM.
+- **`POST /api/admin/maintenance/wal_checkpoint`** (super admin) — forces `PRAGMA wal_checkpoint(TRUNCATE)`. Returns the (busy, log_pages, checkpointed_pages) tuple from PRAGMA so the caller can see whether a long-held reader prevented checkpointing.
+- **`POST /api/admin/maintenance/vacuum`** (super admin) — runs `PRAGMA wal_checkpoint(TRUNCATE)` followed by full `VACUUM`. Uses a fresh autocommit connection (VACUUM cannot run inside a transaction) with a 60-second timeout. Returns size-before / size-after / reclaimed-bytes / elapsed-seconds.
+- **Periodic WAL checkpoint background task** ([control_room_api.py:1556-1583](Haven-UI/backend/control_room_api.py#L1556-L1583)). On startup, schedules `_periodic_wal_checkpoint(interval_seconds=1800)` as an asyncio task. Every 30 minutes it opens a short-lived connection, runs `PRAGMA wal_checkpoint(TRUNCATE)`, logs the result, and closes. Errors are logged but don't kill the loop. Bounds WAL growth even when the SQLite auto-checkpoint threshold isn't reached or a long-held reader prevents it — the runaway-WAL scenario seen during the 2026-04-28 freeze.
+- **Pi-side hardening script** at [scripts/pi_setup_stage3.sh](scripts/pi_setup_stage3.sh). Idempotent. Run once on the Pi as a sudo-capable user; it installs zram-tools, configures a 50%-RAM zram-backed swap with lz4 compression (compressed RAM swap, no SD-card writes), drops a maintenance wrapper at `~/haven-maintenance.sh` that hits `/api/admin/maintenance/vacuum`, and installs a Sunday 04:00 cron entry. zram is the actual answer to "why did it fully freeze instead of throwing OOM errors" — with no swap, the kernel OOM killer can deadlock if its target is blocked on I/O; with zram, the box degrades gracefully into compressed-RAM paging instead.
+
+**Why these specific limits / cadences**
+
+- 30-minute WAL checkpoint: aggressive enough to prevent multi-hundred-MB WAL accumulation under sustained writes, gentle enough that the per-checkpoint blip is unnoticeable. Tuned for the Pi 5's I/O budget.
+- 30-day photo cache (`max-age=2592000`): aligns with Cloudflare's max edge-cache TTL on the free tier and lets us purge with a manual edge-cache invalidation if we ever need to.
+- Sunday 04:00 weekly VACUUM: low-traffic window in US/EU timezones; weekly is enough to keep the freelist bounded without the daily lock-window cost.
+- 50% RAM zram, lz4 compression: standard recommendation for Pi-class boxes — leaves enough physical RAM for the Python process + Docker overhead, lz4 is fastest of the supported algorithms with negligible Pi 5 CPU cost.
+
+**What's still not fixed (by design — out of scope for the freeze work)**
+
+- Leading-wildcard `LIKE '%term%'` on audit-log multi-field search still defeats indexes. With Stage 2's hard `limit ≤ 500` and the existing exact-match indexes from Stage 1, the worst case is bounded — but FTS5 would be faster. Deferred until there's a concrete complaint.
+- No automated alerting on `/api/admin/health` — this provides the data, not the watchdog. A small frontend page or external check (UptimeRobot, etc.) is the next obvious step.
+- The `idx_pending_systems_status` (status alone) index from a prior migration is now subsumed by Stage 1's `idx_pending_systems_status_date` composite. Harmless redundancy; can be pruned later.
+
+---
+
+#### Master Haven 1.53.0 (2026-04-28) - Pi Freeze Mitigation, Stage 1 (Hot-Path Indexes + Trim Rewrite)
+First of three planned stages addressing the 2026-04-28 Raspberry Pi hard-freeze (full lockup, monitor + keyboard unresponsive, required power cycle). Diagnosis traced the freeze to write-lock pile-up triggered by `db.add_activity_log()` running an unbounded `DELETE ... WHERE id NOT IN (... ORDER BY timestamp DESC LIMIT N)` on every single submission. With no index on `activity_logs.timestamp`, that DELETE forced SQLite into a full scan plus in-memory sort while holding the write lock. Under sustained submission load (queue traffic, audit log queries, polling endpoints), every other writer queued behind it, each holding a Python connection plus partial response in memory — eventual OOM, kernel deadlock, frozen box. Stage 1 removes this single hot path; Stages 2 (memory hot paths) and 3 (operational hardening / swap / monitoring) are not yet started.
+
+**Backend API 1.50.0**
+- New migration **v1.71.0** adds the missing indexes on hot tables:
+  - `idx_activity_logs_timestamp` on `activity_logs(timestamp DESC)` — the load-bearing one. The whole point of Stage 1.
+  - `idx_audit_submitter`, `idx_audit_action`, `idx_audit_submission_type` on `approval_audit_log` — partner audit-log search filters were full-scanning a continuously-growing table.
+  - `idx_audit_source` on `approval_audit_log(source)` — guarded with a column-presence check since `source` was added in v1.61.0.
+  - `idx_pending_systems_status_date` on `pending_systems(status, submission_date DESC)` — every pending-queue listing query.
+  - `idx_pending_systems_discord_status` on `pending_systems(discord_tag, status)` — partner-scoped queue listings.
+- **`db.add_activity_log()` rewritten** ([db.py:98-141](Haven-UI/backend/db.py#L98-L141)):
+  - Trim query now uses indexed cutoff lookup: `DELETE FROM activity_logs WHERE timestamp < (SELECT timestamp FROM activity_logs ORDER BY timestamp DESC LIMIT 1 OFFSET ?)`. With the new index, this is one b-tree walk to find the cutoff timestamp and a range scan for deletion. No `NOT IN`, no full scan, no in-memory sort. `COALESCE` to empty string handles the bootstrap case where the table has fewer than `ACTIVITY_LOG_MAX` rows.
+  - Trim moved off the per-write hot path: a process-local counter `_activity_log_insert_counter` now only triggers trim every 100th insert. 99 of every 100 activity-log writes now pay zero trim cost — just `INSERT + commit + close`.
+- Bumped `/api/status` version `1.49.1 → 1.50.0` in [routes/auth.py](Haven-UI/backend/routes/auth.py).
+
+**Why these specific tables**: an audit pass against `Haven-UI/backend/routes/*.py` and the SQLite `init_database` block confirmed (1) zero indexes on `activity_logs` (the trim path), (2) `approval_audit_log` already had `timestamp`, `approver_username`, and `submission_discord_tag` indexes from migration v1.10.0 but was missing the four other filter columns the partner audit-log endpoint uses, and (3) `pending_systems` only had `idx_pending_systems_glyph_code`. The compounding factor was that the audit log and pending queue are both polled by the partner UI — every poll on a busy day hit a full table scan that fought for the write lock that the activity-log trim was holding.
+
+**Not in this stage** (intentional — kept the diff small):
+- `SELECT *` + Python-side filtering in [discoveries.py](Haven-UI/backend/routes/discoveries.py) and [systems.py](Haven-UI/backend/routes/systems.py) still loads big result sets into RAM; that's the Stage 2 memory-bound work.
+- Leading-wildcard `LIKE '%term%'` searches on audit log and discoveries still defeat indexes — Stage 2 should swap these for FTS5.
+- No swap file / zram on the Pi yet — Stage 3.
+- No `VACUUM` / WAL checkpoint cron on the Pi yet — Stage 3.
+- No health/monitoring page yet — Stage 3.
+
+**Migration is idempotent and zero-downtime**: every `CREATE INDEX` uses `IF NOT EXISTS`; the source-column index is column-presence-guarded. On the production Pi DB this should run in well under a second — the tables are small (the freeze was lock contention, not data volume).
+
+---
 
 #### Master Haven 1.52.1 (2026-04-28) - Retired keeper-discord-bot-main (Archived)
 The legacy Discord bot `keeper-discord-bot-main` was retired and archived. The active bot is `The_Keeper/` (community-maintained by Stars), which has been the only bot running in production for some time — the legacy folder was unused dead weight.

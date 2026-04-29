@@ -23,6 +23,29 @@ import mimetypes
 # Without this, StaticFiles serves .webp as text/plain, showing raw binary in browser
 mimetypes.add_type('image/webp', '.webp')
 
+
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles with long-lived browser cache headers for user-uploaded images.
+
+    User photos and war-media uploads are immutable per-filename (the upload
+    pipeline writes each compressed WebP to a new filename and never overwrites),
+    so a 30-day public cache is safe and dramatically reduces Pi load — without
+    this, every page navigation re-fetches every thumbnail from disk through the
+    Python process.
+    """
+
+    def __init__(self, *args, max_age_seconds: int = 2592000, **kwargs):
+        self._max_age = max_age_seconds
+        super().__init__(*args, **kwargs)
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers.setdefault(
+                'Cache-Control', f'public, max-age={self._max_age}, immutable'
+            )
+        return response
+
 # Path setup for Haven-UI self-contained structure
 # backend/ is inside Haven-UI/, which is inside Master-Haven/
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -626,15 +649,16 @@ HAVEN_UI_DIR.mkdir(parents=True, exist_ok=True)
 PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Mount static folders (so running uvicorn directly also serves the SPA)
+# Mount static folders (so running uvicorn directly also serves the SPA).
+# User-uploaded images use CachedStaticFiles for long-lived browser caching.
 photos_dir = HAVEN_UI_DIR / 'photos'
 if photos_dir.exists():
-    app.mount('/haven-ui-photos', StaticFiles(directory=str(photos_dir)), name='haven-ui-photos')
+    app.mount('/haven-ui-photos', CachedStaticFiles(directory=str(photos_dir)), name='haven-ui-photos')
 
 # Mount war-media directory for war room uploaded images
 war_media_dir = HAVEN_UI_DIR / 'public' / 'war-media'
 war_media_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-app.mount('/war-media', StaticFiles(directory=str(war_media_dir)), name='war-media')
+app.mount('/war-media', CachedStaticFiles(directory=str(war_media_dir)), name='war-media')
 
 ui_static_dir = HAVEN_UI_DIR / 'static'
 ui_dist_dir = HAVEN_UI_DIR / 'dist'
@@ -1517,6 +1541,13 @@ async def on_startup():
         logger.warning('Poster service: Playwright failed to boot at startup (%s) — '
                        '/api/posters/* endpoints will 503 until restart', e)
 
+    # Periodic WAL checkpoint. The WAL file accumulates during sustained writes
+    # and only auto-checkpoints when SQLite hits its threshold (default ~1000
+    # pages, ~4MB). Forcing a TRUNCATE checkpoint every 30 minutes bounds WAL
+    # growth and prevents the runaway-WAL scenario seen during the 2026-04-28
+    # Pi freeze, where a long-held reader kept the WAL from rolling back.
+    asyncio.create_task(_periodic_wal_checkpoint())
+
 
 @app.on_event('shutdown')
 async def on_shutdown():
@@ -1526,6 +1557,35 @@ async def on_shutdown():
         await shutdown_browser()
     except Exception as e:
         logger.warning('Poster service: shutdown error (non-fatal): %s', e)
+
+
+async def _periodic_wal_checkpoint(interval_seconds: int = 1800):
+    """Run PRAGMA wal_checkpoint(TRUNCATE) on a fixed cadence.
+
+    Errors are swallowed and logged so a transient lock contention doesn't
+    kill the loop. The checkpoint itself is non-blocking against readers
+    (TRUNCATE just truncates after the checkpoint completes).
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            db_path = get_db_path()
+            if not db_path.exists():
+                continue
+            conn = sqlite3.connect(str(db_path), timeout=10.0)
+            try:
+                cur = conn.cursor()
+                cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                row = cur.fetchone()
+                logger.info('WAL checkpoint: busy=%s log_pages=%s checkpointed=%s',
+                            row[0] if row else '?', row[1] if row else '?',
+                            row[2] if row else '?')
+            finally:
+                conn.close()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning('Periodic WAL checkpoint failed (non-fatal): %s', e)
 
 
 # ============================================================================
@@ -3378,6 +3438,183 @@ async def create_backup(session: Optional[str] = Cookie(None)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ============================================================================
+# Operational health + maintenance endpoints (Pi freeze mitigation Stage 3)
+#
+# /api/admin/health                — visibility (any admin): DB size, WAL size,
+#                                    schema version, table row counts, memory.
+# /api/admin/maintenance/wal_checkpoint — super admin: truncate WAL.
+# /api/admin/maintenance/vacuum    — super admin: full VACUUM + WAL checkpoint.
+# ============================================================================
+
+@app.get('/api/admin/health')
+async def admin_health(session: Optional[str] = Cookie(None)):
+    """Return live operational metrics for the Haven server.
+
+    Any authenticated admin (partner, sub-admin, or super admin) may view this.
+    Designed to surface the warning signs a sustained-load freeze produces:
+    growing WAL file, table row counts climbing without retention, low free RAM.
+    """
+    session_data = get_session(session) if session else None
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+
+    db_path = get_db_path()
+    health: dict = {
+        'db_path': str(db_path),
+        'db_exists': db_path.exists(),
+    }
+
+    if db_path.exists():
+        health['db_size_bytes'] = db_path.stat().st_size
+        wal_path = Path(str(db_path) + '-wal')
+        shm_path = Path(str(db_path) + '-shm')
+        health['wal_size_bytes'] = wal_path.stat().st_size if wal_path.exists() else 0
+        health['shm_size_bytes'] = shm_path.stat().st_size if shm_path.exists() else 0
+
+        try:
+            with get_db() as conn:
+                cur = conn.cursor()
+                # Schema version (latest applied migration). Sort numerically by parsing tuple.
+                try:
+                    cur.execute('SELECT version FROM schema_migrations')
+                    versions = [r[0] for r in cur.fetchall()]
+                    versions.sort(key=lambda v: tuple(int(p) for p in v.split('.') if p.isdigit()))
+                    health['schema_version'] = versions[-1] if versions else None
+                    health['migrations_applied'] = len(versions)
+                except sqlite3.OperationalError:
+                    health['schema_version'] = None
+
+                # Hot-table row counts (cheap on indexed rowid).
+                row_counts = {}
+                for tbl in ('systems', 'planets', 'moons', 'discoveries',
+                            'pending_systems', 'pending_discoveries',
+                            'activity_logs', 'approval_audit_log', 'regions',
+                            'user_profiles'):
+                    try:
+                        cur.execute(f'SELECT COUNT(*) FROM {tbl}')
+                        row_counts[tbl] = cur.fetchone()[0]
+                    except sqlite3.OperationalError:
+                        row_counts[tbl] = None
+                health['row_counts'] = row_counts
+
+                # SQLite freelist (unused pages — VACUUM reclaims these to disk).
+                try:
+                    cur.execute('PRAGMA freelist_count')
+                    free_pages = cur.fetchone()[0]
+                    cur.execute('PRAGMA page_size')
+                    page_size = cur.fetchone()[0]
+                    health['db_freelist_bytes'] = free_pages * page_size
+                except sqlite3.OperationalError:
+                    health['db_freelist_bytes'] = None
+        except Exception as e:
+            health['db_query_error'] = str(e)
+
+    # System memory + CPU (best-effort: psutil isn't a hard dep on the Pi).
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        health['memory'] = {
+            'total_bytes': vm.total,
+            'available_bytes': vm.available,
+            'percent_used': vm.percent,
+        }
+        try:
+            health['load_avg_1_5_15'] = list(psutil.getloadavg())
+        except (AttributeError, OSError):
+            pass
+    except ImportError:
+        # Minimal Linux fallback by reading /proc/meminfo so the Pi (which has
+        # /proc) still gets memory data even without psutil.
+        try:
+            mi = {}
+            with open('/proc/meminfo') as fh:
+                for line in fh:
+                    parts = line.split(':')
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        val_kb = parts[1].strip().split()[0]
+                        if val_kb.isdigit():
+                            mi[key] = int(val_kb) * 1024
+            if 'MemTotal' in mi and 'MemAvailable' in mi:
+                used_pct = (1.0 - mi['MemAvailable'] / mi['MemTotal']) * 100
+                health['memory'] = {
+                    'total_bytes': mi['MemTotal'],
+                    'available_bytes': mi['MemAvailable'],
+                    'percent_used': round(used_pct, 1),
+                }
+        except (FileNotFoundError, OSError):
+            pass
+
+    health['timestamp'] = datetime.now().isoformat()
+    return health
+
+
+@app.post('/api/admin/maintenance/wal_checkpoint')
+async def admin_wal_checkpoint(session: Optional[str] = Cookie(None)):
+    """Force a WAL checkpoint that truncates the WAL file (super admin only).
+
+    The WAL file grows during heavy writes and only shrinks when checkpointed.
+    A long-running read can prevent automatic checkpoints; running this manually
+    bounds WAL size and reclaims disk space without taking the DB offline.
+    Returns the (busy, log_pages, checkpointed_pages) tuple from PRAGMA.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            row = cur.fetchone()
+            return {
+                'busy': row[0] if row else None,
+                'log_pages': row[1] if row else None,
+                'checkpointed_pages': row[2] if row else None,
+            }
+    except Exception as e:
+        logger.exception('WAL checkpoint failed')
+        raise HTTPException(status_code=500, detail=f'WAL checkpoint failed: {e}')
+
+
+@app.post('/api/admin/maintenance/vacuum')
+async def admin_vacuum(session: Optional[str] = Cookie(None)):
+    """Run VACUUM + WAL checkpoint (super admin only).
+
+    VACUUM rewrites the entire DB file, reclaiming space from deleted rows and
+    defragmenting pages. It holds an exclusive lock for the duration, so this
+    should be run during low-traffic windows. Returns size before/after so the
+    caller can see how much was reclaimed.
+    """
+    if not is_super_admin(session):
+        raise HTTPException(status_code=403, detail='Super admin access required')
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail='Database not found')
+
+    size_before = db_path.stat().st_size
+    started = time.time()
+    try:
+        # VACUUM cannot run inside a transaction; use a fresh connection with
+        # autocommit semantics.
+        conn = sqlite3.connect(str(db_path), timeout=60.0, isolation_level=None)
+        try:
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.execute('VACUUM')
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.exception('VACUUM failed')
+        raise HTTPException(status_code=500, detail=f'VACUUM failed: {e}')
+
+    size_after = db_path.stat().st_size
+    elapsed = time.time() - started
+    return {
+        'size_before_bytes': size_before,
+        'size_after_bytes': size_after,
+        'reclaimed_bytes': size_before - size_after,
+        'elapsed_seconds': round(elapsed, 2),
+    }
 
 
 @app.websocket('/ws/logs')

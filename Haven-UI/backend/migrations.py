@@ -5412,3 +5412,46 @@ def migration_1_70_0(conn):
 
     conn.commit()
     logger.info("Created poster_cache table + indexes")
+
+
+@register_migration("1.71.0", "Hot-path indexes: activity_logs.timestamp, approval_audit_log filter columns, pending_systems queue columns")
+def migration_1_71_0(conn):
+    """
+    Pi freeze mitigation (Stage 1).
+
+    activity_logs has zero indexes. The trim query in db.add_activity_log runs on every
+    write and previously did `DELETE ... WHERE id NOT IN (... ORDER BY timestamp DESC LIMIT N)`,
+    which without an index on timestamp is a full scan + in-memory sort while holding the
+    write lock. Index on timestamp DESC lets the rewritten trim use a fast cutoff lookup.
+
+    approval_audit_log already has indexes on timestamp / approver_username / discord_tag.
+    Filters on submitter_username, action, submission_type, and source are unindexed and
+    grow with the audit log. These get added so partner audit-log queries don't fall back
+    to full scans of an ever-growing table.
+
+    pending_systems only has an index on glyph_code. The pending-queue listing endpoints
+    filter by status (always 'pending') and order by submission_date DESC, and partner-
+    scoped views additionally filter by discord_tag. These are the hot paths admins hit
+    on every approval-page load.
+    """
+    cursor = conn.cursor()
+
+    # activity_logs - the single most impactful index per the diagnosis
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs(timestamp DESC)")
+
+    # approval_audit_log - additions to existing timestamp/approver/discord_tag indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_submitter ON approval_audit_log(submitter_username)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON approval_audit_log(action)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_submission_type ON approval_audit_log(submission_type)")
+    # source column was added in v1.61.0; guard in case older DBs pre-migration
+    cursor.execute("PRAGMA table_info(approval_audit_log)")
+    audit_cols = {row[1] for row in cursor.fetchall()}
+    if 'source' in audit_cols:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_source ON approval_audit_log(source)")
+
+    # pending_systems - composite indexes matching the actual queue queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pending_systems_status_date ON pending_systems(status, submission_date DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pending_systems_discord_status ON pending_systems(discord_tag, status)")
+
+    conn.commit()
+    logger.info("Created hot-path indexes for activity_logs, approval_audit_log, and pending_systems")
