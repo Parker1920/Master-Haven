@@ -133,21 +133,21 @@ def get_rank(level):
         max_level = rank.get("max_level")
         exact_level = rank.get("level")
 
-        if exact_level is not none:
+        if exact_level is not None:
             if level == exact_level:
                 return rank
             if level >= exact_level:
                 fallback = rank
                 continue
 
+
         if min_level is not None and max_level is not None:
-            if min_level <= level <= max_level:
-                return rank
-            if level >= min_level:
-                fallback = rank
+             if min_level <= level <= max_level:
+                 return rank
+             if level >= min_level:
+                 fallback = rank
 
-    return fallback or ranks[0]
-
+    return fallback or ranks[1]
 
 # ---------------- ROLE ASSIGN ----------------
 async def set_primary_role(member, role_name, bot):
@@ -235,6 +235,8 @@ async def process_message_xp(message):
 # ---------------- DISCOVERY XP ----------------
 async def process_discovery_xp(user_id, discovery_type, channel_id):
     user = get_user(user_id)
+    upload_channels = get_cfg("channels.upload_channel",[])
+    office_channels = get_cfg("channels.office_channel",[])                     
 
     primary_role = user.get("primary_role")
     if not primary_role:
@@ -255,17 +257,12 @@ async def process_discovery_xp(user_id, discovery_type, channel_id):
         xp += get_cfg("xp_bonus.role_match", 5)
     else:
         xp += get_cfg("xp_bonus.cross_role_penalty", -1)
-
-    dept_channels = get_channels(primary_role, "dept")
-    office_channels = get_channels(primary_role, "office")
-
-    if channel_id in dept_channels:
+    
+    if channel_id in upload_channels:
         xp += get_cfg("xp_bonus.channel_match", 5)
 
     if office_channels and channel_id == office_channels[0]:
         xp += get_cfg("xp_bonus.channel_match", 5)
-
-    xp = int(xp * get_activity_multiplier(user))
 
     add_xp(user_id, primary_role, xp)
 

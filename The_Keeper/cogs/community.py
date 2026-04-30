@@ -184,9 +184,8 @@ class CommunityCog(commands.Cog):
             "client_email": "whrstrsg@the-keeper-493501.iam.gserviceaccount.com",
             "token_uri": "https://oauth2.googleapis.com/token",
         }
-
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        self.gc = gspread.authorize(creds)
+        self.gc = gspread.service_account(filename="creds.json")
+        self.gc = gspread.authorize()
         self.sheet = self.gc.open_by_key(SHEET_ID).sheet1
 
     async def fetch_sheet(self):

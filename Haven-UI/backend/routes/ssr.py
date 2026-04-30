@@ -8,9 +8,20 @@ Discord, the resulting embed shows the global Haven preview, never the
 specific user's card or galaxy.
 
 This shim intercepts the share-friendly URL patterns BEFORE the SPA static
-fallback catches them. For each scraper-friendly route, it returns minimal
-HTML with route-specific og:* and twitter:* meta tags, plus a tiny JS
-redirect so real browsers seamlessly hand off to the SPA.
+fallback catches them. The behavior splits by client:
+
+  - Bot scrapers (Discordbot, Twitterbot, etc.): minimal HTML with route-
+    specific og:* / twitter:* meta tags. Bots stop at the meta tags, so
+    that's all they ever see.
+  - Real browsers: the SPA index.html served at the original path. The URL
+    stays as /voyager/<slug> in the address bar, and the SPA's own router
+    (App.jsx POSTER_ROUTE_PREFIXES) handles the chromeless-poster mode.
+    Vite emits absolute /haven-ui/assets/... paths so the static assets
+    load from any URL prefix.
+
+Previously this route returned a JS redirect to /haven-ui/voyager/<slug>,
+which broke the share URL by changing the address bar. Option A keeps the
+URL clean.
 
 Mount before the SPA fallback in control_room_api.py.
 """
@@ -21,7 +32,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 logger = logging.getLogger('control.room')
 
@@ -30,6 +41,81 @@ router = APIRouter()
 # Resolves to Haven-UI/landing/. Independent of control_room_api so this
 # module can be imported without the parent app loaded.
 LANDING_DIR = Path(__file__).resolve().parent.parent.parent / 'landing'
+
+
+# ----------------------------------------------------------------------------
+# Bot detection — match against the User-Agent string. Conservative list of
+# scraper UAs that don't run JS; anything else falls through to the SPA.
+#
+# Substrings are matched case-insensitively. Ordered roughly by frequency
+# of social-share traffic so the early-out hits common cases first.
+# ----------------------------------------------------------------------------
+
+_BOT_UA_SUBSTRINGS = (
+    'discordbot',
+    'twitterbot',
+    'facebookexternalhit',
+    'facebot',
+    'slackbot',
+    'slack-imgproxy',
+    'linkedinbot',
+    'whatsapp',
+    'telegrambot',
+    'pinterest',
+    'redditbot',
+    'embedly',
+    'applebot',
+    'bingbot',
+    'googlebot',
+    'iframely',
+    'mastodon',
+    'snapchat',
+    'tumblr',
+    'vkshare',
+    'yandex',
+    'baiduspider',
+    'duckduckbot',
+)
+
+
+def is_bot_ua(user_agent: Optional[str]) -> bool:
+    if not user_agent:
+        # No UA at all is suspicious enough to treat as a bot — real browsers
+        # always send one. Scrapers occasionally omit it.
+        return True
+    ua_lower = user_agent.lower()
+    return any(needle in ua_lower for needle in _BOT_UA_SUBSTRINGS)
+
+
+# ----------------------------------------------------------------------------
+# SPA index resolver — mirrors _serve_spa_index() in control_room_api.py.
+# Importing that helper would create a circular dependency (this router is
+# imported BY control_room_api.py), so we duplicate the path logic here.
+# Kept in sync by reading the same HAVEN_UI_DIR layout: dist/index.html
+# (production build) with static/index.html as the fallback.
+# ----------------------------------------------------------------------------
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_HAVEN_UI_DIR = _BACKEND_DIR.parent
+
+_SPA_INDEX_CANDIDATES = (
+    _HAVEN_UI_DIR / 'dist' / 'index.html',
+    _HAVEN_UI_DIR / 'static' / 'index.html',
+)
+
+
+def _serve_spa_index_response():
+    """Return a FileResponse for the SPA index, or 404 HTML if the build is missing."""
+    for candidate in _SPA_INDEX_CANDIDATES:
+        if candidate.exists():
+            # No-cache headers — index.html must always be revalidated so a
+            # new asset bundle hash is picked up immediately on deploy.
+            return FileResponse(
+                str(candidate),
+                media_type='text/html',
+                headers={'Cache-Control': 'no-cache, no-store, must-revalidate'},
+            )
+    return HTMLResponse('<h1>Haven UI not found</h1>', status_code=404)
 
 
 # ============================================================================
@@ -56,9 +142,13 @@ def build_site_og() -> dict:
 
 
 def build_voyager_og(username: str) -> dict:
+    # The URL slug uses hyphens for spaces (e.g. /voyager/hiroki-rinn). For the
+    # human-facing OG title we want "Hiroki Rinn" — image and canonical URLs
+    # stay on the raw slug so scrapers fetch the right card.
+    display_name = username.replace('-', ' ').strip().title() or username
     return {
-        'title': f"{username} — Voyager's Haven",
-        'description': f"{username}'s galaxy fingerprint card. Live data from havenmap.online.",
+        'title': f"{display_name} — Voyager's Haven",
+        'description': f"{display_name}'s galaxy fingerprint card. Live data from havenmap.online.",
         'image': _ogcard('voyager_og', username),
         'image_w': 1200,
         'image_h': 630,
@@ -132,26 +222,11 @@ OG_TEMPLATE = """<!DOCTYPE html>
   <meta name="theme-color" content="#00C2B3">
 
   <link rel="canonical" href="{url_abs}">
-
-  <!-- Real browsers fall through to the SPA. Discord/Twitter/Slack scrapers
-       stop at the meta tags above and never run this script. -->
-  <script>
-    (function () {{
-      try {{
-        var spa = "/haven-ui{spa_url}";
-        if (window.location.pathname.indexOf("/haven-ui") !== 0) {{
-          window.location.replace(spa + window.location.search + window.location.hash);
-        }}
-      }} catch (e) {{ /* no-op */ }}
-    }})();
-  </script>
 </head>
 <body style="background:#0a0e2a;color:#e0e7ff;font-family:system-ui,sans-serif;">
-  <noscript>
-    <p style="padding:32px;">
-      <a href="/haven-ui{spa_url}" style="color:#00C2B3;">Open this page in Voyager's Haven</a>
-    </p>
-  </noscript>
+  <p style="padding:32px;">
+    <a href="{url_abs}" style="color:#00C2B3;">Open in Voyager's Haven</a>
+  </p>
 </body>
 </html>
 """
@@ -174,7 +249,6 @@ def _render_og(payload: dict, request: Request) -> HTMLResponse:
         image_w=payload['image_w'],
         image_h=payload['image_h'],
         url_abs=url_abs,
-        spa_url=payload['url'],
     )
     return HTMLResponse(html, headers={
         'Cache-Control': 'public, max-age=300, must-revalidate',
@@ -193,11 +267,17 @@ def _html_escape(s: str) -> str:
 
 # ============================================================================
 # Routes — these MUST mount BEFORE the SPA static fallback in
-# control_room_api.py so scrapers see meta tags, not the generic SPA shell.
+# control_room_api.py so bot scrapers see meta tags, not the generic SPA shell.
 #
-# Real users hitting these paths in a browser get the meta tags briefly then
-# the inline JS redirects them to /haven-ui/voyager/:user etc. — perceptually
-# instant for any non-headless browser.
+# Per-route browser behavior:
+#   - Poster routes (/voyager, /atlas): serve the SPA index AT THE ORIGINAL
+#     PATH so the URL bar stays clean. The SPA's <BrowserRouter> picks an
+#     empty basename when the pathname starts with a poster prefix
+#     (see Haven-UI/src/main.jsx) so its routes match without /haven-ui.
+#   - Chromed share routes (/, /systems/:id, /community-stats/:tag): 302
+#     redirect to the equivalent /haven-ui/... path. Those pages render
+#     full chrome (Navbar etc.) which depend on the basename being set,
+#     and use <Link> nav that needs the prefix.
 # ============================================================================
 
 @router.get('/', response_class=HTMLResponse)
@@ -249,19 +329,33 @@ async def og_root(request: Request):
 
 @router.get('/voyager/{username}', response_class=HTMLResponse)
 async def og_voyager(username: str, request: Request):
-    return _render_og(build_voyager_og(username), request)
+    if is_bot_ua(request.headers.get('user-agent')):
+        return _render_og(build_voyager_og(username), request)
+    return _serve_spa_index_response()
 
 
 @router.get('/atlas/{galaxy}', response_class=HTMLResponse)
 async def og_atlas(galaxy: str, request: Request):
-    return _render_og(build_atlas_og(galaxy), request)
+    if is_bot_ua(request.headers.get('user-agent')):
+        return _render_og(build_atlas_og(galaxy), request)
+    return _serve_spa_index_response()
 
 
 @router.get('/systems/{system_id}', response_class=HTMLResponse)
 async def og_system(system_id: str, request: Request):
-    return _render_og(build_system_og(system_id), request)
+    if is_bot_ua(request.headers.get('user-agent')):
+        return _render_og(build_system_og(system_id), request)
+    return RedirectResponse(
+        url=f'/haven-ui/systems/{quote(system_id, safe="")}',
+        status_code=302,
+    )
 
 
 @router.get('/community-stats/{tag}', response_class=HTMLResponse)
 async def og_community(tag: str, request: Request):
-    return _render_og(build_community_og(tag), request)
+    if is_bot_ua(request.headers.get('user-agent')):
+        return _render_og(build_community_og(tag), request)
+    return RedirectResponse(
+        url=f'/haven-ui/community-stats/{quote(tag, safe="")}',
+        status_code=302,
+    )

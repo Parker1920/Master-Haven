@@ -1663,12 +1663,14 @@ async def public_voyager_fingerprint(username: str):
         raise HTTPException(status_code=400, detail='username required')
 
     # Same normalization as /api/public/user-stats and the contributor leaderboard.
+    # URL slugs use hyphens for spaces (so /voyager/hiroki-rinn resolves to
+    # "Hiroki Rinn") — convert hyphens back to spaces before the DB lookup.
     input_clean = username.replace('#', '').strip()
     if (len(input_clean) > 4
             and input_clean[-4:].isdigit()
             and (len(input_clean) == 4 or not input_clean[-5].isdigit())):
         input_clean = input_clean[:-4]
-    input_normalized = input_clean.lower().strip()
+    input_normalized = input_clean.lower().replace('-', ' ').strip()
     if not input_normalized:
         raise HTTPException(status_code=400, detail='Invalid username')
 
@@ -1679,7 +1681,9 @@ async def public_voyager_fingerprint(username: str):
         'Unknown'
     )'''
     trimmed = f"TRIM(REPLACE({raw_username}, '#', ''))"
-    norm = f"""LOWER(TRIM(
+    # Outer REPLACE collapses hyphens to spaces so DB names containing hyphens
+    # match slug input as well (rare, but keeps the two sides symmetric).
+    norm = f"""REPLACE(LOWER(TRIM(
         CASE
             WHEN LENGTH({trimmed}) > 4
                 AND SUBSTR({trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
@@ -1688,7 +1692,7 @@ async def public_voyager_fingerprint(username: str):
             THEN SUBSTR({trimmed}, 1, LENGTH({trimmed}) - 4)
             ELSE {trimmed}
         END
-    ))"""
+    )), '-', ' ')"""
 
     conn = None
     try:
