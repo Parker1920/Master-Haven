@@ -39,17 +39,23 @@
     min-height: 100vh;
     width: 100%;
     background: radial-gradient(ellipse at 50% 40%, #1a1f3a 0%, #0A0E1A 55%, #05060d 100%);
+    background-attachment: fixed;
     color: var(--text);
     font-family: 'Inter', system-ui, sans-serif;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
+  /* Starfield is fixed to the viewport so it stays put while the user scrolls
+     past long content — feels like a parallax sky. z-index 0 keeps it under
+     .haven-content (which is z-index 1). */
   #starfield {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
     pointer-events: none;
+    z-index: 0;
   }
 
   .haven-content {
