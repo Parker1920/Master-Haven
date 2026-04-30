@@ -125,7 +125,7 @@ def get_rank(level):
     if not ranks:
         return {"name": "Nope"}
 
-    if level < 1
+    if level < 1:
        level = 1
     
     for rank in ranks:
