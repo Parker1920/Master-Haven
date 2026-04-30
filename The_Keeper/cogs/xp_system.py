@@ -141,7 +141,7 @@ def get_rank(level):
                 continue
 
         
-         if min_level is not None and max_level is not None:
+        if min_level is not None and max_level is not None:
              if min_level <= level <= max_level:
                  return rank
              if level >= min_level:
