@@ -129,6 +129,15 @@ REGISTRY: dict[str, PosterTemplate] = {
         ttl_hours=168,  # weekly
         description='Global Haven OG card — replaces static haven-preview.png',
     ),
+    'landing_og': PosterTemplate(
+        type='landing_og',
+        version=1,
+        width=1200,
+        height=630,
+        spa_route='/poster/landing_og/global',
+        ttl_hours=168,  # weekly
+        description='Landing-page OG card — cosmic-compass + wordmark + 3 live stats, served for havenmap.online/ embeds',
+    ),
     'og_system': PosterTemplate(
         type='og_system',
         version=1,

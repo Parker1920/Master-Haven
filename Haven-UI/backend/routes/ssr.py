@@ -130,11 +130,17 @@ def _ogcard(poster_type: str, key: str, w: int = 1200, h: int = 630) -> str:
 
 
 def build_site_og() -> dict:
-    """Root domain OG payload — havenmap.online itself shows the site card."""
+    """Root domain OG payload — havenmap.online itself shows the landing card.
+
+    Uses landing_og (cosmic-compass + Cinzel wordmark + 3 live stats) so
+    Discord/Twitter previews match the landing page aesthetic. The older
+    og_site card stays in the registry for any callers that still pin to it,
+    but is no longer the default at the root URL.
+    """
     return {
         'title': "Voyager's Haven — a community atlas of No Man's Sky",
         'description': "Browse, name, and map No Man's Sky discoveries together. Live data from havenmap.online.",
-        'image': _ogcard('og_site', 'global'),
+        'image': _ogcard('landing_og', 'global'),
         'image_w': 1200,
         'image_h': 630,
         'url': '/',
