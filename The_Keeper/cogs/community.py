@@ -185,7 +185,7 @@ class CommunityCog(commands.Cog):
             "token_uri": "https://oauth2.googleapis.com/token",
         }
         
-        self.gc = gspread.authorize()
+        self.gc = gspread.authorize(credentials)
         self.sheet = self.gc.open_by_key(SHEET_ID).sheet1
 
     async def fetch_sheet(self):
