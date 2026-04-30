@@ -147,7 +147,7 @@ def get_rank(level):
              if level >= min_level:
                  fallback = rank
 
-    return fallback or ranks[0]
+    return fallback or ranks[1]
 
 # ---------------- ROLE ASSIGN ----------------
 async def set_primary_role(member, role_name, bot):
