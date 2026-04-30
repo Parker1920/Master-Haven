@@ -2,6 +2,7 @@ __pycache__
 **/__pycache__
 *.pyc
 .env
+creds.json
 xp.db
 .git
 .gitignore

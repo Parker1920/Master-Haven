@@ -23,6 +23,17 @@ cd tests
 python -m pytest -v
 ```
 
+## Runtime expectations
+
+| Tier | Cold | Warm | Notes |
+|---|---:|---:|---|
+| Verify | ~10-30s on Pi (~3s on Win-dev) | ~3-10s | Pays the cost of running 71 migrations against the throwaway DB **once per session**; subsequent tests are fast |
+| Smoke (fast) | ~5-10s | ~3-5s | Pure HTTP probes |
+| Smoke (slow) | ~60s | ~15s | Playwright cold-start dominates the first run |
+| `pi_check.sh` | ~2s | ~2s | Pure bash |
+
+Run hourly (smoke fast) and daily (verify + smoke slow) per `cron/README.md`.
+
 ## Layout
 
 ```

@@ -27,6 +27,8 @@ docs/glyph_training/
 .env.*.local
 secrets/
 credentials/
+creds.json
+*-service-account*.json
 
 # -----------------
 # PYTHON

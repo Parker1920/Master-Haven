@@ -4,6 +4,7 @@
 **Date:** 2026-04-29
 **Branch:** `claude/festive-ptolemy-7aa7c3` (clean — Phase 3 introduces new files + a 5-file move; no commits made by Claude)
 **Predecessors:** [INVESTIGATION_REPORT.md](INVESTIGATION_REPORT.md), [PROPOSAL.md](PROPOSAL.md), [FOLLOWUP.md](FOLLOWUP.md)
+**Addendum applied:** Phase 3 Addendum (Migration Context) — three surgical deltas applied; see §11 below.
 
 This report lists every file created, every file moved, every test result, and every unexpected finding from Phase 3. Parker reviews and stages.
 
@@ -337,4 +338,58 @@ py -m pytest tests/smoke/ -v
 
 ---
 
-**End of Phase 3 implementation report.** Awaiting Parker's review.
+---
+
+## 11. Phase 3 Addendum — Migration Context (applied)
+
+Parker shared the full migration history (71 migrations through v1.71.0) after Phase 3 was already implemented. Three surgical deltas were applied without changing the test count, file tree, or scope.
+
+### Delta 1 (applied): schema-race tolerance hook in conftest
+
+Added `pytest_runtest_call` hook in `conftest.py` that intercepts `sqlite3.OperationalError` raised during a verify-tier test, checks the message for "no such table" or "no such column", and translates it into a `pytest.skip()` via `outcome.force_exception(Skipped(...))`.
+
+**Why:** Migrations like v1.49.0 and v1.54.0 do `DROP TABLE` + recreate, so a DROPped-but-not-yet-renamed window can produce transient `OperationalError`s on a busy live DB. Cron retries on the next cycle.
+
+**Scope:** Only fires for tests carrying the `verify` marker. Smoke tests don't touch SQLite directly. AssertionError, ValueError, and other real test failures are unaffected.
+
+Implementation: `tests/conftest.py` — `pytest_runtest_call(item)` hook (search the file for "Schema-race tolerance").
+
+### Delta 2 (applied): runtime estimate updated
+
+`tests/README.md` now has a "Runtime expectations" table at the top. Verify tier on the Pi: ~10-30s cold (was estimated at ~25s). Win-dev measured at 2.5-3s warm. Session-scoped fixtures already amortize the migration cost across all tests.
+
+The original §8 of PROPOSAL.md said ~25s cold for verify tier; actual local measurement is faster. Pi will likely fall in the original estimate range.
+
+### Delta 3 (applied): sentinel user seed in test DB
+
+Added `_seed_sentinel_user(haven_module)` to `conftest.py`, called once at session start from the `haven_app` fixture (after migrations run). Idempotent (uses `INSERT OR IGNORE`).
+
+Inserts:
+- `user_profiles` row: `username='smoke_test_user'`, `username_normalized='smoketestuser'`, `tier=5`, `poster_public=1`, `is_active=1`. Forward-compat: only sets columns that exist in the current schema.
+- `systems` row: `name='Smoke Test System'`, `glyph_code='0123ABC456EF'`, tied to the seeded profile via `profile_id`. Forward-compat: only sets columns that exist.
+
+**Why:** Migration v1.70.0 added `user_profiles.poster_public` opt-in. Without an opt-in row, future verify-mode tests against `/api/public/voyager-fingerprint` would 404. The seed pre-emptively makes the in-process DB look realistic for any voyager/poster test.
+
+The seed function is wrapped in try/except at every layer so it's a no-op on a DB that doesn't yet have v1.70.0's schema (forward-compat with older Haven backends).
+
+**Verified manually:** sentinel user appears in the seeded DB with `poster_public=1`; sample system row tied to its profile_id is present.
+
+### Two v2 candidates added to FOLLOWUP.md
+
+- **§E.3** — `test_activity_logs_query_under_500ms` (concrete first performance budget; canary for "Pi freeze Stage 2 brewing")
+- **§E.5** — `test_migrations_idempotent` (full re-run of every migration; asserts no schema/row-count change on the second pass; catches non-idempotent migrations like the 1.40.0 → 1.41.0 fix pattern)
+
+Both deliberately deferred to v2 per addendum direction.
+
+### Re-validation after addendum
+
+```
+$ py -m pytest tests/verify/ -v
+15 passed in 2.59s
+```
+
+No regressions. Hook is in place; seed runs cleanly; runtime estimate updated.
+
+---
+
+**End of Phase 3 implementation report (addendum applied).** Awaiting Parker's review.

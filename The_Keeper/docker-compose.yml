@@ -27,6 +27,8 @@ services:
     volumes:
       # bot.py reads .env from this hardcoded path
       - ./.env:/storage/emulated/0/Voyage/The_Keeper/.env:ro
+      # Google service-account JSON for !addciv (gspread). Read-only mount.
+      - ./creds.json:/app/creds.json:ro
       # Persist xp.db and milestones.json across rebuilds
       - ./xp.db:/app/xp.db
       - ./milestones.json:/app/milestones.json

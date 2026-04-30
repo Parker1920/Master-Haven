@@ -2,10 +2,10 @@ import discord
 from discord.ext import commands
 import aiohttp
 import csv
+import os
 from io import StringIO
 import asyncio
 import gspread
-from google.oauth2.service_account import Credentials
 
 
 # -------------------- PAGINATOR --------------------
@@ -111,7 +111,14 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         await interaction.response.defer(ephemeral=True)
 
         loop = asyncio.get_running_loop()
-        self.cog.setup_gsheet()
+        try:
+            await loop.run_in_executor(None, self.cog.setup_gsheet)
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Could not connect to Google Sheets: `{type(e).__name__}: {e}`",
+                ephemeral=True,
+            )
+            return
 
         headers = await loop.run_in_executor(None, self.cog.sheet.row_values, 1)
         existing_values = await loop.run_in_executor(None, self.cog.sheet.get_all_values)
@@ -177,15 +184,8 @@ class CommunityCog(commands.Cog):
             return
 
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-
-        creds_dict = {
-            "type": "service_account",
-            "project_id": "the-keeper-493501",
-            "client_email": "whrstrsg@the-keeper-493501.iam.gserviceaccount.com",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-        self.gc = gspread.service_account(filename="creds.json")
-        self.gc = gspread.authorize()
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/app/creds.json")
+        self.gc = gspread.service_account(filename=creds_path, scopes=scopes)
         self.sheet = self.gc.open_by_key(SHEET_ID).sheet1
 
     async def fetch_sheet(self):

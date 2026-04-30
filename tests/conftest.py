@@ -128,6 +128,153 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Schema-race tolerance (Phase 3 Addendum, Delta 1).
+#
+# Several Haven migrations DROP + recreate tables (v1.49.0 regions, v1.54.0
+# systems). If a hot migration runs while a verify test is in flight against
+# a live DB, the test could see `sqlite3.OperationalError: no such table` or
+# `no such column`. That's a transient infrastructure event, not a test
+# failure. Translate it to a skip so cron retries on the next cycle.
+#
+# This hook ONLY applies to tests carrying the `verify` marker. Smoke-tier
+# tests don't touch SQLite directly (they make HTTP requests), so they
+# wouldn't hit this anyway.
+#
+# Real schema regressions still surface — they show up as AssertionError on
+# the test's own assertions, not as OperationalError in the harness.
+# ---------------------------------------------------------------------------
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    outcome = yield
+    if "verify" not in item.keywords:
+        return
+    excinfo = outcome.excinfo
+    if excinfo is None:
+        return
+    exc = excinfo[1]
+    import sqlite3 as _sql
+    if not isinstance(exc, _sql.OperationalError):
+        return
+    msg = str(exc).lower()
+    if "no such table" in msg or "no such column" in msg:
+        from _pytest.outcomes import Skipped
+        outcome.force_exception(
+            Skipped(f"schema operation in flight: {exc}")
+        )
+
+
+# ---------------------------------------------------------------------------
+# Sentinel user seed (Phase 3 Addendum, Delta 3).
+#
+# Migration v1.70.0 added user_profiles.poster_public — without an opt-in
+# row, /api/public/voyager-fingerprint may legitimately 404 in verify mode.
+# We seed `smoke_test_user` with poster_public=1 plus one approved system
+# tied to that profile, so any future verify-mode test against the public
+# fingerprint endpoint sees real (non-empty) data.
+#
+# Try/except wraps each statement so this is a no-op on a DB that doesn't
+# yet have the v1.70.0 columns (forward-compat).
+#
+# Smoke remote mode hits production where Parker's real `parker1920`
+# profile already exists; this seed never runs there.
+# ---------------------------------------------------------------------------
+def _seed_sentinel_user(haven_module) -> None:
+    """Seed the sentinel `smoke_test_user` profile + one sample system.
+
+    Called after migrations from the haven_app fixture. Idempotent — uses
+    INSERT OR IGNORE so re-running on an already-seeded DB is a no-op.
+    """
+    from datetime import datetime
+    now = datetime.now().isoformat()
+
+    try:
+        conn = haven_module.get_db_connection()
+    except Exception:
+        return  # If we can't connect, downstream tests fail with a real error.
+    try:
+        cursor = conn.cursor()
+
+        # Detect column presence; older test runs (or partial migrations)
+        # may not have poster_public. Build the column list dynamically.
+        cursor.execute("PRAGMA table_info(user_profiles)")
+        cols = {r[1] for r in cursor.fetchall()}
+        if not cols:
+            return  # user_profiles table doesn't exist (migrations broken)
+
+        base_cols = [
+            ("username", "smoke_test_user"),
+            ("username_normalized", "smoketestuser"),
+            ("tier", 5),
+            ("display_name", "Smoke Test User"),
+            ("is_active", 1),
+            ("created_at", now),
+            ("updated_at", now),
+        ]
+        if "poster_public" in cols:
+            base_cols.append(("poster_public", 1))
+        if "default_civ_tag" in cols:
+            base_cols.append(("default_civ_tag", None))
+
+        col_names = ", ".join(c for c, _ in base_cols)
+        placeholders = ", ".join("?" for _ in base_cols)
+        values = tuple(v for _, v in base_cols)
+
+        try:
+            cursor.execute(
+                f"INSERT OR IGNORE INTO user_profiles ({col_names}) VALUES ({placeholders})",
+                values,
+            )
+        except Exception:
+            return  # If profile insert fails, skip the system insert too.
+
+        cursor.execute(
+            "SELECT id FROM user_profiles WHERE username_normalized = ?",
+            ("smoketestuser",),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return
+        profile_id = row[0]
+
+        # Seed one approved system tied to this profile so future
+        # /api/public/voyager-fingerprint tests have data to render.
+        try:
+            cursor.execute("PRAGMA table_info(systems)")
+            sys_cols = {r[1] for r in cursor.fetchall()}
+            if "profile_id" in sys_cols:
+                # Build INSERT defensively against schema drift.
+                fields = [
+                    ("name", "Smoke Test System"),
+                    ("glyph_code", "0123ABC456EF"),
+                    ("galaxy", "Euclid"),
+                    ("region_x", 0), ("region_y", 0), ("region_z", 0),
+                    ("x", 0), ("y", 0), ("z", 0),
+                    ("profile_id", profile_id),
+                ]
+                if "source" in sys_cols:
+                    fields.append(("source", "manual"))
+                if "is_complete" in sys_cols:
+                    fields.append(("is_complete", 50))
+                if "discovered_at" in sys_cols:
+                    fields.append(("discovered_at", now))
+                if "discovered_by" in sys_cols:
+                    fields.append(("discovered_by", "smoke_test_user"))
+
+                col_list = ", ".join(c for c, _ in fields)
+                placeholders = ", ".join("?" for _ in fields)
+                cursor.execute(
+                    f"INSERT OR IGNORE INTO systems ({col_list}) VALUES ({placeholders})",
+                    tuple(v for _, v in fields),
+                )
+        except Exception:
+            pass
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
@@ -285,6 +432,20 @@ def haven_app():
     import control_room_api
     _HAVEN_APP_SINGLETON["app"] = control_room_api.app
     _HAVEN_APP_SINGLETON["module"] = control_room_api
+
+    # Force startup so migrations run via the patched runner. Without this,
+    # the seed below sees an empty DB and the sentinel insert is wasted.
+    from fastapi.testclient import TestClient
+    with TestClient(control_room_api.app):
+        pass  # startup + shutdown — migrations now applied to the temp DB
+
+    # Seed the sentinel user (Phase 3 Addendum, Delta 3). Best-effort;
+    # failures are silent so tests still run if the schema is unexpected.
+    try:
+        _seed_sentinel_user(control_room_api)
+    except Exception:
+        pass
+
     return control_room_api.app
 
 

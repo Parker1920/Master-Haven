@@ -162,6 +162,38 @@ These aren't tests — they're ops items the test suite work surfaced.
 - **Effort:** Small.
 - **Recommendation:** v2 candidate.
 
+**Concrete first test (added by Phase 3 Addendum):**
+
+`test_activity_logs_query_under_500ms` — runs
+
+```sql
+SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT 50
+```
+
+against the live Pi DB and asserts it completes in <500ms. Migration v1.71.0
+explicitly tagged itself "Pi freeze mitigation (Stage 1)" and added the index
+this query depends on. A regression here is the canary for "Stage 2 freeze
+brewing" — the right thing to alert on.
+
+### E.5 Migration idempotency (added by Phase 3 Addendum)
+
+The migration history shows several patterns where a buggy migration shipped
+and a follow-up patched it (1.40.0 → 1.41.0, 1.44.0 → 1.45.0). The cold-init
+failure of v1.32.0 surfaced in Phase 3 (PHASE3_REPORT §5.1) is the same shape.
+
+**Concrete test:** `test_migrations_idempotent` — runs every migration against
+a fresh DB, then runs them all again, and asserts:
+
+1. The second run produces no schema changes (compare `sqlite_master` rows).
+2. The second run produces no row-count changes on data tables.
+3. No exceptions raised on the second run.
+
+Catches non-idempotent migrations before they hit prod.
+
+- **Value:** High. Migration bugs already cost real engineering time.
+- **Effort:** Medium. Requires migration-replay infrastructure.
+- **Recommendation:** v2 candidate.
+
 ### E.4 Visual regression for posters
 
 - Current poster tests assert `image/png` + size > 5 KB. Doesn't catch "rendered the wrong text" or "rendered a blank canvas".
