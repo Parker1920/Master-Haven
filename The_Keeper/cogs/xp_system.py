@@ -136,7 +136,7 @@ def get_rank(level):
     if exact_level is not none:
     	if level == exact_level:
         	return rank
-        if level >= exact_level:
+        	if level >= exact_level:
          	fallback = rank
         continue
 
