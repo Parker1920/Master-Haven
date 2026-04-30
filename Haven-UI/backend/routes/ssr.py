@@ -16,6 +16,7 @@ Mount before the SPA fallback in control_room_api.py.
 """
 
 import logging
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -25,6 +26,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 logger = logging.getLogger('control.room')
 
 router = APIRouter()
+
+# Resolves to Haven-UI/landing/. Independent of control_room_api so this
+# module can be imported without the parent app loaded.
+LANDING_DIR = Path(__file__).resolve().parent.parent.parent / 'landing'
 
 
 # ============================================================================
@@ -197,12 +202,49 @@ def _html_escape(s: str) -> str:
 
 @router.get('/', response_class=HTMLResponse)
 async def og_root(request: Request):
-    """Serves OG meta tags + JS redirect to /haven-ui/ for the root domain.
+    """Serves the Voyager's Haven landing page with OG meta tags injected
+    at the top of <head>. Scrapers grab the dynamic og_site poster + tags;
+    real browsers see the full landing page (no redirect to /haven-ui/).
 
-    Discord/Twitter scrapers see the og_site card; real browsers run the
-    inline redirect and land on the SPA shell.
+    Falls back to the legacy OG-card-with-redirect template if landing/
+    is missing — keeps environments without the landing dir unbroken.
     """
-    return _render_og(build_site_og(), request)
+    landing_index = LANDING_DIR / 'index.html'
+    if not landing_index.exists():
+        return _render_og(build_site_og(), request)
+
+    payload = build_site_og()
+    base = str(request.base_url).rstrip('/')
+    image_abs = payload['image']
+    if image_abs.startswith('/'):
+        image_abs = base + image_abs
+
+    og_block = (
+        '\n  <!-- Dynamic OG/Twitter tags (injected per-request by SSR). -->\n'
+        '  <!-- Scrapers honor the FIRST og:* tag, so these win over the static -->\n'
+        '  <!-- block further down in <head>. -->\n'
+        f'  <meta property="og:type" content="website">\n'
+        f'  <meta property="og:title" content="{_html_escape(payload["title"])}">\n'
+        f'  <meta property="og:description" content="{_html_escape(payload["description"])}">\n'
+        f'  <meta property="og:image" content="{image_abs}">\n'
+        f'  <meta property="og:image:width" content="{payload["image_w"]}">\n'
+        f'  <meta property="og:image:height" content="{payload["image_h"]}">\n'
+        f'  <meta property="og:url" content="{base}/">\n'
+        f'  <meta property="og:site_name" content="Voyager\'s Haven">\n'
+        f'  <meta name="twitter:card" content="summary_large_image">\n'
+        f'  <meta name="twitter:title" content="{_html_escape(payload["title"])}">\n'
+        f'  <meta name="twitter:description" content="{_html_escape(payload["description"])}">\n'
+        f'  <meta name="twitter:image" content="{image_abs}">\n'
+        f'  <meta name="theme-color" content="#00C2B3">\n'
+    )
+
+    html = landing_index.read_text(encoding='utf-8')
+    html = html.replace('<head>', '<head>' + og_block, 1)
+
+    return HTMLResponse(html, headers={
+        'Cache-Control': 'public, max-age=300, must-revalidate',
+        'X-Haven-OG': 'landing',
+    })
 
 
 @router.get('/voyager/{username}', response_class=HTMLResponse)

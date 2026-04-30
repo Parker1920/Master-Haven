@@ -387,12 +387,26 @@ async def list_communities():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Pull from both legacy partner_accounts and the unified user_profiles table
+        # (tier 2 = partner, tier 3 = sub-admin). user_profiles is the source of truth
+        # for anyone created via /admin/users in v1.48.0+; partner_accounts is the
+        # legacy fallback for older rows that haven't been migrated.
         cursor.execute('''
-            SELECT discord_tag as tag,
-                   COALESCE(display_name, discord_tag) as name
-            FROM partner_accounts
-            WHERE discord_tag IS NOT NULL AND discord_tag != ''
-            ORDER BY display_name
+            SELECT tag, name FROM (
+                SELECT discord_tag as tag,
+                       COALESCE(display_name, discord_tag) as name
+                FROM partner_accounts
+                WHERE discord_tag IS NOT NULL AND discord_tag != ''
+                UNION
+                SELECT partner_discord_tag as tag,
+                       COALESCE(display_name, username, partner_discord_tag) as name
+                FROM user_profiles
+                WHERE tier IN (2, 3)
+                  AND partner_discord_tag IS NOT NULL
+                  AND partner_discord_tag != ''
+                  AND is_active = 1
+            )
+            ORDER BY name
         ''')
         rows = cursor.fetchall()
         tags = [{'tag': row['tag'], 'name': row['name']} for row in rows]

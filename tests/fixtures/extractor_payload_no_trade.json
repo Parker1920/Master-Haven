@@ -1,0 +1,37 @@
+{
+  "extraction_time": "2026-04-29T12:05:00",
+  "extractor_version": "1.9.3",
+  "glyph_code": "0FEDCBA98765",
+  "galaxy_name": "Euclid",
+  "galaxy_index": 0,
+  "voxel_x": 200,
+  "voxel_y": 150,
+  "voxel_z": -100,
+  "solar_system_index": 456,
+  "system_name": "Smoke Test Abandoned System",
+  "star_color": "Red",
+  "reality": "Normal",
+  "game_mode": "Normal",
+  "discord_username": "smoke_test_user",
+  "personal_id": "000000000000000001",
+  "discord_tag": "personal",
+  "no_trade_data": true,
+  "description": "",
+  "planets": [
+    {
+      "planet_index": 0,
+      "planet_name": "Dead Rock",
+      "biome": "Dead",
+      "biome_subtype": "Barren",
+      "weather": "None",
+      "sentinel_level": "None",
+      "flora_level": "Absent",
+      "fauna_level": "Absent",
+      "planet_size": "Medium",
+      "is_moon": false,
+      "is_gas_giant": false,
+      "is_bubble": false,
+      "is_floating_islands": false
+    }
+  ]
+}

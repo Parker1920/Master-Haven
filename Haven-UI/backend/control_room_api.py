@@ -660,6 +660,13 @@ war_media_dir = HAVEN_UI_DIR / 'public' / 'war-media'
 war_media_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
 app.mount('/war-media', CachedStaticFiles(directory=str(war_media_dir)), name='war-media')
 
+# Landing-page static assets (logo video/poster). Mounted at /assets so the
+# landing page's <video> and <img> tags can reference /assets/haven-logo-*
+# directly. Distinct from /haven-ui/assets which is the React build.
+landing_assets_dir = HAVEN_UI_DIR / 'landing' / 'assets'
+if landing_assets_dir.exists():
+    app.mount('/assets', CachedStaticFiles(directory=str(landing_assets_dir)), name='landing-assets')
+
 ui_static_dir = HAVEN_UI_DIR / 'static'
 ui_dist_dir = HAVEN_UI_DIR / 'dist'
 if ui_dist_dir.exists():
@@ -1629,7 +1636,9 @@ app.include_router(ssr_router)
 
 @app.get('/')
 async def root():
-    """Redirect root to Haven UI"""
+    """Fallback if the SSR router (which handles / for OG injection) is not
+    mounted. In normal operation the SSR root handler serves the landing
+    page with OG tags injected — see routes/ssr.py."""
     return RedirectResponse(url='/haven-ui/')
 
 @app.get('/favicon.ico')
@@ -1851,10 +1860,24 @@ async def list_discord_tags():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Union legacy partner_accounts with user_profiles (tier 2/3 partners and
+        # sub-admins created via /admin/users in v1.48.0+) so profile-only partners
+        # appear in every dropdown that consumes this endpoint.
         cursor.execute('''
-            SELECT discord_tag, display_name, username
-            FROM partner_accounts
-            WHERE discord_tag IS NOT NULL AND is_active = 1
+            SELECT discord_tag, display_name, username FROM (
+                SELECT discord_tag, display_name, username
+                FROM partner_accounts
+                WHERE discord_tag IS NOT NULL AND is_active = 1
+                UNION
+                SELECT partner_discord_tag as discord_tag,
+                       display_name,
+                       username
+                FROM user_profiles
+                WHERE tier IN (2, 3)
+                  AND partner_discord_tag IS NOT NULL
+                  AND partner_discord_tag != ''
+                  AND is_active = 1
+            )
             ORDER BY display_name
         ''')
         # Start with Haven and Personal options (always available)

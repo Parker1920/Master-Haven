@@ -1,0 +1,15 @@
+# Haven smoke + verification test suite — pinned dependencies.
+# Install with: pip install -r tests/requirements.txt
+#
+# Kept intentionally minimal. The Pi already has Haven-UI's runtime deps via
+# its venv; this file adds only test-specific tooling. discord.py is reused
+# from The_Keeper's container if running there.
+
+pytest>=7.0,<9
+pytest-asyncio>=0.21
+pytest-timeout>=2.1
+requests>=2.31
+httpx>=0.24
+fastapi[all]>=0.100
+discord.py>=2.3
+python-dotenv>=1.0

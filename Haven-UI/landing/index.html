@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voyager's Haven</title>
+<meta name="description" content="Voyager's Haven — a No Man's Sky discovery archive. Cartographers of the unknown." />
+
+<link rel="icon" type="image/webp" href="/assets/haven-logo-hero.webp" />
+<link rel="apple-touch-icon" href="/assets/haven-logo-hero.webp" />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Voyager's Haven" />
+<meta property="og:description" content="Cartographers of the Unknown — a No Man's Sky discovery archive." />
+<meta property="og:image" content="https://havenmap.online/assets/haven-logo-hero.webp" />
+<meta property="og:url" content="https://havenmap.online/" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg-deep: #0A0E1A;
+    --bg-soft: #11162a;
+    --teal: #5EE7DF;
+    --purple: #A78BFA;
+    --text: #E8ECF7;
+    --text-dim: rgba(232, 236, 247, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+    background: radial-gradient(ellipse at 50% 40%, #1a1f3a 0%, #0A0E1A 55%, #05060d 100%);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    overflow: hidden;
+  }
+
+  #starfield {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .haven-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 32px 24px;
+    gap: 32px;
+  }
+
+  .haven-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    color: var(--teal);
+    animation: fadeIn 1.2s ease-out both;
+  }
+
+  .haven-logo-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 350ms ease;
+    width: 320px;
+    height: 320px;
+  }
+
+  .haven-logo-wrap:hover {
+    transform: scale(1.02);
+  }
+
+  .haven-logo-wrap > video,
+  .haven-logo-wrap > img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: drop-shadow(0 0 12px rgba(94, 231, 223, 0.2));
+  }
+
+  .haven-logo-wrap > video {
+    transition: transform 300ms ease;
+  }
+
+  .haven-wordmark {
+    font-family: 'Cinzel', serif;
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    margin-top: 12px;
+    color: var(--text);
+  }
+
+  .haven-tagline {
+    margin-top: 6px;
+    font-size: 0.82rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .haven-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(140px, 220px));
+    gap: 14px;
+    width: 100%;
+    max-width: 480px;
+    animation: fadeUp 1s ease-out 0.3s both;
+  }
+
+  @media (min-width: 768px) {
+    .haven-grid {
+      max-width: 760px;
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      gap: 18px;
+    }
+  }
+
+  .dest-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: var(--text);
+    text-decoration: none;
+    transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease, background 220ms ease;
+    overflow: hidden;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .dest-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.6;
+    transition: opacity 220ms ease;
+  }
+
+  .dest-card:hover, .dest-card:focus-visible {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.5),
+      0 0 0 1px var(--accent),
+      0 0 24px -4px var(--accent);
+    outline: none;
+  }
+
+  .dest-card:hover::before, .dest-card:focus-visible::before {
+    opacity: 1;
+  }
+
+  .dest-icon {
+    width: 28px;
+    height: 28px;
+    color: var(--accent);
+  }
+
+  .dest-icon svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .dest-label {
+    font-family: 'Cinzel', serif;
+    font-size: 1.3rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--text);
+  }
+
+  .dest-sub {
+    margin-top: 2px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+  }
+
+  .dest-arrow {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    width: 16px;
+    height: 16px;
+    color: var(--accent);
+    opacity: 0.5;
+    transition: opacity 220ms ease, transform 220ms ease;
+  }
+
+  .dest-card:hover .dest-arrow, .dest-card:focus-visible .dest-arrow {
+    opacity: 1;
+    transform: translateX(3px);
+  }
+
+  .haven-footer {
+    position: relative;
+    z-index: 1;
+    padding: 16px 24px 24px;
+    text-align: center;
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    animation: fadeIn 1s ease-out 0.5s both;
+  }
+
+  .haven-footer a {
+    color: var(--teal);
+    text-decoration: none;
+    margin-left: 6px;
+  }
+
+  .haven-footer a:hover {
+    text-decoration: underline;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .haven-hero, .haven-grid, .haven-footer { animation: none; }
+    .dest-card, .haven-logo-wrap { transition: none; }
+  }
+
+  @media (max-width: 480px) {
+    .haven-logo-wrap {
+      width: 240px;
+      height: 240px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+
+<div class="haven-content">
+  <div class="haven-hero">
+    <div class="haven-logo-wrap" id="logoWrap">
+      <video
+        id="havenLogo"
+        autoplay muted playsinline
+        poster="/assets/haven-logo-hero.webp"
+        disablepictureinpicture
+      >
+        <source src="/assets/haven-logo-circular.webm" type="video/webm" />
+        <source src="/assets/haven-logo-circular.mp4" type="video/mp4" />
+      </video>
+    </div>
+    <div class="haven-wordmark">VOYAGER&apos;S HAVEN</div>
+    <div class="haven-tagline">Cartographers of the Unknown</div>
+  </div>
+
+  <nav class="haven-grid" aria-label="Haven destinations">
+
+    <a href="/haven-ui/systems" class="dest-card" style="--accent: #5EE7DF;">
+      <div class="dest-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+        </svg>
+      </div>
+      <div>
+        <div class="dest-label">Map</div>
+        <div class="dest-sub">Explore the galaxy</div>
+      </div>
+      <svg class="dest-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </a>
+
+    <a href="/haven-ui/create" class="dest-card" style="--accent: #A78BFA;">
+      <div class="dest-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      </div>
+      <div>
+        <div class="dest-label">Create</div>
+        <div class="dest-sub">Submit a discovery</div>
+      </div>
+      <svg class="dest-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </a>
+
+    <a href="/haven-ui/discoveries" class="dest-card" style="--accent: #5EE7DF;">
+      <div class="dest-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-4.5-4.5" />
+        </svg>
+      </div>
+      <div>
+        <div class="dest-label">Search</div>
+        <div class="dest-sub">Find a system or planet</div>
+      </div>
+      <svg class="dest-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </a>
+
+    <a href="/haven-ui/changelog" class="dest-card" style="--accent: #A78BFA;">
+      <div class="dest-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4Z" />
+          <path d="M8 9h6M8 13h6" />
+        </svg>
+      </div>
+      <div>
+        <div class="dest-label">Docs</div>
+        <div class="dest-sub">Guides &amp; references</div>
+      </div>
+      <svg class="dest-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </a>
+
+  </nav>
+
+  <div class="haven-footer">
+    Haven v1.54 &middot; <a href="#" data-todo="discord-invite-url">Discord</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Starfield ---------------------------------------------------------
+  var canvas = document.getElementById('starfield');
+  var ctx = canvas.getContext('2d');
+  var width = 0, height = 0, stars = [], rafId = null, t = 0;
+
+  function tintFor(kind, alpha) {
+    if (kind === 'teal')   return 'rgba(94, 231, 223, ' + alpha + ')';
+    if (kind === 'purple') return 'rgba(167, 139, 250, ' + alpha + ')';
+    return 'rgba(255, 255, 255, ' + alpha + ')';
+  }
+
+  function setupStarfield() {
+    var dpr = window.devicePixelRatio || 1;
+    width  = canvas.width  = canvas.offsetWidth  * dpr;
+    height = canvas.height = canvas.offsetHeight * dpr;
+    var count = Math.floor((width * height) / 4000);
+    stars = new Array(count);
+    for (var i = 0; i < count; i++) {
+      var tint = 'white';
+      if (Math.random() < 0.15) tint = (Math.random() < 0.5) ? 'teal' : 'purple';
+      stars[i] = {
+        x: Math.random() * width,
+        y: Math.random() * height,
+        r: Math.random() * 1.4 + 0.2,
+        vy: Math.random() * 0.05 + 0.01,
+        phase: Math.random() * Math.PI * 2,
+        tint: tint
+      };
+    }
+  }
+
+  function drawStarfield() {
+    var dpr = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, width, height);
+    t += 0.02;
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      var alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(s.phase + t));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = tintFor(s.tint, alpha);
+      ctx.fill();
+      s.y += s.vy * dpr;
+      if (s.y > height) s.y = 0;
+    }
+    rafId = requestAnimationFrame(drawStarfield);
+  }
+
+  if (!prefersReducedMotion) {
+    setupStarfield();
+    drawStarfield();
+    window.addEventListener('resize', setupStarfield);
+  } else {
+    // Static starfield: render one frame, no animation loop.
+    setupStarfield();
+    var dpr = window.devicePixelRatio || 1;
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = tintFor(s.tint, 0.6);
+      ctx.fill();
+    }
+  }
+
+  // ---- Logo: play-once-then-hover-to-replay ------------------------------
+  var logoWrap = document.getElementById('logoWrap');
+  var video = document.getElementById('havenLogo');
+  var hasPlayedOnce = false;
+
+  // If reduced motion is requested, swap the video element for a static image
+  // entirely. This avoids any motion (including the initial autoplay).
+  if (prefersReducedMotion && video) {
+    var img = document.createElement('img');
+    img.src = '/assets/haven-logo-hero.webp';
+    img.alt = "Voyager's Haven";
+    img.width = 320;
+    img.height = 320;
+    video.parentNode.replaceChild(img, video);
+    video = null;
+  }
+
+  if (video) {
+    video.addEventListener('ended', function () {
+      hasPlayedOnce = true;
+    });
+
+    function replay() {
+      if (!hasPlayedOnce) return;
+      try {
+        video.currentTime = 0;
+        var p = video.play();
+        if (p && typeof p.catch === 'function') p.catch(function () { /* ignore */ });
+      } catch (e) { /* ignore */ }
+    }
+
+    logoWrap.addEventListener('mouseenter', replay);
+    logoWrap.addEventListener('touchstart', replay, { passive: true });
+
+    // Some browsers (older Safari, locked-down corp profiles) silently fail to
+    // autoplay. If the video never starts, fall back to the static image.
+    video.addEventListener('error', function () {
+      var fallback = document.createElement('img');
+      fallback.src = '/assets/haven-logo-hero.webp';
+      fallback.alt = "Voyager's Haven";
+      fallback.width = 320;
+      fallback.height = 320;
+      video.parentNode.replaceChild(fallback, video);
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

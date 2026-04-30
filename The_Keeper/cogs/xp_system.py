@@ -122,25 +122,32 @@ def get_rank(level):
     """
 
     ranks = CONFIG.get("ranks", [])
+    if not ranks:
+        return {"name": "Nope"}
 
+    if level < 1:
+       level = 1
+    
     for rank in ranks:
         min_level = rank.get("min_level")
         max_level = rank.get("max_level")
+        exact_level = rank.get("level")
 
-        if min_level is None and max_level is None:
-            if rank.get("level") == level:
+        if exact_level is not none:
+            if level == exact_level:
                 return rank
-            continue
+            if level >= exact_level:
+                fallback = rank
+                continue
 
-        if min_level <= level <= max_level:
-            return rank
+        if min_level is not None and max_level is not None:
+            if min_level <= level <= max_level:
+                return rank
+            if level >= min_level:
+                fallback = rank
 
-    fallback = None
-    for rank in ranks:
-        if rank.get("min_level", 0) <= level:
-            fallback = rank
+    return fallback or ranks[0]
 
-    return fallback
 
 # ---------------- ROLE ASSIGN ----------------
 async def set_primary_role(member, role_name, bot):
