@@ -228,8 +228,8 @@ async def process_message_xp(message):
 # ---------------- DISCOVERY XP ----------------
 async def process_discovery_xp(user_id, discovery_type, channel_id):
     user = get_user(user_id)
-    upload_channels = get_cfg("channels.upload_channel,[])
-    office_channels = get_cfg("channels.office_channel,[])                     
+    upload_channels = get_cfg("channels.upload_channel",[])
+    office_channels = get_cfg("channels.office_channel",[])                     
 
     primary_role = user.get("primary_role")
     if not primary_role:
