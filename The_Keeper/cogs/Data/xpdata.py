@@ -63,7 +63,7 @@ CONFIG = {
     {
       "name": "Voyager",
       "min_level": 10,
-      "max_level": 10
+      "max_level": 10,
       "xp_required": 1500,
       "on_reach_level": 10,
       "dm": {
