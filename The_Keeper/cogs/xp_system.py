@@ -133,12 +133,12 @@ def get_rank(level):
         max_level = rank.get("max_level")
         exact_level = rank.get("level")
 
-    	if exact_level is not none:
-    		if level == exact_level:
-        		return rank
-       	if level >= exact_level:
-         	fallback = rank
-       	 continue
+        if exact_level is not None:
+            if level == exact_level:
+                return rank
+            if level >= exact_level:
+                fallback = rank
+                continue
 
         
          if min_level is not None and max_level is not None:
