@@ -257,8 +257,6 @@ async def process_discovery_xp(user_id, discovery_type, channel_id):
     if office_channels and channel_id == office_channels[0]:
         xp += get_cfg("xp_bonus.channel_match", 5)
 
-    xp = int(xp * get_activity_multiplier(user))
-
     add_xp(user_id, primary_role, xp)
 
     level, leveled_up, dm = add_global_xp(user_id, xp)
