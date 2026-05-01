@@ -6311,3 +6311,8 @@ audit/work/timeline.tsv
 
 # External cloned repo (kept locally, not part of Master Haven)
 Philbert-discord/
+
+# -----------------
+# Claude Code sandbox scratch
+# -----------------
+.work/
