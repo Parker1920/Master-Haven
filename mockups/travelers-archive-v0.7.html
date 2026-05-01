@@ -1,0 +1,2679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Travelers Archive — v0.7 Full Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #f5f3ee; color: #2c2c2a; line-height: 1.5;
+    min-height: 100vh;
+  }
+
+/* ============================ DEV PANEL ============================ */
+.ta-dev-panel {
+position: fixed; bottom: calc(70px + env(safe-area-inset-bottom)); right: 14px; z-index: 200;
+background: #2c2c2a; color: #fff;
+padding: 8px 12px; border-radius: 100px;
+font-size: 11px; cursor: pointer;
+display: flex; align-items: center; gap: 8px;
+box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+.ta-dev-panel-expanded {
+position: fixed; bottom: calc(70px + env(safe-area-inset-bottom)); right: 14px; z-index: 200;
+background: #2c2c2a; color: #fff;
+padding: 14px 16px; border-radius: 12px;
+font-size: 12px; min-width: 220px;
+box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+display: none;
+}
+@media (min-width: 769px) {
+.ta-dev-panel { bottom: 14px; }
+.ta-dev-panel-expanded { bottom: 14px; }
+}
+.ta-dev-panel-expanded.open { display: block; }
+.ta-dev-panel-expanded label {
+display: block; font-size: 10px; text-transform: uppercase;
+letter-spacing: 1px; color: #888780; margin-bottom: 6px;
+}
+.ta-dev-panel-expanded .role-btns {
+display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px;
+}
+.ta-dev-panel-expanded .role-btn {
+padding: 6px 10px; font-size: 11px; font-family: inherit;
+background: #1a1a18; color: #b4b2a9; border: 0.5px solid rgba(255,255,255,0.15);
+border-radius: 6px; cursor: pointer;
+}
+.ta-dev-panel-expanded .role-btn.active {
+background: #534AB7; color: #fff; border-color: #534AB7;
+}
+.ta-dev-panel-expanded .close-x {
+position: absolute; top: 8px; right: 10px;
+cursor: pointer; color: #888780;
+font-size: 16px; line-height: 1;
+}
+
+/* ============================ APP SHELL ============================ */
+.ta-app {
+background: #fff;
+min-height: 100vh;
+display: flex; flex-direction: column;
+position: relative;
+max-width: 1200px; margin: 0 auto;
+}
+
+/* ============================ MOBILE TOP BAR ============================ */
+.ta-mobile-bar {
+display: flex; align-items: center; justify-content: space-between;
+padding: 10px 12px;
+border-bottom: 0.5px solid rgba(0,0,0,0.1);
+background: #fff;
+position: sticky; top: 0; z-index: 50;
+height: 52px;
+}
+.ta-mobile-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.ta-mobile-icon-btn {
+width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
+background: transparent; border: none; cursor: pointer;
+display: flex; align-items: center; justify-content: center;
+color: #2c2c2a;
+}
+.ta-mobile-icon-btn:active { background: #f5f3ee; }
+.ta-mobile-logo {
+display: flex; align-items: center; gap: 8px; min-width: 0;
+font-size: 14px; font-weight: 500;
+}
+.ta-mobile-page-title {
+font-family: Georgia, "Times New Roman", serif;
+white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ta-mobile-bar-right { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.ta-mobile-avatar {
+width: 32px; height: 32px; border-radius: 50%;
+background: #CECBF6; color: #26215C;
+display: flex; align-items: center; justify-content: center;
+font-size: 11px; font-weight: 500; cursor: pointer;
+}
+.ta-logo-mark {
+width: 26px; height: 26px;
+background: linear-gradient(135deg, #534AB7 0%, #1D9E75 100%);
+border-radius: 5px; display: flex; align-items: center; justify-content: center;
+color: #fff; font-size: 10px; font-weight: 600; flex-shrink: 0;
+}
+
+/* ============================ DRAWER ============================ */
+.ta-drawer {
+position: fixed; top: 0; left: 0; bottom: 0;
+width: 84%; max-width: 320px;
+background: #fff;
+transform: translateX(-100%);
+transition: transform 0.25s ease;
+z-index: 100;
+display: flex; flex-direction: column;
+box-shadow: 0 0 24px rgba(0,0,0,0.2);
+}
+.ta-drawer.open { transform: translateX(0); }
+.ta-drawer-overlay {
+position: fixed; inset: 0; background: rgba(0,0,0,0); z-index: 99;
+pointer-events: none; transition: background 0.25s ease;
+}
+.ta-drawer-overlay.open { background: rgba(0,0,0,0.4); pointer-events: auto; }
+.ta-drawer-header {
+padding: 18px 20px;
+border-bottom: 0.5px solid rgba(0,0,0,0.1);
+background: linear-gradient(135deg, #1a1a3e 0%, #534AB7 100%);
+color: #fff;
+}
+.ta-drawer-user { display: flex; align-items: center; gap: 12px; }
+.ta-drawer-avatar {
+width: 44px; height: 44px; border-radius: 50%;
+background: #CECBF6; color: #26215C;
+display: flex; align-items: center; justify-content: center;
+font-size: 16px; font-weight: 500;
+}
+.ta-drawer-name { font-size: 15px; font-weight: 500; }
+.ta-drawer-role { font-size: 12px; color: #CECBF6; }
+.ta-drawer-nav { padding: 8px 0; flex: 1; overflow-y: auto; }
+.ta-drawer-link {
+display: flex; align-items: center; gap: 14px;
+padding: 14px 20px;
+font-size: 15px; color: #2c2c2a;
+cursor: pointer; border-left: 3px solid transparent;
+text-decoration: none;
+}
+.ta-drawer-link:active { background: #ebe8e0; }
+.ta-drawer-link.active { border-left-color: #534AB7; background: #f9f8f4; font-weight: 500; }
+.ta-drawer-icon {
+width: 22px; height: 22px;
+display: flex; align-items: center; justify-content: center;
+color: #5f5e5a;
+}
+.ta-drawer-link.active .ta-drawer-icon { color: #534AB7; }
+.ta-drawer-section-label {
+font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+color: #888780; padding: 14px 20px 6px; font-weight: 500;
+}
+.ta-drawer-link-restricted {
+opacity: 0.4; cursor: not-allowed;
+}
+.ta-drawer-link-restricted::after {
+content: '🔒'; font-size: 11px; margin-left: auto;
+}
+
+/* ============================ BOTTOM NAV ============================ */
+.ta-bottom-nav {
+position: fixed; bottom: 0; left: 0; right: 0;
+background: #fff;
+border-top: 0.5px solid rgba(0,0,0,0.1);
+padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
+z-index: 50;
+max-width: 1200px; margin: 0 auto;
+}
+.ta-bottom-nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+.ta-bottom-nav-item {
+background: none; border: none; cursor: pointer;
+padding: 8px 4px;
+display: flex; flex-direction: column; align-items: center; gap: 3px;
+color: #888780; font-size: 10px; font-family: inherit;
+text-decoration: none;
+}
+.ta-bottom-nav-item:active { background: #f5f3ee; }
+.ta-bottom-nav-item.active { color: #534AB7; }
+.ta-bottom-nav-icon {
+width: 22px; height: 22px;
+display: flex; align-items: center; justify-content: center;
+}
+
+/* ============================ DESKTOP NAV ============================ */
+.ta-nav-desktop {
+display: none;
+align-items: center; gap: 16px;
+padding: 14px 24px; border-bottom: 0.5px solid rgba(0,0,0,0.1);
+font-size: 13px; background: #fff;
+position: sticky; top: 0; z-index: 50;
+}
+.ta-logo {
+font-weight: 500; font-size: 14px; display: flex; align-items: center;
+gap: 8px; text-decoration: none; color: inherit;
+}
+.ta-nav-spacer { flex: 1; }
+.ta-nav-link {
+color: #5f5e5a; cursor: pointer; font-size: 13px;
+padding: 6px 10px; border-radius: 4px;
+text-decoration: none;
+}
+.ta-nav-link:hover { background: #f5f3ee; color: #2c2c2a; }
+.ta-nav-link.active { color: #2c2c2a; font-weight: 500; }
+.ta-user-pill {
+display: flex; align-items: center; gap: 8px;
+padding: 5px 12px 5px 4px; background: #ebe8e0;
+border-radius: 100px; font-size: 12px; cursor: pointer;
+}
+
+/* ============================ AVATARS ============================ */
+.ta-avatar {
+width: 26px; height: 26px; border-radius: 50%;
+background: #B5D4F4; color: #042C53;
+display: flex; align-items: center; justify-content: center;
+font-size: 11px; font-weight: 500; flex-shrink: 0;
+}
+.ta-avatar-sm { width: 20px; height: 20px; font-size: 9px; }
+.ta-avatar-md { width: 32px; height: 32px; font-size: 12px; }
+.ta-avatar-lg { width: 44px; height: 44px; font-size: 16px; }
+.ta-avatar-xl { width: 80px; height: 80px; font-size: 28px; }
+.ta-avatar-purple { background: #CECBF6; color: #26215C; }
+.ta-avatar-teal { background: #9FE1CB; color: #04342C; }
+.ta-avatar-coral { background: #F5C4B3; color: #4A1B0C; }
+.ta-avatar-pink { background: #F4C0D1; color: #4B1528; }
+.ta-avatar-amber { background: #FAC775; color: #412402; }
+.ta-avatar-slate { background: #B8C5D0; color: #1F2D3A; }
+.ta-avatar-green { background: #C0DD97; color: #173404; }
+
+/* ============================ MASTHEAD ============================ */
+.ta-masthead {
+background: #fff; padding: 22px 16px 16px;
+border-bottom: 1px solid #2c2c2a;
+text-align: center;
+}
+.ta-masthead-name {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 28px; font-weight: 500;
+letter-spacing: -0.3px; margin-bottom: 4px;
+}
+.ta-masthead-tag {
+font-size: 10px; color: #888780;
+text-transform: uppercase; letter-spacing: 2px;
+}
+.ta-masthead-meta {
+margin-top: 10px;
+display: flex; justify-content: center; gap: 14px;
+font-size: 10px; color: #5f5e5a;
+flex-wrap: wrap;
+}
+.ta-masthead-meta-item { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.ta-masthead-meta-num {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 14px; font-weight: 500; color: #2c2c2a;
+}
+.ta-masthead-meta-label {
+font-size: 9px; text-transform: uppercase;
+letter-spacing: 0.6px; color: #888780;
+}
+
+/* ============================ BEAT NAV ============================ */
+.ta-beat-nav {
+background: #fff;
+border-bottom: 0.5px solid rgba(0,0,0,0.1);
+padding: 0 12px;
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+scrollbar-width: none;
+position: sticky; top: 52px; z-index: 30;
+}
+.ta-beat-nav::-webkit-scrollbar { display: none; }
+.ta-beat-nav-inner { display: flex; gap: 0; min-width: max-content; }
+.ta-beat-tab {
+padding: 12px 12px; font-size: 11px;
+font-family: inherit; background: none; border: none;
+cursor: pointer; color: #5f5e5a;
+border-bottom: 2px solid transparent;
+margin-bottom: -0.5px;
+text-transform: uppercase; letter-spacing: 1px;
+font-weight: 500; white-space: nowrap;
+text-decoration: none;
+}
+.ta-beat-tab.active { color: #2c2c2a; border-bottom-color: #993C1D; }
+
+/* ============================ TAGS / DOC TYPES ============================ */
+.ta-story-tags {
+display: flex; gap: 5px; flex-wrap: wrap;
+margin-bottom: 8px; align-items: center;
+}
+.ta-doctype {
+font-size: 9px; padding: 2px 6px; border-radius: 3px;
+font-weight: 700; letter-spacing: 0.6px;
+text-transform: uppercase; flex-shrink: 0;
+}
+.ta-doctype-brief { background: #fcdbcd; color: #4A1B0C; }
+.ta-doctype-feature { background: #fff5dd; color: #633806; border: 0.5px solid rgba(99, 56, 6, 0.2); }
+.ta-doctype-inquisition { background: #EEEDFE; color: #26215C; }
+.ta-tag {
+font-size: 10px; padding: 2px 7px; border-radius: 100px;
+font-weight: 500; cursor: pointer; flex-shrink: 0;
+text-decoration: none;
+}
+.ta-tag-beat-conflict { background: #FCEBEB; color: #791F1F; }
+.ta-tag-beat-events { background: #E6F1FB; color: #042C53; }
+.ta-tag-beat-diplomacy { background: #EEEDFE; color: #26215C; }
+.ta-tag-beat-projects { background: #EAF3DE; color: #173404; }
+.ta-tag-beat-civupdates { background: #FAEEDA; color: #412402; }
+.ta-tag-civ {
+background: #f1efe8; color: #5f5e5a;
+border: 0.5px solid rgba(0,0,0,0.1);
+}
+
+/* ============================ HERO STORY ============================ */
+.ta-hero-story {
+padding: 20px 16px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-hero-story:active { background: #fafaf6; }
+.ta-hero-headline {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 22px; font-weight: 500;
+line-height: 1.2; margin-bottom: 8px;
+}
+.ta-hero-deck {
+font-size: 14px; color: #5f5e5a;
+line-height: 1.55; margin-bottom: 12px;
+}
+.ta-byline-row {
+display: flex; align-items: center; gap: 8px;
+font-size: 12px; color: #5f5e5a;
+}
+.ta-byline-row b { color: #2c2c2a; font-weight: 500; }
+
+/* ============================ SECTION DIVIDERS ============================ */
+.ta-section-divider {
+background: #f5f3ee;
+padding: 12px 16px;
+border-top: 0.5px solid rgba(0,0,0,0.08);
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+}
+.ta-section-name {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 12px; font-weight: 500;
+text-transform: uppercase; letter-spacing: 1.5px;
+color: #2c2c2a;
+}
+.ta-section-sub { font-size: 11px; color: #888780; margin-top: 2px; }
+
+/* ============================ STORY CARDS ============================ */
+.ta-story-grid {
+padding: 12px;
+display: grid; gap: 10px;
+grid-template-columns: 1fr;
+}
+.ta-story-card {
+padding: 14px;
+background: #fff;
+border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 10px;
+cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-story-card:active { background: #fafaf6; }
+.ta-story-headline {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 16px; font-weight: 500;
+line-height: 1.35; margin-bottom: 6px;
+}
+.ta-story-deck {
+font-size: 13px; color: #5f5e5a;
+line-height: 1.5; margin-bottom: 8px;
+}
+
+/* ============================ INQUISITIONS ============================ */
+.ta-inq-shelf {
+background: linear-gradient(180deg, #f9f8fc 0%, #fff 100%);
+padding: 16px;
+border-top: 0.5px solid rgba(0,0,0,0.08);
+}
+.ta-inq-card {
+background: #fff;
+border: 0.5px solid rgba(83, 74, 183, 0.2);
+border-left: 3px solid #534AB7;
+border-radius: 0 8px 8px 0;
+padding: 14px 16px;
+margin-bottom: 10px;
+cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-inq-card:last-child { margin-bottom: 0; }
+.ta-inq-card:active { background: #f5f3fc; }
+.ta-inq-numeral {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 10px; color: #534AB7;
+font-weight: 600; letter-spacing: 1.5px;
+margin-bottom: 4px;
+}
+.ta-inq-title {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 16px; font-weight: 500;
+margin-bottom: 6px; line-height: 1.3;
+}
+.ta-inq-meta { font-size: 11px; color: #888780; line-height: 1.5; }
+.ta-inq-progress {
+margin-top: 8px;
+display: flex; align-items: center; gap: 8px;
+font-size: 11px; color: #534AB7;
+}
+.ta-inq-progress-bar {
+flex: 1; height: 4px;
+background: #ebe8e0; border-radius: 100px;
+overflow: hidden;
+}
+.ta-inq-progress-fill { height: 100%; background: #534AB7; }
+
+/* ============================ FILTER BAR ============================ */
+.ta-filter-bar {
+background: #f5f3ee;
+padding: 10px 12px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+display: flex; align-items: center; gap: 8px;
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+scrollbar-width: none;
+font-size: 11px;
+}
+.ta-filter-bar::-webkit-scrollbar { display: none; }
+.ta-filter-label { color: #888780; font-weight: 500; flex-shrink: 0; }
+.ta-filter-pill {
+background: #fff; padding: 5px 10px; border-radius: 100px;
+border: 0.5px solid rgba(0,0,0,0.15);
+display: flex; align-items: center; gap: 5px;
+flex-shrink: 0; white-space: nowrap;
+cursor: pointer; font-family: inherit; font-size: 11px;
+}
+.ta-filter-pill-x { color: #888780; cursor: pointer; font-weight: 500; }
+.ta-filter-pill-add { opacity: 0.7; }
+
+/* ============================ CIV INDEX ============================ */
+.ta-civ-index-header { padding: 18px 16px 12px; }
+.ta-civ-index-title {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 24px; font-weight: 500;
+}
+.ta-civ-index-sub { font-size: 12px; color: #5f5e5a; margin-top: 3px; }
+.ta-civ-grid {
+display: grid; grid-template-columns: 1fr;
+gap: 10px; padding: 14px 12px;
+}
+.ta-civ-card {
+background: #fff;
+border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 10px;
+overflow: hidden;
+cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-civ-card:active { background: #fafaf6; }
+.ta-civ-card-band {
+height: 5px;
+background: linear-gradient(90deg, var(--c1, #534AB7), var(--c2, #1D9E75));
+}
+.ta-civ-card-body { padding: 12px 14px; }
+.ta-civ-card-name {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 17px; font-weight: 500;
+margin-bottom: 4px; line-height: 1.3;
+display: flex; align-items: baseline; gap: 6px;
+flex-wrap: wrap;
+}
+.ta-civ-card-meta {
+font-size: 11px; color: #888780;
+margin-bottom: 8px; line-height: 1.4;
+}
+.ta-civ-card-stats {
+display: flex; gap: 12px;
+font-size: 11px; color: #5f5e5a;
+flex-wrap: wrap;
+}
+.ta-civ-card-stats b { color: #2c2c2a; font-weight: 500; }
+.ta-civ-card-status {
+display: inline-flex; align-items: center; gap: 5px;
+padding: 2px 8px; border-radius: 100px;
+font-size: 10px; font-weight: 500;
+}
+.ta-status-active { background: #EAF3DE; color: #173404; }
+.ta-status-active::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #97C459; }
+.ta-status-dormant { background: #F1EFE8; color: #5f5e5a; }
+.ta-status-dormant::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #888780; }
+.ta-status-archived { background: #FAEEDA; color: #633806; }
+.ta-status-archived::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #C18C2D; }
+
+/* ============================ CIV PAGE ============================ */
+.ta-civ-hero {
+position: relative; padding: 24px 18px 20px;
+color: #fff;
+background: linear-gradient(135deg, var(--c1, #042C53) 0%, var(--c2, #0F6E56) 100%);
+overflow: hidden;
+}
+.ta-civ-hero::before {
+content: ''; position: absolute; inset: 0;
+background-image:
+radial-gradient(circle at 75% 40%, rgba(255,255,255,0.1) 0%, transparent 30%),
+radial-gradient(circle at 25% 70%, rgba(255,255,255,0.08) 0%, transparent 25%);
+}
+.ta-civ-hero-content { position: relative; }
+.ta-civ-hero-eyebrow {
+font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+color: rgba(255,255,255,0.7); margin-bottom: 6px; font-weight: 500;
+}
+.ta-civ-hero-name {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 24px; font-weight: 500; margin-bottom: 5px; line-height: 1.2;
+}
+.ta-civ-hero-tagline {
+font-size: 12px; color: rgba(255,255,255,0.85);
+margin-bottom: 10px; line-height: 1.5;
+}
+.ta-civ-hero-status {
+display: inline-flex; align-items: center; gap: 5px;
+padding: 3px 10px; border-radius: 100px;
+font-size: 10px; font-weight: 500;
+background: rgba(151, 196, 89, 0.2);
+color: #C0DD97;
+border: 1px solid rgba(151, 196, 89, 0.3);
+}
+.ta-civ-hero-status::before {
+content: ''; width: 5px; height: 5px;
+border-radius: 50%; background: #97C459;
+}
+
+.ta-civ-stats-strip {
+background: #f9f8f4;
+padding: 12px 14px;
+display: grid; grid-template-columns: repeat(4, 1fr);
+gap: 4px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+}
+.ta-civ-stat { text-align: center; padding: 4px; }
+.ta-civ-stat-num {
+font-size: 18px; font-weight: 500;
+font-family: Georgia, "Times New Roman", serif;
+line-height: 1.1;
+}
+.ta-civ-stat-label {
+font-size: 9px; color: #5f5e5a;
+text-transform: uppercase; letter-spacing: 0.4px;
+margin-top: 3px; line-height: 1.2;
+}
+
+.ta-civ-tabs {
+display: flex; gap: 0;
+border-bottom: 0.5px solid rgba(0,0,0,0.1);
+padding: 0 12px; background: #fff;
+overflow-x: auto; -webkit-overflow-scrolling: touch;
+scrollbar-width: none;
+position: sticky; top: 52px; z-index: 30;
+}
+.ta-civ-tabs::-webkit-scrollbar { display: none; }
+.ta-civ-tab {
+padding: 12px 12px; font-size: 13px; font-family: inherit;
+border: none; background: none; cursor: pointer;
+color: #5f5e5a; border-bottom: 2px solid transparent;
+margin-bottom: -0.5px; white-space: nowrap; flex-shrink: 0;
+text-decoration: none;
+}
+.ta-civ-tab.active { color: #2c2c2a; border-bottom-color: #534AB7; font-weight: 500; }
+
+.ta-civ-body { padding: 16px 14px; }
+.ta-civ-body-eyebrow {
+font-size: 10px; color: #888780;
+text-transform: uppercase; letter-spacing: 1px;
+margin-bottom: 10px; font-weight: 500;
+}
+.ta-coverage-list { display: flex; flex-direction: column; }
+.ta-coverage-item {
+padding: 14px 0;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-coverage-item:first-child { padding-top: 0; }
+.ta-coverage-item:last-child { border: none; }
+
+.ta-card-clickable {
+cursor: pointer;
+}
+.ta-card-clickable:active { background: #fafaf6; }
+.ta-coverage-date {
+font-size: 10px; color: #888780;
+text-transform: uppercase; letter-spacing: 0.8px;
+margin-bottom: 6px;
+}
+.ta-coverage-title {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 15px; font-weight: 500;
+margin-bottom: 4px; line-height: 1.4;
+}
+.ta-coverage-deck {
+font-size: 12px; color: #5f5e5a;
+line-height: 1.5; margin-bottom: 6px;
+}
+
+.ta-civ-note {
+margin-top: 16px; padding: 12px;
+background: #f5f3ee; border-radius: 8px;
+font-size: 11px; color: #5f5e5a; line-height: 1.5;
+}
+.ta-civ-note b { color: #2c2c2a; }
+
+/* ============================ STORY READER (full article) ============================ */
+.ta-story-reader { padding: 20px 16px 32px; }
+.ta-story-reader-back {
+font-size: 12px; color: #534AB7; cursor: pointer;
+margin-bottom: 14px; display: inline-flex; align-items: center; gap: 4px;
+text-decoration: none;
+}
+.ta-story-reader-tags {
+display: flex; gap: 6px; flex-wrap: wrap;
+margin-bottom: 14px; align-items: center;
+}
+.ta-story-reader h1 {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 26px; font-weight: 500;
+line-height: 1.2; margin-bottom: 12px;
+}
+.ta-story-reader-deck {
+font-size: 16px; color: #5f5e5a;
+line-height: 1.5; font-style: italic;
+margin-bottom: 18px;
+font-family: Georgia, "Times New Roman", serif;
+}
+.ta-story-reader-byline {
+display: flex; align-items: center; gap: 10px;
+padding: 12px 0;
+border-top: 0.5px solid rgba(0,0,0,0.1);
+border-bottom: 0.5px solid rgba(0,0,0,0.1);
+margin-bottom: 18px;
+}
+.ta-story-reader-byline-info { flex: 1; }
+.ta-story-reader-byline-name { font-size: 13px; font-weight: 500; }
+.ta-story-reader-byline-meta { font-size: 11px; color: #888780; }
+.ta-story-reader-actions { display: flex; gap: 6px; }
+.ta-btn-icon {
+width: 36px; height: 36px; border-radius: 8px;
+background: #f5f3ee; border: 0.5px solid rgba(0,0,0,0.1);
+cursor: pointer; display: flex; align-items: center; justify-content: center;
+color: #2c2c2a;
+}
+.ta-btn-icon:active { background: #ebe8e0; }
+.ta-prose {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 15px; line-height: 1.7; color: #2c2c2a;
+}
+.ta-prose p { margin-bottom: 14px; }
+.ta-prose blockquote {
+border-left: 3px solid #FAC775;
+padding: 4px 0 4px 16px;
+margin: 18px 0;
+font-style: italic; color: #5f5e5a;
+}
+
+/* ============================ EDITOR ============================ */
+.ta-editor-page { padding: 16px; }
+.ta-editor-back {
+font-size: 12px; color: #534AB7; cursor: pointer;
+margin-bottom: 14px; display: inline-flex; align-items: center; gap: 4px;
+text-decoration: none;
+}
+.ta-editor-eyebrow {
+font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+color: #534AB7; font-weight: 500; margin-bottom: 4px;
+}
+.ta-editor-h1 {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 24px; font-weight: 500;
+margin-bottom: 18px;
+}
+.ta-editor-section {
+background: #fff; border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 10px; padding: 16px;
+margin-bottom: 14px;
+}
+.ta-editor-section-label {
+font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+color: #888780; font-weight: 500; margin-bottom: 8px;
+}
+.ta-editor-input {
+width: 100%; font-family: inherit;
+padding: 10px 12px; font-size: 14px;
+border: 0.5px solid rgba(0,0,0,0.15);
+border-radius: 8px; background: #fff;
+margin-bottom: 10px;
+}
+.ta-editor-input:focus { outline: 2px solid #B5D4F4; }
+.ta-editor-input-headline {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 22px; font-weight: 500;
+line-height: 1.25; padding: 12px;
+border: 0.5px solid rgba(0,0,0,0.15);
+border-radius: 8px;
+}
+.ta-editor-input-deck {
+font-style: italic; color: #5f5e5a;
+font-family: Georgia, "Times New Roman", serif;
+}
+.ta-editor-textarea {
+width: 100%; font-family: Georgia, "Times New Roman", serif;
+padding: 14px; font-size: 15px; line-height: 1.7;
+border: 0.5px solid rgba(0,0,0,0.15);
+border-radius: 8px; background: #fff;
+min-height: 280px; resize: vertical;
+}
+.ta-editor-textarea:focus { outline: 2px solid #B5D4F4; }
+.ta-editor-meta-row {
+display: grid; grid-template-columns: 1fr; gap: 12px;
+}
+.ta-editor-meta-field { display: flex; flex-direction: column; gap: 6px; }
+.ta-editor-meta-label {
+font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+color: #888780; font-weight: 500;
+}
+.ta-editor-select {
+font-family: inherit; padding: 10px 12px; font-size: 14px;
+border: 0.5px solid rgba(0,0,0,0.15); border-radius: 8px;
+background: #fff; cursor: pointer;
+}
+.ta-editor-checkbox-group {
+display: flex; flex-wrap: wrap; gap: 6px;
+}
+.ta-editor-checkbox {
+display: inline-flex; align-items: center; gap: 6px;
+padding: 6px 12px; border-radius: 100px;
+border: 0.5px solid rgba(0,0,0,0.15);
+background: #fff; font-size: 12px; cursor: pointer;
+user-select: none;
+}
+.ta-editor-checkbox.checked {
+background: #534AB7; color: #fff; border-color: #534AB7;
+}
+.ta-editor-actions {
+display: flex; gap: 8px; margin-top: 18px;
+flex-wrap: wrap;
+}
+.ta-btn {
+padding: 11px 20px; font-size: 13px; font-family: inherit;
+border: 0.5px solid rgba(0,0,0,0.15); background: #fff;
+border-radius: 8px; cursor: pointer; font-weight: 500;
+}
+.ta-btn:active { background: #f5f3ee; }
+.ta-btn-primary { background: #2c2c2a; color: #fff; border-color: #2c2c2a; }
+.ta-btn-primary:active { background: #444441; }
+.ta-btn-publish { background: #534AB7; color: #fff; border-color: #534AB7; }
+.ta-btn-publish:active { background: #3C3489; }
+
+/* ============================ DASHBOARD ============================ */
+.ta-dash-greeting {
+background: linear-gradient(135deg, #2C2C2A 0%, #444441 100%);
+color: #fff; padding: 22px 18px;
+}
+.ta-dash-greet-text {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 20px; font-weight: 500; margin-bottom: 4px;
+}
+.ta-dash-greet-sub { font-size: 12px; color: #b4b2a9; line-height: 1.5; }
+.ta-dash-impact-strip {
+background: #ebe8e0; padding: 14px 12px;
+display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+}
+.ta-dash-impact-cell { text-align: center; padding: 4px; }
+.ta-dash-impact-num { font-size: 18px; font-weight: 500; color: #2c2c2a; font-family: Georgia, serif; }
+.ta-dash-impact-label {
+font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
+color: #5f5e5a; line-height: 1.2;
+}
+.ta-dash-content { padding: 14px; }
+.ta-dash-section {
+background: #fff; border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 10px; padding: 16px;
+margin-bottom: 12px;
+}
+.ta-dash-section-title {
+font-size: 13px; font-weight: 500; margin-bottom: 12px;
+display: flex; justify-content: space-between; align-items: center;
+}
+.ta-dash-section-count {
+background: #ebe8e0; color: #5f5e5a;
+padding: 1px 8px; border-radius: 100px; font-size: 11px;
+}
+.ta-dash-item {
+padding: 12px 0;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+font-size: 13px; cursor: pointer;
+text-decoration: none; color: inherit; display: block;
+}
+.ta-dash-item:last-child { border: none; padding-bottom: 0; }
+.ta-dash-item:first-child { padding-top: 0; }
+.ta-dash-item-title {
+font-weight: 500; font-size: 13px; margin-bottom: 4px; line-height: 1.4;
+}
+.ta-dash-item-meta { color: #888780; font-size: 11px; line-height: 1.4; }
+.ta-mention-highlight { background: #FAEEDA; padding: 0 4px; border-radius: 3px; }
+.ta-dash-quick-actions { display: flex; flex-direction: column; gap: 8px; }
+.ta-dash-quick-btn {
+text-align: left; padding: 12px 14px;
+background: #f9f8f4; border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 8px; font-size: 13px; cursor: pointer;
+font-family: inherit; color: inherit; text-decoration: none;
+display: flex; align-items: center; gap: 10px;
+}
+.ta-dash-quick-btn:active { background: #ebe8e0; }
+.ta-dash-quick-icon { width: 20px; height: 20px; color: #534AB7; }
+
+/* ============================ TIMELINE ============================ */
+.ta-timeline-page-header {
+padding: 22px 16px 14px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+}
+.ta-timeline-page-h1 {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 28px; font-weight: 500;
+margin-bottom: 6px;
+}
+.ta-timeline-page-sub {
+font-size: 13px; color: #5f5e5a;
+}
+.ta-timeline-controls {
+background: #f9f8f4; padding: 12px 14px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+display: flex; gap: 8px; flex-wrap: wrap;
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+}
+.ta-timeline-zoom {
+display: flex; gap: 4px;
+background: #fff; border: 0.5px solid rgba(0,0,0,0.1);
+border-radius: 8px; padding: 2px;
+flex-shrink: 0;
+}
+.ta-timeline-zoom-btn {
+padding: 6px 12px; font-size: 11px;
+font-family: inherit; background: none; border: none;
+cursor: pointer; color: #5f5e5a; border-radius: 6px;
+text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;
+}
+.ta-timeline-zoom-btn.active { background: #2c2c2a; color: #fff; }
+
+.ta-timeline-canvas {
+background: #fff;
+overflow-x: auto;
+overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+position: relative;
+height: 480px;
+border-bottom: 0.5px solid rgba(0,0,0,0.08);
+}
+.ta-timeline-track {
+position: relative;
+height: 100%;
+min-width: 2400px;
+padding: 16px 0;
+}
+.ta-timeline-axis {
+position: absolute;
+bottom: 30px; left: 0; right: 0;
+height: 2px;
+background: #2c2c2a;
+}
+.ta-timeline-year {
+position: absolute;
+bottom: 0;
+transform: translateX(-50%);
+text-align: center;
+font-size: 10px;
+color: #888780;
+text-transform: uppercase;
+letter-spacing: 1px;
+font-weight: 500;
+}
+.ta-timeline-year::before {
+content: '';
+position: absolute;
+top: -10px; left: 50%; transform: translateX(-50%);
+width: 1px; height: 8px; background: #888780;
+}
+.ta-timeline-event {
+position: absolute;
+transform: translateX(-50%);
+cursor: pointer;
+background: #fff;
+border: 0.5px solid rgba(0,0,0,0.15);
+border-left: 3px solid var(--track-color, #534AB7);
+border-radius: 0 6px 6px 0;
+padding: 6px 8px;
+width: 140px;
+font-size: 10px;
+box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+text-decoration: none;
+color: inherit;
+display: block;
+}
+.ta-timeline-event:hover { z-index: 10; box-shadow: 0 4px 14px rgba(0,0,0,0.12); }
+.ta-timeline-event:active { background: #fafaf6; }
+.ta-timeline-event-doctype {
+font-size: 7px; padding: 1px 4px; border-radius: 2px;
+font-weight: 700; letter-spacing: 0.4px;
+text-transform: uppercase;
+display: inline-block; margin-bottom: 3px;
+}
+.ta-timeline-event-title {
+font-family: Georgia, "Times New Roman", serif;
+font-weight: 500; font-size: 11px; line-height: 1.25;
+margin-bottom: 2px;
+color: #2c2c2a;
+display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+overflow: hidden;
+}
+.ta-timeline-event-meta {
+color: #888780; font-size: 9px;
+}
+.ta-timeline-event-line {
+position: absolute;
+width: 1px;
+background: rgba(0,0,0,0.15);
+pointer-events: none;
+}
+.ta-timeline-track-labels {
+position: absolute; left: 0; top: 0;
+background: #fff;
+z-index: 5;
+padding: 16px 8px 0;
+border-right: 0.5px solid rgba(0,0,0,0.08);
+height: 100%;
+display: flex; flex-direction: column;
+width: 90px;
+}
+.ta-timeline-track-label {
+font-size: 9px;
+color: #5f5e5a;
+text-transform: uppercase;
+letter-spacing: 0.6px;
+font-weight: 500;
+height: 64px;
+display: flex;
+align-items: center;
+line-height: 1.2;
+}
+.ta-timeline-helper {
+padding: 14px 16px;
+background: #f5f3ee;
+font-size: 11px;
+color: #5f5e5a;
+text-align: center;
+}
+
+/* ============================ DIPLOMAT/HISTORIAN PROFILE ============================ */
+.ta-profile-hero {
+background: linear-gradient(135deg, var(--c1, #04342C) 0%, var(--c2, #0F6E56) 100%);
+color: #fff; padding: 28px 16px;
+text-align: center;
+}
+.ta-profile-name {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 24px; font-weight: 500; margin-top: 14px; margin-bottom: 4px;
+}
+.ta-profile-meta { font-size: 12px; opacity: 0.85; margin-bottom: 12px; }
+.ta-profile-beat {
+background: rgba(0,0,0,0.25); padding: 8px 12px;
+border-radius: 8px; display: inline-flex; align-items: center; gap: 8px;
+font-size: 11px;
+}
+.ta-profile-beat-eyebrow {
+color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 1px;
+font-size: 10px; font-weight: 500;
+}
+.ta-profile-stats {
+display: grid; grid-template-columns: repeat(4, 1fr);
+gap: 1px; background: rgba(0,0,0,0.08);
+}
+.ta-profile-stat {
+background: #fff; padding: 16px 8px; text-align: center;
+}
+.ta-profile-stat-num {
+font-size: 20px; font-weight: 500; color: #2c2c2a;
+font-family: Georgia, serif;
+}
+.ta-profile-stat-label {
+font-size: 9px; color: #5f5e5a;
+text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px;
+}
+.ta-profile-body { padding: 18px 14px; }
+.ta-section-title {
+font-family: Georgia, "Times New Roman", serif;
+font-size: 11px; color: #888780;
+text-transform: uppercase; letter-spacing: 1.5px;
+margin: 18px 0 10px; font-weight: 500;
+padding-bottom: 4px; border-bottom: 0.5px solid #ebe8e0;
+}
+.ta-section-title:first-child { margin-top: 0; }
+
+/* ============================ TOAST ============================ */
+.ta-toast {
+position: fixed; bottom: 80px; left: 50%;
+transform: translateX(-50%) translateY(20px);
+background: #2c2c2a; color: #fff;
+padding: 12px 20px; border-radius: 100px;
+font-size: 13px; font-weight: 500;
+box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+opacity: 0; pointer-events: none;
+transition: all 0.25s ease;
+z-index: 250;
+}
+.ta-toast.show {
+opacity: 1; transform: translateX(-50%) translateY(0);
+}
+
+/* ============================ ROUTE OUTLET ============================ */
+#route-outlet {
+flex: 1;
+padding-bottom: 70px;
+}
+@media (min-width: 769px) {
+#route-outlet { padding-bottom: 0; }
+}
+
+/* ============================ DESKTOP RESPONSIVE ============================ */
+@media (min-width: 769px) {
+body { padding: 0; }
+.ta-app { min-height: 100vh; box-shadow: 0 0 30px rgba(0,0,0,0.05); }
+.ta-mobile-bar { display: none; }
+.ta-bottom-nav { display: none; }
+.ta-nav-desktop { display: flex; }
+
+.ta-beat-nav { top: 50px; padding: 0 18px; }
+.ta-beat-tab { padding: 12px 16px; font-size: 12px; }
+
+.ta-masthead { padding: 32px 24px 22px; }
+.ta-masthead-name { font-size: 36px; }
+.ta-masthead-tag { font-size: 11px; }
+.ta-masthead-meta { gap: 20px; margin-top: 14px; }
+.ta-masthead-meta-num { font-size: 18px; }
+.ta-masthead-meta-label { font-size: 10px; }
+
+.ta-hero-story { padding: 28px 24px 24px; }
+.ta-hero-headline { font-size: 30px; }
+.ta-hero-deck { font-size: 15px; max-width: 720px; }
+
+.ta-section-divider { padding: 14px 24px; }
+.ta-section-name { font-size: 13px; }
+
+.ta-story-grid {
+  grid-template-columns: repeat(2, 1fr);
+  padding: 18px 24px; gap: 14px;
+}
+.ta-story-card { padding: 16px; }
+.ta-story-headline { font-size: 17px; }
+
+.ta-inq-shelf { padding: 22px 24px; }
+.ta-inq-card { padding: 16px 18px; }
+.ta-inq-title { font-size: 17px; }
+
+.ta-filter-bar { padding: 12px 20px; font-size: 12px; }
+
+.ta-civ-index-header { padding: 24px 24px 14px; }
+.ta-civ-index-title { font-size: 28px; }
+.ta-civ-grid {
+  grid-template-columns: repeat(2, 1fr);
+  padding: 18px 24px; gap: 14px;
+}
+.ta-civ-card-body { padding: 14px 16px; }
+.ta-civ-card-name { font-size: 18px; }
+
+.ta-civ-hero { padding: 30px 28px 24px; }
+.ta-civ-hero-name { font-size: 30px; }
+.ta-civ-hero-tagline { font-size: 13px; }
+
+.ta-civ-stats-strip { padding: 16px 20px; }
+.ta-civ-stat-num { font-size: 22px; }
+
+.ta-civ-tabs { padding: 0 18px; top: 50px; }
+.ta-civ-tab { padding: 14px 16px; }
+
+.ta-civ-body { padding: 22px 24px; }
+.ta-coverage-title { font-size: 16px; }
+.ta-coverage-deck { font-size: 13px; }
+
+.ta-story-reader { padding: 32px 28px 48px; max-width: 720px; margin: 0 auto; }
+.ta-story-reader h1 { font-size: 32px; }
+.ta-story-reader-deck { font-size: 18px; }
+
+.ta-editor-page { padding: 24px 28px; max-width: 800px; margin: 0 auto; }
+.ta-editor-h1 { font-size: 28px; }
+.ta-editor-meta-row {
+  grid-template-columns: 1fr 1fr; gap: 14px;
+}
+
+.ta-dash-content {
+  padding: 18px 24px;
+  display: grid; grid-template-columns: 2fr 1fr; gap: 18px;
+}
+.ta-dash-section { margin-bottom: 0; }
+.ta-dash-content > div { display: flex; flex-direction: column; gap: 14px; }
+
+.ta-timeline-page-header { padding: 28px 24px 16px; }
+.ta-timeline-page-h1 { font-size: 32px; }
+
+.ta-profile-hero { padding: 32px 24px; }
+.ta-profile-body { padding: 22px 24px; }
+}
+
+/* ============================ DARK MODE ============================ */
+@media (prefers-color-scheme: dark) {
+body { background: #1a1a18; color: #e8e6e0; }
+.ta-app { background: #1a1a18; }
+.ta-mobile-bar, .ta-nav-desktop { background: #1a1a18; border-color: rgba(255,255,255,0.15); }
+.ta-mobile-icon-btn, .ta-mobile-page-title { color: #e8e6e0; }
+.ta-mobile-icon-btn:active { background: #2c2c2a; }
+.ta-bottom-nav { background: #1a1a18; border-color: rgba(255,255,255,0.1); }
+.ta-bottom-nav-item:not(.active) { color: #888780; }
+.ta-drawer { background: #1a1a18; }
+.ta-drawer-link { color: #e8e6e0; }
+.ta-drawer-link.active { background: #2c2c2a; }
+.ta-drawer-icon { color: #b4b2a9; }
+.ta-nav-link { color: #b4b2a9; }
+.ta-nav-link:hover { background: #2c2c2a; color: #e8e6e0; }
+.ta-nav-link.active { color: #e8e6e0; }
+.ta-user-pill { background: #2c2c2a; }
+.ta-masthead { background: #1a1a18; border-color: #e8e6e0; }
+.ta-masthead-tag { color: #888780; }
+.ta-masthead-meta { color: #b4b2a9; }
+.ta-masthead-meta-num { color: #e8e6e0; }
+.ta-masthead-meta-label { color: #888780; }
+.ta-beat-nav { background: #1a1a18; border-color: rgba(255,255,255,0.1); }
+.ta-beat-tab { color: #b4b2a9; }
+.ta-beat-tab.active { color: #e8e6e0; }
+.ta-hero-story { background: #1a1a18; border-color: rgba(255,255,255,0.08); }
+.ta-hero-deck, .ta-byline-row, .ta-story-deck, .ta-coverage-deck, .ta-inq-meta, .ta-civ-card-meta, .ta-civ-card-stats, .ta-civ-index-sub, .ta-dash-item-meta, .ta-timeline-page-sub { color: #b4b2a9; }
+.ta-byline-row b, .ta-civ-card-stats b { color: #e8e6e0; }
+.ta-section-divider { background: #2c2c2a; border-color: rgba(255,255,255,0.08); }
+.ta-section-name { color: #e8e6e0; }
+.ta-section-sub { color: #888780; }
+.ta-story-card, .ta-civ-card, .ta-dash-section { background: #2c2c2a; border-color: rgba(255,255,255,0.1); }
+.ta-story-card:active, .ta-civ-card:active { background: #3a3a36; }
+.ta-inq-shelf { background: linear-gradient(180deg, #1f1d2e 0%, #2c2c2a 100%); border-color: rgba(255,255,255,0.08); }
+.ta-inq-card { background: #1a1a18; }
+.ta-tag-civ { background: #2c2c2a; color: #b4b2a9; border-color: rgba(255,255,255,0.1); }
+.ta-civ-stats-strip { background: #2c2c2a; border-color: rgba(255,255,255,0.08); }
+.ta-civ-stat-label { color: #b4b2a9; }
+.ta-civ-tabs { background: #1a1a18; border-color: rgba(255,255,255,0.1); }
+.ta-civ-tab { color: #b4b2a9; }
+.ta-civ-tab.active { color: #e8e6e0; }
+.ta-coverage-item { border-color: rgba(255,255,255,0.08); }
+.ta-coverage-date, .ta-civ-body-eyebrow { color: #888780; }
+.ta-filter-bar { background: #2c2c2a; border-color: rgba(255,255,255,0.08); }
+.ta-filter-label { color: #888780; }
+.ta-filter-pill { background: #1a1a18; border-color: rgba(255,255,255,0.15); color: #e8e6e0; }
+.ta-civ-note { background: #2c2c2a; color: #b4b2a9; }
+.ta-civ-note b { color: #e8e6e0; }
+.ta-prose { color: #e8e6e0; }
+.ta-prose blockquote { color: #b4b2a9; }
+.ta-story-reader-byline { border-color: rgba(255,255,255,0.1); }
+.ta-story-reader-byline-meta { color: #888780; }
+.ta-story-reader-deck { color: #b4b2a9; }
+.ta-btn-icon { background: #2c2c2a; border-color: rgba(255,255,255,0.1); color: #e8e6e0; }
+.ta-editor-section { background: #2c2c2a; border-color: rgba(255,255,255,0.1); }
+.ta-editor-input, .ta-editor-textarea, .ta-editor-select { background: #1a1a18; border-color: rgba(255,255,255,0.15); color: #e8e6e0; }
+.ta-editor-checkbox { background: #2c2c2a; border-color: rgba(255,255,255,0.15); color: #e8e6e0; }
+.ta-editor-section-label, .ta-editor-meta-label { color: #888780; }
+.ta-btn { background: #2c2c2a; border-color: rgba(255,255,255,0.15); color: #e8e6e0; }
+.ta-dash-impact-strip { background: #2c2c2a; }
+.ta-dash-impact-num { color: #e8e6e0; }
+.ta-dash-impact-label { color: #b4b2a9; }
+.ta-dash-section-count { background: #1a1a18; color: #b4b2a9; }
+.ta-dash-item { border-color: rgba(255,255,255,0.08); }
+.ta-dash-quick-btn { background: #1a1a18; border-color: rgba(255,255,255,0.1); color: #e8e6e0; }
+.ta-timeline-page-header { border-color: rgba(255,255,255,0.08); }
+.ta-timeline-controls { background: #2c2c2a; border-color: rgba(255,255,255,0.08); }
+.ta-timeline-zoom { background: #1a1a18; border-color: rgba(255,255,255,0.15); }
+.ta-timeline-zoom-btn { color: #b4b2a9; }
+.ta-timeline-zoom-btn.active { background: #e8e6e0; color: #1a1a18; }
+.ta-timeline-canvas { background: #1a1a18; border-color: rgba(255,255,255,0.08); }
+.ta-timeline-axis { background: #e8e6e0; }
+.ta-timeline-year::before { background: #888780; }
+.ta-timeline-event { background: #2c2c2a; border-color: rgba(255,255,255,0.15); color: #e8e6e0; }
+.ta-timeline-event-meta { color: #888780; }
+.ta-timeline-event-line { background: rgba(255,255,255,0.15); }
+.ta-timeline-track-labels { background: #1a1a18; border-color: rgba(255,255,255,0.08); }
+.ta-timeline-track-label { color: #b4b2a9; }
+.ta-timeline-helper { background: #2c2c2a; color: #b4b2a9; }
+.ta-profile-stat { background: #2c2c2a; }
+.ta-profile-stat-num { color: #e8e6e0; }
+.ta-profile-stat-label { color: #b4b2a9; }
+.ta-section-title { color: #888780; border-color: rgba(255,255,255,0.1); }
+}
+</style>
+</head>
+<body>
+
+<!-- DEV PANEL: role switcher -->
+<div class="ta-dev-panel" id="devPanelTrigger">
+  <span style="width: 8px; height: 8px; border-radius: 50%; background: #97C459;"></span>
+  <span id="devPanelLabel">Logged in as Ekimo · Diplomat</span>
+</div>
+<div class="ta-dev-panel-expanded" id="devPanel">
+  <span class="close-x" id="devPanelClose">×</span>
+  <label>Mock user role</label>
+  <div class="role-btns" id="roleBtns"></div>
+  <label>Switch persona</label>
+  <div class="role-btns" id="personaBtns"></div>
+  <div style="font-size: 10px; color: #888780; margin-top: 8px; line-height: 1.5;">
+    Role-switching previews permissions. Editor and Historian unlock more nav items.
+  </div>
+</div>
+
+<!-- THE APP -->
+<div class="ta-app">
+
+  <!-- DESKTOP NAV -->
+  <nav class="ta-nav-desktop">
+    <a href="#/" class="ta-logo">
+      <span class="ta-logo-mark">TA</span>
+      <span style="font-family: Georgia, serif;">Travelers Archive</span>
+    </a>
+    <div class="ta-nav-spacer"></div>
+    <a href="#/" class="ta-nav-link" data-route-link="/">Newsroom</a>
+    <a href="#/civs" class="ta-nav-link" data-route-link="/civs">Civilizations</a>
+    <a href="#/inquisitions" class="ta-nav-link" data-route-link="/inquisitions">Inquisitions</a>
+    <a href="#/timeline" class="ta-nav-link" data-route-link="/timeline">Timeline</a>
+    <a href="#/dashboard" class="ta-nav-link" data-route-link="/dashboard">Dashboard</a>
+    <a href="#/profile/ekimo" class="ta-user-pill">
+      <span class="ta-avatar ta-avatar-purple">E</span>
+      <span id="navUserName">Ekimo</span>
+    </a>
+  </nav>
+
+  <!-- MOBILE TOP BAR -->
+  <header class="ta-mobile-bar">
+    <div class="ta-mobile-bar-left">
+      <button class="ta-mobile-icon-btn" id="menuBtn" aria-label="Menu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="ta-mobile-logo">
+        <span class="ta-logo-mark">TA</span>
+        <span class="ta-mobile-page-title" id="mobilePageTitle">Travelers Archive</span>
+      </div>
+    </div>
+    <div class="ta-mobile-bar-right">
+      <button class="ta-mobile-icon-btn" aria-label="Search" onclick="alert('Search would open here')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+      <a href="#/profile/ekimo" class="ta-mobile-avatar">E</a>
+    </div>
+  </header>
+
+  <!-- DRAWER -->
+  <div class="ta-drawer-overlay" id="drawerOverlay"></div>
+  <div class="ta-drawer" id="drawer">
+    <div class="ta-drawer-header">
+      <div class="ta-drawer-user">
+        <div class="ta-drawer-avatar">E</div>
+        <div>
+          <div class="ta-drawer-name">Ekimo</div>
+          <div class="ta-drawer-role" id="drawerUserRole">Diplomat · Voyager's Haven</div>
+        </div>
+      </div>
+    </div>
+    <div class="ta-drawer-nav">
+      <div class="ta-drawer-section-label">Browse</div>
+      <a href="#/" class="ta-drawer-link" data-route-link="/">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="2 18 22 18 22 22 2 22"/><polygon points="6 14 18 14 22 18 2 18"/><polygon points="9 6 15 6 18 14 6 14"/><polygon points="11 2 13 2 15 6 9 6"/></svg></span>
+        Newsroom
+      </a>
+      <a href="#/civs" class="ta-drawer-link" data-route-link="/civs">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg></span>
+        Civilizations
+      </a>
+      <a href="#/inquisitions" class="ta-drawer-link" data-route-link="/inquisitions">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        Inquisitions
+      </a>
+      <a href="#/timeline" class="ta-drawer-link" data-route-link="/timeline">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+        Timeline
+      </a>
+
+      <div class="ta-drawer-section-label">My archive</div>
+      <a href="#/dashboard" class="ta-drawer-link" data-route-link="/dashboard">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></span>
+        Dashboard
+      </a>
+      <a href="#/compose/brief" class="ta-drawer-link" id="navComposeBrief">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        New Brief
+      </a>
+      <a href="#/compose/feature" class="ta-drawer-link" id="navComposeFeature">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        New Feature
+      </a>
+      <a href="#/compose/inquisition" class="ta-drawer-link" id="navComposeInquisition">
+        <span class="ta-drawer-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        New Inquisition
+      </a>
+
+      <div class="ta-drawer-section-label">Beats</div>
+      <a href="#/beat/conflicts" class="ta-drawer-link"><span class="ta-drawer-icon"><span style="display: block; width: 12px; height: 12px; border-radius: 3px; background: #791F1F;"></span></span>Conflicts</a>
+      <a href="#/beat/diplomacy" class="ta-drawer-link"><span class="ta-drawer-icon"><span style="display: block; width: 12px; height: 12px; border-radius: 3px; background: #26215C;"></span></span>Diplomacy</a>
+      <a href="#/beat/events" class="ta-drawer-link"><span class="ta-drawer-icon"><span style="display: block; width: 12px; height: 12px; border-radius: 3px; background: #042C53;"></span></span>Events</a>
+      <a href="#/beat/civupdates" class="ta-drawer-link"><span class="ta-drawer-icon"><span style="display: block; width: 12px; height: 12px; border-radius: 3px; background: #412402;"></span></span>Civ updates</a>
+      <a href="#/beat/projects" class="ta-drawer-link"><span class="ta-drawer-icon"><span style="display: block; width: 12px; height: 12px; border-radius: 3px; background: #173404;"></span></span>Projects</a>
+    </div>
+  </div>
+
+  <!-- ROUTE OUTLET -->
+  <main id="route-outlet"></main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="ta-bottom-nav">
+    <div class="ta-bottom-nav-grid">
+      <a href="#/" class="ta-bottom-nav-item" data-route-link="/">
+        <span class="ta-bottom-nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="2 18 22 18 22 22 2 22"/><polygon points="6 14 18 14 22 18 2 18"/><polygon points="9 6 15 6 18 14 6 14"/><polygon points="11 2 13 2 15 6 9 6"/></svg></span>
+        Newsroom
+      </a>
+      <a href="#/civs" class="ta-bottom-nav-item" data-route-link="/civs">
+        <span class="ta-bottom-nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg></span>
+        Civs
+      </a>
+      <a href="#/timeline" class="ta-bottom-nav-item" data-route-link="/timeline">
+        <span class="ta-bottom-nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+        Timeline
+      </a>
+      <a href="#/dashboard" class="ta-bottom-nav-item" data-route-link="/dashboard">
+        <span class="ta-bottom-nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></span>
+        Dashboard
+      </a>
+    </div>
+  </nav>
+</div>
+
+<!-- TOAST -->
+<div class="ta-toast" id="toast"></div>
+
+<script>
+// ============================================================
+// DATA — civs, stories, inquisitions, people
+// ============================================================
+
+const PEOPLE = {
+  ekimo: { name: 'Ekimo', avatar: 'E', color: 'purple', role: 'Founder · Voyager\'s Haven', civ: 'Voyager\'s Haven' },
+  stars: { name: 'Stars', avatar: 'S', color: 'pink', role: 'Lead cartographer · Voyager\'s Haven', civ: 'Voyager\'s Haven' },
+  watcher: { name: 'Watcher', avatar: 'W', color: 'teal', role: 'Diplomat · Embedded with Galactic Hub', civ: 'Voyager\'s Haven', beat: 'The Galactic Hub' },
+  lucca: { name: 'Lucca', avatar: 'L', color: 'amber', role: 'Diplomat · Atlas Foundation beat', civ: 'Voyager\'s Haven', beat: 'Atlas Foundation' },
+  jaina: { name: 'Jaina', avatar: 'J', color: 'coral', role: 'Diplomat · Cross-civ desk', civ: 'Voyager\'s Haven', beat: 'Multi-civ' },
+  todd: { name: 'Todd', avatar: 'T', color: 'slate', role: 'Diplomat · Conflicts desk', civ: 'Voyager\'s Haven' },
+  shadow: { name: 'Shadow', avatar: 'Sh', color: 'green', role: 'Diplomat · HAD.SH beat', civ: 'Voyager\'s Haven' },
+  thekeeper: { name: 'TheKeeper', avatar: 'K', color: 'coral', role: 'Lead Historian · The Archivist', civ: 'The Archivist' }
+};
+
+const CIVS = {
+  'galactic-hub': {
+    slug: 'galactic-hub', name: 'The Galactic Hub', status: 'active',
+    galaxy: 'Euclid', founded: 'c. 2017',
+    tagline: '16 regions · 4,000+ explorers',
+    desc: 'The largest civilization in Euclid. Founded c. 2017. Comprises 16 named regions across multiple galaxies.',
+    c1: '#042C53', c2: '#0F6E56',
+    stats: { entries: 342, inquisitions: 3, people: 47, years: 9 }
+  },
+  'voyagers-haven': {
+    slug: 'voyagers-haven', name: 'Voyager\'s Haven', status: 'active',
+    galaxy: 'Euclid', founded: '2025',
+    tagline: 'workshop community · ~50 members',
+    desc: 'A community focused on building public tools for the multiverse. Operates Haven Control Room, the Keeper bot, the Postal System, and is building an economy and an archive.',
+    c1: '#534AB7', c2: '#1D9E75',
+    stats: { entries: 87, inquisitions: 0, people: 12, years: 1 }
+  },
+  'eyfert-khannate': {
+    slug: 'eyfert-khannate', name: 'Eyfert Khannate', status: 'active',
+    galaxy: 'Hilbert', founded: '2021',
+    tagline: '~200 explorers',
+    desc: 'A long-established community in Hilbert. Known for its diplomatic rigor and structured trade agreements.',
+    c1: '#4A1B0C', c2: '#993C1D',
+    stats: { entries: 134, inquisitions: 1, people: 23, years: 5 }
+  },
+  'fas': {
+    slug: 'fas', name: 'Federation of Allied Stars', status: 'active',
+    galaxy: 'Euclid', founded: '2019',
+    tagline: 'alliance of 12 communities',
+    desc: 'An alliance of 12 communities founded in 2019 around shared exploration standards.',
+    c1: '#1F2D3A', c2: '#042C53',
+    stats: { entries: 198, inquisitions: 2, people: 38, years: 7 }
+  },
+  'atlas-foundation': {
+    slug: 'atlas-foundation', name: 'Atlas Foundation', status: 'active',
+    galaxy: 'Multi-galaxy', founded: '2018',
+    tagline: 'roleplay collective · ~600 members',
+    desc: 'A multi-galaxy roleplay collective centered on Atlas mythology and lore. ~600 members across multiple regions.',
+    c1: '#5C1F4D', c2: '#993556',
+    stats: { entries: 156, inquisitions: 1, people: 29, years: 8 }
+  },
+  'hadsh': {
+    slug: 'hadsh', name: 'HAD.SH', status: 'active',
+    galaxy: 'Euclid', founded: '2020',
+    tagline: 'cataloging community · ~80 members',
+    desc: 'A community focused on cataloging exploration data. Builds federated databases that integrate with the Travelers Collective.',
+    c1: '#173404', c2: '#639922',
+    stats: { entries: 62, inquisitions: 0, people: 9, years: 6 }
+  },
+  'lazarus': {
+    slug: 'lazarus', name: 'Lazarus Collective', status: 'active',
+    galaxy: 'Eissentam', founded: '2025',
+    tagline: '7 members · documentation focus',
+    desc: 'A small documentation-focused collective that formed in Eissentam. Modeled on the Haven Control Room.',
+    c1: '#633806', c2: '#C18C2D',
+    stats: { entries: 4, inquisitions: 0, people: 3, years: 1 }
+  },
+  'hub-cartographers': {
+    slug: 'hub-cartographers', name: 'The Hub Cartographers', status: 'dormant',
+    galaxy: 'Euclid', founded: '2018', ended: '2022',
+    tagline: 'cartography splinter',
+    desc: 'A cartography-focused splinter group from the Galactic Hub, active 2018–2022.',
+    c1: '#888780', c2: '#b4b2a9',
+    stats: { entries: 43, inquisitions: 0, people: 11, years: 4 }
+  },
+  'old-travelers-guild': {
+    slug: 'old-travelers-guild', name: 'The Old Travelers Guild', status: 'archived',
+    galaxy: 'Euclid', founded: '2017', ended: '2019',
+    tagline: 'one of the earliest civs',
+    desc: 'One of the earliest documented NMS civilizations. Disbanded 2019. ~80 members at peak.',
+    c1: '#C18C2D', c2: '#FAC775',
+    stats: { entries: 27, inquisitions: 1, people: 14, years: 2 }
+  }
+};
+
+const STORIES = {
+  's-haven-keeper-postal': {
+    id: 's-haven-keeper-postal', doctype: 'brief', beat: 'projects',
+    civs: ['voyagers-haven'],
+    headline: 'Big week for Haven: Keeper bot and Postal System launch',
+    deck: 'The Haven shipped two community-facing tools this week: the Keeper bot deployed to Discord, and a postal system generating galaxy posters and player stat cards from URLs.',
+    body: `Voyager's Haven released two community tools within 48 hours of each other this week — the Keeper bot, a Discord integration for community management and historical retrieval, and the Postal System, a generator that creates custom galaxy posters and player stat cards from a URL passed through Discord, Twitter, or Messenger.
+
+Both tools are free for any civilization to use. The Postal System, in particular, addresses a long-standing gap in NMS social tooling: the ability to share visual representations of a player's discoveries without manual screenshot work.
+
+"This is what we mean when we say workshop community," said Stars, the Haven's lead cartographer. "We build things, we publish them, other civs use them. That's the loop."
+
+The Keeper bot, in particular, has been in development across multiple iterations. An earlier version went silent for several months before Stars rebuilt the entire codebase from scratch. The current version — which is what shipped this week — bears almost no relation to the original architecturally, even though the user-facing functionality has been preserved and expanded.`,
+    author: 'stars', publishedISO: '2026-04-30T12:00:00', readMinutes: null,
+    timestamp: '6h ago', date: '2026-04-30'
+  },
+  's-hub-restructure': {
+    id: 's-hub-restructure', doctype: 'brief', beat: 'civupdates',
+    civs: ['galactic-hub'],
+    headline: 'Hub announces 16-region restructure',
+    deck: 'After six months of internal debate, Hub leadership confirmed the new structure today. Three regions merge; two new ones split off.',
+    body: `The Galactic Hub's leadership council confirmed a long-anticipated restructure at this morning's all-hands meeting in the Hub's primary capital system. Under the new arrangement, three older Euclid-galaxy regions will merge into a single new region, while two regions in Eissentam will split into two distinct regional councils.
+
+A sixth change formally recognizes a corridor that members have informally called "the Western Reach" for over a year.
+
+"We've outgrown the old map," one regional coordinator said in remarks shared on the Hub's Discord. "What we built six years ago worked when we had four hundred members. With four thousand, the regional boundaries no longer matched where people actually live and explore."
+
+The Federation of Allied Stars confirmed it would update its diplomatic registry within the week. A Khannate spokesperson reached for comment said only that the Khannate "looks forward to the new map."`,
+    author: 'watcher', publishedISO: '2026-04-30T17:13:00', readMinutes: null,
+    timestamp: '47m ago', date: '2026-04-30'
+  },
+  's-atlas-gathering': {
+    id: 's-atlas-gathering', doctype: 'brief', beat: 'events',
+    civs: ['atlas-foundation'],
+    headline: 'Atlas Foundation Gathering opens — 400+ travelers expected',
+    deck: 'The annual gathering opened tonight near the Atlas Origin. Live coverage continues through the weekend.',
+    body: `The Atlas Foundation's annual gathering opened tonight at coordinates near the Atlas Origin, with attendance figures projected at over 400 travelers across the weekend.
+
+The opening session featured the traditional Atlas readings, followed by smaller breakout sessions on lore developments and new initiatives within the Foundation. Live coverage from this writer will continue through the weekend.
+
+This is the eighth annual gathering, and the largest in projected attendance since 2022.`,
+    author: 'lucca', publishedISO: '2026-04-30T15:00:00', readMinutes: null,
+    timestamp: '2h ago', date: '2026-04-30'
+  },
+  's-khannate-fas-trade': {
+    id: 's-khannate-fas-trade', doctype: 'brief', beat: 'diplomacy',
+    civs: ['eyfert-khannate', 'fas'],
+    headline: 'Khannate opens trade corridor with Federation of Allied Stars',
+    deck: 'First formal trade agreement between the two communities. Limited to Quicksilver components for now.',
+    body: `The Eyfert Khannate and the Federation of Allied Stars announced their first formal trade agreement yesterday — a limited corridor focused on Quicksilver Companion components.
+
+The agreement was finalized at the Khannate's eastern outpost during a three-day negotiation session attended by representatives from both communities. While the initial scope is narrow, both sides indicated the possibility of expansion if the corridor performs as expected.
+
+"This is a starting point, not a finishing point," a Khannate spokesperson said.
+
+The deal sidesteps the broader Quicksilver Wars, in which neither civ has formally taken a position.`,
+    author: 'jaina', publishedISO: '2026-04-29T14:00:00', readMinutes: null,
+    timestamp: 'yesterday', date: '2026-04-29'
+  },
+  's-quicksilver-skirmish-3': {
+    id: 's-quicksilver-skirmish-3', doctype: 'brief', beat: 'conflicts',
+    civs: [],
+    civsLabel: 'multi-civ',
+    headline: 'Third Quicksilver Wars skirmish reported in Hub border region',
+    deck: 'No formal civ involvement claimed. Independent traders organizing into informal blocs.',
+    body: `A third skirmish in the ongoing Quicksilver Wars was reported this week in the Hub border region, marking an escalation in what has been a slow-burning conflict between independent trader blocs.
+
+No formal civilizations have claimed involvement, and both the Galactic Hub and the Federation of Allied Stars have denied any direct participation. However, sources within the conflict suggest informal networks of traders are increasingly aligning along civ lines.
+
+The Inquisition currently underway on the Quicksilver Wars (Inquisition XLVII) will document this latest incident as part of its broader investigation.`,
+    author: 'todd', publishedISO: '2026-04-28T10:00:00', readMinutes: null,
+    timestamp: '2d ago', date: '2026-04-28'
+  },
+  's-hadsh-v3': {
+    id: 's-hadsh-v3', doctype: 'brief', beat: 'civupdates',
+    civs: ['hadsh'],
+    headline: 'HAD.SH releases v3 of their cataloging platform',
+    deck: 'The new version adds Travelers Collective integration and federated database support.',
+    body: `HAD.SH has released v3 of its cataloging platform this week, adding integration with the Travelers Collective and federated database support — a key piece of the long-planned Phase B rollout.
+
+The Phase B rollout, originally scheduled for earlier this year, will federate HAD.SH's exploration database with the Haven Control Room, allowing both communities to share verified discoveries while maintaining separate identities and ownership.
+
+"This was the technical work that had to happen first," said a HAD.SH spokesperson. "Now we can actually federate."`,
+    author: 'shadow', publishedISO: '2026-04-27T11:30:00', readMinutes: null,
+    timestamp: '3d ago', date: '2026-04-27'
+  },
+  's-haven-feature': {
+    id: 's-haven-feature', doctype: 'feature', beat: 'projects',
+    civs: ['voyagers-haven'],
+    headline: 'Inside the Haven: how five tools became a workshop for the multiverse',
+    deck: 'Seven months ago, Voyager\'s Haven didn\'t exist. Today the community runs Haven Control Room, an exploration database, the Keeper bot, the Postal System, and is building both an economy and an archive — all built in public, all free for any civ that wants them.',
+    body: `Seven months ago, Voyager's Haven didn't exist. Its founder, Ekimo, had been quietly building tools as a hobbyist — small utilities for managing exploration data — but there was no community. There was no Discord server. There was no website. There was just code, and an idea: that the multiverse needed shared infrastructure.
+
+Today, the Haven runs five public-facing tools, with a sixth (this very archive) and a seventh (an internal economy) in active development. Every tool is free. Every tool is open to any civilization that wants to use it. And every tool was built with the same conviction: that the work matters more than the credit.
+
+> "We don't claim systems we haven't visited. We don't write histories we can't source. That's the whole charter, really."
+
+That charter — written sometime around the founding of the community in late 2025 — has become a kind of organizing principle for the Haven's approach to building. Tools are not products. They're contributions. The Haven Control Room, which serves as the community's exploration database, is publicly accessible to any traveler regardless of affiliation. The Keeper bot, which lives in the Haven's Discord, is being prepared for distribution to other communities. The Postal System, which generates galaxy posters and player stat cards from URLs, was deliberately designed to work across platforms — Discord, Twitter, Messenger — because the goal was never to drive traffic to the Haven. It was to make a thing that worked for everyone.
+
+This is the Haven's distinguishing feature, and it's also why other civilizations have started paying attention. The Galactic Hub, six years older and many times larger, recently invited Haven representatives to a Hub-internal regional summit. HAD.SH and the Haven are weeks away from federating their databases. The Atlas Foundation has expressed informal interest in the Postal System for its annual gatherings.
+
+What the Haven has, in short, is a particular kind of credibility: it makes things that work, and gives them away.
+
+The work itself isn't slowing down. The Travelers Archive — the platform you're reading this article on — is the latest project, and it represents the Haven's most ambitious attempt yet to address a multiverse-wide problem: that ten years of NMS history exists in fragments across dead Discord servers, lost wikis, and the memories of people who were there. The Archive aims to consolidate it, supplement it with current reporting, and preserve it. Like everything else the Haven builds, it's free for any civilization to use.
+
+It's worth noting what the Haven hasn't done. It hasn't tried to organize the multiverse. It hasn't asserted itself as a leader of any particular faction. It hasn't, despite all the tools it's built, attempted to become a power center. The community's role, as Ekimo has put it on more than one occasion, is to make things and let them spread.
+
+Seven months in, the things are spreading.`,
+    author: 'stars', publishedISO: '2026-04-30T08:00:00', readMinutes: 12,
+    timestamp: '4h ago', date: '2026-04-30'
+  },
+  's-keeper-retold': {
+    id: 's-keeper-retold', doctype: 'feature', beat: 'projects',
+    civs: ['voyagers-haven'],
+    headline: 'The Keeper, retold: from concept to Stars\'s rebuild',
+    deck: 'The Keeper bot\'s first iteration was simple. It went silent for months. Then Stars took over and rebuilt it from the ground up.',
+    body: `The first iteration of the Keeper bot did three things: it greeted new members, it pinned messages, and it kept track of who had been promoted to which role.
+
+That was the original scope. It worked, and for a while, it was enough. The Keeper bot ran in Voyager's Haven Discord without modification for several months, providing a thin layer of automation atop the community's growing membership.
+
+Then it broke.
+
+What exactly went wrong is, at this point, not entirely clear. The original codebase had been written quickly, and as the community grew, edge cases multiplied. The bot started missing message pinning. Role assignments occasionally failed silently. Eventually, the bot stopped responding to commands at all, and for a period of about three months, the Haven operated without it entirely.
+
+This is the point at which Stars stepped in.
+
+Stars's involvement with the Haven had begun some time earlier, focused initially on cartography. The lead cartographer role suited Stars: it was a position that required genuine attention to detail, and the Haven Control Room — the community's exploration database — had grown to a point where its data quality genuinely depended on Stars's involvement.
+
+But when the Keeper went silent, Stars took on a new project: rebuild it. Not patch it. Rebuild it from scratch.
+
+The new Keeper, which shipped to the Haven Discord this week, is functionally a different bot. It uses a different framework, a different data layer, and a different approach to integration with the rest of the Haven's infrastructure. It does everything the old bot did, plus several things the old bot couldn't do — including direct integration with the Haven Control Room API for retrieving exploration data, and a forthcoming connection to the Postal System for triggering poster generation directly from Discord commands.
+
+The user-facing experience, however, is intentionally similar. New members are greeted. Messages are pinned. Roles are tracked. The visible surface of the Keeper has been preserved, even though the underlying system is entirely new.
+
+This is, in a way, the most Voyager's Haven thing about the rebuild: the work that mattered most was the work nobody could see. And it's now stable enough that the community is preparing to package the Keeper for distribution to other civilizations. If the rebuild succeeded — if the new architecture is genuinely as durable as Stars believes — then the Keeper is about to become another Haven tool that escapes the Haven and goes wherever it's needed.`,
+    author: 'lucca', publishedISO: '2026-04-26T14:00:00', readMinutes: 8,
+    timestamp: '4d ago', date: '2026-04-26'
+  },
+  's-why-hub-waited': {
+    id: 's-why-hub-waited', doctype: 'feature', beat: 'civupdates',
+    civs: ['galactic-hub'],
+    headline: 'Why the Hub waited six months',
+    deck: 'Inside the deliberation that led to today\'s region restructure announcement — interviews with three regional coordinators on what almost broke and what saved it.',
+    body: `The Hub did not announce its 16-region restructure on a whim. According to three regional coordinators interviewed for this piece, the deliberation began at the Hub's Spring Summit in October, and it nearly didn't conclude.
+
+"There was a moment," said one coordinator, "where we thought we were going to split the Hub itself."
+
+The contention was not about whether the existing 14-region structure was working — it wasn't, and that had been clear to leadership for some time. The contention was about what to replace it with. Three competing proposals reached the floor at the Spring Summit, ranging from a relatively minor adjustment of the existing borders to a full re-architecture of the Hub's regional system.
+
+What ultimately won out was a compromise: three older Euclid regions would merge to address overlap problems, two Eissentam regions would split to address growth, and a corridor that had been informally called "the Western Reach" for over a year would be formally recognized.
+
+This piece will be supplemented with additional reporting in the coming days as the new structure takes effect.`,
+    author: 'watcher', publishedISO: '2026-04-23T16:00:00', readMinutes: 14,
+    timestamp: '1w ago', date: '2026-04-23'
+  }
+};
+
+const INQUISITIONS = {
+  'inq-47': {
+    id: 'inq-47', numeral: 'XLVII',
+    title: 'The Quicksilver Wars',
+    subtitle: '2024–present',
+    deck: 'A collaborative investigation into the c. 2024–2025 conflict over Quicksilver Companion shop monopolies.',
+    authors: ['stars', 'watcher', 'thekeeper', 'lucca'],
+    sources: 12, status: 'in progress', progress: 65,
+    started: '2026-03-08',
+    civs: ['galactic-hub', 'fas'],
+    body: `**The question.** What were the precipitating events of the so-called Quicksilver Wars, and to what extent did formal civilizations participate versus independent traders?
+
+**Findings so far.** Initial trade disputes appear to have begun c. 2024 when at least three civilizations independently established Quicksilver-only trade routes. The conflict escalated when route exclusivity claims overlapped in the Hub region.
+
+The participation of the Federation of Allied Stars remains disputed — primary sources from FAS leadership deny direct involvement, but secondary accounts from independent traders place FAS members at multiple confrontations.
+
+**Open questions.** Date of first organized confrontation (sources vary by 4 months); casualty figures (in-game terms; no canonical count); role of the Atlas Foundation as mediator vs. participant.
+
+**This inquisition is in progress.** Findings are tentative and may change as research continues.`
+  },
+  'inq-46': {
+    id: 'inq-46', numeral: 'XLVI',
+    title: 'The Galactic Hub: A Decade in the Making',
+    subtitle: 'c. 2017–present',
+    deck: 'A comprehensive history of the Galactic Hub from founding through present day. Expected to be the largest inquisition the Archive has yet undertaken.',
+    authors: ['thekeeper'],
+    sources: 47, status: 'in progress', progress: 22,
+    started: '2026-01-15',
+    civs: ['galactic-hub'],
+    body: `**Scope.** This inquisition aims to document the full history of the Galactic Hub from its founding circa 2017 through the present day. At present, 14 pages have been completed, covering the founding period (2017–2018) and the early expansion (2018–2019).
+
+**Methodology.** Primary sources include interviews with founding members, archived Discord exports, contemporaneous Reddit threads, and Wayback Machine snapshots of the original Hub website (now defunct). Where possible, claims have been cross-referenced across multiple independent sources.
+
+**Coverage so far.** Founding (2017): the original gathering of explorers in Euclid. Early expansion (2018): the establishment of the regional system. The First Schism (2018): the departure of the Hub Cartographers.
+
+**Coverage planned.** The Pact era (2019–2021). The Membership Explosion (2021–2023). The Quicksilver Wars period (2024–present, in coordination with Inquisition XLVII). The recent restructure (2026).
+
+**Status.** Research is ongoing. Estimated completion is six months from this writing.`
+  },
+  'inq-45': {
+    id: 'inq-45', numeral: 'XLV',
+    title: 'The Atlas Calls',
+    subtitle: 'a community\'s relationship with its own mythology',
+    deck: 'An examination of how the Atlas Foundation has navigated the relationship between in-game lore and community identity.',
+    authors: ['lucca'],
+    sources: 18, status: 'closed', progress: 100,
+    started: '2025-11-20',
+    civs: ['atlas-foundation'],
+    body: `**Closed and published.** This inquisition was closed in March 2026 after eighteen sources were consolidated and reviewed.
+
+**Findings.** The Atlas Foundation occupies a singular position in the multiverse: it is the only major civilization whose identity is built primarily around in-game lore rather than cartographic territory or community function. This inquisition traces the development of that identity from the Foundation's establishment in 2018 through the present, with particular attention to the moments when in-game updates from Hello Games introduced new lore that the Foundation had to assimilate.
+
+**The result.** A community that takes its mythology seriously without conflating it with claims about reality — a balance that, as the inquisition documents, has been managed with remarkable care.`
+  }
+};
+
+// ============================================================
+// USER STATE
+// ============================================================
+const ROLES = {
+  reader: { label: 'Reader', canCompose: false, canEditAll: false },
+  diplomat: { label: 'Diplomat', canCompose: true, canEditAll: false, canCompose_brief: true, canCompose_feature: true, canCompose_inquisition: false },
+  historian: { label: 'Historian', canCompose: true, canEditAll: false, canCompose_brief: true, canCompose_feature: true, canCompose_inquisition: true },
+  editor: { label: 'Editor', canCompose: true, canEditAll: true, canCompose_brief: true, canCompose_feature: true, canCompose_inquisition: true }
+};
+
+let CURRENT_USER = 'ekimo';
+let CURRENT_ROLE = 'diplomat';
+
+// ============================================================
+// ROUTER
+// ============================================================
+function navigate(path) {
+  window.location.hash = '#' + path;
+}
+
+// Card click handler: if user tapped an inner <a>, let it navigate normally;
+// otherwise navigate to the card's data-href.
+function cardNav(event, path) {
+  if (event.target.closest('a')) return;
+  navigate(path);
+}
+
+function getCurrentRoute() {
+  const hash = window.location.hash.replace(/^#/, '') || '/';
+  return hash;
+}
+
+function parseRoute(path) {
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length === 0) return { name: 'home' };
+  if (parts[0] === 'civs') return { name: 'civs' };
+  if (parts[0] === 'civ' && parts[1]) return { name: 'civ', slug: parts[1] };
+  if (parts[0] === 'inquisitions') return { name: 'inquisitions' };
+  if (parts[0] === 'inquisition' && parts[1]) return { name: 'inquisition', id: parts[1] };
+  if (parts[0] === 'beat' && parts[1]) return { name: 'beat', slug: parts[1] };
+  if (parts[0] === 'story' && parts[1]) return { name: 'story', id: parts[1] };
+  if (parts[0] === 'profile' && parts[1]) return { name: 'profile', id: parts[1] };
+  if (parts[0] === 'timeline') return { name: 'timeline' };
+  if (parts[0] === 'dashboard') return { name: 'dashboard' };
+  if (parts[0] === 'compose' && parts[1]) return { name: 'compose', doctype: parts[1] };
+  return { name: 'notfound' };
+}
+
+window.addEventListener('hashchange', render);
+window.addEventListener('load', render);
+
+// Global click interceptor for hash links — capture phase, prevents
+// browser/sandbox from interpreting them as external navigations.
+function handleHashLinkClick(e) {
+  const link = e.target.closest('a');
+  if (!link) return;
+  const href = link.getAttribute('href');
+  if (!href) return;
+  if (href.startsWith('#/') || href === '#') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (href === '#') return;
+    if (window.location.hash === href) {
+      render();
+    } else {
+      window.location.hash = href;
+    }
+  }
+}
+document.addEventListener('click', handleHashLinkClick, true);
+
+// ============================================================
+// HELPERS
+// ============================================================
+function avatar(personId, size = '') {
+  const p = PEOPLE[personId];
+  if (!p) return '<span class="ta-avatar">?</span>';
+  const s = size ? ' ta-avatar-' + size : '';
+  return `<span class="ta-avatar ta-avatar-${p.color}${s}">${p.avatar}</span>`;
+}
+
+function civPill(slug) {
+  const c = CIVS[slug];
+  if (!c) return '';
+  return `<a href="#/civ/${slug}" class="ta-tag ta-tag-civ">▸ ${c.name}</a>`;
+}
+
+function beatPill(beat) {
+  const labels = { conflicts: 'Conflicts', events: 'Events', diplomacy: 'Diplomacy', projects: 'Projects', civupdates: 'Civ updates', features: 'Features' };
+  return `<a href="#/beat/${beat}" class="ta-tag ta-tag-beat-${beat}">${labels[beat] || beat}</a>`;
+}
+
+function doctypeBadge(dt) {
+  const labels = { brief: 'Brief', feature: 'Feature', inquisition: 'Inquisition' };
+  return `<span class="ta-doctype ta-doctype-${dt}">${labels[dt]}</span>`;
+}
+
+function showToast(msg, durationMs = 2400) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), durationMs);
+}
+
+function setMobileTitle(title) {
+  document.getElementById('mobilePageTitle').textContent = title;
+}
+
+function renderStoryTags(s) {
+  let tags = doctypeBadge(s.doctype);
+  if (s.beat) tags += beatPill(s.beat);
+  if (s.civs && s.civs.length > 0) {
+    s.civs.forEach(c => tags += civPill(c));
+  } else if (s.civsLabel) {
+    tags += `<span class="ta-tag ta-tag-civ">▸ ${s.civsLabel}</span>`;
+  }
+  return tags;
+}
+
+// ============================================================
+// VIEW: HOME (newsroom front page)
+// ============================================================
+function viewHome() {
+  setMobileTitle('Newsroom');
+  const hero = STORIES['s-haven-feature'];
+  const briefs = ['s-haven-keeper-postal', 's-hub-restructure', 's-atlas-gathering', 's-khannate-fas-trade', 's-quicksilver-skirmish-3', 's-hadsh-v3'].map(id => STORIES[id]);
+  const features = ['s-keeper-retold', 's-why-hub-waited'].map(id => STORIES[id]);
+  const activeInq = ['inq-47', 'inq-46', 'inq-45'].map(id => INQUISITIONS[id]);
+
+  return `
+    <div class="ta-masthead">
+      <h1 class="ta-masthead-name">Travelers Archive</h1>
+      <div class="ta-masthead-tag">A record of the No Man's Sky multiverse</div>
+      <div class="ta-masthead-meta">
+        <div class="ta-masthead-meta-item"><span class="ta-masthead-meta-num">2,847</span><span class="ta-masthead-meta-label">entries</span></div>
+        <div class="ta-masthead-meta-item"><span class="ta-masthead-meta-num">23</span><span class="ta-masthead-meta-label">civs</span></div>
+        <div class="ta-masthead-meta-item"><span class="ta-masthead-meta-num">14</span><span class="ta-masthead-meta-label">diplomats</span></div>
+        <div class="ta-masthead-meta-item"><span class="ta-masthead-meta-num">8</span><span class="ta-masthead-meta-label">historians</span></div>
+        <div class="ta-masthead-meta-item"><span class="ta-masthead-meta-num">47</span><span class="ta-masthead-meta-label">inquisitions</span></div>
+      </div>
+    </div>
+
+    <div class="ta-beat-nav">
+      <div class="ta-beat-nav-inner">
+        <a href="#/" class="ta-beat-tab active">Front page</a>
+        <a href="#/beat/conflicts" class="ta-beat-tab">Conflicts</a>
+        <a href="#/beat/diplomacy" class="ta-beat-tab">Diplomacy</a>
+        <a href="#/beat/events" class="ta-beat-tab">Events</a>
+        <a href="#/beat/civupdates" class="ta-beat-tab">Civ updates</a>
+        <a href="#/beat/projects" class="ta-beat-tab">Projects</a>
+        <a href="#/inquisitions" class="ta-beat-tab">Inquisitions</a>
+      </div>
+    </div>
+
+    <div class="ta-hero-story ta-card-clickable" onclick="cardNav(event, '/story/${hero.id}')">
+      <div class="ta-story-tags">${renderStoryTags(hero)}</div>
+      <h2 class="ta-hero-headline">${hero.headline}</h2>
+      <p class="ta-hero-deck">${hero.deck}</p>
+      <div class="ta-byline-row">
+        ${avatar(hero.author, 'md')}
+        <span>By <b>${PEOPLE[hero.author].name}</b> · ${hero.timestamp} · ${hero.readMinutes} min</span>
+      </div>
+    </div>
+
+    <div class="ta-section-divider">
+      <div class="ta-section-name">Latest briefs</div>
+      <div class="ta-section-sub">Today's reports from across the multiverse</div>
+    </div>
+    <div class="ta-story-grid">
+      ${briefs.map(s => `
+        <div class="ta-story-card ta-card-clickable" onclick="cardNav(event, '/story/${s.id}')">
+          <div class="ta-story-tags">${renderStoryTags(s)}</div>
+          <h3 class="ta-story-headline">${s.headline}</h3>
+          <p class="ta-story-deck">${s.deck}</p>
+          <div class="ta-byline-row"><span>By <b>${PEOPLE[s.author].name}</b> · ${s.timestamp}</span></div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="ta-section-divider">
+      <div class="ta-section-name">Recent features</div>
+      <div class="ta-section-sub">Long-form reporting on civilizations, projects, and ongoing stories</div>
+    </div>
+    <div class="ta-story-grid">
+      ${features.map(s => `
+        <div class="ta-story-card ta-card-clickable" onclick="cardNav(event, '/story/${s.id}')">
+          <div class="ta-story-tags">${renderStoryTags(s)}</div>
+          <h3 class="ta-story-headline">${s.headline}</h3>
+          <p class="ta-story-deck">${s.deck}</p>
+          <div class="ta-byline-row">
+            ${avatar(s.author, 'md')}
+            <span>By <b>${PEOPLE[s.author].name}</b> · ${s.timestamp}${s.readMinutes ? ' · ' + s.readMinutes + ' min' : ''}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="ta-section-divider">
+      <div class="ta-section-name">Active inquisitions</div>
+      <div class="ta-section-sub">Long-form historical investigations by the Archivists</div>
+    </div>
+    <div class="ta-inq-shelf">
+      ${activeInq.map(inq => `
+        <div class="ta-inq-card ta-card-clickable" onclick="cardNav(event, '/inquisition/${inq.id}')">
+          <div class="ta-inq-numeral">INQUISITION ${inq.numeral}</div>
+          <h3 class="ta-inq-title">${inq.title}${inq.subtitle ? ' (' + inq.subtitle + ')' : ''}</h3>
+          <p class="ta-inq-meta">By ${inq.authors.map(a => PEOPLE[a].name).join(', ')} · ${inq.authors.length} historian${inq.authors.length > 1 ? 's' : ''} · ${inq.sources} sources · ${inq.status}</p>
+          ${inq.progress < 100 ? `
+            <div class="ta-inq-progress">
+              <span>${inq.progress}%</span>
+              <div class="ta-inq-progress-bar"><div class="ta-inq-progress-fill" style="width: ${inq.progress}%;"></div></div>
+            </div>
+          ` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: BEAT
+// ============================================================
+function viewBeat(slug) {
+  const labels = { conflicts: 'Conflicts', events: 'Events', diplomacy: 'Diplomacy', projects: 'Projects', civupdates: 'Civ updates' };
+  setMobileTitle(labels[slug] || slug);
+  const stories = Object.values(STORIES).filter(s => s.beat === slug);
+
+  return `
+    <div class="ta-masthead">
+      <h1 class="ta-masthead-name">Travelers Archive</h1>
+      <div class="ta-masthead-tag">A record of the No Man's Sky multiverse</div>
+    </div>
+
+    <div class="ta-beat-nav">
+      <div class="ta-beat-nav-inner">
+        <a href="#/" class="ta-beat-tab">Front page</a>
+        <a href="#/beat/conflicts" class="ta-beat-tab ${slug==='conflicts'?'active':''}">Conflicts</a>
+        <a href="#/beat/diplomacy" class="ta-beat-tab ${slug==='diplomacy'?'active':''}">Diplomacy</a>
+        <a href="#/beat/events" class="ta-beat-tab ${slug==='events'?'active':''}">Events</a>
+        <a href="#/beat/civupdates" class="ta-beat-tab ${slug==='civupdates'?'active':''}">Civ updates</a>
+        <a href="#/beat/projects" class="ta-beat-tab ${slug==='projects'?'active':''}">Projects</a>
+        <a href="#/inquisitions" class="ta-beat-tab">Inquisitions</a>
+      </div>
+    </div>
+
+    <div class="ta-filter-bar">
+      <span class="ta-filter-label">Showing:</span>
+      <span class="ta-filter-pill">${labels[slug]} <span class="ta-filter-pill-x" onclick="navigate('/')">×</span></span>
+      <span class="ta-filter-label" style="margin-left: 4px;">Add:</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Civ</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Type</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Date</span>
+    </div>
+
+    ${stories.length === 0 ? `
+      <div style="padding: 40px 20px; text-align: center; color: #888780; font-size: 13px;">
+        No stories in this beat yet.
+      </div>
+    ` : `
+      <div class="ta-story-grid">
+        ${stories.map(s => `
+          <div class="ta-story-card ta-card-clickable" onclick="cardNav(event, '/story/${s.id}')">
+            <div class="ta-story-tags">${renderStoryTags(s)}</div>
+            <h3 class="ta-story-headline">${s.headline}</h3>
+            <p class="ta-story-deck">${s.deck}</p>
+            <div class="ta-byline-row">
+              ${avatar(s.author, 'md')}
+              <span>By <b>${PEOPLE[s.author].name}</b> · ${s.timestamp}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+}
+
+// ============================================================
+// VIEW: STORY READER
+// ============================================================
+function viewStory(id) {
+  const s = STORIES[id];
+  if (!s) return viewNotFound();
+  setMobileTitle(s.headline);
+  const author = PEOPLE[s.author];
+
+  // convert markdown-ish blockquotes
+  const bodyHtml = s.body.split('\n\n').map(p => {
+    if (p.startsWith('> ')) return `<blockquote>${p.replace(/^> /, '')}</blockquote>`;
+    return `<p>${p}</p>`;
+  }).join('');
+
+  return `
+    <div class="ta-story-reader">
+      <a href="#/" class="ta-story-reader-back">← Back to newsroom</a>
+      <div class="ta-story-reader-tags">${renderStoryTags(s)}</div>
+      <h1>${s.headline}</h1>
+      <p class="ta-story-reader-deck">${s.deck}</p>
+      <div class="ta-story-reader-byline">
+        <a href="#/profile/${s.author}" style="text-decoration: none; color: inherit;">${avatar(s.author, 'md')}</a>
+        <div class="ta-story-reader-byline-info">
+          <div class="ta-story-reader-byline-name"><a href="#/profile/${s.author}" style="text-decoration: none; color: inherit;">${author.name}</a></div>
+          <div class="ta-story-reader-byline-meta">${author.role} · published ${new Date(s.publishedISO).toLocaleDateString('en-US', { dateStyle: 'long' })}${s.readMinutes ? ' · ' + s.readMinutes + ' min read' : ''}</div>
+        </div>
+        <div class="ta-story-reader-actions">
+          <button class="ta-btn-icon" onclick="showToast('Saved to your reading list')" title="Save">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          <button class="ta-btn-icon" onclick="showToast('Link copied to clipboard')" title="Share">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="ta-prose">${bodyHtml}</div>
+
+      ${s.civs && s.civs.length > 0 ? `
+        <div style="margin-top: 32px; padding: 16px; background: #f5f3ee; border-radius: 10px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888780; font-weight: 500; margin-bottom: 10px;">Mentioned civilizations</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${s.civs.map(c => `<a href="#/civ/${c}" style="text-decoration: none; color: #534AB7; font-size: 13px; font-weight: 500;">${CIVS[c].name} →</a>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: CIV INDEX
+// ============================================================
+function viewCivs() {
+  setMobileTitle('Civilizations');
+  const civs = Object.values(CIVS);
+  return `
+    <div class="ta-civ-index-header">
+      <h2 class="ta-civ-index-title">Civilizations</h2>
+      <p class="ta-civ-index-sub">${civs.length} civs documented · all sizes, all states · same structural treatment</p>
+    </div>
+    <div class="ta-filter-bar">
+      <span class="ta-filter-label">Sort:</span>
+      <span class="ta-filter-pill">Recently active</span>
+      <span class="ta-filter-label" style="margin-left: 4px;">Filter:</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Status</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Galaxy</span>
+      <span class="ta-filter-pill ta-filter-pill-add">+ Era</span>
+    </div>
+    <div class="ta-civ-grid">
+      ${civs.map(c => `
+        <div class="ta-civ-card ta-card-clickable" style="--c1: ${c.c1}; --c2: ${c.c2};" onclick="cardNav(event, '/civ/${c.slug}')">
+          <div class="ta-civ-card-band"></div>
+          <div class="ta-civ-card-body">
+            <div class="ta-civ-card-name">${c.name} <span class="ta-civ-card-status ta-status-${c.status}">${c.status}</span></div>
+            <div class="ta-civ-card-meta">${c.galaxy} · founded ${c.founded}${c.ended ? '–' + c.ended : ''} · ${c.tagline}</div>
+            <div class="ta-civ-card-stats">
+              <span><b>${c.stats.entries}</b> entries</span>
+              <span><b>${c.stats.inquisitions}</b> inq.</span>
+              <span><b>${c.stats.people}</b> people</span>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: CIV PAGE
+// ============================================================
+function viewCiv(slug) {
+  const c = CIVS[slug];
+  if (!c) return viewNotFound();
+  setMobileTitle(c.name);
+
+  const civStories = Object.values(STORIES).filter(s => s.civs && s.civs.includes(slug));
+  const civInquisitions = Object.values(INQUISITIONS).filter(i => i.civs && i.civs.includes(slug));
+
+  return `
+    <div class="ta-civ-hero" style="--c1: ${c.c1}; --c2: ${c.c2};">
+      <div class="ta-civ-hero-content">
+        <div class="ta-civ-hero-eyebrow">Civilization</div>
+        <h1 class="ta-civ-hero-name">${c.name}</h1>
+        <div class="ta-civ-hero-tagline">${c.galaxy} galaxy · founded ${c.founded}${c.ended ? '–' + c.ended : ''} · ${c.tagline}</div>
+        <span class="ta-civ-hero-status">${c.status} community</span>
+      </div>
+    </div>
+    <div class="ta-civ-stats-strip">
+      <div class="ta-civ-stat"><div class="ta-civ-stat-num">${c.stats.entries}</div><div class="ta-civ-stat-label">Entries</div></div>
+      <div class="ta-civ-stat"><div class="ta-civ-stat-num">${c.stats.inquisitions}</div><div class="ta-civ-stat-label">Inquisitions</div></div>
+      <div class="ta-civ-stat"><div class="ta-civ-stat-num">${c.stats.people}</div><div class="ta-civ-stat-label">People</div></div>
+      <div class="ta-civ-stat"><div class="ta-civ-stat-num">${c.stats.years}</div><div class="ta-civ-stat-label">Years</div></div>
+    </div>
+    <div class="ta-civ-tabs">
+      <button class="ta-civ-tab active">Coverage</button>
+      <button class="ta-civ-tab" onclick="navigate('/timeline')">Timeline</button>
+      <button class="ta-civ-tab">People</button>
+      <button class="ta-civ-tab">Relations</button>
+      <button class="ta-civ-tab">Inquisitions${c.stats.inquisitions ? ' (' + c.stats.inquisitions + ')' : ''}</button>
+      <button class="ta-civ-tab">About</button>
+    </div>
+    <div class="ta-civ-body">
+      <div class="ta-civ-body-eyebrow">All coverage tagged ${c.name} · ${civStories.length + civInquisitions.length} entries shown</div>
+      ${civStories.length === 0 && civInquisitions.length === 0 ? `
+        <div style="padding: 30px 0; text-align: center; color: #888780; font-size: 13px;">
+          No coverage yet. ${c.name} is documented but has no published stories.
+        </div>
+      ` : `
+        <div class="ta-coverage-list">
+          ${civInquisitions.map(inq => `
+            <div class="ta-coverage-item ta-card-clickable" onclick="cardNav(event, '/inquisition/${inq.id}')">
+              <div class="ta-coverage-date">${inq.status} · inquisition · ${inq.subtitle || ''}</div>
+              <h3 class="ta-coverage-title">Inquisition ${inq.numeral} · ${inq.title}</h3>
+              <p class="ta-coverage-deck">${inq.deck}</p>
+              <div class="ta-byline-row"><span>By <b>${inq.authors.map(a => PEOPLE[a].name).join(', ')}</b></span></div>
+            </div>
+          `).join('')}
+          ${civStories.map(s => `
+            <div class="ta-coverage-item ta-card-clickable" onclick="cardNav(event, '/story/${s.id}')">
+              <div class="ta-coverage-date">${s.timestamp} · ${s.doctype} · ${s.beat}</div>
+              <h3 class="ta-coverage-title">${s.headline}</h3>
+              <p class="ta-coverage-deck">${s.deck}</p>
+              <div class="ta-byline-row"><span>By <b>${PEOPLE[s.author].name}</b></span></div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+      <div class="ta-civ-note">
+        <b>Note:</b> Coverage shown is everything tagged with ${c.name}. Stories appear here because of their tags — civ pages organize by relevance, not by beat.
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: INQUISITIONS INDEX
+// ============================================================
+function viewInquisitions() {
+  setMobileTitle('Inquisitions');
+  const inqs = Object.values(INQUISITIONS).sort((a, b) => parseInt(b.id.split('-')[1]) - parseInt(a.id.split('-')[1]));
+  return `
+    <div class="ta-civ-index-header">
+      <h2 class="ta-civ-index-title">Inquisitions</h2>
+      <p class="ta-civ-index-sub">${inqs.length} inquisitions · long-form historical investigations by the Archivists</p>
+    </div>
+    <div class="ta-inq-shelf" style="border-top: 0.5px solid rgba(0,0,0,0.08);">
+      ${inqs.map(inq => `
+        <div class="ta-inq-card ta-card-clickable" onclick="cardNav(event, '/inquisition/${inq.id}')">
+          <div class="ta-inq-numeral">INQUISITION ${inq.numeral}</div>
+          <h3 class="ta-inq-title">${inq.title}${inq.subtitle ? ' (' + inq.subtitle + ')' : ''}</h3>
+          <p class="ta-inq-meta">By ${inq.authors.map(a => PEOPLE[a].name).join(', ')} · ${inq.authors.length} historian${inq.authors.length > 1 ? 's' : ''} · ${inq.sources} sources · ${inq.status}</p>
+          ${inq.progress < 100 ? `
+            <div class="ta-inq-progress">
+              <span>${inq.progress}%</span>
+              <div class="ta-inq-progress-bar"><div class="ta-inq-progress-fill" style="width: ${inq.progress}%;"></div></div>
+            </div>
+          ` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: INQUISITION READER
+// ============================================================
+function viewInquisition(id) {
+  const inq = INQUISITIONS[id];
+  if (!inq) return viewNotFound();
+  setMobileTitle(`Inquisition ${inq.numeral}`);
+
+  const bodyHtml = inq.body.split('\n\n').map(p => {
+    return `<p>${p.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`;
+  }).join('');
+
+  return `
+    <div style="background: linear-gradient(180deg, #1a1a3e 0%, #2C2C2A 100%); color: #fff; padding: 36px 18px 28px; text-align: center;">
+      <div style="font-family: Georgia, serif; font-size: 36px; font-weight: 500; color: #FAC775; letter-spacing: 5px; margin-bottom: 4px;">${inq.numeral}</div>
+      <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #d3d1c7; margin-bottom: 18px;">Inquisition</div>
+      <div style="width: 50px; height: 1px; background: #FAC775; margin: 0 auto 14px;"></div>
+      <h1 style="font-family: Georgia, serif; font-size: 24px; font-weight: 500; line-height: 1.25; margin-bottom: 14px;">${inq.title}</h1>
+      <div style="font-size: 11px; color: #b4b2a9; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px;">${inq.subtitle || 'A collaborative investigation'}</div>
+      <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px;">
+        ${inq.authors.map(a => `
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+            <a href="#/profile/${a}" style="text-decoration: none;">${avatar(a, 'md')}</a>
+            <div style="font-size: 11px; color: #fff; font-weight: 500;">${PEOPLE[a].name}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display: inline-block; background: rgba(250, 199, 117, 0.15); color: #FAC775; padding: 4px 12px; border-radius: 100px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; border: 1px solid rgba(250, 199, 117, 0.3);">${inq.status}${inq.progress < 100 ? ' · ' + inq.progress + '%' : ''}</div>
+    </div>
+
+    <div class="ta-story-reader">
+      <a href="#/inquisitions" class="ta-story-reader-back">← Back to inquisitions</a>
+      <div class="ta-prose">${bodyHtml}</div>
+
+      ${inq.civs && inq.civs.length > 0 ? `
+        <div style="margin-top: 32px; padding: 16px; background: #f5f3ee; border-radius: 10px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888780; font-weight: 500; margin-bottom: 10px;">Civilizations covered</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${inq.civs.map(c => `<a href="#/civ/${c}" style="text-decoration: none; color: #534AB7; font-size: 13px; font-weight: 500;">${CIVS[c].name} →</a>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: PROFILE
+// ============================================================
+function viewProfile(id) {
+  const p = PEOPLE[id];
+  if (!p) return viewNotFound();
+  setMobileTitle(p.name);
+  const authored = Object.values(STORIES).filter(s => s.author === id);
+  const isHistorian = p.role.includes('Historian');
+  const c1 = isHistorian ? '#26215C' : '#04342C';
+  const c2 = isHistorian ? '#534AB7' : '#0F6E56';
+
+  return `
+    <div class="ta-profile-hero" style="--c1: ${c1}; --c2: ${c2};">
+      ${avatar(id, 'xl')}
+      <h1 class="ta-profile-name">${p.name}</h1>
+      <div class="ta-profile-meta">${p.role}</div>
+      ${p.beat ? `
+        <div class="ta-profile-beat">
+          <span class="ta-profile-beat-eyebrow">Beat</span>
+          <span style="color: #fff; font-weight: 500;">${p.beat}</span>
+        </div>
+      ` : ''}
+    </div>
+    <div class="ta-profile-stats">
+      <div class="ta-profile-stat"><div class="ta-profile-stat-num">${authored.length}</div><div class="ta-profile-stat-label">Stories</div></div>
+      <div class="ta-profile-stat"><div class="ta-profile-stat-num">${authored.filter(s=>s.doctype==='brief').length}</div><div class="ta-profile-stat-label">Briefs</div></div>
+      <div class="ta-profile-stat"><div class="ta-profile-stat-num">${authored.filter(s=>s.doctype==='feature').length}</div><div class="ta-profile-stat-label">Features</div></div>
+      <div class="ta-profile-stat"><div class="ta-profile-stat-num">${Object.values(INQUISITIONS).filter(i => i.authors.includes(id)).length}</div><div class="ta-profile-stat-label">Inquisitions</div></div>
+    </div>
+    <div class="ta-profile-body">
+      <div class="ta-section-title">Recent stories</div>
+      ${authored.length === 0 ? `<div style="font-size: 13px; color: #888780; padding: 16px 0;">No stories yet.</div>` : `
+        <div class="ta-coverage-list">
+          ${authored.map(s => `
+            <div class="ta-coverage-item ta-card-clickable" onclick="cardNav(event, '/story/${s.id}')">
+              <div class="ta-coverage-date">${s.timestamp} · ${s.doctype} · ${s.beat}</div>
+              <h3 class="ta-coverage-title">${s.headline}</h3>
+              <p class="ta-coverage-deck">${s.deck}</p>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: DASHBOARD
+// ============================================================
+function viewDashboard() {
+  setMobileTitle('Dashboard');
+  const me = PEOPLE[CURRENT_USER];
+  const myStories = Object.values(STORIES).filter(s => s.author === CURRENT_USER);
+  const role = ROLES[CURRENT_ROLE];
+
+  return `
+    <div class="ta-dash-greeting">
+      <div class="ta-dash-greet-text">Welcome back, ${me.name}.</div>
+      <div class="ta-dash-greet-sub">3 things on your watchlist. ${role.canCompose ? 'Ready to file?' : 'Browsing only — switch to Diplomat or Historian in the dev panel to compose.'}</div>
+    </div>
+    <div class="ta-dash-impact-strip">
+      <div class="ta-dash-impact-cell"><div class="ta-dash-impact-num">${myStories.length}</div><div class="ta-dash-impact-label">stories</div></div>
+      <div class="ta-dash-impact-cell"><div class="ta-dash-impact-num">${myStories.filter(s=>s.doctype==='brief').length}</div><div class="ta-dash-impact-label">briefs</div></div>
+      <div class="ta-dash-impact-cell"><div class="ta-dash-impact-num">${myStories.filter(s=>s.doctype==='feature').length}</div><div class="ta-dash-impact-label">features</div></div>
+      <div class="ta-dash-impact-cell"><div class="ta-dash-impact-num">${Object.values(INQUISITIONS).filter(i => i.authors.includes(CURRENT_USER)).length}</div><div class="ta-dash-impact-label">inquisitions</div></div>
+    </div>
+    <div class="ta-dash-content">
+      <div>
+        <div class="ta-dash-section">
+          <div class="ta-dash-section-title">
+            <span>Watchlist</span>
+            <span class="ta-dash-section-count">3 new</span>
+          </div>
+          <a href="#/civ/galactic-hub" class="ta-dash-item">
+            <div class="ta-dash-item-title">Galactic Hub edited by Watcher</div>
+            <div class="ta-dash-item-meta">New brief filed: 16-region restructure · 47m ago</div>
+          </a>
+          <a href="#/inquisition/inq-46" class="ta-dash-item">
+            <div class="ta-dash-item-title">Inquisition XLVI updated</div>
+            <div class="ta-dash-item-meta">TheKeeper added 2 pages · yesterday</div>
+          </a>
+          <a href="#/civ/voyagers-haven" class="ta-dash-item">
+            <div class="ta-dash-item-title">New activity on Voyager's Haven</div>
+            <div class="ta-dash-item-meta">2 new briefs published · today</div>
+          </a>
+        </div>
+
+        <div class="ta-dash-section">
+          <div class="ta-dash-section-title">
+            <span>Mentions</span>
+            <span class="ta-dash-section-count">2</span>
+          </div>
+          <div class="ta-dash-item">
+            <div class="ta-dash-item-title">Watcher mentioned <span class="ta-mention-highlight">@Ekimo</span></div>
+            <div class="ta-dash-item-meta">"Want to coordinate on the Hub feature next week?" · 2h</div>
+          </div>
+          <div class="ta-dash-item">
+            <div class="ta-dash-item-title">TheKeeper added you as a source</div>
+            <div class="ta-dash-item-meta">Inquisition XLVI · cited Haven docs · yesterday</div>
+          </div>
+        </div>
+
+        ${myStories.length > 0 ? `
+          <div class="ta-dash-section">
+            <div class="ta-dash-section-title">
+              <span>Your stories</span>
+              <span class="ta-dash-section-count">${myStories.length}</span>
+            </div>
+            ${myStories.map(s => `
+              <a href="#/story/${s.id}" class="ta-dash-item">
+                <div class="ta-dash-item-title">${s.headline}</div>
+                <div class="ta-dash-item-meta">${s.doctype} · ${s.timestamp} · ${s.beat}</div>
+              </a>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+
+      <div>
+        <div class="ta-dash-section">
+          <div class="ta-dash-section-title">Quick actions</div>
+          <div class="ta-dash-quick-actions">
+            ${role.canCompose_brief ? `
+              <a href="#/compose/brief" class="ta-dash-quick-btn">
+                <svg class="ta-dash-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                Start a new brief
+              </a>
+            ` : ''}
+            ${role.canCompose_feature ? `
+              <a href="#/compose/feature" class="ta-dash-quick-btn">
+                <svg class="ta-dash-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                Start a new feature
+              </a>
+            ` : ''}
+            ${role.canCompose_inquisition ? `
+              <a href="#/compose/inquisition" class="ta-dash-quick-btn">
+                <svg class="ta-dash-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                Begin an inquisition
+              </a>
+            ` : ''}
+            <a href="#/civs" class="ta-dash-quick-btn">
+              <svg class="ta-dash-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg>
+              Browse civilizations
+            </a>
+            <a href="#/timeline" class="ta-dash-quick-btn">
+              <svg class="ta-dash-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              View the master timeline
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: COMPOSE (editor)
+// ============================================================
+function viewCompose(doctype) {
+  const role = ROLES[CURRENT_ROLE];
+  const canKey = 'canCompose_' + doctype;
+
+  if (!role[canKey]) {
+    return `
+      <div style="padding: 60px 20px; text-align: center;">
+        <h2 style="font-family: Georgia, serif; font-size: 22px; margin-bottom: 10px;">Permission required</h2>
+        <p style="font-size: 14px; color: #5f5e5a; margin-bottom: 16px;">Your current role (<b>${role.label}</b>) can't compose ${doctype === 'inquisition' ? 'inquisitions' : doctype + 's'}.</p>
+        <p style="font-size: 12px; color: #888780; margin-bottom: 20px;">${doctype === 'inquisition' ? 'Inquisitions are written by historians.' : doctype === 'feature' ? 'Features are written by diplomats and historians.' : 'Briefs are written by diplomats and historians.'}</p>
+        <p style="font-size: 12px; color: #888780;">Use the dev panel (bottom-right) to switch roles.</p>
+      </div>
+    `;
+  }
+
+  const titles = { brief: 'New Brief', feature: 'New Feature', inquisition: 'New Inquisition' };
+  setMobileTitle(titles[doctype]);
+  const eyebrows = {
+    brief: '▶ Compose a brief — short, dated report on something happening now',
+    feature: '▶ Compose a feature — long-form reporting with context and arc',
+    inquisition: '▶ Open a new inquisition — comprehensive historical investigation'
+  };
+
+  const placeholders = {
+    brief: { headline: 'Hub announces 16-region restructure', deck: 'Brief context — what happened, where, why now', body: 'Write the brief here. Aim for 200-600 words covering one event...' },
+    feature: { headline: 'The Keeper, retold: from concept to Stars\'s rebuild', deck: 'A subtitle that gives the feature its arc', body: 'Long-form narrative goes here. Include context, interviews, sources...' },
+    inquisition: { headline: 'The Quicksilver Wars', deck: 'A scholarly investigation into [topic, time period]', body: 'Methodology, sources, findings, open questions...' }
+  };
+
+  return `
+    <div class="ta-editor-page">
+      <a href="#/dashboard" class="ta-editor-back">← Back to dashboard</a>
+      <div class="ta-editor-eyebrow">${eyebrows[doctype]}</div>
+      <h1 class="ta-editor-h1">${titles[doctype]}</h1>
+
+      <div class="ta-editor-section">
+        <div class="ta-editor-section-label">Headline</div>
+        <input type="text" class="ta-editor-input ta-editor-input-headline" id="composeHeadline" placeholder="${placeholders[doctype].headline}" />
+
+        <div class="ta-editor-section-label">Deck (subtitle)</div>
+        <input type="text" class="ta-editor-input ta-editor-input-deck" id="composeDeck" placeholder="${placeholders[doctype].deck}" />
+      </div>
+
+      <div class="ta-editor-section">
+        <div class="ta-editor-section-label">Body</div>
+        <textarea class="ta-editor-textarea" id="composeBody" placeholder="${placeholders[doctype].body}"></textarea>
+      </div>
+
+      <div class="ta-editor-section">
+        <div class="ta-editor-meta-row">
+          ${doctype !== 'inquisition' ? `
+            <div class="ta-editor-meta-field">
+              <span class="ta-editor-meta-label">Beat</span>
+              <select class="ta-editor-select" id="composeBeat">
+                <option value="conflicts">Conflicts</option>
+                <option value="events">Events</option>
+                <option value="diplomacy">Diplomacy</option>
+                <option value="projects">Projects</option>
+                <option value="civupdates" selected>Civ updates</option>
+              </select>
+            </div>
+          ` : ''}
+          <div class="ta-editor-meta-field">
+            <span class="ta-editor-meta-label">Status</span>
+            <select class="ta-editor-select" id="composeStatus">
+              <option value="draft">Draft (private)</option>
+              <option value="review">Submit for review</option>
+              <option value="publish">Publish now</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top: 14px;">
+          <span class="ta-editor-meta-label">Civilizations covered</span>
+          <div class="ta-editor-checkbox-group" style="margin-top: 8px;" id="civCheckboxes">
+            ${Object.values(CIVS).map(c => `
+              <span class="ta-editor-checkbox" data-civ="${c.slug}" onclick="this.classList.toggle('checked')">${c.name}</span>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="ta-editor-actions">
+        <button class="ta-btn" onclick="saveDraft()">Save draft</button>
+        ${doctype === 'inquisition'
+          ? `<button class="ta-btn ta-btn-primary" onclick="submitForReview()">Open inquisition</button>`
+          : `<button class="ta-btn ta-btn-primary" onclick="submitForReview()">Submit for review</button>
+             <button class="ta-btn ta-btn-publish" onclick="publishNow()">Publish now</button>`}
+      </div>
+
+      <div style="margin-top: 16px; font-size: 11px; color: #888780; line-height: 1.6;">
+        This is a mock editor. Submitting won't persist data — but the workflow visualizes how a real diplomat or historian would compose, save, and publish.
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: TIMELINE
+// ============================================================
+function viewTimeline() {
+  setMobileTitle('Master timeline');
+
+  const events = [];
+  Object.values(STORIES).forEach(s => events.push({
+    type: 'story', date: s.date, doctype: s.doctype, title: s.headline,
+    civ: s.civs && s.civs[0], id: s.id, link: '#/story/' + s.id
+  }));
+  Object.values(INQUISITIONS).forEach(i => events.push({
+    type: 'inquisition', date: i.started, doctype: 'inquisition',
+    title: 'Inq. ' + i.numeral + ': ' + i.title,
+    civ: i.civs && i.civs[0], id: i.id, link: '#/inquisition/' + i.id
+  }));
+  Object.values(CIVS).forEach(c => {
+    const fy = parseInt(c.founded.replace(/[^\d]/g, ''));
+    if (fy) events.push({
+      type: 'civ-founded', date: fy + '-01-01', doctype: 'civ',
+      title: c.name + ' founded', civ: c.slug, id: c.slug,
+      link: '#/civ/' + c.slug
+    });
+    if (c.ended) events.push({
+      type: 'civ-ended', date: c.ended + '-01-01', doctype: 'civ',
+      title: c.name + ' ended', civ: c.slug, id: c.slug,
+      link: '#/civ/' + c.slug
+    });
+  });
+
+  const startYear = 2017;
+  const endYear = 2026;
+  const yearWidth = 240;
+  const labelW = 90;
+  const totalWidth = (endYear - startYear + 1) * yearWidth;
+
+  function dateToX(dateStr) {
+    const d = new Date(dateStr);
+    const yearFraction = (d.getFullYear() - startYear) + (d.getMonth() / 12) + (d.getDate() / 365);
+    return labelW + (yearFraction * yearWidth);
+  }
+
+  const civColors = {};
+  Object.entries(CIVS).forEach(([slug, c]) => civColors[slug] = c.c1);
+
+  const laneHeight = 64;
+  const lanes = ['galactic-hub', 'voyagers-haven', 'atlas-foundation', 'eyfert-khannate', 'fas', 'hadsh'];
+  const laneIndex = {};
+  lanes.forEach((l, i) => laneIndex[l] = i);
+  const laneStartY = 16;
+
+  return `
+    <div class="ta-timeline-page-header">
+      <h1 class="ta-timeline-page-h1">Master timeline</h1>
+      <p class="ta-timeline-page-sub">Every dated entry across the archive, on one scrubbable line. Stories, inquisitions, civ foundings and endings — all here.</p>
+    </div>
+    <div class="ta-timeline-controls">
+      <div class="ta-timeline-zoom">
+        <button class="ta-timeline-zoom-btn">Decade</button>
+        <button class="ta-timeline-zoom-btn active">Years</button>
+        <button class="ta-timeline-zoom-btn">Months</button>
+      </div>
+      <span class="ta-filter-pill">All civs</span>
+      <span class="ta-filter-pill">All types</span>
+    </div>
+    <div class="ta-timeline-canvas" id="timelineCanvas">
+      <div class="ta-timeline-track" style="width: ${totalWidth + labelW}px;">
+        <div class="ta-timeline-track-labels">
+          ${lanes.map(l => `
+            <div class="ta-timeline-track-label">${CIVS[l] ? CIVS[l].name.replace('The ', '').replace(' Foundation', ' Found.').replace(' Khannate', ' Khan.') : l}</div>
+          `).join('')}
+        </div>
+        <div class="ta-timeline-axis"></div>
+        ${Array.from({length: endYear - startYear + 1}, (_, i) => {
+          const year = startYear + i;
+          const x = labelW + (i * yearWidth);
+          return `<div class="ta-timeline-year" style="left: ${x}px;">${year}</div>`;
+        }).join('')}
+        ${events.map(e => {
+          const x = dateToX(e.date);
+          const lane = laneIndex[e.civ];
+          if (lane === undefined) return '';
+          const y = laneStartY + (lane * laneHeight);
+          const color = civColors[e.civ] || '#534AB7';
+          return `
+            <a href="${e.link}" class="ta-timeline-event" style="left: ${x}px; top: ${y}px; --track-color: ${color};">
+              <span class="ta-timeline-event-doctype" style="background: ${color}; color: white;">${e.doctype}</span>
+              <div class="ta-timeline-event-title">${e.title}</div>
+              <div class="ta-timeline-event-meta">${new Date(e.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</div>
+            </a>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    <div class="ta-timeline-helper">
+      ← Scroll horizontally → · Tap any event to read it · Lanes group events by civilization
+    </div>
+  `;
+}
+
+// ============================================================
+// VIEW: NOT FOUND
+// ============================================================
+function viewNotFound() {
+  setMobileTitle('Not found');
+  return `
+    <div style="padding: 80px 20px; text-align: center;">
+      <h2 style="font-family: Georgia, serif; font-size: 26px; margin-bottom: 10px;">404 — not found</h2>
+      <p style="font-size: 14px; color: #5f5e5a; margin-bottom: 18px;">That page doesn't exist in the archive.</p>
+      <a href="#/" class="ta-btn ta-btn-primary" style="text-decoration: none; display: inline-block;">Back to newsroom</a>
+    </div>
+  `;
+}
+
+// ============================================================
+// MAIN RENDER
+// ============================================================
+function render() {
+  const path = getCurrentRoute();
+  const route = parseRoute(path);
+  const outlet = document.getElementById('route-outlet');
+
+  closeDrawer();
+
+  let html = '';
+  switch (route.name) {
+    case 'home': html = viewHome(); break;
+    case 'civs': html = viewCivs(); break;
+    case 'civ': html = viewCiv(route.slug); break;
+    case 'inquisitions': html = viewInquisitions(); break;
+    case 'inquisition': html = viewInquisition(route.id); break;
+    case 'beat': html = viewBeat(route.slug); break;
+    case 'story': html = viewStory(route.id); break;
+    case 'profile': html = viewProfile(route.id); break;
+    case 'dashboard': html = viewDashboard(); break;
+    case 'compose': html = viewCompose(route.doctype); break;
+    case 'timeline': html = viewTimeline(); break;
+    default: html = viewNotFound();
+  }
+
+  outlet.innerHTML = html;
+
+  document.querySelectorAll('[data-route-link]').forEach(link => {
+    const linkRoute = link.dataset.routeLink;
+    const isActive = (linkRoute === '/' && path === '/') ||
+      (linkRoute !== '/' && path.startsWith(linkRoute));
+    link.classList.toggle('active', isActive);
+  });
+
+  window.scrollTo(0, 0);
+}
+
+// ============================================================
+// EDITOR ACTIONS
+// ============================================================
+function saveDraft() {
+  showToast('Draft saved');
+}
+
+function submitForReview() {
+  showToast('Submitted for review');
+  setTimeout(() => navigate('/dashboard'), 1200);
+}
+
+function publishNow() {
+  const headline = document.getElementById('composeHeadline')?.value;
+  if (!headline || headline.trim() === '') {
+    showToast('Add a headline before publishing');
+    return;
+  }
+  showToast('Published! Visible on the front page.');
+  setTimeout(() => navigate('/'), 1200);
+}
+
+// ============================================================
+// DRAWER
+// ============================================================
+const drawer = document.getElementById('drawer');
+const drawerOverlay = document.getElementById('drawerOverlay');
+
+function openDrawer() {
+  drawer.classList.add('open');
+  drawerOverlay.classList.add('open');
+}
+function closeDrawer() {
+  drawer.classList.remove('open');
+  drawerOverlay.classList.remove('open');
+}
+
+document.getElementById('menuBtn').addEventListener('click', openDrawer);
+drawerOverlay.addEventListener('click', closeDrawer);
+
+// ============================================================
+// DEV PANEL — role + persona switching
+// ============================================================
+const devPanelTrigger = document.getElementById('devPanelTrigger');
+const devPanel = document.getElementById('devPanel');
+const devPanelClose = document.getElementById('devPanelClose');
+
+devPanelTrigger.addEventListener('click', () => {
+  devPanel.classList.add('open');
+  devPanelTrigger.style.display = 'none';
+});
+devPanelClose.addEventListener('click', () => {
+  devPanel.classList.remove('open');
+  devPanelTrigger.style.display = 'flex';
+});
+
+function renderRoleBtns() {
+  const roleBtns = document.getElementById('roleBtns');
+  roleBtns.innerHTML = Object.keys(ROLES).map(r => `<button class="role-btn ${r === CURRENT_ROLE ? 'active' : ''}" data-role="${r}">${ROLES[r].label}</button>`).join('');
+  roleBtns.querySelectorAll('.role-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      CURRENT_ROLE = btn.dataset.role;
+      updateUserDisplay();
+      renderRoleBtns();
+      render();
+    });
+  });
+}
+
+function renderPersonaBtns() {
+  const personaBtns = document.getElementById('personaBtns');
+  const personas = ['ekimo', 'stars', 'watcher', 'lucca', 'thekeeper'];
+  personaBtns.innerHTML = personas.map(p => `<button class="role-btn ${p === CURRENT_USER ? 'active' : ''}" data-persona="${p}">${PEOPLE[p].name}</button>`).join('');
+  personaBtns.querySelectorAll('.role-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      CURRENT_USER = btn.dataset.persona;
+      const p = PEOPLE[CURRENT_USER];
+      if (p.role.includes('Historian')) CURRENT_ROLE = 'historian';
+      else if (p.role.includes('Diplomat')) CURRENT_ROLE = 'diplomat';
+      else CURRENT_ROLE = 'diplomat';
+      updateUserDisplay();
+      renderRoleBtns();
+      renderPersonaBtns();
+      render();
+    });
+  });
+}
+
+function updateUserDisplay() {
+  const me = PEOPLE[CURRENT_USER];
+  const role = ROLES[CURRENT_ROLE];
+  document.getElementById('devPanelLabel').textContent = `Logged in as ${me.name} · ${role.label}`;
+  document.getElementById('navUserName').textContent = me.name;
+  document.getElementById('drawerUserRole').textContent = `${role.label} · ${me.civ}`;
+  const mobileAvatar = document.querySelector('.ta-mobile-avatar');
+  if (mobileAvatar) mobileAvatar.textContent = me.avatar;
+  const drawerAvatar = document.querySelector('.ta-drawer-avatar');
+  if (drawerAvatar) drawerAvatar.textContent = me.avatar;
+  const drawerName = document.querySelector('.ta-drawer-name');
+  if (drawerName) drawerName.textContent = me.name;
+  const navAvatar = document.querySelector('.ta-user-pill .ta-avatar');
+  if (navAvatar) navAvatar.textContent = me.avatar;
+
+  document.getElementById('navComposeBrief').style.display = role.canCompose_brief ? '' : 'none';
+  document.getElementById('navComposeFeature').style.display = role.canCompose_feature ? '' : 'none';
+  document.getElementById('navComposeInquisition').style.display = role.canCompose_inquisition ? '' : 'none';
+}
+
+renderRoleBtns();
+renderPersonaBtns();
+updateUserDisplay();
+</script>
+</body>
+</html>
