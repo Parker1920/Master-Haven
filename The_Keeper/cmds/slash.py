@@ -4,7 +4,7 @@ from discord import app_commands
 import requests
 import os, sys
 import logging
-from cogs.community import SearchView, AddCivView
+from cogs.community import SearchView, AddCivView, EditConfirmView
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
