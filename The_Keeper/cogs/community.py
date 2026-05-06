@@ -144,7 +144,7 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         def insert():
             next_row = len(self.cog.sheet.get_all_values()) + 1
             self.cog.sheet.update_cell(next_row, 1, self.name.value)
-             self.cog.sheet.update_cell(next_row, 4, self.description.value)
+            self.cog.sheet.update_cell(next_row, 4, self.description.value)
             self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
     
 
