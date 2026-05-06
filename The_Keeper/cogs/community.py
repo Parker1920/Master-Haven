@@ -134,16 +134,13 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
-        new_row = [""] * len(headers)
-
-        col_link = next((i for i, h in enumerate(headers) if "link" in h.lower()), None)
+        new_row = [""] * max(5, len(headers))
 
         new_row[0] = self.name.value
-        if len(headers) > 1:
-            new_row[1] = self.description.value
-        if col_link is not None:
-            new_row[col_link] = self.link.value or ""
 
+        new_row[3] = self.description.value
+
+        new_row[4] = self.link.value or ""
         def insert():
             self.cog.sheet.append_row(new_row, value_input_option="RAW")
 
