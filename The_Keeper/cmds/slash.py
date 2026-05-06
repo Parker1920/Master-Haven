@@ -5,7 +5,7 @@ import requests
 import os, sys
 import logging
 from cogs import community
-log = logging.getlogger("commands")
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
