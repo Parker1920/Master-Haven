@@ -210,8 +210,6 @@ channel_id = bot.CHANNELS.get("welcome")
 # -------------------- EVENTS --------------------
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=YOUR_GUILD_ID)
-    await bot.tree.sync(guild=guild)
     print("COMMANDS:", [cmd.name for cmd in bot.commands])
     print("[...The Keeper is watching...]")
 
