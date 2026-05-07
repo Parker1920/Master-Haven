@@ -53,6 +53,30 @@ class CommandsCog(commands.Cog):
             ephemeral=True
         )
 
+# -------Say------------
+@app_commands.command(name="say", description="Send doc to selected channel")
+    @app_commands.describe(
+        channel="Channel to send to"
+    )
+    async def announce(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ):
+        await interaction.response.defer()
+
+        text = self.parser.get_doc_text()
+        sections = self.parser.parse_blocks(text)
+
+        for section in sections:
+            if section:
+                await channel.send(section[:2000])
+
+        await interaction.followup.send(
+            f"Sent to {channel.mention}",
+            ephemeral=True
+        )
+
 # ---------------- Community ----------------
     @app_commands.command(name="community", description="Look up a No Man's Sky civ or commmunity")    
     async def community(self, interaction: discord.Interaction, *, search: str = None):
