@@ -32,7 +32,7 @@ class CommandsCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel,
-        tag: discord.Member | discord.Role
+        tag: discord.Member | discord.Role = None
     ):
         await interaction.response.defer()
 
