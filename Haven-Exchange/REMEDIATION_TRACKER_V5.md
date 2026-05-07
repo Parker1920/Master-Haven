@@ -13,8 +13,8 @@
 | 2 | done | 2026-05-06 21:09 | 2026-05-06 21:25 | 52/52 | b489b36 |
 | 3 | done | 2026-05-06 21:26 | 2026-05-06 21:55 | 52/52 | b875422 |
 | 4 | done | 2026-05-06 21:56 | 2026-05-06 22:18 | 52/52 | 0cc707e |
-| 5 | done | 2026-05-06 22:19 | 2026-05-06 22:38 | 52/52 | (in-flight) |
-| 6 | pending | — | — | — | — |
+| 5 | done | 2026-05-06 22:19 | 2026-05-06 22:38 | 52/52 | eded972 |
+| 6 | done | 2026-05-06 22:39 | 2026-05-06 22:48 | 52/52 | (in-flight) |
 | 7 | pending | — | — | — | — |
 | 8 | pending | — | — | — | — |
 | 9 | pending | — | — | — | — |
@@ -83,3 +83,18 @@
 ### Deferred-to-followup
 - 11: Leadership-transfer flow (needs design input from Parker)
 - 24: CSRF tokens (separate security pass)
+
+## Phase 6 — State matrix verification
+
+All 8 states walked live:
+
+| State | User | Result |
+|---|---|---|
+| 1. New user, no nation (<24h) | newby | PASS — onboarding banner shown, no Open a Shop, no leader nav |
+| 2. Pending nation app | pending_user | PASS — pending banner with pulse animation, no Open a Shop |
+| 3. Citizen of approved nation | bob (in Atlantia) | PASS — no onboarding, no leader nav |
+| 4. Leader of approved nation | alice (Atlantia) | PASS — Treasury+Distribute+Members+Pending Shops nav present (x2 = nav + dashboard card) |
+| 5. Leader of suspended nation | shea (SheaLand suspended) | PASS — role demoted to citizen, no leader nav |
+| 6. WM also leading a nation | admin (Adminland) | PASS — Mint nav + Treasury nav both visible, /nation/treasury returns 200 |
+| 7. Shop owner with pending shop | bob (Bob Shop) | PASS — pending banner on /shop/manage, listing form replaced with placeholder |
+| 8. Shop owner with approved shop | alice (Alice Shop) | PASS — full management UI, IPO link visible |
