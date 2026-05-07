@@ -107,6 +107,14 @@ class CommandsCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=AddCivView(cog))
 
+#------------sync------------
+@app_commands.command(name="sync")
+@app_commands.checks.has_permissions(administrator=True)
+async def sync(interaction: discord.Interaction):
+    guild = discord.Object(id=YOUR_GUILD_ID)
+    await bot.tree.sync(guild=guild)
+    await interaction.response.send_message("Synced!", ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(CommandsCog(bot))
