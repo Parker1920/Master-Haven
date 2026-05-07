@@ -14,6 +14,18 @@ class CommandsCog(commands.Cog):
         self.bot = bot
         self.parser = GoogleDocParser(DOC_URL)
 
+    # ---------------- SYNC ----------------
+    @app_commands.command(name="sync", description="Sync slash commands globally")
+@app_commands.checks.has_permissions(administrator=True)
+async def sync(self, interaction: discord.Interaction):
+
+    synced = await self.bot.tree.sync()
+
+    await interaction.response.send_message(
+        f"Synced {len(synced)} global commands.",
+        ephemeral=True
+    )
+
     # ---------------- Announce ----------------
     @app_commands.command(name="announce", description="Send doc to selected channel")
     @app_commands.describe(
@@ -97,18 +109,6 @@ class CommandsCog(commands.Cog):
         )
 
         await interaction.response.send_message(embed=embed, view=AddCivView(cog))
-
-
-# ---------------- SYNC COMMAND (FIXED) ----------------
-@app_commands.command(name="sync")
-@app_commands.checks.has_permissions(administrator=True)
-async def sync(interaction: discord.Interaction):
-    bot = interaction.client  # FIX: get bot from interaction
-
-    guild = discord.Object(id=1423941004230135851)
-    await bot.tree.sync(guild=guild)
-
-    await interaction.response.send_message("Synced!", ephemeral=True)
 
 
 async def setup(bot):
