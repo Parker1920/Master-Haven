@@ -24,28 +24,27 @@ class CommandsCog(commands.Cog):
         self.bot = bot
         self.parser = GoogleDocParser(DOC_URL)
 
+    # ---------------- Announce ----------------
     @app_commands.command(name="announce", description="Send doc to selected channel")
-@app_commands.describe(
-    channel="Channel to send to",
-    tag="User or role to mention (optional)"
-)
-async def announce(
-    self,
-    interaction: discord.Interaction,
-    channel: discord.TextChannel,
-    tag: Optional[discord.Member | discord.Role] = None
-):
+    @app_commands.describe(
+        channel="Channel to send to",
+        tag="User or role to mention (optional)"
+    )
+    async def announce(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        tag: Optional[discord.Member | discord.Role] = None
+    ):
         await interaction.response.defer()
 
         text = self.parser.get_doc_text()
         sections = self.parser.parse_blocks(text)
 
-        # Send all sections first
         for section in sections:
             if section:
                 await channel.send(section[:2000])
 
-        # Send ONE mention at the end
         if tag:
             await channel.send(f"{tag.mention}")
 
