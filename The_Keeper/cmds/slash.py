@@ -16,7 +16,7 @@ class CommandsCog(commands.Cog):
 
     # ---------------- SYNC ----------------
     @app_commands.command(name="sync", description="Sync slash commands globally")
-@app_commands.checks.has_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def sync(self, interaction: discord.Interaction):
 
     synced = await self.bot.tree.sync()
