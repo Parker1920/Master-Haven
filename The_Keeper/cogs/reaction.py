@@ -9,19 +9,26 @@ class DepartmentView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    async def give_role(self, interaction, role_key):
+    async def give_role(self, interaction: discord.Interaction, role_key: str):
         guild = interaction.guild
         member = interaction.user
 
         role_id = PRIMARY_ROLE_MAP[role_key]
         new_role = guild.get_role(role_id)
 
+        if new_role is None:
+            await interaction.response.send_message(
+                "Role not found in server.",
+                ephemeral=True
+            )
+            return
+
+        # remove old primary roles
         for r_id in PRIMARY_ROLE_MAP.values():
             role = guild.get_role(r_id)
             if role in member.roles:
                 await member.remove_roles(role)
 
-    
         await member.add_roles(new_role)
 
         await interaction.response.send_message(
@@ -58,12 +65,12 @@ class ReactionRoles(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-@commands.Cog.listener()
-async def on_ready(self):         
-    self.bot.add_view(DepartmentView())
-    
 
-@commands.command(name="react")
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self.bot.add_view(DepartmentView())
+
+    @commands.command(name="react")
     @commands.has_permissions(administrator=True)
     async def react_panel(self, ctx):
 
@@ -76,10 +83,7 @@ async def on_ready(self):
             color=discord.Color.blurple()
         )
 
-        await ctx.send(
-            embed=embed,
-            view=DepartmentView()
-        )
+        await ctx.send(embed=embed, view=DepartmentView())
 
 
 async def setup(bot):
