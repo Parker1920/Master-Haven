@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from .data import xpdata
+from data.xpdata import PRIMARY_ROLE_MAP
 
 
 class DepartmentView(discord.ui.View):
