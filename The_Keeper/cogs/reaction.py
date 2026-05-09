@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from cogs.data import xpdata
+from .data import xpdata
 
 
 class DepartmentView(discord.ui.View):
