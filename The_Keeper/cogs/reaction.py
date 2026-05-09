@@ -17,13 +17,19 @@ class DepartmentView(discord.ui.View):
         new_role = guild.get_role(role_id)
 
         if new_role is None:
-            await interaction.response.send_message(
-                "Role not found in server.",
-                ephemeral=True
-            )
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "Role not found in server.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "Role not found in server.",
+                    ephemeral=True
+                )
             return
 
-        
+        # remove old primary roles
         for r_id in PRIMARY_ROLE_MAP.values():
             role = guild.get_role(r_id)
             if role in member.roles:
@@ -31,10 +37,16 @@ class DepartmentView(discord.ui.View):
 
         await member.add_roles(new_role)
 
-        await interaction.response.send_message(
-            f"Set primary role to {new_role.name}",
-            ephemeral=True
-        )
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                f"Set primary role to {new_role.name}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"Set primary role to {new_role.name}",
+                ephemeral=True
+            )
 
     @discord.ui.button(label="Architecture", emoji="🔨", style=discord.ButtonStyle.secondary, custom_id="architect")
     async def architect_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -76,8 +88,8 @@ class ReactionRoles(commands.Cog):
                 continue
 
             channel_id, message_id = data
-
             channel = guild.get_channel(channel_id)
+
             if not channel:
                 continue
 
@@ -110,9 +122,6 @@ class ReactionRoles(commands.Cog):
         save_panel(ctx.guild.id, ctx.channel.id, msg.id)
 
         await ctx.send("Reaction panel created and saved.", delete_after=5)
-    save_panel(ctx.guild.id, ctx.channel.id, msg.id)
-
-    await ctx.send("Reaction panel created and saved.", delete_after=5)
 
 
 async def setup(bot):
