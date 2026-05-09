@@ -194,6 +194,7 @@ COGS = [
     "cogs.personality",
     "cogs.xp_system",
     "cogs.xp_cog",
+    "cogs.reaction",
     "cogs.Haven_stats",
     "cogs.featured",
     "cogs.community",
