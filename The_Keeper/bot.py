@@ -210,36 +210,28 @@ COGS = [
     "setup",
 ]
 @bot.tree.interaction_check
-async def channel_restriction_check(interaction: discord.Interaction) -> bool:
+async def check_channel_allowed(interaction: discord.Interaction) -> bool:
     if not interaction.guild:
-        return True
+        return True  # allow DMs or block if you prefer
 
-    guild_id = interaction.guild.id
-    config_path = f"Data/guilds/{guild_id}.json"
+    import json
+    import os
 
-    if not os.path.exists(config_path):
-        return True  # no restrictions set
+    path = f"Data/guilds/{interaction.guild.id}.json"
 
-    with open(config_path, "r") as f:
+    if not os.path.exists(path):
+        return True  # no config = allow everywhere (or change to False if you want strict mode)
+
+    with open(path, "r") as f:
         config = json.load(f)
 
     command_name = interaction.command.name
+    allowed_channels = config.get(f"/{command_name}", [])
 
-    # if command is not restricted, allow
-    if command_name not in config:
+    if not allowed_channels:
         return True
 
-    allowed_channels = config[command_name]
-
-    # block if not in allowed channel
-    if interaction.channel_id not in allowed_channels:
-        await interaction.response.send_message(
-            "🚫 This command is not allowed in this channel.",
-            ephemeral=True
-        )
-        return False
-
-    return True
+    return interaction.channel.id in allowed_channels
 # -------------------- EVENTS --------------------
 @bot.event
 async def on_ready():
