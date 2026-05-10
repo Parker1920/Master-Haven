@@ -25,7 +25,6 @@ class FeaturedCog(commands.Cog):
         self.FEATURED_MESSAGES = self.load_featured_messages()
         self.PROCESSING = set()
 
-        # ✅ NEW: prevent duplicate bootstrap runs
         self.bootstrapped = False
 
     # -------------------- LOAD / SAVE --------------------
