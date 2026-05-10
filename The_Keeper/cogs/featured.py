@@ -25,6 +25,9 @@ class FeaturedCog(commands.Cog):
         self.FEATURED_MESSAGES = self.load_featured_messages()
         self.PROCESSING = set()
 
+        # ✅ NEW: prevent duplicate bootstrap runs
+        self.bootstrapped = False
+
     # -------------------- LOAD / SAVE --------------------
     def load_featured_messages(self):
         if not os.path.exists(FEATURED_FILE):
@@ -54,6 +57,32 @@ class FeaturedCog(commands.Cog):
                 json.dump(list(self.FEATURED_MESSAGES), f, indent=4)
         except Exception as e:
             print(f"Failed saving featured messages: {e}")
+
+    # -------------------- STARTUP BOOTSTRAP --------------------
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self.bootstrapped:
+            return
+        self.bootstrapped = True
+        await self.bootstrap_recent_photos()
+
+    async def bootstrap_recent_photos(self):
+        await self.bot.wait_until_ready()
+
+        photo_channel = self.bot.get_channel(self.PHOTO_CHANNEL_ID)
+        if not photo_channel:
+            self.log("BOOTSTRAP", "Photo channel not found")
+            return
+
+        try:
+            async for message in photo_channel.history(limit=5):
+                await self.try_feature_message(message)
+                await asyncio.sleep(0.2)
+
+            self.log("BOOTSTRAP", "Checked last 5 photos on startup")
+
+        except Exception as e:
+            self.log("BOOTSTRAP_ERROR", str(e))
 
     # -------------------- FEATURE LOGIC --------------------
     async def try_feature_message(self, message: discord.Message):
@@ -240,5 +269,14 @@ async def setup(bot: commands.Bot):
     def count_total_reactions(message):
         return sum(r.count - (1 if r.me else 0) for r in message.reactions)
 
-    cog = FeaturedCog(bot, PHOTO_CHANNEL_ID, FEATURED_CHANNEL_ID, FEATURED_THRESHOLD, FEATURED_TIME_LIMIT, log, count_total_reactions)
+    cog = FeaturedCog(
+        bot,
+        PHOTO_CHANNEL_ID,
+        FEATURED_CHANNEL_ID,
+        FEATURED_THRESHOLD,
+        FEATURED_TIME_LIMIT,
+        log,
+        count_total_reactions
+    )
+
     await bot.add_cog(cog)
