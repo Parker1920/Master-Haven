@@ -31,15 +31,23 @@ def save_guild_config(guild_id: int, data: dict):
 
 # ---------------- COMMAND FETCHER ----------------
 
-def get_all_app_commands(bot: commands.Bot):
-    """
-    Pulls ALL slash commands from loaded cogs/extensions
-    (exclaim.py, slash.py, Voyager.py, etc.)
-    """
+def get_all_commands(bot: commands.Bot):
     cmds = []
+
+    # ---------------- SLASH COMMANDS ----------------
     for cmd in bot.tree.get_commands():
         desc = cmd.description or "No description"
-        cmds.append((cmd.name, desc))
+        cmds.append((f"/{cmd.name}", desc))
+
+    # ---------------- PREFIX COMMANDS (! commands) ----------------
+    for cmd in bot.commands:
+        if cmd.hidden:
+            continue
+
+        name = f"!{cmd.name}"
+        desc = cmd.help or "No description"
+        cmds.append((name, desc))
+
     return cmds
 
 
