@@ -57,7 +57,7 @@ class WelcomeCog(commands.Cog):
         await channel.send(embed=embed)
 
 #----------------The simulation----------
-@commands.command()
+@commands.command(name="welcome")
 @commands.has_permissions(administrator=True)
 async def simulate_join(self, ctx, member: discord.Member = None):
     """
