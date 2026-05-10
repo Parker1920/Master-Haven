@@ -289,6 +289,8 @@ def add_xp(user_id, role, amount):
     """, (user_id, role))
 
     xp, old_level = cur.fetchone()
+
+    old_level = int(old_level)
     level = old_level
 
     
@@ -375,26 +377,19 @@ def get_panel(guild_id):
 
 
 # ---------------- COOLDOWNS ----------------
+cooldowns = {}
+
 def check_cooldown(user_id, key, cooldown):
     now = time.time()
 
-    conn = get_conn()
-    cur = conn.cursor()
+    cache_key = f"{user_id}:{key}"
 
-    cur.execute("SELECT last_used FROM cooldowns WHERE user_id=? AND key=?", (user_id, key))
-    row = cur.fetchone()
+    last = cooldowns.get(cache_key, 0)
 
-    if row and now - row[0] < cooldown:
-        conn.close()
+    if now - last < cooldown:
         return False
 
-    cur.execute("""
-    INSERT OR REPLACE INTO cooldowns (user_id, key, last_used)
-    VALUES (?, ?, ?)
-    """, (user_id, key, now))
-
-    conn.commit()
-    conn.close()
+    cooldowns[cache_key] = now
     return True
 
 
