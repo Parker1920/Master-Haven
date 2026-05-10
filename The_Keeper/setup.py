@@ -29,51 +29,58 @@ def save_guild_config(guild_id: int, data: dict):
         json.dump(data, f, indent=4)
 
 
-# ---------------- FEATURES ----------------
+# ---------------- COMMAND FETCHER ----------------
 
-FEATURES = {
-    "auto_reactions": "Auto Reactions",
-    "welcome": "Welcome Messages",
-    "mod_logs": "Moderation Logs"
-}
+def get_all_app_commands(bot: commands.Bot):
+    """
+    Pulls ALL slash commands from loaded cogs/extensions
+    (exclaim.py, slash.py, Voyager.py, etc.)
+    """
+    cmds = []
+    for cmd in bot.tree.get_commands():
+        desc = cmd.description or "No description"
+        cmds.append((cmd.name, desc))
+    return cmds
 
 
-# ---------------- UI: FEATURE SELECT ----------------
+# ---------------- UI: COMMAND SELECT ----------------
 
-class FeatureSelect(discord.ui.Select):
-    def __init__(self):
+class CommandSelect(discord.ui.Select):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
         options = [
-            discord.SelectOption(label=name, value=key)
-            for key, name in FEATURES.items()
+            discord.SelectOption(label=name, value=name, description=desc[:100])
+            for name, desc in get_all_app_commands(bot)
         ]
 
         super().__init__(
-            placeholder="Choose a feature to configure...",
+            placeholder="Select a command to configure...",
             min_values=1,
             max_values=1,
             options=options
         )
 
     async def callback(self, interaction: discord.Interaction):
-        feature = self.values[0]
+        command_name = self.values[0]
 
         await interaction.response.edit_message(
-            content=f"✅ Selected: **{FEATURES[feature]}**\nNow select channel(s):",
-            view=ChannelSelectView(feature)
+            content=f"✅ Selected command: **/{command_name}**\nNow select channel(s):",
+            view=ChannelSelectView(command_name)
         )
 
 
-class FeatureSelectView(discord.ui.View):
-    def __init__(self):
+class CommandSelectView(discord.ui.View):
+    def __init__(self, bot: commands.Bot):
         super().__init__(timeout=180)
-        self.add_item(FeatureSelect())
+        self.add_item(CommandSelect(bot))
 
 
 # ---------------- UI: CHANNEL SELECT ----------------
 
 class ChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, feature: str):
-        self.feature = feature
+    def __init__(self, command_name: str):
+        self.command_name = command_name
 
         super().__init__(
             placeholder="Select channel(s)...",
@@ -94,8 +101,8 @@ class ChannelSelect(discord.ui.ChannelSelect):
 
         config = load_guild_config(guild_id)
 
-        # Save feature → channel IDs
-        config[self.feature] = [c.id for c in channels]
+        # store by command name now
+        config[self.command_name] = [c.id for c in channels]
 
         save_guild_config(guild_id, config)
 
@@ -104,7 +111,7 @@ class ChannelSelect(discord.ui.ChannelSelect):
         await interaction.response.edit_message(
             content=(
                 f"✅ Setup saved!\n\n"
-                f"**Feature:** {FEATURES[self.feature]}\n"
+                f"**Command:** /{self.command_name}\n"
                 f"**Channels:** {mentions}"
             ),
             view=None
@@ -112,9 +119,9 @@ class ChannelSelect(discord.ui.ChannelSelect):
 
 
 class ChannelSelectView(discord.ui.View):
-    def __init__(self, feature: str):
+    def __init__(self, command_name: str):
         super().__init__(timeout=180)
-        self.add_item(ChannelSelect(feature))
+        self.add_item(ChannelSelect(command_name))
 
 
 # ---------------- MAIN COG ----------------
@@ -125,7 +132,7 @@ class SetupCog(commands.Cog):
 
     @app_commands.command(
         name="setup",
-        description="Configure bot features per server"
+        description="Configure bot commands per server"
     )
     async def setup(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -135,8 +142,8 @@ class SetupCog(commands.Cog):
             )
 
         await interaction.response.send_message(
-            "🔧 **Setup Wizard**\nSelect a feature to configure:",
-            view=FeatureSelectView(),
+            "🔧 **Setup Wizard**\nSelect a command to configure:",
+            view=CommandSelectView(self.bot),
             ephemeral=True
         )
 
