@@ -262,7 +262,7 @@ async def on_command_error(ctx, error):
 # -------------------- RUN --------------------
 async def main():
     async def setup_hook():
-        await
+        
 
     bot.setup_hook = setup_hook
 
