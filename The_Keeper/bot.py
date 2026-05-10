@@ -85,7 +85,7 @@ ROLES = {
     },
 }
 
-# -------------------- PRIMARY ROLE MAP (NEW FIXED LAYER) --------------------
+# -------------------- PRIMARY ROLE MAP --------------------
 PRIMARY_ROLES = {
     "cartographer": get_env_int("ROLE_PRIMARY_CARTOGRAPHER"),
     "xenobiologist": get_env_int("ROLE_PRIMARY_XENOBIOLOGIST"),
@@ -212,30 +212,30 @@ COGS = [
 @bot.tree.interaction_check
 async def check_channel_allowed(interaction: discord.Interaction) -> bool:
     if not interaction.guild:
-        return True  # allow DMs
+        return True
 
     import os, json
 
     path = f"Data/guilds/{interaction.guild.id}.json"
-
     if not os.path.exists(path):
-        return True  # or False if you want strict mode
+        return True  # change to False if you want strict lockdown
 
     with open(path, "r") as f:
         config = json.load(f)
 
-    # safety check
-    if not interaction.command:
-        return True  # or False for strict mode
+    if not interaction.data:
+        return True
 
-    command_name = f"/{interaction.command.name}"
+    # better command resolution
+    command_name = interaction.data.get("name")
 
-    # FIXED: correct dictionary lookup (no assignment here!)
+    if not command_name:
+        return True
+
     allowed_channels = config.get(command_name, [])
 
-    # if command not configured, allow (change to False if strict mode)
     if not allowed_channels:
-        return True
+        return False  
 
     return interaction.channel.id in allowed_channels
 # -------------------- EVENTS --------------------
