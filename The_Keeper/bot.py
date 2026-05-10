@@ -217,25 +217,25 @@ async def check_channel_allowed(interaction: discord.Interaction) -> bool:
     import os, json
 
     path = f"Data/guilds/{interaction.guild.id}.json"
+
     if not os.path.exists(path):
-        return True  # change to False if you want strict lockdown
+        return False
 
     with open(path, "r") as f:
         config = json.load(f)
 
-    if not interaction.data:
+   
+    command = interaction.command
+    if command is None:
         return True
 
-    # better command resolution
-    command_name = interaction.data.get("name")
+    command_name = command.qualified_name  # FIXED (supports subcommands)
 
-    if not command_name:
-        return True
+    allowed_channels = config.get(command_name)
 
-    allowed_channels = config.get(command_name, [])
-
+    
     if not allowed_channels:
-        return False  
+        return False
 
     return interaction.channel.id in allowed_channels
 # -------------------- EVENTS --------------------
