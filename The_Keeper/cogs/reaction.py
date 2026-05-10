@@ -15,8 +15,16 @@ def build_main_embed(guild: discord.Guild):
 
         role = guild.get_role(role_id)
 
-        # always fetch fresh member count
-        count = len(role.members) if role else 0
+        if role:
+
+            # TRUE LIVE COUNT
+            count = sum(
+                1 for member in guild.members
+                if role in member.roles
+            )
+
+        else:
+            count = 0
 
         lines.append(
             f"• **{role_name.capitalize()}** — {count}"
@@ -64,10 +72,10 @@ class DepartmentView(discord.ui.View):
 
         try:
 
-            # force fresh fetch
+            # fresh fetch every update
             msg = await channel.fetch_message(message_id)
 
-            # rebuild embed fresh every time
+            # rebuild embed with fresh counts
             embed = build_main_embed(guild)
 
             await msg.edit(
@@ -114,7 +122,7 @@ class DepartmentView(discord.ui.View):
                 await member.remove_roles(role)
                 removed_any = True
 
-        # wait for discord cache update
+        # wait for role removal update
         if removed_any:
             await asyncio.sleep(1)
 
@@ -126,7 +134,7 @@ class DepartmentView(discord.ui.View):
         # wait for cache update
         await asyncio.sleep(1)
 
-        # ---------------- FORCE PANEL REFRESH ----------------
+        # ---------------- UPDATE PANEL ----------------
 
         await self.update_panel(guild)
 
