@@ -59,7 +59,7 @@ class CommandSelect(discord.ui.Select):
 
         options = [
             discord.SelectOption(label=name, value=name, description=desc[:100])
-            for name, desc in get_all_app_commands(bot)
+            for name, desc in get_all_commands(bot)
         ]
 
         super().__init__(
