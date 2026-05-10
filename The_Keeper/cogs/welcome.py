@@ -92,10 +92,15 @@ class WelcomeCog(commands.Cog):
         embed.set_image(
             url="https://cdn.discordapp.com/attachments/1483946204919501030/1483951736187256913/ezgif-36919d2af39654a6.gif"
         )
-        position = sorted(member.guild.members, key=lambda m: m.joined_at).index(member) + 1
+        members = sorted(
+            [m for m in member.guild.members if m.joined_at],
+            key=lambda m: m.joined_at
+        )
+
+        position = next((i for i, m in         enumerate(members, 1) if m.id == member.id), None)
         embed.set_footer(text=f"You are #{position} in the server")
 
-        await channel.send(embed=embed, view=DeptView())
+        await channel.send(embed=embed, view=DeptView(member.guild.id))
 
 class DeptView(discord.ui.View):
     def __init__(self, guild_id: int):
