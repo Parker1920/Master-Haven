@@ -5809,3 +5809,26 @@ def migration_1_77_0(conn):
     """)
     conn.commit()
     logger.info("Created user_saved_searches table for Systems Tab v2.0 saved filter sets")
+
+
+@register_migration("1.78.0", "Poster cache: system_count_at_render column for region_thumb threshold refresh")
+def migration_1_78_0(conn):
+    """
+    Adds `system_count_at_render` to `poster_cache` so region_thumb knows
+    when to invalidate.
+
+    Parker 2026-05-11: region posters refresh after the region grows by
+    >= 10 systems OR >= 10% since the cached render. We persist the
+    `system_count_at_render` value at render time and compare on each new
+    system approval. See routes/approvals.py:_should_refresh_region_thumb.
+
+    All other poster types ignore this column; it defaults to NULL on the
+    existing rows.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(poster_cache)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'system_count_at_render' not in cols:
+        cursor.execute("ALTER TABLE poster_cache ADD COLUMN system_count_at_render INTEGER")
+        logger.info("Added poster_cache.system_count_at_render")
+    conn.commit()

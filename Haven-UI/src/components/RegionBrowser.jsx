@@ -155,7 +155,7 @@ export default function RegionBrowser() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {paged.map((r) => {
               const k = regionKey(r)
-              return <RegionCard key={k} r={r} onClick={() => handleClick(r)} pinned={pinnedKeys.has(k)} pinning={pinning} />
+              return <RegionCard key={k} r={r} onClick={() => handleClick(r)} pinned={pinnedKeys.has(k)} pinning={pinning} reality={reality} galaxy={galaxy} />
             })}
           </div>
           {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onPage={setPage} />}
@@ -167,10 +167,16 @@ export default function RegionBrowser() {
   )
 }
 
-function RegionCard({ r, onClick, pinned, pinning }) {
+function RegionCard({ r, onClick, pinned, pinning, reality, galaxy }) {
   const stateCls = cardStateClass(r)
   const badge = stateBadge(r)
   const named = !!r.custom_name
+  // Live region_thumb poster — see Haven-UI/src/posters/RegionThumb.jsx.
+  // Cache key is `rx_ry_rz`; galaxy + reality go in the query string so the
+  // SPA poster route can render with the right scope. Threshold-based
+  // invalidation handles refresh on growth (10+ new systems).
+  const posterKey = `${r.region_x}_${r.region_y}_${r.region_z}`
+  const posterUrl = `/api/posters/region_thumb/${posterKey}.png?galaxy=${encodeURIComponent(galaxy || 'Euclid')}&reality=${encodeURIComponent(reality || 'Normal')}`
   return (
     <button
       type="button"
@@ -186,8 +192,15 @@ function RegionCard({ r, onClick, pinned, pinning }) {
         <span className="absolute top-2 left-2 z-20 pill-teal-solid text-[10px] mono px-1.5 py-0.5 rounded">PINNED</span>
       )}
 
-      <div className="aspect-[2/1] stub-poster">
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(157, 78, 221, 0.15), transparent)' }} />
+      <div className="aspect-[2/1] relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f1538, var(--app-bg))' }}>
+        <img
+          src={posterUrl}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = 'none' }}
+        />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(157, 78, 221, 0.10), transparent)' }} />
         <div className="absolute top-3 left-3 z-10">
           <span
             className={`pill backdrop-blur ${named ? 'pill-purple' : 'pill-muted'}`}

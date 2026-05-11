@@ -196,8 +196,18 @@ function SystemCard({ s, onClick, pinned, pinning }) {
         <span className="absolute top-2 left-2 z-20 pill-teal-solid text-[10px] mono px-1.5 py-0.5 rounded">PINNED</span>
       )}
 
-      <div className="aspect-[3/2] stub-poster">
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(0, 194, 179, 0.10), transparent)' }} />
+      <div className="aspect-[3/2] relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f1538, var(--app-bg))' }}>
+        {/* Live-rendered system_thumb poster — first view triggers headless
+            render (lazy). New systems get pre-rendered on approval, so the
+            common path is instant. Errors fall back to the stub gradient. */}
+        <img
+          src={`/api/posters/system_thumb/${encodeURIComponent(s.id)}.png`}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = 'none' }}
+        />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(0, 194, 179, 0.06), transparent)' }} />
         <div className="absolute top-3 left-3 z-10">
           {s.star_type && (
             <span className={`pill ${starCls}`}>

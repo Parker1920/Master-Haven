@@ -1603,11 +1603,24 @@ async def approve_system(
             current_username,
         )
 
+        # Post-approval poster invalidation. system_thumb fires every time
+        # (covers both first upload and edit-via-approval per Parker spec).
+        # region_thumb is threshold-gated inside the helper.
+        _rcoords = None
+        try:
+            rx, ry, rz = system_data.get('region_x'), system_data.get('region_y'), system_data.get('region_z')
+            if rx is not None and ry is not None and rz is not None:
+                _rcoords = (int(rx), int(ry), int(rz))
+        except (TypeError, ValueError):
+            pass
         fire_and_forget(
             _invalidate_posters_async,
             submitted_by=submission.get('submitted_by') or submission.get('personal_discord_username'),
             galaxy=system_data.get('galaxy', 'Euclid'),
             discord_tag=submission.get('discord_tag'),
+            system_id=system_id,
+            region_coords=_rcoords,
+            reality=system_data.get('reality') or 'Normal',
         )
 
         return {
@@ -1643,6 +1656,9 @@ def _invalidate_posters_for_submission(
     submitted_by: Optional[str],
     galaxy: Optional[str],
     discord_tag: Optional[str] = None,
+    system_id: Optional[str] = None,
+    region_coords: Optional[tuple] = None,
+    reality: Optional[str] = None,
 ):
     """Drop cached PNGs for everything the new system affects.
 
@@ -1651,6 +1667,12 @@ def _invalidate_posters_for_submission(
     submitter's per-community card if present, and the submitter's voyager
     cards. Each invalidate() call is independent — one failure does not
     block the others.
+
+    Parker 2026-05-11: also invalidate `system_thumb` for the specific
+    system_id on approval (first upload OR subsequent edit). `region_thumb`
+    invalidation is threshold-based — only fire when the region's system
+    count has grown ≥10 since the last cached render, OR the cache is
+    >7 days old. See _should_refresh_region_thumb().
     """
     try:
         from services.poster_service import invalidate
@@ -1690,14 +1712,91 @@ def _invalidate_posters_for_submission(
             _try('voyager', slug)
             _try('voyager_og', slug)
 
+    # system_thumb — always invalidate this exact system on approval/edit.
+    # The og_system card too (per-system social embed).
+    if system_id:
+        _try('system_thumb', str(system_id))
+        _try('og_system', str(system_id))
+
+    # region_thumb — threshold-based: only invalidate if the region has
+    # grown enough OR the cache is stale. Cheap to compute since we just
+    # need the current system_count for that region.
+    if region_coords and len(region_coords) == 3:
+        rx, ry, rz = region_coords
+        try:
+            if _should_refresh_region_thumb(rx, ry, rz, reality, galaxy):
+                _try('region_thumb', f'{rx}_{ry}_{rz}')
+        except Exception as e:
+            logger.warning(f"Region thumb refresh check failed: {e}")
+
+
+def _should_refresh_region_thumb(rx, ry, rz, reality, galaxy):
+    """Return True when the region_thumb cached PNG is stale enough to drop.
+
+    Rules:
+      - No cache row yet → False (next view will lazy-render fresh anyway)
+      - Cache row >7 days old → True (safety-net for slow-drip changes)
+      - system_count grew by ≥ 10 since last render → True
+      - system_count grew by ≥ 10% since last render → True (small regions)
+    """
+    from db import get_db_connection
+    from datetime import datetime, timezone, timedelta
+
+    cache_key = f'{rx}_{ry}_{rz}'
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT generated_at, system_count_at_render
+            FROM poster_cache
+            WHERE poster_type = 'region_thumb' AND cache_key = ?
+            LIMIT 1
+        """, (cache_key,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        # Time-based safety net
+        try:
+            gen = datetime.fromisoformat(row['generated_at'].replace('Z', '+00:00'))
+            if gen.tzinfo is None:
+                gen = gen.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - gen > timedelta(days=7):
+                return True
+        except (ValueError, KeyError, TypeError):
+            pass
+
+        # Count-based threshold
+        last_count = row['system_count_at_render'] or 0
+        params = [rx, ry, rz]
+        where = "region_x = ? AND region_y = ? AND region_z = ?"
+        if reality:
+            where += " AND COALESCE(reality, 'Normal') = ?"
+            params.append(reality)
+        if galaxy:
+            where += " AND COALESCE(galaxy, 'Euclid') = ?"
+            params.append(galaxy)
+        cursor.execute(f"SELECT COUNT(*) AS c FROM systems WHERE {where}", params)
+        current_count = cursor.fetchone()['c']
+        if current_count - last_count >= 10:
+            return True
+        if last_count > 0 and (current_count - last_count) / last_count >= 0.10:
+            return True
+    return False
+
 
 async def _invalidate_posters_async(
     submitted_by: Optional[str],
     galaxy: Optional[str],
     discord_tag: Optional[str] = None,
+    system_id: Optional[str] = None,
+    region_coords: Optional[tuple] = None,
+    reality: Optional[str] = None,
 ):
     """Async wrapper so fire_and_forget can schedule it as a coroutine."""
-    _invalidate_posters_for_submission(submitted_by, galaxy, discord_tag)
+    _invalidate_posters_for_submission(
+        submitted_by, galaxy, discord_tag,
+        system_id=system_id, region_coords=region_coords, reality=reality,
+    )
 
 
 @router.post('/api/reject_system/{submission_id}')
@@ -2406,10 +2505,20 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                 conn.commit()
 
                 processed += 1
+                _rcoords = None
+                try:
+                    rx_, ry_, rz_ = system_data.get('region_x'), system_data.get('region_y'), system_data.get('region_z')
+                    if rx_ is not None and ry_ is not None and rz_ is not None:
+                        _rcoords = (int(rx_), int(ry_), int(rz_))
+                except (TypeError, ValueError):
+                    pass
                 approved_meta.append({
                     'submitted_by': submission.get('submitted_by') or submission.get('personal_discord_username'),
                     'galaxy': system_data.get('galaxy', 'Euclid'),
                     'discord_tag': submission.get('discord_tag'),
+                    'system_id': system_id,
+                    'region_coords': _rcoords,
+                    'reality': system_data.get('reality') or 'Normal',
                 })
 
             except Exception as e:
@@ -2480,6 +2589,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                     submitted_by=meta['submitted_by'],
                     galaxy=meta['galaxy'],
                     discord_tag=meta['discord_tag'],
+                    system_id=meta.get('system_id'),
+                    region_coords=meta.get('region_coords'),
+                    reality=meta.get('reality'),
                 )
             except Exception as inv_err:
                 logger.warning(f"Batch job {job_id}: poster invalidation for one submission failed: {inv_err}")

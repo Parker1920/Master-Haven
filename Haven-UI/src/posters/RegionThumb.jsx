@@ -43,14 +43,34 @@ function project(localX, localY, localZ) {
   return [sx, sy]
 }
 
-// Tint the dot for a system. Prefer community tag colour; fall back to star
-// type so unowned systems still get visual variety.
+// Star-type colors — per Parker (2026-05-11): dots show the actual star
+// color (not the community tag). Community color now goes on the OUTER
+// border so both bits of info still read at a glance.
 const STAR_TINT = {
   Yellow: '#facc15',
   Blue: '#60a5fa',
   Red: '#ef4444',
   Green: '#34d399',
   Purple: '#a855f7',
+}
+
+// Pick the community color that owns the region — that's whichever
+// discord_tag has the most systems inside it. Falls back to muted neutral
+// when the region has no tagged systems.
+function dominantTagColor(systems, getColor) {
+  if (!Array.isArray(systems) || systems.length === 0) return null
+  const counts = new Map()
+  for (const s of systems) {
+    const tag = s.discord_tag
+    if (!tag || tag === 'personal') continue
+    counts.set(tag, (counts.get(tag) || 0) + 1)
+  }
+  if (counts.size === 0) return null
+  let bestTag = null, bestCount = 0
+  for (const [tag, count] of counts) {
+    if (count > bestCount) { bestTag = tag; bestCount = count }
+  }
+  return { tag: bestTag, color: getColor(bestTag), share: bestCount / systems.length }
 }
 
 export default function RegionThumb({ routeKey }) {
@@ -103,20 +123,25 @@ export default function RegionThumb({ routeKey }) {
         let lx = (s.star_x ?? baseX) - baseX
         let ly = (s.star_y ?? baseY) - baseY
         let lz = (s.star_z ?? baseZ) - baseZ
-        // Clamp just in case any old row escaped the ±64 spread bound
         lx = Math.max(-64, Math.min(64, lx))
         ly = Math.max(-64, Math.min(64, ly))
         lz = Math.max(-64, Math.min(64, lz))
-        const tagColor = s.discord_tag ? getTagColorFromAPI(s.discord_tag) : null
-        const tint = tagColor || STAR_TINT[s.star_type] || POSTER_COLORS.dim
+        // Star color drives the dot (per Parker's spec change). Untyped
+        // stars get a muted gray so they're visible but secondary.
+        const tint = STAR_TINT[s.star_type] || 'rgba(255,255,255,0.45)'
         return { lx, ly, lz, tint, name: s.name }
       })
-      .sort((a, b) => (a.lz + a.lx) - (b.lz + b.lx)) // back-to-front for painter's algo
+      .sort((a, b) => (a.lz + a.lx) - (b.lz + b.lx)) // back-to-front (painter)
   }, [data])
+
+  // Outer-frame color = dominant community tag in this region.
+  const tagFrame = useMemo(() => dominantTagColor(data?.systems || [], getTagColorFromAPI), [data])
 
   const named = !!region?.custom_name
   const displayName = region?.custom_name || `Region (${rx}, ${ry}, ${rz})`
-  const systemCount = data?.systems?.length ?? region?.system_count ?? 0
+  // STARS reads from the region row (canonical count), not the fetch length
+  // — fetches cap at 600 so dense regions used to underreport.
+  const systemCount = region?.system_count ?? data?.systems?.length ?? 0
 
   // Cube vertices for the wireframe
   const cubeEdges = useMemo(() => {
@@ -135,8 +160,18 @@ export default function RegionThumb({ routeKey }) {
   const cx = 130
   const cy = H / 2
 
+  // Frame color sourced from dominant community tag; falls back to teal.
+  const frameColor = tagFrame?.color || POSTER_COLORS.primary
   return (
     <PosterFrame width={W} height={H} padded={false}>
+      {/* Outer 4px frame — community tag color */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        border: `4px solid ${frameColor}`,
+        borderRadius: 0,
+        pointerEvents: 'none',
+        zIndex: 30,
+      }} />
       <div style={{
         position: 'absolute', inset: 0,
         background: `radial-gradient(120% 70% at 35% 50%, rgba(157,78,221,0.16) 0%, transparent 60%), linear-gradient(135deg, #0f1538 0%, ${POSTER_COLORS.bgPoster} 100%)`,

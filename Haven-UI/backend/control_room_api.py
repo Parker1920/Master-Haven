@@ -1612,6 +1612,15 @@ async def on_startup():
     # Pi freeze, where a long-held reader kept the WAL from rolling back.
     asyncio.create_task(_periodic_wal_checkpoint())
 
+    # Periodic poster cache eviction. Walks Haven-UI/data/posters/, totals
+    # disk usage every 30 minutes, evicts oldest cache rows when over the
+    # 4 GB ceiling down to 3.5 GB floor. See services/poster_service.py.
+    try:
+        from services.poster_service import periodic_eviction_task
+        asyncio.create_task(periodic_eviction_task())
+    except Exception as e:
+        logger.warning(f'Poster eviction task failed to schedule: {e}')
+
 
 @app.on_event('shutdown')
 async def on_shutdown():

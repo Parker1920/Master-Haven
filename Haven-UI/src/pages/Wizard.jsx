@@ -42,6 +42,7 @@ import useFormDirty from '../hooks/useFormDirty'
 import WizardModeGate from '../components/wizard/WizardModeGate'
 import WizardSidebar from '../components/wizard/WizardSidebar'
 import WizardPreviewPanel from '../components/wizard/WizardPreviewPanel'
+import WizardAdvancedPreview from '../components/wizard/WizardAdvancedPreview'
 import WizardProgressBar from '../components/wizard/WizardProgressBar'
 import WizardModeToolbar from '../components/wizard/WizardModeToolbar'
 import EditModeBanner from '../components/wizard/EditModeBanner'
@@ -1158,7 +1159,12 @@ export default function Wizard() {
           )}
         </div>
 
-        {flow === 'advanced' && <WizardPreviewPanel system={system} gradeInfo={completeness} />}
+        {/* System Preview panel — mounts in BOTH flows per Parker (2026-05-11).
+            Easy flow keeps the portrait sticky right column for compactness.
+            Advanced flow uses the wider landscape preview with glyph row
+            and named co-authors. */}
+        {flow === 'easy' && <WizardPreviewPanel system={system} gradeInfo={completeness} />}
+        {flow === 'advanced' && <WizardAdvancedPreview system={system} gradeInfo={completeness} />}
       </div>
 
       </div>{/* /max-w wrapper (Basic flow only) */}
