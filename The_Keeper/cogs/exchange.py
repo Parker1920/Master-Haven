@@ -777,15 +777,3 @@ async def update_mint_settings(
         discord_user_id=discord_user_id,
         json=payload,
     )
-
-
-async def main(): api = TravelersExchangeAPI(api_key="YOUR_API_KEY")
-
-try:
-    wallet = await api.get_my_wallet(discord_user_id=123456789)
-    print(wallet)
-
-finally:
-    await api.close()
-
-if name == "main": asyncio.run(main())
