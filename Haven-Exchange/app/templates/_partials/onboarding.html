@@ -1,0 +1,46 @@
+{# Onboarding banner — included at the top of dashboard.html.
+
+State machine:
+  - logged-in user, new (created_at < 24h) AND no nation_id → full welcome + 3-step checklist
+  - has pending nation application → pending banner
+  - no nation, not new → compact "join a nation" prompt
+  - in approved nation → no banner
+#}
+
+{% if user_pending_nation and not user.nation_id %}
+<div class="card" style="margin-bottom: var(--space-lg); border-left: 4px solid var(--accent);">
+    <div class="card-body">
+        <h3 style="margin: 0 0 var(--space-sm); display: flex; align-items: center; gap: var(--space-xs);">
+            <span style="font-size: 1.25em;">&#9203;</span> Your nation application is pending
+        </h3>
+        <p class="text-muted" style="margin-bottom: 0;">
+            <strong>{{ user_pending_nation.name }}</strong> is waiting on World Mint review. You&rsquo;ll be notified once it&rsquo;s approved &mdash; then you can open shops, charter banks, and distribute coin.
+        </p>
+    </div>
+</div>
+{% elif user and user.nation_id is none and is_new_user %}
+<div class="card" style="margin-bottom: var(--space-lg); border-left: 4px solid var(--accent);">
+    <div class="card-body">
+        <h3 style="margin: 0 0 var(--space-sm);">&#128075; Welcome to Travelers Exchange!</h3>
+        <p class="text-muted" style="margin-bottom: var(--space-md);">Here&rsquo;s how to get started:</p>
+        <ol style="margin: 0 0 var(--space-md); padding-left: var(--space-lg); line-height: 1.8;">
+            <li><strong>Find a community.</strong> <a href="/nations">Browse nations</a> already running on the exchange.</li>
+            <li><strong>Or start your own.</strong> <a href="/nations/apply">Apply to lead a nation</a> &mdash; the World Mint reviews and approves.</li>
+            <li><strong>Read the docs.</strong> <a href="/docs">Learn how the economy, banks, and stocks work</a>.</li>
+        </ol>
+    </div>
+</div>
+{% elif user and user.nation_id is none %}
+<div class="card" style="margin-bottom: var(--space-lg);">
+    <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
+        <div>
+            <strong>You&rsquo;re not in a nation yet.</strong>
+            <p class="text-muted" style="margin: var(--space-xs) 0 0;">Join an existing nation or apply to lead a new one.</p>
+        </div>
+        <div class="btn-group">
+            <a href="/nations" class="btn btn-secondary btn-sm">Browse Nations</a>
+            <a href="/nations/apply" class="btn btn-primary btn-sm">Apply to lead</a>
+        </div>
+    </div>
+</div>
+{% endif %}

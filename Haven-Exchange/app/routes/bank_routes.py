@@ -1189,3 +1189,154 @@ def update_settings(
         "interest_rate_cap_bps": gs.interest_rate_cap_bps,
         "interest_burn_rate_bps": gs.interest_burn_rate_bps,
     }
+
+
+# ---------------------------------------------------------------------------
+# Citizen-initiated loan application + single-loan detail
+# (mirrors website /loans/apply and /loans/{id})
+# ---------------------------------------------------------------------------
+
+class LoanApplyRequest(BaseModel):
+    bank_id: int
+    amount: int
+    memo: str | None = None
+
+
+@router.post("/api/loans/apply")
+def loan_apply(
+    payload: LoanApplyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Citizen self-service loan application against an active bank in
+    their nation.  Mirrors the website /loans/apply form.
+    """
+    bank = db.execute(select(Bank).where(Bank.id == payload.bank_id)).scalar_one_or_none()
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Bank not found.")
+    if not bank.is_active:
+        raise HTTPException(status_code=400, detail="Bank is not active.")
+    if current_user.nation_id != bank.nation_id:
+        raise HTTPException(status_code=403, detail="You must be a member of the bank's nation.")
+
+    active = db.execute(
+        select(Loan).where(Loan.borrower_id == current_user.id, Loan.status == "active")
+    ).scalar_one_or_none()
+    if active is not None:
+        raise HTTPException(status_code=409, detail="You already have an active loan.")
+
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive.")
+    if bank.balance < payload.amount:
+        raise HTTPException(status_code=400, detail="Bank has insufficient reserves.")
+
+    gs = _get_global_settings(db)
+
+    try:
+        create_transaction(
+            db,
+            tx_type="LOAN",
+            from_address=bank.wallet_address,
+            to_address=current_user.wallet_address,
+            amount=payload.amount,
+            memo=f"Loan from {bank.name}: {payload.memo or 'No memo'}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    bank.total_loaned += payload.amount
+
+    loan = Loan(
+        bank_id=bank.id,
+        lender_type="bank",
+        lender_wallet_address=bank.wallet_address,
+        borrower_id=current_user.id,
+        principal=payload.amount,
+        outstanding=payload.amount,
+        cap_amount=payload.amount,
+        interest_rate=gs.interest_rate_cap_bps,
+        burn_rate_snapshot=gs.burn_rate_bps,
+        interest_burn_rate_snapshot=gs.interest_burn_rate_bps,
+        status="active",
+        memo=payload.memo,
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+
+    return {
+        "success": True,
+        "loan_id": loan.id,
+        "principal": loan.principal,
+        "outstanding": loan.outstanding,
+        "interest_rate_bps": loan.interest_rate,
+    }
+
+
+@router.get("/api/loans/{loan_id}")
+def get_loan_detail(
+    loan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Single-loan detail.  Visible to the borrower, the bank operator,
+    the borrower's nation leader, or World Mint.
+    """
+    loan = db.execute(select(Loan).where(Loan.id == loan_id)).scalar_one_or_none()
+    if loan is None:
+        raise HTTPException(status_code=404, detail="Loan not found.")
+
+    can_view = current_user.id == loan.borrower_id or current_user.role == "world_mint"
+    if not can_view and loan.bank_id > 0:
+        bank = db.execute(select(Bank).where(Bank.id == loan.bank_id)).scalar_one_or_none()
+        if bank and (bank.owner_id == current_user.id):
+            can_view = True
+        if bank:
+            nation = db.execute(select(Nation).where(Nation.id == bank.nation_id)).scalar_one_or_none()
+            if nation and nation.leader_id == current_user.id:
+                can_view = True
+    if not can_view and loan.bank_id == 0 and loan.treasury_nation_id:
+        nation = db.execute(select(Nation).where(Nation.id == loan.treasury_nation_id)).scalar_one_or_none()
+        if nation and nation.leader_id == current_user.id:
+            can_view = True
+    if not can_view:
+        raise HTTPException(status_code=403, detail="Not authorized to view this loan.")
+
+    payments = list(
+        db.execute(
+            select(LoanPayment).where(LoanPayment.loan_id == loan.id).order_by(LoanPayment.created_at.asc())
+        ).scalars().all()
+    )
+
+    return {
+        "id": loan.id,
+        "borrower_id": loan.borrower_id,
+        "lender_type": loan.lender_type,
+        "lender_wallet_address": loan.lender_wallet_address,
+        "bank_id": loan.bank_id if loan.bank_id > 0 else None,
+        "treasury_nation_id": loan.treasury_nation_id,
+        "principal": loan.principal,
+        "outstanding": loan.outstanding,
+        "accrued_interest": loan.accrued_interest,
+        "cap_amount": loan.cap_amount,
+        "interest_rate_bps": loan.interest_rate,
+        "burn_rate_bps": loan.burn_rate_snapshot,
+        "interest_burn_rate_bps": loan.interest_burn_rate_snapshot,
+        "status": loan.status,
+        "memo": loan.memo,
+        "created_at": loan.created_at.isoformat() if loan.created_at else None,
+        "total_interest_paid": loan.total_interest_paid,
+        "total_burned_during_payments": loan.total_burned_during_payments,
+        "final_close_burn": loan.final_close_burn,
+        "payments": [
+            {
+                "id": p.id,
+                "amount": p.amount,
+                "interest_portion": p.interest_portion,
+                "principal_portion": p.principal_portion,
+                "is_final_payment": bool(p.is_final_payment),
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in payments
+        ],
+    }

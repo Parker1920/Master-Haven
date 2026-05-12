@@ -55,9 +55,29 @@
                             <span class="status-badge status-{{ n.status }}">{{ n.status }}</span>
                         </td>
                         <td>{{ n.member_count }}</td>
-                        <td>
+                        <td style="white-space: nowrap;">
                             <a href="/mint/nations/{{ n.id }}/edit-identity" class="btn btn-sm btn-secondary">Edit</a>
                             <a href="/nations/{{ n.id }}" class="btn btn-sm btn-secondary">View</a>
+                            {% if n.status == 'pending' %}
+                                <form action="/mint/nations/{{ n.id }}/approve" method="POST" style="display: inline;"
+                                      data-confirm="Approve nation '{{ n.name }}'?">
+                                    <button type="submit" class="btn btn-sm btn-primary">Approve</button>
+                                </form>
+                                <form action="/mint/nations/{{ n.id }}/reject" method="POST" style="display: inline;"
+                                      data-confirm="Reject nation '{{ n.name }}'? This cannot be undone.">
+                                    <button type="submit" class="btn btn-sm btn-danger">Reject</button>
+                                </form>
+                            {% elif n.status == 'approved' %}
+                                <form action="/mint/nations/{{ n.id }}/suspend" method="POST" style="display: inline;"
+                                      data-confirm="Suspend nation '{{ n.name }}'? Leader will be demoted to citizen.">
+                                    <button type="submit" class="btn btn-sm btn-danger">Suspend</button>
+                                </form>
+                            {% elif n.status == 'suspended' %}
+                                <form action="/mint/nations/{{ n.id }}/unsuspend" method="POST" style="display: inline;"
+                                      data-confirm="Restore nation '{{ n.name }}'? Leader will be re-promoted.">
+                                    <button type="submit" class="btn btn-sm btn-primary">Restore</button>
+                                </form>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}

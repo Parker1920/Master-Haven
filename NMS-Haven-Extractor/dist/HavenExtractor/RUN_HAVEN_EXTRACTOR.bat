@@ -1,7 +1,7 @@
 @echo off
-title Haven Extractor v1.6.7
+title Haven Extractor v1.9.7
 echo ============================================================
-echo   HAVEN EXTRACTOR v1.6.7 - Batch Mode
+echo   HAVEN EXTRACTOR v1.9.7 - Batch Mode
 echo   For No Man's Sky
 echo ============================================================
 echo.
@@ -15,6 +15,24 @@ if not exist "python\python.exe" (
     echo Please ensure the package was extracted correctly.
     pause
     exit /b 1
+)
+
+REM Pre-flight: ensure numpy is installed (required for procedural name generation).
+REM The auto-updater (haven_updater.ps1) installs numpy too, but this catches the case
+REM where someone copied the folder from a friend or restored from a backup without
+REM ever running FIRST_TIME_SETUP.bat or UPDATE_HAVEN_EXTRACTOR.bat.
+python\python.exe -c "import numpy" >nul 2>&1
+if errorlevel 1 (
+    echo Numpy missing - installing for procedural name generation...
+    python\python.exe -m pip install numpy --quiet
+    if errorlevel 1 (
+        echo WARNING: numpy install failed. Procedural name generation will be unavailable.
+        echo You can install manually: python\python.exe -m pip install numpy
+        echo.
+    ) else (
+        echo Numpy installed.
+        echo.
+    )
 )
 
 REM API URL is hardcoded in the mod - always enabled!

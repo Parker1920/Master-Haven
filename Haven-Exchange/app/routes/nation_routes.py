@@ -660,3 +660,171 @@ def reject_stimulus_proposal(
     db.commit()
 
     return _proposal_to_dict(proposal)
+
+
+# ---------------------------------------------------------------------------
+# Nation self-service edits — mirrors website /nation/settings,
+# /nations/{id}/edit-description.  Bot-callable.
+# ---------------------------------------------------------------------------
+
+import re as _re_id
+
+
+class EditNationDescriptionRequest(BaseModel):
+    description: str | None = None
+
+
+class EditNationIdentityRequest(BaseModel):
+    name: str | None = None
+    currency_name: str | None = None
+    currency_code: str | None = None
+    discord_invite: str | None = None
+    game: str | None = None
+
+
+@router.post("/{nation_id}/edit-description")
+def edit_nation_description(
+    nation_id: int,
+    payload: EditNationDescriptionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    nation = db.execute(select(Nation).where(Nation.id == nation_id)).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+    if nation.leader_id != current_user.id and current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Only the nation leader may edit the description.")
+    nation.description = (payload.description or "").strip() or None
+    db.commit()
+    return {"success": True}
+
+
+@router.put("/{nation_id}/identity")
+def edit_nation_identity(
+    nation_id: int,
+    payload: EditNationIdentityRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Leader-only nation identity edit (name, currency, discord, game)."""
+    nation = db.execute(select(Nation).where(Nation.id == nation_id)).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+    if nation.leader_id != current_user.id and current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Only the nation leader may edit identity.")
+
+    # Name (optional)
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty.")
+        if new_name != nation.name:
+            clash = db.execute(
+                select(Nation).where(Nation.name == new_name, Nation.id != nation.id)
+            ).scalar_one_or_none()
+            if clash is not None:
+                raise HTTPException(status_code=409, detail="Nation name already taken.")
+            nation.name = new_name
+
+    # Currency code
+    if payload.currency_code is not None:
+        cc = payload.currency_code.strip().upper() or None
+        if cc and not _re_id.match(r"^[A-Z]{2,8}$", cc):
+            raise HTTPException(status_code=400, detail="Currency code must be 2-8 uppercase letters.")
+        if cc and cc != nation.currency_code:
+            clash = db.execute(
+                select(Nation).where(Nation.currency_code == cc, Nation.id != nation.id)
+            ).scalar_one_or_none()
+            if clash is not None:
+                raise HTTPException(status_code=409, detail=f"Currency code {cc} is already in use.")
+        nation.currency_code = cc
+
+    # Currency name
+    if payload.currency_name is not None:
+        nation.currency_name = payload.currency_name.strip() or None
+
+    # Discord invite + game
+    if payload.discord_invite is not None:
+        nation.discord_invite = payload.discord_invite.strip() or None
+    if payload.game is not None:
+        nation.game = payload.game.strip() or None
+
+    db.commit()
+    return {
+        "success": True,
+        "name": nation.name,
+        "currency_name": nation.currency_name,
+        "currency_code": nation.currency_code,
+        "discord_invite": nation.discord_invite,
+        "game": nation.game,
+    }
+
+
+@router.get("/{nation_id}/treasury")
+def get_treasury(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Treasury overview: balance + recent distributions + allocation history.
+
+    Available to any nation member; non-members get 403.
+    """
+    nation = db.execute(select(Nation).where(Nation.id == nation_id)).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+    if current_user.nation_id != nation.id and current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Not a member of this nation.")
+
+    from app.models import Transaction, MintAllocation
+    recent = list(
+        db.execute(
+            select(Transaction)
+            .where(
+                Transaction.tx_type == "DISTRIBUTE",
+                Transaction.from_address == nation.treasury_address,
+            )
+            .order_by(Transaction.created_at.desc())
+            .limit(20)
+        ).scalars().all()
+    )
+    allocations = list(
+        db.execute(
+            select(MintAllocation)
+            .where(MintAllocation.nation_id == nation.id)
+            .order_by(MintAllocation.created_at.desc())
+            .limit(20)
+        ).scalars().all()
+    )
+    return {
+        "nation_id": nation.id,
+        "name": nation.name,
+        "treasury_address": nation.treasury_address,
+        "balance": nation.treasury_balance,
+        "currency_name": nation.currency_name,
+        "currency_code": nation.currency_code,
+        "gdp_score": nation.gdp_score,
+        "gdp_multiplier": nation.gdp_multiplier,
+        "recent_distributions": [
+            {
+                "tx_hash": t.tx_hash,
+                "to_address": t.to_address,
+                "amount": t.amount,
+                "memo": t.memo,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in recent
+        ],
+        "allocations": [
+            {
+                "id": a.id,
+                "calculated_amount": a.calculated_amount,
+                "approved_amount": a.approved_amount,
+                "status": a.status,
+                "period": a.period,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in allocations
+        ],
+    }
+# (end nation treasury endpoint)

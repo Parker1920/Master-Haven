@@ -78,15 +78,26 @@ if _ng is None:
         _embedded_python = Path(__file__).resolve().parent.parent / "python" / "python.exe"
         if not _embedded_python.exists():
             raise FileNotFoundError(f"Embedded Python not found at {_embedded_python}")
-        subprocess.check_call(
+        # subprocess.run + capture_output (drains pipes safely). Previous check_call+PIPE
+        # could deadlock on numpy's verbose install output.
+        _proc = subprocess.run(
             [str(_embedded_python), '-m', 'pip', 'install', 'numpy'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
+            capture_output=True, text=True, timeout=180
         )
+        if _proc.returncode != 0:
+            logger.error(f"[NAMEGEN] pip exit code {_proc.returncode}")
+            if _proc.stderr:
+                # Show last 20 lines of stderr — keeps log readable, captures the actual error
+                _err_tail = '\n'.join(_proc.stderr.strip().splitlines()[-20:])
+                logger.error(f"[NAMEGEN] pip stderr:\n{_err_tail}")
+            raise RuntimeError(f"pip install numpy failed (exit {_proc.returncode})")
         logger.info("[NAMEGEN] numpy auto-installed - retrying nms_namegen import")
         _ng = _import_nms_namegen()
+        if _ng is None:
+            logger.error("[NAMEGEN] numpy installed but nms_namegen import still fails - check mod/nms_namegen/ exists")
     except Exception as e:
-        logger.warning(f"[NAMEGEN] numpy auto-install failed: {e}")
-        logger.warning("[NAMEGEN] Procedural name generation unavailable - run FIRST_TIME_SETUP.bat")
+        logger.error(f"[NAMEGEN] numpy auto-install failed: {e}")
+        logger.error("[NAMEGEN] Procedural name generation unavailable - re-run FIRST_TIME_SETUP.bat or use UPDATE_HAVEN_EXTRACTOR.bat")
 
 if _ng is not None:
     nms_system_name, nms_region_name, nms_planet_name = _ng
@@ -834,8 +845,8 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.9.3"
-    __description__ = "Custom system name field for renamed systems (procgen preserved in description)"
+    __version__ = "1.9.7"
+    __description__ = "Batch upload fix: middle-of-batch systems previously got the NEXT system's lifeform / star_color / economy / planet sizes because _save_current_system_to_batch re-read sys_data at save time (which runs from the next on_system_generate, by which point NMS has overwritten the memory pool with the new system). Now snapshots system properties WHILE the current system is active, and builds the planet list from hook-captured data only - never reads cached_solar_system.maPlanets at save time."
 
     # ==========================================================================
     # VALID ADJECTIVE LISTS FROM adjectives.js
@@ -1046,6 +1057,14 @@ class HavenExtractorMod(Mod):
         # =====================================================
         self._captured_planets = {}
         self._capture_enabled = False  # Only capture after system generates
+
+        # v1.9.7: System-level properties snapshot, captured WHILE the current system is
+        # the active system in memory. Used by _save_current_system_to_batch instead of
+        # re-reading sys_data at save time. Save runs from the NEXT system's
+        # on_system_generate, by which point NMS has begun populating new sys_data into
+        # the same memory pool - re-reading there pulled the wrong system's lifeform /
+        # star_type / economy / planet count for every batched-non-last system.
+        self._current_system_snapshot = None
 
         # =====================================================
         # BATCH MODE - Store multiple star systems
@@ -1486,7 +1505,8 @@ class HavenExtractorMod(Mod):
                     return
                 else:
                     # Force-update: refresh planets and system name in existing batch entry
-                    existing_entry['planets'] = self._extract_planets(self._cached_solar_system)
+                    # v1.9.7: Use captured-only planets (same reason as below).
+                    existing_entry['planets'] = self._planets_from_captured()
                     existing_entry['planet_count'] = len(existing_entry['planets'])
                     # Update system name from coords (includes manual name if set)
                     name = coords.get('system_name', '')
@@ -1496,31 +1516,44 @@ class HavenExtractorMod(Mod):
                     logger.debug(f"[BATCH] Updated {glyph_code} with refreshed adjectives and name")
                     return
 
-            # Get system data
-            sys_data = self._cached_solar_system.mSolarSystemData
+            # v1.9.7: System-level properties come from the snapshot taken WHILE this
+            # system was live (in on_system_generate / on_creature_roles_generate /
+            # _auto_refresh_for_export). DO NOT re-read sys_data here because by save time
+            # NMS has begun populating the next system's data at the same memory pool -
+            # re-reading would pull the wrong system's lifeform/star_type/economy.
+            data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
 
-            # CRITICAL: Cache sys_data address for direct memory reads in _extract_single_planet
-            # Cache sys_data address for direct memory reads during planet extraction
+            if self._current_system_snapshot is not None:
+                # Strip private bookkeeping keys before spreading into system_data
+                sys_props = {k: v for k, v in self._current_system_snapshot.items()
+                             if not k.startswith('_')}
+                logger.info(f"[BATCH] Using snapshot for system_props (lifeform={sys_props.get('dominant_lifeform')}, star={sys_props.get('star_color')})")
+            else:
+                # Fallback: snapshot missed for some reason - re-read with the usual caveat
+                logger.warning("[BATCH] No system_props snapshot available - falling back to live sys_data read (may capture next system's data)")
+                sys_data = self._cached_solar_system.mSolarSystemData
+                sys_props = self._extract_system_properties(sys_data)
+
+            # Cache sys_data address for any code that still reads direct memory
+            # (single-extraction code paths). The batch save itself no longer relies on this.
             try:
-                self._cached_sys_data_addr = get_addressof(sys_data)
-                logger.debug(f"[BATCH] Cached sys_data address: 0x{self._cached_sys_data_addr:X}")
-            except Exception as e:
-                logger.warning(f"[BATCH] Could not get sys_data address: {e}")
+                self._cached_sys_data_addr = get_addressof(self._cached_solar_system.mSolarSystemData)
+            except Exception:
                 self._cached_sys_data_addr = None
 
             # Also cache coordinates for deterministic weather hash
             self._cached_coords = coords
 
-            # Build the system extraction
-            data_source = "captured_hook" if len(self._captured_planets) > 0 else "memory_read"
-
-            # Get system properties (includes system_name from memory)
-            sys_props = self._extract_system_properties(sys_data)
-
             # Preserve manual system name from coords if set (takes priority over memory read)
             manual_name = coords.get('system_name', '')
             has_manual_name = manual_name and not manual_name.startswith('System_')
 
+            # v1.9.7: Planets come from _planets_from_captured(), NOT from re-reading
+            # cached_solar_system.maPlanets. The hook captured each planet's data
+            # (biome/size/is_moon/flora/fauna/sentinel/weather/resources/etc.) WHILE the
+            # system was active. Re-reading maPlanets at save time pulls the next system's
+            # planet names through the now-recycled memory, causing name-match failures
+            # in _extract_single_planet that drop moons and mix up planets/sizes/biomes.
             system_data = {
                 "extraction_time": datetime.now().isoformat(),
                 "extractor_version": self.__version__,
@@ -1530,9 +1563,9 @@ class HavenExtractorMod(Mod):
                 "captured_planet_count": len(self._captured_planets),
                 "discoverer_name": "HavenExtractor",
                 "discovery_timestamp": int(datetime.now().timestamp()),
-                **sys_props,  # System properties from memory first
+                **sys_props,  # System properties from snapshot
                 **coords,     # Coords AFTER so manual name overwrites
-                "planets": self._extract_planets(self._cached_solar_system),
+                "planets": self._planets_from_captured(),
             }
             system_data["planet_count"] = len(system_data["planets"])
 
@@ -1619,6 +1652,13 @@ class HavenExtractorMod(Mod):
             self._cached_solar_system = map_struct(addr, nms.cGcSolarSystem)
             self._pending_extraction = True
 
+            # v1.9.7: Reset and take initial system-props snapshot for the NEW system.
+            # The previous system's snapshot was already consumed by the save_to_batch call
+            # above (or wasn't needed). Take the new snapshot while memory is fresh; the
+            # planet-capture hook will refresh it as more data populates.
+            self._current_system_snapshot = None
+            self._snapshot_system_properties()
+
             # Coord resolution: mUniverseAddress primary, player_state secondary.
             # System name is procedurally generated from seed, not stored in Name field.
             # The Name field is only populated for user-renamed systems.
@@ -1672,6 +1712,11 @@ class HavenExtractorMod(Mod):
         # it becomes readable. Guard on "not yet captured any planets" removed because the
         # race window can extend past the first capture.
         self._maybe_upgrade_coords()
+
+        # v1.9.7: Refresh system-props snapshot while we KNOW the current system's sys_data
+        # is the one in memory (we're inside its planet generation). The first snapshot in
+        # on_system_generate may have fired before economy/conflict/lifeform populated.
+        self._snapshot_system_properties()
 
         # v1.6.11: Hook-fire limit enforced below per unique planet name to handle
         # the case where the hook fires for the same planet twice (was filling the
@@ -2433,7 +2478,16 @@ class HavenExtractorMod(Mod):
         v1.4.1: Silently refresh adjectives from PlanetInfo before export.
         Reads PlanetInfo display strings and resolves adjectives without verbose logging.
         Ensures _captured_planets has the latest text IDs resolved through _resolve_adjective().
+
+        v1.9.7: Also refreshes the system-props snapshot. Called from APPVIEW handler
+        (last system in batch) and from _save_current_system_to_batch as a safety net.
+        If the cached_solar_system is still the current/active system, the snapshot
+        captures correct system-level data; if it's already stale, _extract_system_properties
+        will read garbage but that's no worse than what happens today.
         """
+        # Always attempt a snapshot refresh - cheap, and helps even if planet refresh below skips.
+        self._snapshot_system_properties()
+
         if not self._captured_planets or not self._cached_solar_system:
             return
 
@@ -3125,6 +3179,111 @@ class HavenExtractorMod(Mod):
 
         return result
 
+    def _snapshot_system_properties(self):
+        """v1.9.7: Snapshot system-level data WHILE the current system is fresh in memory.
+
+        Stored on self._current_system_snapshot. _save_current_system_to_batch reads this
+        snapshot instead of re-reading sys_data at save time (which by then reflects the
+        NEXT system because NMS recycles sys_data memory for the new system before our
+        save runs in the next on_system_generate).
+
+        Safe to call multiple times - later calls override earlier ones with whatever
+        memory has populated by then. Best to call it both immediately after the new
+        solar_system is cached AND from on_creature_roles_generate as a refresh.
+        """
+        if self._cached_solar_system is None:
+            return
+        try:
+            sys_data = self._cached_solar_system.mSolarSystemData
+            props = self._extract_system_properties(sys_data)
+            # Also snapshot planet count, prime planets, and the fresh sys_data_addr so
+            # the batch save can use the same direct-memory codepath without re-resolving.
+            sys_data_addr = get_addressof(sys_data)
+            planets_count = None
+            prime_planets = None
+            if sys_data_addr and sys_data_addr > 0x10000:
+                pc = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PLANETS_COUNT)
+                pp = self._read_int32(sys_data_addr, SolarSystemDataOffsets.PRIME_PLANETS)
+                if 0 < pc <= 6:
+                    planets_count = pc
+                if 0 <= pp <= 6:
+                    prime_planets = pp
+            props["_planets_count"] = planets_count
+            props["_prime_planets"] = prime_planets
+            self._current_system_snapshot = props
+            logger.info(
+                f"  [SNAPSHOT] system_props: star={props.get('star_color')}, "
+                f"economy={props.get('economy_type')}/{props.get('economy_strength')}, "
+                f"conflict={props.get('conflict_level')}, "
+                f"lifeform={props.get('dominant_lifeform')}, "
+                f"no_data={props.get('no_trade_data', False)}, "
+                f"planets={planets_count}"
+            )
+        except Exception as e:
+            logger.warning(f"  [SNAPSHOT] system_props snapshot failed: {e}")
+
+    def _planet_from_captured(self, captured: dict, index: int) -> dict:
+        """v1.9.7: Build a planet result dict from captured hook data only.
+
+        Used in batch mode where reading from cached_solar_system.maPlanets[i] returns
+        the NEXT system's planet data (memory recycled). Captured data was gathered while
+        the actual system was active in memory, so it's authoritative for the batched
+        system's planets.
+
+        Mirrors the shape produced by _extract_single_planet for the fields Haven UI cares
+        about. Fields we don't have in captured (planet_seed, has_rings, late-bound
+        extraction-time flags) are omitted - the backend treats missing fields as
+        unknown/null, which is honest given we couldn't read them with a fresh system.
+        """
+        result = {
+            "planet_index": index,
+            "planet_name": captured.get('planet_name') or f"Planet_{index + 1}",
+            "biome": captured.get('biome', 'Unknown'),
+            "biome_subtype": captured.get('biome_subtype', 'Unknown'),
+            "weather": captured.get('weather', 'Unknown'),
+            "sentinel_level": captured.get('sentinel', 'Unknown'),
+            "flora_level": captured.get('flora', 'Unknown'),
+            "fauna_level": captured.get('fauna', 'Unknown'),
+            "common_resource": captured.get('common_resource', '') or 'Unknown',
+            "uncommon_resource": captured.get('uncommon_resource', '') or 'Unknown',
+            "rare_resource": captured.get('rare_resource', '') or 'Unknown',
+            "is_moon": bool(captured.get('is_moon', False)),
+            "planet_size": captured.get('planet_size', 'Unknown'),
+        }
+        # Optional flags set during hook processing - only include if truthy
+        for flag in ("ancient_bones", "salvageable_scrap", "storm_crystals",
+                     "gravitino_balls", "vile_brood", "infested"):
+            if captured.get(flag):
+                result[flag] = captured[flag]
+        # Translate resource names from internal IDs to display strings
+        for res_key in ("common_resource", "uncommon_resource", "rare_resource"):
+            val = result.get(res_key)
+            if val and val != "Unknown":
+                result[res_key] = translate_resource(val)
+        # Hidden substance fix (matches _extract_single_planet behavior)
+        for res_key in ("common_resource", "uncommon_resource", "rare_resource"):
+            if result[res_key] in HIDDEN_SUBSTANCE_NAMES or result[res_key] in HIDDEN_SUBSTANCE_IDS:
+                result[res_key] = "Rusted Metal"
+        # Derive plant_resource from biome (only if flora > 0)
+        biome = result.get("biome", "Unknown")
+        biome_subtype = result.get("biome_subtype", "Unknown")
+        plant_resource = BIOME_SUBTYPE_PLANT_OVERRIDE.get(biome_subtype, "") or BIOME_PLANT_RESOURCE.get(biome, "")
+        if plant_resource and captured.get('flora_raw', -1) > 0:
+            result["plant_resource"] = plant_resource
+        return result
+
+    def _planets_from_captured(self) -> list:
+        """v1.9.7: Build the full planet list from _captured_planets, preserving insertion
+        order (= slot order at capture time). Used by _save_current_system_to_batch.
+        """
+        planets = []
+        for i, (name, captured) in enumerate(self._captured_planets.items()):
+            planets.append(self._planet_from_captured(captured, i))
+        moon_count = sum(1 for p in planets if p.get('is_moon', False))
+        planet_count = len(planets) - moon_count
+        logger.info(f"  [CAPTURED-ONLY] {planet_count} planets + {moon_count} moons from {len(self._captured_planets)} captures")
+        return planets
+
     def _extract_planets(self, solar_system) -> list:
         """Extract planet data - ONLY valid slots based on Planets count."""
         planets = []
@@ -3749,13 +3908,75 @@ class HavenExtractorMod(Mod):
     # is a single packed uint64 on mPlanetDiscoveryData — one offset vs. five, so
     # far more resilient to NMS updates.
 
-    def _read_galaxy_from_player_state(self) -> int:
-        """Read galaxy index from player_state.mLocation.RealityIndex.
+    def _read_galaxy_from_solar_system_direct(self) -> Optional[int]:
+        """Read galaxy index from per-planet GenInput RealityIndex via direct memory.
 
-        mUniverseAddress (packed uint64 on cGcDiscoveryData) does NOT contain the galaxy —
-        it's just the packed GalacticAddress (coords + system + planet). The galaxy is only
-        available from the player state's RealityIndex field, which is a separate int32 at
-        offset 0x14 in the full cGcUniverseAddressData struct.
+        v1.9.5: PRIMARY galaxy source — replaces the broken player_state path.
+
+        IMPORTANT (v1.9.5 fix): computes sys_data_addr FRESH from self._cached_solar_system
+        every call. The previous v1.9.4 implementation used self._cached_sys_data_addr which
+        is only set inside _save_current_system_to_batch / _do_extraction — both of which run
+        AFTER coord resolution. So during on_system_generate's _maybe_upgrade_coords() call,
+        the cached attr was either None (first warp ever) or pointing at the previously-saved
+        system (whose memory may have been freed). The whole reason _read_galaxy_from_player_state
+        kept getting hit (and returning 0 = Euclid) was that this gate failed every time.
+
+        cGcPlanetGenerationInputData.RealityIndex sits at offset 0x44 within each per-planet
+        entry of the PLANET_GEN_INPUTS array on cGcSolarSystemData (sys_data + 0x1EA0).
+        cGcSolarSystem.mSolarSystemData is at offset 0x0 of the solar system, so the addresses
+        coincide. Reading via the same path used for biome/size/resources, which produce correct
+        values in production — so this is guaranteed-stable.
+
+        Slot 0 only — v1.6.11 noted slots 1-5 have shifted stride post-Voyagers and produce
+        garbage values, but slot 0 is canonical.
+
+        Returns the galaxy index, or None if the read failed (caller should fall back).
+        """
+        # Resolve sys_data_addr fresh from the cached solar system. This is the one piece of
+        # state we KNOW is set before _maybe_upgrade_coords runs (on_system_generate sets it
+        # at line 1630 before calling _maybe_upgrade_coords at line 1641).
+        sys_data_addr = None
+        try:
+            if self._cached_solar_system is not None:
+                sys_data = self._cached_solar_system.mSolarSystemData
+                sys_data_addr = get_addressof(sys_data)
+        except Exception as e:
+            logger.info(f"  [GALAXY] direct: failed to get sys_data addr from cached solar system: {e}")
+
+        # Fall back to the lazily-cached address if the fresh read failed (covers the rare
+        # case where _do_extraction set it but _cached_solar_system was cleared).
+        if not sys_data_addr:
+            sys_data_addr = self._cached_sys_data_addr
+
+        if not sys_data_addr:
+            logger.info("  [GALAXY] direct: no sys_data address available (cached_solar_system is None and no fallback addr)")
+            return None
+
+        try:
+            # PLANET_GEN_INPUTS array starts at sys_data + 0x1EA0; slot 0 = +0; REALITY_INDEX = +0x44
+            reality_addr_offset = SolarSystemDataOffsets.PLANET_GEN_INPUTS + PlanetGenInputOffsets.REALITY_INDEX
+            raw_reality = self._read_int32(sys_data_addr, reality_addr_offset)
+            # v1.9.5: log the address being read so we can verify it changed across warps —
+            # if the address stays the same across galaxies, the cached_solar_system isn't
+            # being updated correctly. If the value at that address is wrong, the offset is wrong.
+            logger.info(
+                f"  [GALAXY] direct: sys_data=0x{sys_data_addr:X} +0x{reality_addr_offset:X} "
+                f"-> raw={raw_reality} ({get_galaxy_name(raw_reality) if 0 <= raw_reality <= 255 else 'OUT OF RANGE'})"
+            )
+            if 0 <= raw_reality <= 255:
+                return raw_reality
+            return None
+        except Exception as e:
+            logger.info(f"  [GALAXY] direct read failed: {e}")
+            return None
+
+    def _read_galaxy_from_player_state(self) -> int:
+        """SECONDARY galaxy source: player_state.mLocation.RealityIndex.
+
+        Post-Voyagers this returns 0 (Euclid) consistently because the nmspy mLocation
+        offset (0x180) shifted — kept as a fallback only for cases where _cached_sys_data_addr
+        is unavailable (e.g., extraction without a cached solar system). Direct GenInput
+        read is the v1.9.4 primary path; this should rarely fire.
 
         Returns 0 (Euclid) if the read fails.
         """
@@ -3765,16 +3986,23 @@ class HavenExtractorMod(Mod):
                 return 0
             location = player_state.mLocation
             raw_reality = self._safe_int(location.RealityIndex)
-            # v1.9.3: INFO-level so production logs show what's being read — needed to
-            # diagnose the "always Euclid" reports where we can't tell if RealityIndex is
-            # genuinely 0 or if the struct offset has shifted post-Voyagers.
-            logger.info(f"  [GALAXY] RealityIndex={raw_reality} -> {get_galaxy_name(raw_reality) if 0 <= raw_reality <= 255 else 'OUT OF RANGE'}")
+            logger.info(f"  [GALAXY] player_state RealityIndex={raw_reality} -> {get_galaxy_name(raw_reality) if 0 <= raw_reality <= 255 else 'OUT OF RANGE'}")
             if 0 <= raw_reality <= 255:
                 return raw_reality
             return 0
         except Exception as e:
             logger.info(f"  [GALAXY] Failed to read RealityIndex: {e}")
             return 0
+
+    def _resolve_galaxy_index(self) -> int:
+        """Resolve current galaxy index. Primary: direct sys_data read. Fallback: player_state.
+
+        Centralizes the v1.9.4 fallback ordering so all callers stay in sync.
+        """
+        direct = self._read_galaxy_from_solar_system_direct()
+        if direct is not None:
+            return direct
+        return self._read_galaxy_from_player_state()
 
     def _coords_look_valid(self, voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
         """Reject all-zero (impossible universe origin) and out-of-range galaxy."""
@@ -3834,8 +4062,10 @@ class HavenExtractorMod(Mod):
                 return None
 
             # v1.9.0: Galaxy is NOT in mUniverseAddress (it's only the packed GalacticAddress).
-            # Read galaxy separately from player_state.mLocation.RealityIndex.
-            galaxy_idx = self._read_galaxy_from_player_state()
+            # v1.9.4: Use _resolve_galaxy_index() which reads from per-planet GenInput direct
+            # memory (primary) and falls back to player_state.mLocation.RealityIndex (broken
+            # post-Voyagers — returns 0 — kept only for the no-cached-sys-data edge case).
+            galaxy_idx = self._resolve_galaxy_index()
             galaxy_name = get_galaxy_name(galaxy_idx)
 
             system_name = self._get_actual_system_name() or self._generate_system_name(
@@ -3886,17 +4116,15 @@ class HavenExtractorMod(Mod):
             voxel_z = self._safe_int(galactic_addr.VoxelZ)
             system_idx = self._safe_int(galactic_addr.SolarSystemIndex)
             planet_idx = self._safe_int(galactic_addr.PlanetIndex)
-            raw_reality = self._safe_int(location.RealityIndex)
-            # v1.8.1 (Fix 1+3): Log the raw RealityIndex value for forensic debugging AND
-            # reject out-of-range reads instead of silently defaulting to 0 (Euclid).
-            # Silent clamping was producing fake Euclid submissions for players warping to
-            # non-Euclid galaxies when the Voyagers-broken struct returned garbage.
-            # v1.9.3: INFO-level so fallback-path galaxy reads are visible in prod logs.
-            logger.info(f"  [{source_label}] raw RealityIndex={raw_reality}, voxel=[{voxel_x},{voxel_y},{voxel_z}], sys={system_idx}")
-            if raw_reality < 0 or raw_reality > 255:
-                logger.info(f"  [{source_label}] rejected: RealityIndex={raw_reality} out of range (0-255) — not fabricating Euclid")
+            # v1.9.4: Prefer the direct GenInput read (which works post-Voyagers) over the
+            # broken player_state.mLocation.RealityIndex chain. _resolve_galaxy_index() falls
+            # through to player_state if sys_data isn't cached.
+            raw_reality_ps = self._safe_int(location.RealityIndex)
+            galaxy_idx = self._resolve_galaxy_index()
+            logger.info(f"  [{source_label}] player_state RealityIndex={raw_reality_ps}, resolved galaxy_idx={galaxy_idx}, voxel=[{voxel_x},{voxel_y},{voxel_z}], sys={system_idx}")
+            if galaxy_idx < 0 or galaxy_idx > 255:
+                logger.info(f"  [{source_label}] rejected: galaxy_idx={galaxy_idx} out of range (0-255) — not fabricating Euclid")
                 return None
-            galaxy_idx = raw_reality
             if not self._coords_look_valid(voxel_x, voxel_y, voxel_z, system_idx, galaxy_idx):
                 logger.debug(f"  [{source_label}] failed sanity: X={voxel_x},Y={voxel_y},Z={voxel_z},Sys={system_idx},Galaxy={galaxy_idx}")
                 return None

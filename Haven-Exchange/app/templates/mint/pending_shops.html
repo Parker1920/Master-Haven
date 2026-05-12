@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Shops — World Mint — Travelers Exchange{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Pending Shops</h1>
+    <p class="page-subtitle">Shops awaiting World Mint review across all nations</p>
+</div>
+
+<div class="btn-group mb-xl">
+    <a href="/mint" class="btn btn-secondary">Back to Mint Dashboard</a>
+</div>
+
+{% if pending_shops %}
+<div class="card mb-xl">
+    <div class="card-header">
+        <h3>{{ pending_shops | length }} pending</h3>
+    </div>
+    <div class="card-body">
+        <div class="pending-nations-grid">
+            {% for shop in pending_shops %}
+            <div class="pending-nation-card">
+                <div class="pending-nation-info">
+                    <h4>{{ shop.name }}</h4>
+                    <span class="nation-game-tag" style="font-size: 0.75rem;">{{ shop.nation_name }}</span>
+                    {% if shop.description %}
+                        <p class="text-muted" style="font-size: 0.875rem; margin-top: var(--space-sm); margin-bottom: var(--space-sm);">
+                            {{ shop.description[:160] }}{{ '...' if shop.description | length > 160 else '' }}
+                        </p>
+                    {% endif %}
+                    <small class="text-muted">
+                        Owner: <strong>{{ shop.owner_name }}</strong> &mdash;
+                        Submitted: {{ shop.created_at.strftime('%Y-%m-%d %H:%M') if shop.created_at else '—' }}
+                    </small>
+                </div>
+                <div class="pending-nation-actions">
+                    <form action="/mint/shops/{{ shop.id }}/approve" method="POST" style="display: inline;"
+                          data-confirm="Approve shop '{{ shop.name }}' in {{ shop.nation_name }}?">
+                        <button type="submit" class="btn btn-sm btn-primary">Approve</button>
+                    </form>
+                    <form action="/mint/shops/{{ shop.id }}/reject" method="POST" style="display: inline-flex; gap: var(--space-xs); align-items: center;"
+                          data-confirm="Reject shop '{{ shop.name }}'?">
+                        <input type="text" name="reason" placeholder="Reason (optional)" class="form-control" style="font-size: 0.85rem; padding: var(--space-xs) var(--space-sm);">
+                        <button type="submit" class="btn btn-sm btn-danger">Reject</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">&#128722;</div>
+            <h3>No pending shops</h3>
+            <p>All shops have been reviewed.</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

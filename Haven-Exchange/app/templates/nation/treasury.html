@@ -2,6 +2,16 @@
 
 {% block title %}{{ nation.name }} Treasury — Travelers Exchange{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb"><div class="breadcrumb-inner">
+    <a href="/dashboard">Dashboard</a>
+    <span class="crumb-sep">›</span>
+    <a href="/nations/{{ nation.id }}">{{ nation.name }}</a>
+    <span class="crumb-sep">›</span>
+    <span class="crumb-current">Treasury</span>
+</div></div>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>{{ nation.name }} — Treasury</h1>

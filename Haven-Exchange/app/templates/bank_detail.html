@@ -2,6 +2,16 @@
 
 {% block title %}{{ bank.name }} — Travelers Exchange{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb"><div class="breadcrumb-inner">
+    <a href="/dashboard">Dashboard</a>
+    <span class="crumb-sep">›</span>
+    <a href="/banks/nation/{{ bank.nation_id }}">Banks</a>
+    <span class="crumb-sep">›</span>
+    <span class="crumb-current">{{ bank.name }}</span>
+</div></div>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>{{ bank.name }}</h1>

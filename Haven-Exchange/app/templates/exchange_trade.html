@@ -2,6 +2,18 @@
 
 {% block title %}Trade {{ stock.ticker }} — Travelers Exchange{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb"><div class="breadcrumb-inner">
+    <a href="/dashboard">Dashboard</a>
+    <span class="crumb-sep">›</span>
+    <a href="/exchange">Exchange</a>
+    <span class="crumb-sep">›</span>
+    <a href="/exchange/{{ stock.ticker }}">{{ stock.ticker }}</a>
+    <span class="crumb-sep">›</span>
+    <span class="crumb-current">Trade</span>
+</div></div>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>

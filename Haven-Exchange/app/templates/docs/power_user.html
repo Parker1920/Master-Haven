@@ -21,8 +21,15 @@
     <a href="/docs" class="marketing-nav-link active">Docs</a>
   </div>
   <div class="marketing-nav-actions">
-    <a href="/login" class="btn-mkt btn-mkt-secondary">Login</a>
-    <a href="/register" class="btn-mkt btn-mkt-primary">Register</a>
+    {% if user %}
+      <a href="/dashboard" class="btn-mkt btn-mkt-secondary">Dashboard</a>
+      <form action="/logout" method="POST" style="display:inline;">
+        <button type="submit" class="btn-mkt btn-mkt-primary">Logout</button>
+      </form>
+    {% else %}
+      <a href="/login" class="btn-mkt btn-mkt-secondary">Login</a>
+      <a href="/register" class="btn-mkt btn-mkt-primary">Register</a>
+    {% endif %}
   </div>
 </nav>
 

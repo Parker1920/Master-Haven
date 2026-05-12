@@ -18,7 +18,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.blockchain import create_genesis_block
 from app.config import settings
 from app.database import SessionLocal, init_db
-from app.models import Bank, GdpSnapshot, GlobalSettings, Loan, LoanPayment, StimulusProposal, User  # noqa: F401  — ensures models are registered with Base
+from app.models import ApiKey, Bank, GdpSnapshot, GlobalSettings, Loan, LoanPayment, StimulusProposal, User  # noqa: F401  — ensures models are registered with Base
 from app.routes.mint_routes import router as mint_router
 from app.routes.nation_routes import router as nation_router
 from app.routes.page_routes import router as page_router
@@ -65,6 +65,75 @@ app.include_router(bank_router)
 from app.routes.docs_routes import router as docs_router
 app.include_router(docs_router)
 app.include_router(page_router)
+
+
+# ---------------------------------------------------------------------------
+# Bot rate-limiting middleware (Keeper integration P0, Q4)
+# ---------------------------------------------------------------------------
+# In-process windowed counter.  Limits:
+#   - 600 mutating req/min/key
+#   -  60 mutating req/min/discord_id
+# "Mutating" = HTTP method other than GET/HEAD/OPTIONS.  Only applies when
+# Authorization: Bearer is present (i.e. bot traffic).  Browser sessions
+# are not throttled here.  Single-process uvicorn is the deployment model
+# for Travelers Exchange; if we ever scale to multi-worker, swap this for
+# Redis.
+import time as _time
+from collections import deque
+from threading import Lock as _Lock
+
+_RATE_KEY_LIMIT = 600
+_RATE_USER_LIMIT = 60
+_RATE_WINDOW_SECONDS = 60
+
+_rate_buckets: dict[str, deque] = {}
+_rate_lock = _Lock()
+
+
+def _rate_check(bucket_key: str, limit: int) -> bool:
+    """Return True if the request is allowed, False if it exceeds limit.
+
+    Uses a sliding-window deque per bucket.  O(1) amortised — the deque
+    only grows up to `limit` entries before it starts evicting from the
+    front.
+    """
+    now = _time.monotonic()
+    cutoff = now - _RATE_WINDOW_SECONDS
+    with _rate_lock:
+        dq = _rate_buckets.setdefault(bucket_key, deque(maxlen=limit + 1))
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= limit:
+            return False
+        dq.append(now)
+        return True
+
+
+@app.middleware("http")
+async def bot_rate_limit_middleware(request, call_next):
+    auth_hdr = request.headers.get("authorization") or ""
+    if (
+        request.method not in ("GET", "HEAD", "OPTIONS")
+        and auth_hdr.lower().startswith("bearer ")
+    ):
+        token = auth_hdr.split(None, 1)[1].strip()
+        # Bucket by the prefix (cheap, avoids hashing) + discord_id.
+        prefix = token[:12] if token else "unknown"
+        if not _rate_check(f"key:{prefix}", _RATE_KEY_LIMIT):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                {"detail": f"Bot key rate limit exceeded ({_RATE_KEY_LIMIT}/min)."},
+                status_code=429,
+            )
+        discord_id = request.headers.get("x-discord-user-id") or ""
+        if discord_id:
+            if not _rate_check(f"user:{discord_id.strip()}", _RATE_USER_LIMIT):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    {"detail": f"Per-user rate limit exceeded ({_RATE_USER_LIMIT}/min)."},
+                    status_code=429,
+                )
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +207,9 @@ def _run_schema_migrations() -> None:
         # tables.  The stimulus_proposals table itself is created by create_all.
         # World Mint authority corrections (Phase 2K)
         "ALTER TABLE nations ADD COLUMN mint_cap INTEGER DEFAULT 1000000000 NOT NULL",
+        # Keeper integration P0: Discord identity binding
+        "ALTER TABLE users ADD COLUMN discord_id TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_discord_id ON users(discord_id) WHERE discord_id IS NOT NULL",
     ]
     for sql in migrations:
         try:

@@ -48,3 +48,5 @@ coverage.xml
 
 # mypy
 .mypy_cache/
+audit_v4_screenshots/
+data/economy.db.*

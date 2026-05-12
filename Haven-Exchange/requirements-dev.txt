@@ -1,0 +1,14 @@
+# Travelers Exchange — development / test dependencies
+#
+# Not baked into the production Docker image (kept lean).  To run the
+# smoke test suite inside the running container:
+#
+#     docker exec economy bash -c "pip install -r requirements-dev.txt && cd /app && python -m pytest tests/smoke_test_e2e.py -q"
+#
+# Or for local-machine pytest:
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#     pytest tests/smoke_test_e2e.py -q
+#
+pytest>=8.0
+httpx>=0.27

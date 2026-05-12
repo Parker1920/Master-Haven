@@ -19,21 +19,21 @@
                 <label for="to_address">Recipient Address</label>
                 <input type="text" id="to_address" name="to_address" required
                        placeholder="TRV-xxxxxxxx" style="font-family: var(--font-mono);"
-                       {% if prefill_address %}value="{{ prefill_address }}"{% endif %}>
+                       value="{{ form_data.to_address if form_data and form_data.to_address else (prefill_address or '') }}">
                 <span class="form-hint">Enter a wallet address or search by username</span>
                 <div id="recipient-name-hint" style="min-height: 1.4em; margin-top: 4px; font-size: 0.875rem;"></div>
             </div>
 
             <div class="form-group">
                 <label for="amount">Amount ({{ settings.CURRENCY_SHORT }})</label>
-                <input type="number" id="amount" name="amount" required min="1" max="{{ user.balance }}" step="1"
-                       placeholder="0">
-                <span class="form-hint">Whole numbers only. Maximum: {{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}</span>
+                <input type="number" id="amount" name="amount" required min="1" {% if user.balance > 0 %}max="{{ user.balance }}"{% endif %} step="1"
+                       placeholder="0" value="{{ form_data.amount if form_data and form_data.amount else '' }}">
+                <span class="form-hint">Whole numbers only. {% if user.balance > 0 %}Maximum: {{ user.balance | format_number }} {{ settings.CURRENCY_SHORT }}{% else %}You have no available balance.{% endif %}</span>
             </div>
 
             <div class="form-group">
                 <label for="memo">Memo (optional)</label>
-                <textarea id="memo" name="memo" rows="2" placeholder="What is this transfer for?"></textarea>
+                <textarea id="memo" name="memo" rows="2" placeholder="What is this transfer for?">{{ form_data.memo if form_data and form_data.memo else '' }}</textarea>
             </div>
 
             <div class="btn-group">

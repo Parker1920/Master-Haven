@@ -24,9 +24,14 @@
     <div class="card-body">
         <div class="empty-state">
             <div class="empty-icon">&#127974;</div>
-            <h3>No Banks Available</h3>
-            <p>Your nation does not have any active banks yet.</p>
+            <h3>No Banks in Your Nation</h3>
+            {% if user_led_nation %}
+            <p>Your nation doesn&rsquo;t have any active banks yet. As leader, you can charter the first one.</p>
+            <a href="/banks/create" class="btn btn-primary">Create a Bank</a>
+            {% else %}
+            <p>Your nation doesn&rsquo;t have any active banks yet. Ask your nation leader to charter one.</p>
             <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+            {% endif %}
         </div>
     </div>
 </div>

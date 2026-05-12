@@ -2063,3 +2063,49 @@ textarea {
     color: var(--accent);
     margin-bottom: var(--space-xs);
 }
+
+/* ----- Breadcrumbs (Phase 7 fix 34) ----- */
+.breadcrumb {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-primary);
+}
+.breadcrumb-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0.5rem 1.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.breadcrumb-inner a { color: var(--text-secondary); text-decoration: none; }
+.breadcrumb-inner a:hover { color: var(--text-primary); text-decoration: underline; }
+.breadcrumb-inner .crumb-sep { color: var(--text-muted); }
+.breadcrumb-inner .crumb-current { color: var(--text-primary); font-weight: 500; }
+
+/* ----- Mobile nav section labels (Phase 7 fix 32/33 lite) ----- */
+@media (max-width: 768px) {
+    .nav-links .nav-divider {
+        position: relative;
+        margin: 0.75rem 0 0.25rem;
+        height: auto;
+        background: transparent;
+        border-top: 1px solid var(--border-primary);
+    }
+}
+
+/* Render data-label as visual section header on mobile */
+@media (max-width: 768px) {
+    .nav-links .nav-divider[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        padding: 0.5rem 0 0.25rem;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+}

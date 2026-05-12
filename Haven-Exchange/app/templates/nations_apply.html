@@ -31,10 +31,12 @@
     </div>
     <div class="card-body">
         <form action="/nations/apply" method="POST">
+            {% set fd = form_data or {} %}
             <div class="form-group">
                 <label for="name">Nation Name <span class="text-error">*</span></label>
                 <input type="text" id="name" name="name" required
-                       placeholder="e.g. Galactic Federation" maxlength="100">
+                       placeholder="e.g. Galactic Federation" maxlength="100"
+                       value="{{ fd.name or '' }}">
                 <span class="form-hint">Choose a unique name for your nation</span>
             </div>
 
@@ -42,10 +44,10 @@
                 <label for="game">Game</label>
                 <select id="game" name="game">
                     <option value="">Select a game (optional)</option>
-                    <option value="NMS">No Man's Sky</option>
-                    <option value="Minecraft">Minecraft</option>
-                    <option value="Multi">Multi-Game</option>
-                    <option value="Other">Other</option>
+                    <option value="NMS" {% if fd.game == 'NMS' %}selected{% endif %}>No Man's Sky</option>
+                    <option value="Minecraft" {% if fd.game == 'Minecraft' %}selected{% endif %}>Minecraft</option>
+                    <option value="Multi" {% if fd.game == 'Multi' %}selected{% endif %}>Multi-Game</option>
+                    <option value="Other" {% if fd.game == 'Other' %}selected{% endif %}>Other</option>
                 </select>
                 <span class="form-hint">The primary game your nation is associated with</span>
             </div>
@@ -53,13 +55,13 @@
             <div class="form-group">
                 <label for="description">Description</label>
                 <textarea id="description" name="description" rows="4"
-                          placeholder="Tell us about your nation, its goals, and what makes it unique..."></textarea>
+                          placeholder="Tell us about your nation, its goals, and what makes it unique...">{{ fd.description or '' }}</textarea>
             </div>
 
             <div class="form-group">
                 <label for="discord_invite">Discord Invite Link</label>
                 <input type="text" id="discord_invite" name="discord_invite"
-                       placeholder="https://discord.gg/...">
+                       placeholder="https://discord.gg/..." value="{{ fd.discord_invite or '' }}">
                 <span class="form-hint">Optional — provide a Discord invite so prospective citizens can find your nation</span>
             </div>
 
@@ -73,14 +75,16 @@
             <div class="form-group">
                 <label for="currency_name">Currency Name</label>
                 <input type="text" id="currency_name" name="currency_name"
-                       placeholder="e.g. Voyager Credits" maxlength="50">
+                       placeholder="e.g. Voyager Credits" maxlength="50"
+                       value="{{ fd.currency_name or '' }}">
                 <span class="form-hint">A display name for your national currency</span>
             </div>
 
             <div class="form-group">
                 <label for="currency_code">Currency Code</label>
                 <input type="text" id="currency_code" name="currency_code"
-                       placeholder="e.g. VGC" maxlength="5" style="text-transform: uppercase;">
+                       placeholder="e.g. VGC" maxlength="5" style="text-transform: uppercase;"
+                       value="{{ fd.currency_code or '' }}">
                 <span class="form-hint">2&ndash;5 uppercase letters (e.g. VGC, CRED). Must be unique.</span>
             </div>
 

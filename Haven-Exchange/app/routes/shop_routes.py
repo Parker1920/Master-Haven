@@ -15,7 +15,7 @@ from app.auth import require_login
 from app.blockchain import create_transaction
 from app.database import get_db
 from app.gdp import tc_to_national
-from app.models import Nation, Shop, ShopListing, User
+from app.models import Nation, Shop, ShopListing, Stock, User
 
 router = APIRouter(prefix="/api/shops", tags=["shops"])
 
@@ -528,6 +528,11 @@ def approve_shop(
             status_code=403, detail="Only the nation leader or World Mint can approve shops"
         )
 
+    if current_user.id == shop.owner_id and current_user.role != "world_mint":
+        raise HTTPException(
+            status_code=403, detail="You cannot approve your own shop. Ask the World Mint to review it."
+        )
+
     if shop.status == "approved":
         raise HTTPException(status_code=400, detail="Shop is already approved")
 
@@ -566,6 +571,11 @@ def reject_shop(
             status_code=403, detail="Only the nation leader or World Mint can reject shops"
         )
 
+    if current_user.id == shop.owner_id and current_user.role != "world_mint":
+        raise HTTPException(
+            status_code=403, detail="You cannot reject your own shop. Ask the World Mint to review it."
+        )
+
     if shop.status == "approved":
         raise HTTPException(status_code=400, detail="Cannot reject an already-approved shop; use suspend instead")
 
@@ -602,6 +612,11 @@ def suspend_shop(
             status_code=403, detail="Only the nation leader or World Mint can suspend shops"
         )
 
+    if current_user.id == shop.owner_id and current_user.role != "world_mint":
+        raise HTTPException(
+            status_code=403, detail="You cannot suspend your own shop. Ask the World Mint to review it."
+        )
+
     if shop.status == "suspended":
         raise HTTPException(status_code=400, detail="Shop is already suspended")
 
@@ -611,3 +626,51 @@ def suspend_shop(
     db.commit()
 
     return {"success": True, "shop_id": shop.id, "status": "suspended"}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shops/{shop_id}/ipo — IPO a shop into a tradable business stock
+# ---------------------------------------------------------------------------
+
+class IPORequest(BaseModel):
+    num_shares: int
+
+
+@router.post("/{shop_id}/ipo")
+def ipo_shop(
+    shop_id: int,
+    payload: IPORequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    """Owner-initiated IPO.  Creates a business stock backed by this shop."""
+    from app.valuation import create_business_stock
+
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        raise HTTPException(status_code=404, detail="Shop not found.")
+    if shop.owner_id != current_user.id and current_user.role != "world_mint":
+        raise HTTPException(status_code=403, detail="Only the shop owner may IPO.")
+    if shop.status != "approved":
+        raise HTTPException(status_code=400, detail="Shop must be approved before IPO.")
+
+    existing = db.execute(
+        select(Stock).where(Stock.stock_type == "business", Stock.entity_id == shop.id)
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail=f"Shop already has stock {existing.ticker}.")
+
+    if payload.num_shares < 1:
+        raise HTTPException(status_code=400, detail="num_shares must be positive.")
+
+    try:
+        stock = create_business_stock(db, shop, payload.num_shares)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "success": True,
+        "ticker": stock.ticker,
+        "stock_id": stock.id,
+        "shares_outstanding": payload.num_shares,
+    }

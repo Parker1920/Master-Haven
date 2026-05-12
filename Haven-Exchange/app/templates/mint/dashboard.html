@@ -43,6 +43,9 @@
 <!-- Admin Tools -->
 <div class="btn-group mb-xl">
     <a href="/mint/nations" class="btn btn-secondary">Nation Directory (Edit Names / Tags)</a>
+    <a href="/mint/shops/pending" class="btn btn-secondary">
+        Pending Shops{% if pending_shops_count and pending_shops_count > 0 %} ({{ pending_shops_count }}){% endif %}
+    </a>
     <a href="/mint/settings" class="btn btn-secondary">Mint Settings</a>
     <a href="/mint/stats" class="btn btn-secondary">Detailed Stats</a>
 </div>

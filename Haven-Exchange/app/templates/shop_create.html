@@ -13,14 +13,31 @@
         <p style="color: var(--text-secondary); margin-bottom: var(--space-lg);">
             As a citizen of <strong>{{ nation_name }}</strong>, you can open a shop to sell services, items, and more across the Travelers Exchange.
         </p>
-        <form method="POST" action="/shop/create">
+        {% set fd = form_data or {} %}
+        <form method="POST" action="/shop/create" id="shop-create-form">
             <div class="form-group">
                 <label for="name">Shop Name</label>
-                <input type="text" id="name" name="name" class="form-control" required placeholder="e.g. Parker's Ship Shop">
+                <input type="text" id="name" name="name" class="form-control" required
+                       placeholder="e.g. Parker's Ship Shop"
+                       value="{{ fd.name or '' }}">
             </div>
             <div class="form-group">
                 <label for="description">Description (optional)</label>
-                <textarea id="description" name="description" class="form-control" rows="3" placeholder="What does your shop offer?"></textarea>
+                <textarea id="description" name="description" class="form-control" rows="3" placeholder="What does your shop offer?">{{ fd.description or '' }}</textarea>
+            </div>
+            <div class="form-group">
+                <label for="shop_type">Shop Type</label>
+                <select id="shop_type" name="shop_type" class="form-control">
+                    {% set st = fd.shop_type or 'general' %}
+                    <option value="general" {% if st == 'general' %}selected{% endif %}>General &mdash; services, items, coordinates</option>
+                    <option value="resource_depot" {% if st == 'resource_depot' %}selected{% endif %}>Resource Depot &mdash; minerals, mining output</option>
+                </select>
+                <span class="form-hint">Resource depots require a mining setup disclosure.</span>
+            </div>
+            <div class="form-group" id="mining-setup-group" {% if (fd.shop_type or 'general') != 'resource_depot' %}style="display:none;"{% endif %}>
+                <label for="mining_setup">Mining Setup <span class="text-error">*</span></label>
+                <textarea id="mining_setup" name="mining_setup" class="form-control" rows="2" placeholder="Describe your rigs, locations, and roughly daily output">{{ fd.mining_setup or '' }}</textarea>
+                <span class="form-hint">Required for resource_depot shops; helps the marketplace and World Mint vet supply.</span>
             </div>
             <div style="display: flex; gap: var(--space-md);">
                 <button type="submit" class="btn btn-primary">Create Shop</button>
@@ -29,4 +46,16 @@
         </form>
     </div>
 </div>
+
+<script>
+(function () {
+    var typeSel = document.getElementById('shop_type');
+    var miningGroup = document.getElementById('mining-setup-group');
+    if (typeSel && miningGroup) {
+        typeSel.addEventListener('change', function () {
+            miningGroup.style.display = (typeSel.value === 'resource_depot') ? '' : 'none';
+        });
+    }
+})();
+</script>
 {% endblock %}

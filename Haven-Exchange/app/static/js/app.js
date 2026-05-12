@@ -43,11 +43,26 @@
     };
 
     /* ------------------------------------------------------------------
+       Delegated copy-button handler (Phase 8 fix 43)
+       Allows <button data-copy="..."> instead of inline onclick=
+       ------------------------------------------------------------------ */
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-copy]");
+        if (!btn) return;
+        e.preventDefault();
+        var text = btn.getAttribute("data-copy");
+        if (text) window.copyToClipboard(text, btn);
+    });
+
+    /* ------------------------------------------------------------------
        Flash Message Auto-Dismiss
        ------------------------------------------------------------------ */
     function initFlashMessages() {
+        // Phase 8 fix 37: only auto-dismiss success and info; errors stay
+        // until the user explicitly closes them.
         var alerts = document.querySelectorAll(".alert[data-auto-dismiss]");
         alerts.forEach(function (alert) {
+            if (alert.classList.contains("alert-error")) return;
             setTimeout(function () {
                 alert.style.opacity = "0";
                 alert.style.transform = "translateY(-10px)";
@@ -125,17 +140,19 @@
             }, 300);
         });
 
-        // Auto-dismiss
-        setTimeout(function () {
-            if (div.parentNode) {
-                div.style.opacity = "0";
-                div.style.transform = "translateY(-10px)";
-                div.style.transition = "opacity 0.3s ease, transform 0.3s ease";
-                setTimeout(function () {
-                    if (div.parentNode) div.remove();
-                }, 300);
-            }
-        }, 5000);
+        // Auto-dismiss success and info; keep errors until explicitly closed
+        if (type !== "error") {
+            setTimeout(function () {
+                if (div.parentNode) {
+                    div.style.opacity = "0";
+                    div.style.transform = "translateY(-10px)";
+                    div.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+                    setTimeout(function () {
+                        if (div.parentNode) div.remove();
+                    }, 300);
+                }
+            }, 5000);
+        }
     }
 
     function escapeHTML(str) {

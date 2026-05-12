@@ -2,23 +2,81 @@
 
 {% block title %}My Shop — Travelers Exchange{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb"><div class="breadcrumb-inner">
+    <a href="/dashboard">Dashboard</a>
+    <span class="crumb-sep">›</span>
+    <span class="crumb-current">My Shop{% if shop %} ({{ shop.name }}){% endif %}</span>
+</div></div>
+{% endblock %}
+
 {% block content %}
 {% if not shop %}
 <div class="page-header">
     <h1>My Shop</h1>
-    <p class="page-subtitle">You don't have a shop yet</p>
+    <p class="page-subtitle">You don&rsquo;t have a shop yet</p>
 </div>
+
+{# State-aware empty state — depends on the user's nation status #}
+{% if user_pending_nation and not user.nation_id %}
+<div class="empty-state">
+    <div class="empty-icon">&#9203;</div>
+    <h3>Your nation application is still pending</h3>
+    <p>Once <strong>{{ user_pending_nation.name }}</strong> is approved by the World Mint, you&rsquo;ll be able to open a shop here.</p>
+    <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% elif not user.nation_id %}
+<div class="empty-state">
+    <div class="empty-icon">&#128722;</div>
+    <h3>Join a nation first</h3>
+    <p>Shops are run inside nations. Join an existing nation or apply to lead a new one before opening a shop.</p>
+    <div class="btn-group" style="justify-content: center;">
+        <a href="/nations" class="btn btn-secondary">Browse Nations</a>
+        <a href="/nations/apply" class="btn btn-primary">Apply to lead a nation</a>
+    </div>
+</div>
+{% elif user_nation and user_nation.status == 'pending' %}
+<div class="empty-state">
+    <div class="empty-icon">&#9203;</div>
+    <h3>Your nation application is still pending</h3>
+    <p>Once {{ user_nation.name }} is approved by the World Mint, you&rsquo;ll be able to open a shop here.</p>
+    <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% elif user_nation and user_nation.status != 'approved' %}
+<div class="empty-state">
+    <div class="empty-icon">&#9888;</div>
+    <h3>Your nation isn&rsquo;t active</h3>
+    <p>{{ user_nation.name }} is currently {{ user_nation.status }}. Shops can only be opened in approved nations.</p>
+    <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% else %}
 <div class="empty-state">
     <div class="empty-icon">&#128722;</div>
     <h3>Open a Shop</h3>
     <p>Create a shop to start selling services, items, and more across the Travelers Exchange.</p>
     <a href="/shop/create" class="btn btn-primary">Create Shop</a>
 </div>
+{% endif %}
 {% else %}
 <div class="page-header">
     <h1>{{ shop.name }}</h1>
     <p class="page-subtitle">Shop Management</p>
 </div>
+
+{# Pending / rejected / suspended status banners #}
+{% if shop.status == 'pending' %}
+<div class="alert alert-info" style="margin-bottom: var(--space-lg);">
+    <span><strong>Your shop is pending approval.</strong> Once your nation leader or the World Mint approves it, you&rsquo;ll be able to create listings and accept purchases.</span>
+</div>
+{% elif shop.status == 'rejected' %}
+<div class="alert alert-error" style="margin-bottom: var(--space-lg);">
+    <span><strong>Your shop was rejected.</strong>{% if shop.rejected_reason %} Reason: {{ shop.rejected_reason }}.{% endif %}</span>
+</div>
+{% elif shop.status == 'suspended' %}
+<div class="alert alert-error" style="margin-bottom: var(--space-lg);">
+    <span><strong>Your shop has been suspended.</strong>{% if shop.rejected_reason %} Reason: {{ shop.rejected_reason }}.{% endif %} Listings cannot be modified while suspended.</span>
+</div>
+{% endif %}
 
 <!-- Stats -->
 <div class="stats-grid" style="margin-bottom: var(--space-xl);">
@@ -40,7 +98,8 @@
     </div>
 </div>
 
-<!-- Add Listing Form -->
+{% if shop.status == 'approved' %}
+<!-- Add Listing Form (only when shop is approved) -->
 <div class="card" style="margin-bottom: var(--space-xl);">
     <div class="card-header">
         <h3>Add New Listing</h3>
@@ -49,24 +108,25 @@
         <form method="POST" action="/shop/listings/create">
             <div class="form-group">
                 <label for="title">Title</label>
-                <input type="text" id="title" name="title" class="form-control" required placeholder="e.g. Base Building Service">
+                <input type="text" id="title" name="title" class="form-control" required placeholder="e.g. Base Building Service" value="{{ form_data.title if form_data else '' }}">
             </div>
             <div class="form-group">
                 <label for="description">Description</label>
-                <textarea id="description" name="description" class="form-control" rows="3" placeholder="Describe what you're offering..."></textarea>
+                <textarea id="description" name="description" class="form-control" rows="3" placeholder="Describe what you're offering...">{{ form_data.description if form_data else '' }}</textarea>
             </div>
             <div style="display: flex; gap: var(--space-md);">
                 <div class="form-group" style="flex: 1;">
                     <label for="price">Price ({{ settings.CURRENCY_SHORT }})</label>
-                    <input type="number" id="price" name="price" class="form-control" required min="1" placeholder="100">
+                    <input type="number" id="price" name="price" class="form-control" required min="1" placeholder="100" value="{{ form_data.price if form_data else '' }}">
                 </div>
                 <div class="form-group" style="flex: 1;">
                     <label for="category">Category</label>
                     <select id="category" name="category" class="form-control">
-                        <option value="service">Service</option>
-                        <option value="coordinates">Coordinates</option>
-                        <option value="item">Item</option>
-                        <option value="other" selected>Other</option>
+                        {% set sel_cat = (form_data.category if form_data else 'other') %}
+                        <option value="service" {% if sel_cat == 'service' %}selected{% endif %}>Service</option>
+                        <option value="coordinates" {% if sel_cat == 'coordinates' %}selected{% endif %}>Coordinates</option>
+                        <option value="item" {% if sel_cat == 'item' %}selected{% endif %}>Item</option>
+                        <option value="other" {% if sel_cat == 'other' %}selected{% endif %}>Other</option>
                     </select>
                 </div>
             </div>
@@ -74,6 +134,13 @@
         </form>
     </div>
 </div>
+{% else %}
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-body">
+        <p class="text-muted">Listings can be added once your shop is approved.</p>
+    </div>
+</div>
+{% endif %}
 
 <!-- Existing Listings -->
 <div class="card" style="margin-bottom: var(--space-xl);">
@@ -107,11 +174,15 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if shop.status == 'approved' %}
                             <form method="POST" action="/shop/listings/{{ listing.id }}/toggle" style="display: inline;">
                                 <button type="submit" class="btn btn-secondary btn-sm">
                                     {% if listing.is_available %}Deactivate{% else %}Activate{% endif %}
                                 </button>
                             </form>
+                            {% else %}
+                            <span class="text-muted" style="font-size: 0.85rem;">&mdash;</span>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -119,7 +190,7 @@
             </table>
         </div>
         {% else %}
-        <p class="text-muted">No listings yet. Add your first listing above!</p>
+        <p class="text-muted">No listings yet.{% if shop.status == 'approved' %} Add your first listing above!{% endif %}</p>
         {% endif %}
     </div>
 </div>
@@ -163,7 +234,9 @@
 
 <div style="display: flex; gap: var(--space-md);">
     <a href="/market/{{ shop.id }}" class="btn btn-secondary">View Public Shop Page</a>
+    {% if shop.status == 'approved' %}
     <a href="/shop/ipo" class="btn btn-secondary">IPO / Stock Listing</a>
+    {% endif %}
 </div>
 {% endif %}
 {% endblock %}

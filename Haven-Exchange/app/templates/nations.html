@@ -13,6 +13,12 @@
     {% endif %}
 </div>
 
+{% if user and user.nation_id is none and not user_pending_nation %}
+<div class="alert alert-info" style="margin-bottom: var(--space-lg);">
+    <span>Don&rsquo;t see your community? <a href="/nations/apply" style="font-weight: 600;">Apply to lead a new nation</a> &mdash; the World Mint reviews each application.</span>
+</div>
+{% endif %}
+
 {% if nations %}
 <div class="nations-grid">
     {% for nation in nations %}
@@ -45,8 +51,11 @@
 {% else %}
 <div class="empty-state">
     <div class="empty-icon">&#9873;</div>
-    <h3>No nations yet</h3>
-    <p>There are no approved nations at this time. Check back later!</p>
+    <h3>No approved nations yet</h3>
+    <p>{% if user %}<strong>Be the first.</strong> Apply to lead a new nation and start a community here.{% else %}Be the first &mdash; <a href="/register">register</a>, then apply to lead a nation.{% endif %}</p>
+    {% if user %}
+    <a href="/nations/apply" class="btn btn-primary">Apply to lead a nation</a>
+    {% endif %}
 </div>
 {% endif %}
 {% endblock %}

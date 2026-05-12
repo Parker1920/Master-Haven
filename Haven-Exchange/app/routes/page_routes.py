@@ -5,6 +5,7 @@ Serves all user-facing HTML pages via Jinja2 templates.
 """
 
 import math
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Query, Request
@@ -15,7 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import (
     get_current_user,
+    get_led_nation,
     hash_password,
+    is_leader_of,
     require_login,
     require_role,
     verify_password,
@@ -99,6 +102,26 @@ def _base_context(request: Request, user: Optional[User], db: Session = None, **
             select(Nation).where(Nation.id == user.nation_id)
         ).scalar_one_or_none()
 
+    # Resolve the approved nation the user *leads* (used by templates to
+    # decide whether to render the leader-only nav block; the role enum
+    # may say `nation_leader` even after the nation has been suspended).
+    user_led_nation = None
+    user_pending_nation = None
+    if user and db:
+        user_led_nation = db.execute(
+            select(Nation).where(
+                Nation.leader_id == user.id,
+                Nation.status == "approved",
+            )
+        ).scalar_one_or_none()
+        # Pending application by this user (for state-aware empty states)
+        user_pending_nation = db.execute(
+            select(Nation).where(
+                Nation.leader_id == user.id,
+                Nation.status == "pending",
+            )
+        ).scalar_one_or_none()
+
     user_currency = {
         "code": user_nation.currency_code if user_nation and user_nation.currency_code else "TC",
         "name": user_nation.currency_name if user_nation and user_nation.currency_name else "Travelers Coin",
@@ -115,11 +138,14 @@ def _base_context(request: Request, user: Optional[User], db: Session = None, **
         "request": request,
         "user": user,
         "user_nation": user_nation,
+        "user_led_nation": user_led_nation,
+        "user_pending_nation": user_pending_nation,
         "user_currency": user_currency,
         "user_balance_national": user_balance_national,
         "settings": settings,
         "active_page": kwargs.pop("active_page", ""),
         "tc_to_national": tc_to_national,
+        "current_year": datetime.now(timezone.utc).year,
     }
     ctx.update(kwargs)
     return ctx
@@ -137,6 +163,32 @@ def _paginate(total: int, page: int, per_page: int = PER_PAGE) -> dict:
         "has_next": page < total_pages,
         "offset": (page - 1) * per_page,
     }
+
+
+def _render_form_error(
+    request: Request,
+    user: Optional[User],
+    db: Session,
+    template_name: str,
+    error: str,
+    form_data: dict,
+    **extra_ctx,
+):
+    """Re-render *template_name* with the user's input preserved.
+
+    Use this from POST handlers in place of a 303 RedirectResponse so the
+    error message and the form values stay together.  The template is
+    expected to read `form_data.<field>` defaulting to empty string.
+    """
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        flash_error=error,
+        form_data=form_data,
+        **extra_ctx,
+    )
+    return templates.TemplateResponse(template_name, ctx)
 
 
 def _build_name_map(db: Session) -> dict:
@@ -189,6 +241,27 @@ def landing_page(
 # ---------------------------------------------------------------------------
 # GET /login
 # ---------------------------------------------------------------------------
+@router.post("/logout")
+def logout_post(
+    request: Request,
+    response: RedirectResponse = None,
+    db: Session = Depends(get_db),
+):
+    """Form-fallback logout — used when JS isn't available.
+
+    Clears the session_token cookie and redirects to /login. The fetch-based
+    logout in app.js still works as a progressive enhancement; this endpoint
+    is the no-JS path.
+    """
+    from app.auth import delete_session
+    token = request.cookies.get("session_token")
+    if token:
+        delete_session(db, token)
+    resp = RedirectResponse(url="/login?success=Logged+out+successfully", status_code=303)
+    resp.delete_cookie("session_token")
+    return resp
+
+
 @router.get("/login")
 def login_page(
     request: Request,
@@ -375,25 +448,47 @@ def nations_apply_post(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    # Validate: user doesn't already lead a nation
-    existing_nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id)
-    ).scalar_one_or_none()
-    if existing_nation is not None:
-        return RedirectResponse(
-            url="/nations/apply?error=You+already+lead+a+nation",
-            status_code=303,
+    fd = {
+        "name": name,
+        "description": description,
+        "game": game,
+        "discord_invite": discord_invite,
+        "currency_name": currency_name,
+        "currency_code": currency_code,
+    }
+
+    def _err(msg):
+        return _render_form_error(
+            request, user, db, "nations_apply.html", msg, fd,
+            active_page="nations",
         )
 
-    # Validate: name is unique
-    name_taken = db.execute(
-        select(Nation).where(Nation.name == name.strip())
-    ).scalar_one_or_none()
-    if name_taken is not None:
-        return RedirectResponse(
-            url="/nations/apply?error=A+nation+with+that+name+already+exists",
-            status_code=303,
+    # Validate: user doesn't already lead a nation (any status — pending,
+    # approved, suspended).  Re-applying after rejection is allowed.
+    existing_nation = db.execute(
+        select(Nation).where(
+            Nation.leader_id == user.id,
+            Nation.status != "rejected",
         )
+    ).scalar_one_or_none()
+    if existing_nation is not None:
+        return _err("You already lead a nation")
+
+    # Validate: user must leave their current nation before applying to lead
+    # a new one (you can't be a citizen of nation A and try to lead nation B).
+    if user.nation_id is not None:
+        return _err("You must leave your current nation before founding a new one")
+
+    # Validate: name is unique among non-rejected nations.  Allow re-using
+    # a name that was previously rejected so applicants get a second chance.
+    name_taken_active = db.execute(
+        select(Nation).where(
+            Nation.name == name.strip(),
+            Nation.status != "rejected",
+        )
+    ).scalar_one_or_none()
+    if name_taken_active is not None:
+        return _err("A nation with that name already exists")
 
     # Validate currency code if provided
     import re
@@ -401,18 +496,12 @@ def nations_apply_post(
     cn = currency_name.strip() if currency_name else ""
     if cc:
         if not re.match(r"^[A-Z]{2,5}$", cc):
-            return RedirectResponse(
-                url="/nations/apply?error=Currency+code+must+be+2-5+uppercase+letters",
-                status_code=303,
-            )
+            return _err("Currency code must be 2-5 uppercase letters")
         code_taken = db.execute(
             select(Nation).where(Nation.currency_code == cc)
         ).scalar_one_or_none()
         if code_taken is not None:
-            return RedirectResponse(
-                url=f"/nations/apply?error=Currency+code+{cc}+is+already+in+use",
-                status_code=303,
-            )
+            return _err(f"Currency code {cc} is already in use")
 
     # Create the nation with placeholder address, flush to get ID
     nation = Nation(
@@ -640,19 +729,10 @@ def nation_settings_page(
     /mint/nations/{id}/edit-identity for any nation; this page is the
     self-service equivalent for the leader of a single nation.
     """
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader+to+edit+nation+settings",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found+for+your+account",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -683,19 +763,10 @@ def nation_settings_post(
     currency code 2-8 chars and auto-uppercased, blank currency fields
     stored as NULL.
     """
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader+to+edit+nation+settings",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found+for+your+account",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -786,19 +857,10 @@ def nation_treasury_page(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader+to+access+the+treasury",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -840,19 +902,10 @@ def nation_distribute_page(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader+to+distribute+funds",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -889,19 +942,10 @@ def nation_distribute_post(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -937,19 +981,10 @@ def nation_distribute_bulk_post(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -1010,19 +1045,10 @@ def nation_members_page(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    if user.role != "nation_leader":
-        return RedirectResponse(
-            url="/dashboard?error=You+must+be+a+nation+leader",
-            status_code=303,
-        )
-
-    nation = db.execute(
-        select(Nation).where(Nation.leader_id == user.id, Nation.status == "approved")
-    ).scalar_one_or_none()
-
+    nation = get_led_nation(db, user)
     if nation is None:
         return RedirectResponse(
-            url="/dashboard?error=No+approved+nation+found",
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
             status_code=303,
         )
 
@@ -1043,6 +1069,139 @@ def nation_members_page(
         members=members,
     )
     return templates.TemplateResponse("nation/members.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /nation/shops/pending — Nation leader's pending shop approval queue
+# ---------------------------------------------------------------------------
+@router.get("/nation/shops/pending")
+def nation_pending_shops_page(
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    from app.auth import get_led_nation
+    nation = get_led_nation(db, user)
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
+            status_code=303,
+        )
+
+    rows = list(
+        db.execute(
+            select(Shop, User)
+            .join(User, Shop.owner_id == User.id)
+            .where(Shop.status == "pending", Shop.nation_id == nation.id)
+            .order_by(Shop.created_at.desc())
+        ).all()
+    )
+    pending_shops = [
+        {
+            "id": shop.id,
+            "name": shop.name,
+            "description": shop.description,
+            "owner_name": owner.display_name or owner.username,
+            "owner_id": owner.id,
+            "is_own_shop": owner.id == user.id,
+            "created_at": shop.created_at,
+        }
+        for shop, owner in rows
+    ]
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="pending_shops",
+        nation=nation,
+        pending_shops=pending_shops,
+    )
+    return templates.TemplateResponse("nation/pending_shops.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /nation/shops/{shop_id}/approve — Leader approves a shop in their nation
+# ---------------------------------------------------------------------------
+@router.post("/nation/shops/{shop_id}/approve")
+def nation_approve_shop_post(
+    shop_id: int,
+    request: Request,
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    from app.auth import get_led_nation
+    nation = get_led_nation(db, user)
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
+            status_code=303,
+        )
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None or shop.nation_id != nation.id:
+        return RedirectResponse(
+            url="/nation/shops/pending?error=Shop+not+found+in+your+nation", status_code=303
+        )
+    if shop.status != "pending":
+        return RedirectResponse(
+            url="/nation/shops/pending?error=Shop+is+not+pending", status_code=303
+        )
+    if shop.owner_id == user.id:
+        return RedirectResponse(
+            url="/nation/shops/pending?error=You+cannot+approve+your+own+shop.+Ask+the+World+Mint+to+review+it.",
+            status_code=303,
+        )
+    shop.status = "approved"
+    shop.is_active = True
+    shop.approved_by = user.id
+    shop.approved_at = datetime.now(timezone.utc)
+    shop.rejected_reason = None
+    db.commit()
+    return RedirectResponse(
+        url=f"/nation/shops/pending?success=Shop+'{shop.name}'+approved".replace("'", "%27"),
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /nation/shops/{shop_id}/reject — Leader rejects a shop in their nation
+# ---------------------------------------------------------------------------
+@router.post("/nation/shops/{shop_id}/reject")
+def nation_reject_shop_post(
+    shop_id: int,
+    request: Request,
+    reason: str = Form(""),
+    user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    from app.auth import get_led_nation
+    nation = get_led_nation(db, user)
+    if nation is None:
+        return RedirectResponse(
+            url="/dashboard?error=You+do+not+lead+an+approved+nation",
+            status_code=303,
+        )
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None or shop.nation_id != nation.id:
+        return RedirectResponse(
+            url="/nation/shops/pending?error=Shop+not+found+in+your+nation", status_code=303
+        )
+    if shop.status == "approved":
+        return RedirectResponse(
+            url="/nation/shops/pending?error=Cannot+reject+an+approved+shop", status_code=303
+        )
+    if shop.owner_id == user.id:
+        return RedirectResponse(
+            url="/nation/shops/pending?error=You+cannot+reject+your+own+shop.",
+            status_code=303,
+        )
+    shop.status = "rejected"
+    shop.is_active = False
+    shop.rejected_reason = reason or None
+    db.commit()
+    return RedirectResponse(
+        url=f"/nation/shops/pending?success=Shop+'{shop.name}'+rejected".replace("'", "%27"),
+        status_code=303,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1429,15 +1588,38 @@ def dashboard_page(
         select(Nation).where(Nation.leader_id == user.id, Nation.status == "pending")
     ).scalar_one_or_none()
 
-    # Recent transactions (last 10)
-    recent_transactions = get_transactions_for_address(
-        db, user.wallet_address, limit=10, offset=0
+    # "New user" flag for onboarding banner — created in last 24 hours
+    is_new_user = False
+    if user.created_at is not None:
+        created_aware = user.created_at if user.created_at.tzinfo else user.created_at.replace(tzinfo=timezone.utc)
+        is_new_user = (datetime.now(timezone.utc) - created_aware) < timedelta(hours=24)
+
+    # Recent transactions (last 10) — Phase 8 fix 39: hide stock activity by
+    # default; that lives on /portfolio instead.
+    _all_recent = get_transactions_for_address(
+        db, user.wallet_address, limit=30, offset=0
     )
+    recent_transactions = [
+        tx for tx in _all_recent
+        if tx.tx_type in ("TRANSFER", "PURCHASE", "DISTRIBUTE", "MINT", "GENESIS")
+    ][:10]
 
     name_map = _build_name_map(db)
 
     # Check if user has a shop
     user_shop = db.execute(select(Shop).where(Shop.owner_id == user.id)).scalar_one_or_none()
+
+    # Pending shops in the nation the user leads (for the leader-only card)
+    led_pending_shops_count = 0
+    if led_nation is not None:
+        led_pending_shops_count = (
+            db.execute(
+                select(func.count(Shop.id)).where(
+                    Shop.status == "pending",
+                    Shop.nation_id == led_nation.id,
+                )
+            ).scalar() or 0
+        )
 
     # Portfolio stats
     portfolio_holdings = list(
@@ -1473,7 +1655,9 @@ def dashboard_page(
         recent_transactions=recent_transactions,
         name_map=name_map,
         user_shop=user_shop,
+        led_pending_shops_count=led_pending_shops_count,
         portfolio_stats=portfolio_stats,
+        is_new_user=is_new_user,
     )
     return templates.TemplateResponse("dashboard.html", ctx)
 
@@ -1528,11 +1712,16 @@ def send_post(
             status_code=303,
         )
     except ValueError as exc:
-        error_msg = str(exc).replace(" ", "+")
-        return RedirectResponse(
-            url=f"/send?error={error_msg}",
-            status_code=303,
+        # Re-render the send form with the user's input preserved.
+        ctx = _base_context(
+            request,
+            user,
+            db=db,
+            active_page="send",
+            flash_error=str(exc),
+            form_data={"to_address": to_address, "amount": amount, "memo": memo or ""},
         )
+        return templates.TemplateResponse("send.html", ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1549,8 +1738,6 @@ def history_page(
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime as dt, timedelta
-
     valid_types = {"MINT", "DISTRIBUTE", "TRANSFER", "PURCHASE", "BURN", "TAX", "GENESIS", "STOCK_BUY", "STOCK_SELL"}
 
     # Build filter conditions
@@ -1573,14 +1760,14 @@ def history_page(
 
     if date_from:
         try:
-            df = dt.strptime(date_from, "%Y-%m-%d")
+            df = datetime.strptime(date_from, "%Y-%m-%d")
             conditions.append(Transaction.created_at >= df)
         except ValueError:
             pass
 
     if date_to:
         try:
-            dt_end = dt.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+            dt_end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
             conditions.append(Transaction.created_at < dt_end)
         except ValueError:
             pass
@@ -1731,9 +1918,18 @@ def shop_create_post(
     request: Request,
     name: str = Form(...),
     description: str = Form(""),
+    shop_type: str = Form("general"),
+    mining_setup: str = Form(""),
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
+    fd = {
+        "name": name,
+        "description": description,
+        "shop_type": shop_type,
+        "mining_setup": mining_setup,
+    }
+
     if user.nation_id is None:
         return RedirectResponse(url="/shop/manage?error=You+must+join+a+nation+first", status_code=303)
 
@@ -1745,15 +1941,30 @@ def shop_create_post(
     if existing is not None:
         return RedirectResponse(url="/shop/manage?error=You+already+own+a+shop", status_code=303)
 
+    def _err(msg):
+        return _render_form_error(
+            request, user, db, "shop_create.html", msg, fd,
+            active_page="shop", nation_name=nation.name,
+        )
+
     shop_name = name.strip()
     if not shop_name:
-        return RedirectResponse(url="/shop/create?error=Shop+name+cannot+be+empty", status_code=303)
+        return _err("Shop name cannot be empty")
+
+    if shop_type not in ("general", "resource_depot"):
+        return _err("Invalid shop type")
+
+    mining_clean = mining_setup.strip() if mining_setup else ""
+    if shop_type == "resource_depot" and not mining_clean:
+        return _err("Resource depot shops require a mining setup disclosure")
 
     shop = Shop(
         owner_id=user.id,
         nation_id=user.nation_id,
         name=shop_name,
         description=description.strip() or None,
+        shop_type=shop_type,
+        mining_setup=mining_clean or None,
     )
     db.add(shop)
     db.commit()
@@ -1777,6 +1988,12 @@ def shop_listing_create_post(
     shop = db.execute(select(Shop).where(Shop.owner_id == user.id)).scalar_one_or_none()
     if shop is None:
         return RedirectResponse(url="/shop/manage?error=You+don't+have+a+shop", status_code=303)
+
+    if shop.status != "approved":
+        return RedirectResponse(
+            url="/shop/manage?error=Your+shop+must+be+approved+before+you+can+add+listings",
+            status_code=303,
+        )
 
     valid_categories = {"service", "coordinates", "item", "other"}
     if category not in valid_categories:
@@ -1819,6 +2036,12 @@ def shop_listing_toggle_post(
     shop = db.execute(select(Shop).where(Shop.id == listing.shop_id)).scalar_one_or_none()
     if shop is None or shop.owner_id != user.id:
         return RedirectResponse(url="/shop/manage?error=Unauthorized", status_code=303)
+
+    if shop.status != "approved":
+        return RedirectResponse(
+            url="/shop/manage?error=Your+shop+must+be+approved+to+toggle+listings",
+            status_code=303,
+        )
 
     listing.is_available = not listing.is_available
     db.commit()
@@ -1955,7 +2178,6 @@ def mint_dashboard_page(
         or 0
     )
 
-    from datetime import datetime, timedelta, timezone
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     active_users_30d = (
         db.execute(
@@ -1988,6 +2210,13 @@ def mint_dashboard_page(
         )
         .scalars()
         .all()
+    )
+
+    # Pending shops count (link to /mint/shops/pending)
+    pending_shops_count = (
+        db.execute(
+            select(func.count(Shop.id)).where(Shop.status == "pending")
+        ).scalar() or 0
     )
 
     # Pending allocations (awaiting approval)
@@ -2048,6 +2277,7 @@ def mint_dashboard_page(
         chain_valid=chain_valid,
         recent_mints=recent_mints,
         pending_nations=pending_nations,
+        pending_shops_count=pending_shops_count,
         pending_allocations=pending_allocations,
         approved_allocations=approved_allocations,
         recent_allocations=recent_allocations,
@@ -2218,7 +2448,6 @@ def mint_approve_nation_post(
     user: User = Depends(_require_world_mint),
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone
 
     nation = db.execute(
         select(Nation).where(Nation.id == nation_id)
@@ -2286,6 +2515,79 @@ def mint_reject_nation_post(
 
 
 # ---------------------------------------------------------------------------
+# POST /mint/nations/{nation_id}/suspend — Suspend an approved nation
+# ---------------------------------------------------------------------------
+@router.post("/mint/nations/{nation_id}/suspend")
+def mint_suspend_nation_post(
+    nation_id: int,
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        return RedirectResponse(url="/mint/nations?error=Nation+not+found", status_code=303)
+    if nation.status != "approved":
+        return RedirectResponse(url="/mint/nations?error=Only+approved+nations+can+be+suspended", status_code=303)
+
+    nation.status = "suspended"
+
+    leader = db.execute(
+        select(User).where(User.id == nation.leader_id)
+    ).scalar_one_or_none()
+    if leader is not None and leader.role == "nation_leader":
+        other_led = db.execute(
+            select(func.count(Nation.id)).where(
+                Nation.leader_id == leader.id,
+                Nation.status == "approved",
+                Nation.id != nation.id,
+            )
+        ).scalar() or 0
+        if other_led == 0:
+            leader.role = "citizen"
+
+    db.commit()
+    return RedirectResponse(
+        url=f"/mint/nations?success=Nation+'{nation.name}'+suspended".replace("'", "%27"),
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /mint/nations/{nation_id}/unsuspend — Restore a suspended nation
+# ---------------------------------------------------------------------------
+@router.post("/mint/nations/{nation_id}/unsuspend")
+def mint_unsuspend_nation_post(
+    nation_id: int,
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+    if nation is None:
+        return RedirectResponse(url="/mint/nations?error=Nation+not+found", status_code=303)
+    if nation.status != "suspended":
+        return RedirectResponse(url="/mint/nations?error=Only+suspended+nations+can+be+unsuspended", status_code=303)
+
+    nation.status = "approved"
+    leader = db.execute(
+        select(User).where(User.id == nation.leader_id)
+    ).scalar_one_or_none()
+    if leader is not None and leader.role not in ("world_mint", "nation_leader"):
+        leader.role = "nation_leader"
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/mint/nations?success=Nation+'{nation.name}'+restored".replace("'", "%27"),
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /mint/nations — World Mint nation directory (with edit links)
 # ---------------------------------------------------------------------------
 @router.get("/mint/nations")
@@ -2310,6 +2612,105 @@ def mint_nations_directory(
         nations=nations,
     )
     return templates.TemplateResponse("mint/nations.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# GET /mint/shops/pending — World Mint shop approval queue
+# ---------------------------------------------------------------------------
+@router.get("/mint/shops/pending")
+def mint_pending_shops(
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    """List every pending shop across all nations for World Mint review."""
+    rows = list(
+        db.execute(
+            select(Shop, User, Nation)
+            .join(User, Shop.owner_id == User.id)
+            .join(Nation, Shop.nation_id == Nation.id)
+            .where(Shop.status == "pending")
+            .order_by(Shop.created_at.desc())
+        ).all()
+    )
+    pending_shops = [
+        {
+            "id": shop.id,
+            "name": shop.name,
+            "description": shop.description,
+            "owner_name": owner.display_name or owner.username,
+            "owner_id": owner.id,
+            "nation_name": nation.name,
+            "nation_id": nation.id,
+            "created_at": shop.created_at,
+        }
+        for shop, owner, nation in rows
+    ]
+    ctx = _base_context(
+        request,
+        user,
+        db=db,
+        active_page="mint",
+        pending_shops=pending_shops,
+    )
+    return templates.TemplateResponse("mint/pending_shops.html", ctx)
+
+
+# ---------------------------------------------------------------------------
+# POST /mint/shops/{shop_id}/approve — World Mint approves a shop
+# ---------------------------------------------------------------------------
+@router.post("/mint/shops/{shop_id}/approve")
+def mint_approve_shop_post(
+    shop_id: int,
+    request: Request,
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        return RedirectResponse(url="/mint/shops/pending?error=Shop+not+found", status_code=303)
+    if shop.status != "pending":
+        return RedirectResponse(
+            url="/mint/shops/pending?error=Shop+is+not+pending", status_code=303
+        )
+    shop.status = "approved"
+    shop.is_active = True
+    shop.approved_by = user.id
+    shop.approved_at = datetime.now(timezone.utc)
+    shop.rejected_reason = None
+    db.commit()
+    return RedirectResponse(
+        url=f"/mint/shops/pending?success=Shop+'{shop.name}'+approved".replace("'", "%27"),
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /mint/shops/{shop_id}/reject — World Mint rejects a shop
+# ---------------------------------------------------------------------------
+@router.post("/mint/shops/{shop_id}/reject")
+def mint_reject_shop_post(
+    shop_id: int,
+    request: Request,
+    reason: str = Form(""),
+    user: User = Depends(_require_world_mint),
+    db: Session = Depends(get_db),
+):
+    shop = db.execute(select(Shop).where(Shop.id == shop_id)).scalar_one_or_none()
+    if shop is None:
+        return RedirectResponse(url="/mint/shops/pending?error=Shop+not+found", status_code=303)
+    if shop.status == "approved":
+        return RedirectResponse(
+            url="/mint/shops/pending?error=Cannot+reject+an+approved+shop", status_code=303
+        )
+    shop.status = "rejected"
+    shop.is_active = False
+    shop.rejected_reason = reason or None
+    db.commit()
+    return RedirectResponse(
+        url=f"/mint/shops/pending?success=Shop+'{shop.name}'+rejected".replace("'", "%27"),
+        status_code=303,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2460,7 +2861,6 @@ def mint_calculate_allocations_post(
     user: User = Depends(_require_world_mint),
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timedelta, timezone
 
     # Determine the target period (next month in "YYYY-MM" format)
     now = datetime.now(timezone.utc)
@@ -2523,7 +2923,6 @@ def mint_approve_allocation_post(
     user: User = Depends(_require_world_mint),
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone
 
     allocation = db.execute(
         select(MintAllocation).where(MintAllocation.id == allocation_id)
@@ -2559,7 +2958,6 @@ def mint_execute_allocation_post(
     user: User = Depends(_require_world_mint),
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone
 
     allocation = db.execute(
         select(MintAllocation).where(MintAllocation.id == allocation_id)
@@ -3139,7 +3537,6 @@ def shop_ipo_page(
 
     # Eligibility checks
     from app.valuation import IPO_MIN_DAYS, IPO_MIN_SALES
-    from datetime import timezone as tz
 
     eligible = True
     reasons = []
@@ -3147,7 +3544,7 @@ def shop_ipo_page(
         eligible = False
         reasons.append(f"Need {IPO_MIN_SALES} sales (have {shop.total_sales})")
     if shop.created_at:
-        days = (datetime.now(tz.utc) - shop.created_at.replace(tzinfo=tz.utc)).days
+        days = (datetime.now(timezone.utc) - shop.created_at.replace(tzinfo=timezone.utc)).days
         if days < IPO_MIN_DAYS:
             eligible = False
             reasons.append(f"Shop must be {IPO_MIN_DAYS}+ days old ({days} days)")
@@ -3744,7 +4141,6 @@ def loan_pay_post(
     if loan.outstanding <= 0:
         loan.outstanding = 0
         loan.status = "closed"
-        from datetime import datetime, timezone
         loan.closed_at = datetime.now(timezone.utc)
 
     payment = LoanPayment(
@@ -3814,7 +4210,6 @@ def mint_settings_post(
     db: Session = Depends(get_db),
 ):
     """Process the global settings update form."""
-    from datetime import datetime, timezone
 
     # Validate ranges
     burn_rate_bps = max(0, min(10000, burn_rate_bps))

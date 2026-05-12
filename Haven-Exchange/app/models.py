@@ -71,6 +71,12 @@ class User(Base):
     wallet_health_last_calculated: Mapped[Optional[datetime]] = mapped_column(
         nullable=True
     )
+    # Keeper integration P0: Discord identity binding.  NULL until the user
+    # confirms a 6-digit code via /api/auth/discord-link/confirm.  UNIQUE so
+    # one Discord account can't be linked to two Exchange accounts.
+    discord_id: Mapped[Optional[str]] = mapped_column(
+        String, unique=True, nullable=True, index=True
+    )
 
     # Relationships
     nation: Mapped[Optional["Nation"]] = relationship(
@@ -756,3 +762,42 @@ class StimulusProposal(Base):
             f"<StimulusProposal(id={self.id}, nation_id={self.nation_id}, "
             f"tier='{self.tier}', status='{self.status}')>"
         )
+
+
+# ===========================================================================
+# Keeper integration P0 — API keys + Discord link codes
+# ===========================================================================
+
+class ApiKey(Base):
+    """Bearer-token credentials for external bots (Keeper, etc.).
+
+    The plaintext key is shown once at issuance and never persisted.
+    Lookups go via key_prefix (the first 12 chars of the key — used as
+    a fast index) followed by a constant-time bcrypt compare against
+    key_hash on the candidate row.
+
+    `scope` is a coarse capability label.  v1 ships with one value:
+        bot_full   — the bearer can resolve any X-Discord-User-Id and
+                     act on that user's behalf with that user's role.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key_prefix: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="bot_full")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        insert_default=func.current_timestamp()
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ApiKey(id={self.id}, label='{self.label}', scope='{self.scope}')>"
+
+
+## DiscordLinkCode model removed — auto-provision replaces the link flow.
+## Bot bearer + X-Discord-User-Id alone is sufficient; if no user is bound to
+## that discord_id, the Exchange creates one automatically on first call.

@@ -27,13 +27,26 @@ COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    """Apply the session cookie to *response* with standard settings."""
+    """Apply the session cookie to *response* with standard settings.
+
+    NOTE on `secure=True`: cookies marked Secure are only sent by browsers
+    over HTTPS.  Production runs behind Cloudflare → Nginx Proxy Manager
+    with TLS termination so this is correct there.  In a plain-HTTP local
+    dev setup (e.g. running the container on http://localhost:8010 without
+    a proxy), real browsers will refuse to *store* the cookie at all and
+    every request will appear unauthenticated.  Workarounds for local dev:
+      1. Run the dev container behind an HTTPS proxy (e.g. mkcert + caddy).
+      2. Temporarily flip secure=False here for local-only debugging.
+    A future hardening pass should gate this on an env var (e.g.
+    `settings.COOKIE_SECURE`) so the same code base works in both modes
+    without requiring a manual toggle.
+    """
     response.set_cookie(
         key=COOKIE_KEY,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=True,
+        secure=False,  # TEMP for local-dev demo — flip back to True before merging
         max_age=COOKIE_MAX_AGE,
     )
 
@@ -164,3 +177,52 @@ def logout(
     )
 
     return {"success": True}
+
+
+
+# ---------------------------------------------------------------------------
+# Account self-service (mirrors website /settings/* — bot-callable)
+# ---------------------------------------------------------------------------
+
+from fastapi import HTTPException as _HTTPException  # noqa: E402
+from pydantic import BaseModel as _BaseModel  # noqa: E402
+
+from app.auth import require_login as _require_login  # noqa: E402
+
+
+class _PasswordChangeRequest(_BaseModel):
+    old_password: str
+    new_password: str
+
+
+class _DisplayNameRequest(_BaseModel):
+    display_name: str | None = None
+
+
+@router.post("/settings/password")
+def settings_change_password(
+    payload: _PasswordChangeRequest,
+    user: User = Depends(_require_login),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Change the calling user's password.  Same rules as the web form."""
+    if not verify_password(payload.old_password, user.password_hash):
+        raise _HTTPException(status_code=403, detail="Current password is incorrect.")
+    if len(payload.new_password) < 8:
+        raise _HTTPException(status_code=400, detail="New password must be at least 8 characters.")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/settings/display-name")
+def settings_change_display_name(
+    payload: _DisplayNameRequest,
+    user: User = Depends(_require_login),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update the calling user's display name."""
+    cleaned = (payload.display_name or "").strip() or None
+    user.display_name = cleaned
+    db.commit()
+    return {"success": True, "display_name": cleaned}

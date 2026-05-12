@@ -386,6 +386,42 @@ def approve_nation(
 
 
 # ---------------------------------------------------------------------------
+# POST /api/mint/nations/{nation_id}/reject
+# ---------------------------------------------------------------------------
+@router.post("/nations/{nation_id}/reject")
+def reject_nation(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Reject a pending nation application.
+
+    Status is moved to ``rejected``; ``leader_id`` and other identity
+    fields are preserved for audit purposes.  The applicant may re-apply
+    with a different name (or the same name once the rejected row is
+    excluded from uniqueness checks — see nations_apply_post).
+    """
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    if nation.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only pending nations can be rejected (current status: {nation.status}).",
+        )
+
+    nation.status = "rejected"
+    db.commit()
+
+    return {"success": True, "nation_id": nation.id, "status": "rejected"}
+
+
+# ---------------------------------------------------------------------------
 # POST /api/mint/nations/{nation_id}/suspend
 # ---------------------------------------------------------------------------
 @router.post("/nations/{nation_id}/suspend")
@@ -394,7 +430,11 @@ def suspend_nation(
     db: Session = Depends(get_db),
     admin: User = Depends(_require_world_mint),
 ):
-    """Suspend an approved nation."""
+    """Suspend an approved nation.
+
+    Also demotes the leader's user.role back to ``citizen`` if they don't
+    lead any other approved nation.  ``world_mint`` is preserved.
+    """
 
     nation = db.execute(
         select(Nation).where(Nation.id == nation_id)
@@ -404,6 +444,55 @@ def suspend_nation(
         raise HTTPException(status_code=404, detail="Nation not found.")
 
     nation.status = "suspended"
+
+    leader = db.execute(
+        select(User).where(User.id == nation.leader_id)
+    ).scalar_one_or_none()
+    if leader is not None and leader.role == "nation_leader":
+        # Only demote if they don't lead any *other* approved nation
+        other_led = db.execute(
+            select(func.count(Nation.id)).where(
+                Nation.leader_id == leader.id,
+                Nation.status == "approved",
+                Nation.id != nation.id,
+            )
+        ).scalar() or 0
+        if other_led == 0:
+            leader.role = "citizen"
+
+    db.commit()
+
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/mint/nations/{nation_id}/unsuspend — Restore a suspended nation
+# ---------------------------------------------------------------------------
+@router.post("/nations/{nation_id}/unsuspend")
+def unsuspend_nation(
+    nation_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Restore a suspended nation back to ``approved`` and re-promote leader."""
+
+    nation = db.execute(
+        select(Nation).where(Nation.id == nation_id)
+    ).scalar_one_or_none()
+
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+    if nation.status != "suspended":
+        raise HTTPException(status_code=400, detail="Nation is not suspended.")
+
+    nation.status = "approved"
+
+    leader = db.execute(
+        select(User).where(User.id == nation.leader_id)
+    ).scalar_one_or_none()
+    if leader is not None and leader.role not in ("world_mint", "nation_leader"):
+        leader.role = "nation_leader"
+
     db.commit()
 
     return {"success": True}
@@ -831,4 +920,168 @@ def reject_stimulus_proposal(
         "success": True,
         "proposal_id": proposal.id,
         "status": "rejected",
+    }
+
+
+# ---------------------------------------------------------------------------
+# WM nation-identity edit + manual stock recalc + detailed stats
+# ---------------------------------------------------------------------------
+
+import re as _re_id
+
+
+class MintEditNationIdentityRequest(BaseModel):
+    name: str | None = None
+    currency_name: str | None = None
+    currency_code: str | None = None
+    discord_invite: str | None = None
+    game: str | None = None
+
+
+@router.put("/nations/{nation_id}/identity")
+def mint_edit_nation_identity(
+    nation_id: int,
+    payload: MintEditNationIdentityRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """World-Mint-only nation identity edit.  Renames the nation, swaps
+    currency name/code, updates discord invite or game.  Keeps the
+    backing nation Stock row in sync (ticker + name).
+    """
+    from app.models import Stock as _Stock
+
+    nation = db.execute(select(Nation).where(Nation.id == nation_id)).scalar_one_or_none()
+    if nation is None:
+        raise HTTPException(status_code=404, detail="Nation not found.")
+
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty.")
+        if new_name != nation.name:
+            clash = db.execute(
+                select(Nation).where(Nation.name == new_name, Nation.id != nation_id)
+            ).scalar_one_or_none()
+            if clash is not None:
+                raise HTTPException(status_code=409, detail=f"Nation name already taken by #{clash.id}.")
+            nation.name = new_name
+
+    if payload.currency_name is not None:
+        nation.currency_name = payload.currency_name.strip() or None
+
+    if payload.currency_code is not None:
+        cc = payload.currency_code.strip().upper() or None
+        if cc and not _re_id.match(r"^[A-Z]{2,8}$", cc):
+            raise HTTPException(status_code=400, detail="Currency code must be 2-8 uppercase letters.")
+        if cc:
+            ticker_clash = db.execute(
+                select(_Stock).where(
+                    _Stock.ticker == cc,
+                    ~((_Stock.stock_type == "nation") & (_Stock.entity_id == nation.id)),
+                )
+            ).scalar_one_or_none()
+            if ticker_clash is not None:
+                raise HTTPException(status_code=409, detail=f"Ticker {cc} already in use.")
+        nation.currency_code = cc
+
+    if payload.discord_invite is not None:
+        nation.discord_invite = payload.discord_invite.strip() or None
+    if payload.game is not None:
+        nation.game = payload.game.strip() or None
+
+    # Sync nation stock
+    nation_stock = db.execute(
+        select(_Stock).where(_Stock.stock_type == "nation", _Stock.entity_id == nation.id)
+    ).scalar_one_or_none()
+    if nation_stock is not None:
+        nation_stock.name = nation.name
+        if nation.currency_code:
+            nation_stock.ticker = nation.currency_code
+        else:
+            from app.valuation import generate_ticker
+            nation_stock.ticker = generate_ticker(nation.name, db)
+
+    db.commit()
+    return {
+        "success": True,
+        "name": nation.name,
+        "currency_name": nation.currency_name,
+        "currency_code": nation.currency_code,
+        "discord_invite": nation.discord_invite,
+        "game": nation.game,
+    }
+
+
+@router.post("/recalculate-stocks")
+def mint_recalculate_stocks(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Force a recalculation of every active stock's price."""
+    from app.valuation import recalculate_all_prices
+    n = recalculate_all_prices(db)
+    return {"success": True, "stocks_recalculated": n}
+
+
+@router.get("/stats/detailed")
+def mint_stats_detailed(
+    db: Session = Depends(get_db),
+    admin: User = Depends(_require_world_mint),
+):
+    """Deep economy stats: hash chain status, nations breakdown, supply
+    by holder type, recent transaction-type counts.  Mirrors the data
+    behind the website's /mint/stats page.
+    """
+    from sqlalchemy import func as _func
+    from app.blockchain import verify_chain
+    from app.models import Transaction as _Tx
+
+    chain = verify_chain(db)
+
+    user_balance = db.execute(
+        select(_func.coalesce(_func.sum(User.balance), 0)).where(User.role != "world_mint")
+    ).scalar() or 0
+    nation_balance = db.execute(
+        select(_func.coalesce(_func.sum(Nation.treasury_balance), 0))
+    ).scalar() or 0
+
+    tx_by_type = {
+        row[0]: row[1]
+        for row in db.execute(
+            select(_Tx.tx_type, _func.count(_Tx.id)).group_by(_Tx.tx_type)
+        ).all()
+    }
+
+    nations = list(
+        db.execute(select(Nation).where(Nation.status == "approved").order_by(Nation.name)).scalars().all()
+    )
+
+    return {
+        "chain": {
+            "valid": chain["valid"],
+            "errors": chain.get("errors", []),
+            "block_count": chain.get("block_count", 0),
+        },
+        "supply": {
+            "user_balances": user_balance,
+            "nation_treasuries": nation_balance,
+            "total": user_balance + nation_balance,
+        },
+        "transactions_by_type": tx_by_type,
+        "nations": [
+            {
+                "id": n.id,
+                "name": n.name,
+                "treasury_balance": n.treasury_balance,
+                "member_count": n.member_count,
+                "gdp_score": n.gdp_score,
+                "gdp_multiplier": n.gdp_multiplier,
+                "currency_code": n.currency_code,
+                "demurrage_enabled": n.demurrage_enabled,
+                "demurrage_rate_bps": n.demurrage_rate_bps,
+                "mint_cap": n.mint_cap,
+            }
+            for n in nations
+        ],
     }
