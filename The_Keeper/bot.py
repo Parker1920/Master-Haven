@@ -203,6 +203,7 @@ COGS = [
     "cogs.Haven_upload",
     "cogs.announcements",
     "cogs.hex",
+    "cogs.exchange",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
