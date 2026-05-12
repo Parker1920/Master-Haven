@@ -778,11 +778,6 @@ async def update_mint_settings(
         json=payload,
     )
 
-============================================================
-
-EXAMPLE
-
-============================================================
 
 async def main(): api = TravelersExchangeAPI(api_key="YOUR_API_KEY")
 
