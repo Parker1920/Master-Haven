@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Haven 2.0 — Unified Design Language Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --app-bg: #0a0e27;
+    --app-bg-2: #070a1c;
+    --app-text: #ffffff;
+    --app-text-dim: #b8c0e0;
+    --app-text-muted: #6a7299;
+    --app-card: #141b3d;
+    --app-card-2: #1a2150;
+    --app-primary: #00C2B3;
+    --app-primary-soft: rgba(0, 194, 179, 0.14);
+    --app-accent-2: #9d4edd;
+    --app-accent-2-soft: rgba(157, 78, 221, 0.18);
+    --app-accent-amber: #ffb44c;
+    --app-accent-amber-soft: rgba(255, 180, 76, 0.16);
+    --app-glow: rgba(0, 194, 179, 0.35);
+    --app-glow-purple: rgba(157, 78, 221, 0.32);
+    --grade-s: #34d399;
+    --grade-a: #4ade80;
+    --grade-b: #60a5fa;
+    --grade-c: #94a3b8;
+    --star-yellow: #ffd34a;
+    --star-blue: #6db1ff;
+    --star-red: #ff6b6b;
+    --star-green: #5dd39e;
+    --star-purple: #b794f6;
+    --border: rgba(255, 255, 255, 0.07);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --elev-1: 0 6px 18px rgba(0, 0, 0, 0.28);
+    --elev-2: 0 14px 38px rgba(0, 0, 0, 0.4);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--app-bg); color: var(--app-text); font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background:
+    radial-gradient(ellipse at 20% -10%, rgba(157, 78, 221, 0.12), transparent 50%),
+    radial-gradient(ellipse at 90% 10%, rgba(0, 194, 179, 0.08), transparent 45%),
+    var(--app-bg);
+    min-height: 100vh;
+  }
+  .container { max-width: 1240px; margin: 0 auto; padding: 56px 32px 96px; }
+  .eyebrow { font-family: Inter; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--app-text-muted); font-weight: 500; }
+  .eyebrow-accent { color: var(--app-primary); }
+  .cinzel { font-family: 'Cinzel', serif; letter-spacing: 0.02em; }
+  .cinzel-italic { font-family: 'Cinzel', serif; font-style: italic; letter-spacing: 0.01em; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  h1.page-title { font-family: 'Cinzel', serif; font-weight: 600; font-size: 48px; letter-spacing: 0.04em; margin: 8px 0 4px; }
+  h2.section-title { font-family: 'Cinzel', serif; font-weight: 500; font-size: 22px; letter-spacing: 0.08em; margin: 64px 0 18px; display: flex; align-items: baseline; gap: 12px; }
+  h2.section-title .num { color: var(--app-primary); font-size: 18px; }
+  h2.section-title.purple .num { color: var(--app-accent-2); }
+  h2.section-title.amber .num { color: var(--app-accent-amber); }
+  h2.section-title .label { color: var(--app-text); }
+  .lede { color: var(--app-text-dim); max-width: 720px; line-height: 1.6; font-size: 15px; }
+
+  /* ---------- TOKEN STRIP ---------- */
+  .token-strip {
+    margin-top: 32px;
+    padding: 20px 24px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 32px;
+  }
+  .swatch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .swatch { display: flex; flex-direction: column; gap: 6px; }
+  .swatch .chip { width: 100%; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--border); }
+  .swatch .name { font-size: 10px; letter-spacing: 0.15em; color: var(--app-text-muted); text-transform: uppercase; }
+  .swatch .hex { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--app-text-dim); }
+  .type-ramp { display: flex; flex-direction: column; gap: 8px; }
+  .type-ramp .row { display: flex; align-items: baseline; gap: 12px; }
+  .type-ramp .row .lbl { font-size: 10px; letter-spacing: 0.2em; color: var(--app-text-muted); width: 64px; text-transform: uppercase; }
+
+  /* ---------- ENTITY CARD: SYSTEM ---------- */
+  .card-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  .system-card, .region-card {
+    position: relative;
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(157, 78, 221, 0.07), transparent 70%),
+      linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.01));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: var(--elev-1);
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .system-card:hover, .region-card:hover {
+    border-color: rgba(0, 194, 179, 0.35);
+    box-shadow: var(--elev-2), 0 0 0 1px var(--app-glow);
+    transform: translateY(-2px);
+  }
+  .card-eyebrow { display: flex; justify-content: space-between; align-items: center; font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--app-text-muted); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 500; }
+  .pill-star { background: rgba(255, 211, 74, 0.14); border: 1px solid rgba(255, 211, 74, 0.3); color: var(--star-yellow); }
+  .pill-star.blue { background: rgba(109, 177, 255, 0.14); border-color: rgba(109, 177, 255, 0.3); color: var(--star-blue); }
+  .pill-star .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+  .pill-grade { width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-family: 'Cinzel'; font-weight: 600; font-size: 14px; }
+  .pill-grade.s { background: rgba(52, 211, 153, 0.18); border: 1px solid rgba(52, 211, 153, 0.4); color: var(--grade-s); }
+  .pill-grade.a { background: rgba(74, 222, 128, 0.16); border: 1px solid rgba(74, 222, 128, 0.36); color: var(--grade-a); }
+  .pill-community { background: var(--app-accent-2-soft); border: 1px solid rgba(157, 78, 221, 0.35); color: #cba7f1; padding: 3px 10px; border-radius: 8px; font-size: 11px; }
+
+  .schematic { position: relative; aspect-ratio: 16 / 9; margin: 14px 0 8px; border-radius: 10px; background: radial-gradient(circle at 50% 55%, rgba(255, 211, 74, 0.08), transparent 60%); display: flex; align-items: center; justify-content: center; }
+  .schematic .star { width: 18px; height: 18px; border-radius: 50%; background: var(--star-yellow); box-shadow: 0 0 20px var(--star-yellow), 0 0 8px #fff inset; }
+  .schematic .star.blue { background: var(--star-blue); box-shadow: 0 0 20px var(--star-blue), 0 0 8px #fff inset; }
+  .schematic .orbit { position: absolute; border: 1px dashed rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none; }
+  .schematic .o1 { width: 35%; height: 60%; }
+  .schematic .o2 { width: 60%; height: 100%; }
+  .schematic .planet-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--app-primary); box-shadow: 0 0 6px var(--app-primary); }
+  .schematic .info-table { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; gap: 10px; }
+  .schematic .info-cell { background: rgba(20, 27, 61, 0.5); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--app-text-dim); flex: 1; }
+  .schematic .info-cell .v { color: var(--app-text); font-size: 10px; letter-spacing: 0.02em; text-transform: none; margin-top: 2px; }
+  .glyph-strip { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(7, 10, 28, 0.6); border-radius: 8px; font-family: 'JetBrains Mono'; font-size: 11px; color: var(--app-text-dim); letter-spacing: 0.12em; }
+  .glyph-strip .glyph-icons { color: var(--app-text-muted); font-size: 10px; letter-spacing: 0.3em; }
+
+  .card-body { margin-top: 16px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .card-body .name { font-family: 'Cinzel'; font-weight: 500; font-size: 22px; letter-spacing: 0.03em; }
+  .card-meta { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 12px; color: var(--app-text-dim); }
+  .card-meta .row { display: flex; justify-content: space-between; }
+  .card-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 11px; color: var(--app-text-muted); letter-spacing: 0.04em; }
+
+  /* ---------- REGION CARD ---------- */
+  .region-card .schematic { background: radial-gradient(circle at 50% 50%, rgba(157, 78, 221, 0.08), transparent 70%); }
+  .scatter { position: absolute; inset: 8px; }
+  .scatter .dot { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: var(--app-accent-amber); opacity: 0.7; }
+  .region-card .stat-row { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .region-card .stat { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-right: 14px; border-right: 1px solid var(--border); }
+  .region-card .stat:last-child { border-right: none; }
+  .region-card .stat .v { font-family: 'Cinzel'; font-size: 26px; font-weight: 500; color: var(--app-text); }
+  .region-card .stat .lbl { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--app-text-muted); }
+  .region-card .stat .v.amber { color: var(--app-accent-amber); font-size: 16px; }
+  .region-card .stat .v.teal { color: var(--app-primary); font-size: 16px; }
+
+  /* ---------- HERO + PAGE HEADER ---------- */
+  .page-hero {
+    margin-top: 36px;
+    padding: 32px 28px;
+    background:
+      radial-gradient(ellipse at 80% 0%, rgba(0, 194, 179, 0.1), transparent 50%),
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)),
+      var(--app-card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .page-hero::before { content: ''; position: absolute; inset: 0; background-image:
+    radial-gradient(1px 1px at 12% 30%, rgba(255,255,255,0.4), transparent),
+    radial-gradient(1px 1px at 78% 60%, rgba(255,255,255,0.3), transparent),
+    radial-gradient(1px 1px at 45% 85%, rgba(255,255,255,0.3), transparent),
+    radial-gradient(1px 1px at 90% 20%, rgba(255,255,255,0.3), transparent);
+    pointer-events: none;
+  }
+  .page-hero h1 { font-family: 'Cinzel'; font-weight: 600; font-size: 36px; letter-spacing: 0.05em; margin: 8px 0 6px; }
+  .page-hero .sub { color: var(--app-text-dim); max-width: 620px; line-height: 1.55; }
+
+  /* ---------- STAT TILES ---------- */
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 20px; }
+  .stat-tile {
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+  .stat-tile .lbl { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--app-text-muted); }
+  .stat-tile .val { font-family: 'Cinzel'; font-size: 32px; font-weight: 500; margin-top: 8px; }
+  .stat-tile .delta { font-size: 11px; color: var(--grade-s); margin-top: 4px; }
+  .stat-tile.accent-teal .val { color: var(--app-primary); }
+  .stat-tile.accent-purple .val { color: var(--app-accent-2); }
+  .stat-tile.accent-amber .val { color: var(--app-accent-amber); }
+
+  /* ---------- FORM PANEL (PROFILE / SETTINGS RESKIN) ---------- */
+  .form-panel {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.005));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    margin-top: 18px;
+  }
+  .form-panel .section-label { font-family: 'Cinzel'; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--app-primary); margin-bottom: 18px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--app-text-muted); }
+  .field input, .field select, .field textarea {
+    background: rgba(7, 10, 28, 0.6);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--app-text);
+    font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--app-primary); box-shadow: 0 0 0 3px rgba(0, 194, 179, 0.15); }
+  .form-actions { display: flex; gap: 12px; margin-top: 22px; }
+  .btn {
+    padding: 11px 22px; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 500;
+    letter-spacing: 0.04em; cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+  }
+  .btn-primary { background: var(--app-primary); color: #04211d; box-shadow: 0 0 24px -4px var(--app-glow); }
+  .btn-primary:hover { box-shadow: 0 0 32px -2px var(--app-glow); transform: translateY(-1px); }
+  .btn-ghost { background: transparent; color: var(--app-text-dim); border-color: var(--border-strong); }
+  .btn-ghost:hover { border-color: var(--app-primary); color: var(--app-text); }
+
+  /* ---------- TABLE PATTERN (EVENTS / USER MGMT RESKIN) ---------- */
+  .data-panel { margin-top: 18px; background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.005)); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .data-panel .head { display: flex; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); align-items: center; }
+  .data-panel .head .title { font-family: 'Cinzel'; font-size: 16px; letter-spacing: 0.12em; }
+  table.haven-table { width: 100%; border-collapse: collapse; }
+  table.haven-table th { text-align: left; padding: 14px 24px; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--app-text-muted); font-weight: 500; background: rgba(7, 10, 28, 0.4); }
+  table.haven-table td { padding: 14px 24px; font-size: 13px; color: var(--app-text-dim); border-top: 1px solid var(--border); }
+  table.haven-table tr:hover td { background: rgba(0, 194, 179, 0.04); color: var(--app-text); }
+  .tier-badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; letter-spacing: 0.05em; }
+  .tier-super { background: rgba(255, 180, 76, 0.14); color: var(--app-accent-amber); border: 1px solid rgba(255, 180, 76, 0.32); }
+  .tier-partner { background: rgba(0, 194, 179, 0.14); color: var(--app-primary); border: 1px solid rgba(0, 194, 179, 0.32); }
+  .tier-member { background: rgba(157, 78, 221, 0.14); color: #cba7f1; border: 1px solid rgba(157, 78, 221, 0.32); }
+
+  /* ---------- WIZARD LIVE PREVIEW PATTERN ---------- */
+  .wizard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 18px; }
+  .preview-panel {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.005));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    min-height: 480px;
+    position: relative;
+  }
+  .preview-header { display: flex; justify-content: space-between; align-items: center; }
+  .preview-header .left { display: flex; flex-direction: column; }
+  .preview-header .name { font-family: 'Cinzel'; font-style: italic; font-size: 22px; color: var(--app-text-dim); margin-top: 4px; }
+  .preview-header .draft-tag { padding: 5px 12px; border-radius: 8px; background: var(--app-accent-amber-soft); border: 1px solid rgba(255, 180, 76, 0.36); color: var(--app-accent-amber); font-size: 10px; letter-spacing: 0.18em; }
+  .preview-radar { aspect-ratio: 1; margin: 24px auto 0; max-width: 360px; position: relative; }
+  .preview-radar .ring { position: absolute; border: 1px dashed rgba(255,255,255,0.08); border-radius: 50%; }
+  .r1 { inset: 12%; } .r2 { inset: 24%; } .r3 { inset: 36%; } .r4 { inset: 48%; }
+  .preview-radar .cross { position: absolute; background: rgba(255,255,255,0.05); }
+  .preview-radar .h { left: 8%; right: 8%; top: 50%; height: 1px; }
+  .preview-radar .v { top: 8%; bottom: 8%; left: 50%; width: 1px; }
+  .preview-radar .center-star { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: var(--star-yellow); box-shadow: 0 0 32px var(--star-yellow); }
+  .compass-rose { position: absolute; top: 8px; right: 8px; font-size: 10px; letter-spacing: 0.18em; color: var(--app-primary); width: 56px; height: 56px; display: grid; grid-template-areas: ". n ." "w c e" ". s ."; gap: 2px; }
+  .compass-rose .n { grid-area: n; text-align: center; } .compass-rose .s { grid-area: s; text-align: center; }
+  .compass-rose .e { grid-area: e; } .compass-rose .w { grid-area: w; text-align: right; }
+  .compass-rose .c { grid-area: c; text-align: center; font-size: 14px; }
+  .glyph-dashes { margin: 18px 0; padding: 12px 16px; background: rgba(7, 10, 28, 0.6); border: 1px dashed var(--border-strong); border-radius: 10px; font-family: 'JetBrains Mono'; letter-spacing: 0.4em; color: var(--app-text-muted); text-align: center; }
+  .preview-stats { margin-top: 12px; }
+  .preview-stats .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .preview-stats .lbl { letter-spacing: 0.16em; text-transform: uppercase; color: var(--app-text-muted); }
+  .preview-stats .val { color: var(--app-text); font-family: 'Cinzel'; font-style: italic; }
+  .preview-stats .val.auto { color: var(--app-primary); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px; }
+
+  .wizard-form { background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.005)); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  .wizard-form .step-tab-row { display: flex; gap: 8px; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+  .step-tab { padding: 8px 14px; border-radius: 8px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; border: 1px solid var(--border-strong); color: var(--app-text-muted); }
+  .step-tab.active { background: var(--app-primary-soft); border-color: rgba(0, 194, 179, 0.5); color: var(--app-primary); }
+  .step-tab.done { color: var(--app-text-dim); border-color: rgba(0, 194, 179, 0.25); }
+  .help-fab { position: absolute; right: 18px; bottom: 18px; width: 44px; height: 44px; border-radius: 50%; background: var(--app-accent-2); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; box-shadow: 0 0 24px var(--app-glow-purple); }
+
+  /* ---------- TIER MAPPING FOOTER ---------- */
+  .map-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 18px; }
+  .map-col { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
+  .map-col h3 { font-family: 'Cinzel'; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; margin: 0 0 12px; }
+  .map-col.tier-a h3 { color: var(--grade-s); }
+  .map-col.tier-b h3 { color: var(--app-primary); }
+  .map-col.tier-c h3 { color: var(--app-accent-amber); }
+  .map-col ul { list-style: none; padding: 0; margin: 0; font-size: 12px; color: var(--app-text-dim); line-height: 1.9; }
+  .map-col .count { font-family: 'Cinzel'; font-size: 22px; font-weight: 500; margin-bottom: 8px; color: var(--app-text); }
+
+  /* ---------- INTRO NOTE ---------- */
+  .intro-note { padding: 18px 22px; border-left: 3px solid var(--app-accent-2); background: rgba(157, 78, 221, 0.06); border-radius: 0 12px 12px 0; margin-top: 24px; color: var(--app-text-dim); font-size: 14px; line-height: 1.6; }
+
+  /* ---------- SUB SECTION HEADER WITH NUMBER ---------- */
+  .sub-section-header { display: flex; align-items: baseline; gap: 16px; margin-top: 32px; }
+  .sub-section-header .num { font-family: 'Cinzel'; font-size: 18px; color: var(--app-accent-2); letter-spacing: 0.06em; }
+  .sub-section-header .name { font-family: 'Cinzel'; font-size: 18px; color: var(--app-text); letter-spacing: 0.08em; }
+  .sub-section-header.teal .num { color: var(--app-primary); }
+  .sub-section-header.amber .num { color: var(--app-accent-amber); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <span class="eyebrow eyebrow-accent">Voyager's Haven · Design Language</span>
+  <h1 class="page-title">Haven 2.0 — Unified.</h1>
+  <p class="lede">Everything below assumes the Systems, Wizard, and Landing redesigns are the reference. This mockup shows the shared language extracted from those pages, plus how it'd land on the rest of the site. Open it next to havenmap.online and treat each block as a target.</p>
+
+  <div class="intro-note">
+    <strong>How to read this:</strong> Tokens at top establish the palette. The card patterns are reproductions of what the Systems and Regions pages already do. The Hero / Stat tiles / Form / Table / Live-Preview blocks are <em>new chrome</em> applied to existing screen archetypes — they're what Profile, Settings, Analytics, Events, UserManagement should look like after a unification pass. The tier map at the end shows which existing pages each archetype unblocks.
+  </div>
+
+  <!-- ============ 01. TOKENS ============ -->
+  <h2 class="section-title"><span class="num cinzel">01</span><span class="label">Foundations</span></h2>
+  <div class="token-strip">
+    <div>
+      <span class="eyebrow">Palette</span>
+      <div class="swatch-grid" style="margin-top:12px">
+        <div class="swatch"><div class="chip" style="background:#0a0e27"></div><span class="name">bg</span><span class="hex">#0a0e27</span></div>
+        <div class="swatch"><div class="chip" style="background:#141b3d"></div><span class="name">card</span><span class="hex">#141b3d</span></div>
+        <div class="swatch"><div class="chip" style="background:#00C2B3"></div><span class="name">primary</span><span class="hex">#00C2B3</span></div>
+        <div class="swatch"><div class="chip" style="background:#9d4edd"></div><span class="name">accent</span><span class="hex">#9d4edd</span></div>
+        <div class="swatch"><div class="chip" style="background:#ffb44c"></div><span class="name">amber</span><span class="hex">#ffb44c</span></div>
+      </div>
+    </div>
+    <div>
+      <span class="eyebrow">Type Ramp</span>
+      <div class="type-ramp" style="margin-top:12px">
+        <div class="row"><span class="lbl">Display</span><span class="cinzel" style="font-size:24px">Voyager's Haven</span></div>
+        <div class="row"><span class="lbl">Entity</span><span class="cinzel-italic" style="font-size:18px;color:var(--app-text-dim)">Ivmatey</span></div>
+        <div class="row"><span class="lbl">Eyebrow</span><span class="eyebrow">Star System · Euclid</span></div>
+        <div class="row"><span class="lbl">Body</span><span style="font-size:13px;color:var(--app-text-dim)">Inter — 13px, dim</span></div>
+      </div>
+    </div>
+    <div>
+      <span class="eyebrow">Chrome</span>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px;font-size:12px;color:var(--app-text-dim);line-height:1.55">
+        <div>· 1px border @ <span class="mono" style="color:var(--app-text)">rgba(255,255,255,0.07)</span></div>
+        <div>· Card grad <span class="mono" style="color:var(--app-text)">white 4% → 1%</span></div>
+        <div>· Radius <span class="mono" style="color:var(--app-text)">14–18px</span></div>
+        <div>· Hover glow <span class="mono" style="color:var(--app-text)">teal 35%</span></div>
+        <div>· Elev <span class="mono" style="color:var(--app-text)">0 6 18 / 0 14 38</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 02. ENTITY CARDS ============ -->
+  <h2 class="section-title purple"><span class="num cinzel">02</span><span class="label">Entity Cards (already shipped)</span></h2>
+  <p class="lede">Reference reproductions of what Systems and Regions already render. Every other "list of things" page should adopt this anatomy: eyebrow → schematic → name → meta rows → footer.</p>
+  <div class="card-row">
+
+    <!-- SYSTEM CARD -->
+    <div class="system-card">
+      <div class="card-eyebrow"><span>Voyager's Haven · Star System</span><span>Euclid · Normal</span></div>
+      <div class="schematic">
+        <div class="info-table">
+          <div class="info-cell">Economy<div class="v">Advanced</div></div>
+          <div class="info-cell">Conflict<div class="v">Medium</div></div>
+          <div class="info-cell">Bodies<div class="v">3 / 1</div></div>
+          <div class="info-cell">Race<div class="v">Vy'keen</div></div>
+        </div>
+        <div class="orbit o1"></div>
+        <div class="orbit o2"></div>
+        <div class="star"></div>
+        <div class="planet-dot" style="top:30%;left:72%"></div>
+        <div class="planet-dot" style="top:62%;left:18%"></div>
+      </div>
+      <div class="glyph-strip"><span>108BF894716C</span><span class="glyph-icons">⌬ ⏣ ⟁ ⏧ ⟴</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="pill pill-star"><span class="dot"></span>Yellow</span>
+        </div>
+        <span class="pill-grade s">S</span>
+      </div>
+      <div class="card-body">
+        <span class="name">Ivmatey</span>
+        <span class="pill-community">Haven</span>
+      </div>
+      <div class="card-meta">
+        <div class="row"><span>⊕ Advanced / T2</span><span>Medium</span></div>
+        <div class="row"><span>○ 0 planets</span><span>Vy'keen</span></div>
+      </div>
+      <div class="card-footer"><span>100% complete</span><span>TurpitZz</span></div>
+    </div>
+
+    <!-- REGION CARD -->
+    <div class="region-card">
+      <div class="card-eyebrow"><span>Voyager's Haven · Region</span><span></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px">
+        <span class="pill-community" style="background:var(--app-accent-2-soft)">Named</span>
+        <div style="text-align:right">
+          <div class="cinzel-italic" style="font-size:20px;color:var(--app-accent-amber)">Nilinun Band</div>
+          <div class="mono" style="font-size:11px;color:var(--app-text-muted);margin-top:2px">3103 · 207 · 1417</div>
+        </div>
+      </div>
+      <div class="schematic" style="aspect-ratio:21/9;margin-top:12px">
+        <div class="scatter" id="scatter1"></div>
+        <div style="position:absolute;bottom:10px;right:12px;font-size:10px;letter-spacing:0.14em;color:var(--app-text-muted)">STARS <span style="color:var(--app-text);font-family:Cinzel">577</span></div>
+        <div style="position:absolute;bottom:10px;left:12px;font-size:10px;letter-spacing:0.14em;color:var(--app-text-muted)">GALAXY <span style="color:var(--app-text);font-family:Cinzel">Euclid</span></div>
+      </div>
+      <div class="card-body"><span class="name">Nilinun Band</span></div>
+      <div class="stat-row">
+        <div class="stat"><span class="v">577</span><span class="lbl">Systems</span></div>
+        <div class="stat"><span class="v amber">—</span><span class="lbl">Grade S</span></div>
+        <div class="stat"><span class="v teal">—</span><span class="lbl">Contributors</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 03. PAGE HEADER + STATS (DASHBOARD / ANALYTICS RESKIN) ============ -->
+  <h2 class="section-title"><span class="num cinzel">03</span><span class="label">Page Hero + Stat Tiles</span></h2>
+  <p class="lede">Drop-in for Dashboard, Analytics, PartnerAnalytics, CommunityStats, DBStats. Replaces the current bare gray Card grid.</p>
+  <div class="page-hero">
+    <span class="eyebrow eyebrow-accent">Cartographer's Dashboard</span>
+    <h1>Welcome back, TurpitZz</h1>
+    <p class="sub">9,331 systems mapped across 256 galaxies. 47 awaiting your review.</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat-tile accent-teal">
+      <span class="lbl">Star Systems</span>
+      <div class="val">9,331</div>
+      <span class="delta">+184 this week</span>
+    </div>
+    <div class="stat-tile accent-purple">
+      <span class="lbl">Named Regions</span>
+      <div class="val">2,215</div>
+      <span class="delta">+12 this week</span>
+    </div>
+    <div class="stat-tile accent-amber">
+      <span class="lbl">Pending Review</span>
+      <div class="val">47</div>
+      <span class="delta" style="color:var(--app-accent-amber)">+3 today</span>
+    </div>
+    <div class="stat-tile">
+      <span class="lbl">Contributors</span>
+      <div class="val">312</div>
+      <span class="delta">+5 this week</span>
+    </div>
+  </div>
+
+  <!-- ============ 04. FORM PANEL (PROFILE / SETTINGS RESKIN) ============ -->
+  <h2 class="section-title purple"><span class="num cinzel">04</span><span class="label">Form Panel</span></h2>
+  <p class="lede">For Profile, Settings, DataRestrictions, CsvImport, partner edit modals. Replaces the bare Tailwind <span class="mono" style="color:var(--app-text)">bg-gray-700 / border-gray-600</span> input pattern with glass panels, tracked-uppercase labels, and a focus glow.</p>
+  <div class="form-panel">
+    <div class="section-label">Voyager Identity</div>
+    <div class="form-row">
+      <div class="field">
+        <label>Display Name</label>
+        <input type="text" value="TurpitZz" />
+      </div>
+      <div class="field">
+        <label>Discord Handle</label>
+        <input type="text" value="TurpitZz#9999" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label>Default Community</label>
+        <select><option>Voyager's Haven</option></select>
+      </div>
+      <div class="field">
+        <label>Default Galaxy</label>
+        <select><option>Euclid</option></select>
+      </div>
+    </div>
+    <div class="form-row" style="grid-template-columns: 1fr">
+      <div class="field">
+        <label>Cartographer's Note</label>
+        <textarea rows="3" placeholder="A short bio shown on your public profile…"></textarea>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary">Save Identity</button>
+      <button class="btn btn-ghost">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ============ 05. TABLE PATTERN (EVENTS / USER MGMT RESKIN) ============ -->
+  <h2 class="section-title amber"><span class="num cinzel">05</span><span class="label">Data Table</span></h2>
+  <p class="lede">For PartnerManagement, UserManagement, SubAdminManagement, ExtractorUsers, ApprovalAudit, Events. Replaces bare Tailwind grids with a glass-panel container, tracked-uppercase headers, and tier badges that match the palette.</p>
+  <div class="data-panel">
+    <div class="head">
+      <span class="title">Registered Voyagers</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="padding:7px 14px;font-size:12px">Filter</button>
+        <button class="btn btn-primary" style="padding:7px 14px;font-size:12px">+ New Voyager</button>
+      </div>
+    </div>
+    <table class="haven-table">
+      <thead><tr>
+        <th>Voyager</th><th>Tier</th><th>Community</th><th>Systems</th><th>Last Active</th>
+      </tr></thead>
+      <tbody>
+        <tr><td><span class="cinzel-italic" style="color:var(--app-text)">TurpitZz</span></td><td><span class="tier-badge tier-super">Super Admin</span></td><td>Voyager's Haven</td><td>1,204</td><td>2 hours ago</td></tr>
+        <tr><td><span class="cinzel-italic" style="color:var(--app-text)">Stars</span></td><td><span class="tier-badge tier-partner">Partner</span></td><td>Voyager's Haven</td><td>892</td><td>1 day ago</td></tr>
+        <tr><td><span class="cinzel-italic" style="color:var(--app-text)">dreams of a dark</span></td><td><span class="tier-badge tier-member">Member</span></td><td>IEA</td><td>318</td><td>3 days ago</td></tr>
+        <tr><td><span class="cinzel-italic" style="color:var(--app-text)">Wander Respite</span></td><td><span class="tier-badge tier-member">Member</span></td><td>B.E.S</td><td>204</td><td>1 week ago</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============ 06. WIZARD LIVE PREVIEW ============ -->
+  <h2 class="section-title purple"><span class="num cinzel">06</span><span class="label">Wizard — Live Preview Pattern (from mockup v1.1)</span></h2>
+  <p class="lede">The v1.1 wizard mockup introduces a live-preview panel — radar-style schematic that fills in as the user types. This isn't in production yet but the chrome below maps cleanly onto the current Wizard form. Pair the existing form (left) with this preview (right).</p>
+  <div class="wizard-grid">
+    <div class="wizard-form">
+      <div class="step-tab-row">
+        <span class="step-tab done">Portal</span>
+        <span class="step-tab active">System Attrs</span>
+        <span class="step-tab">Planets</span>
+        <span class="step-tab">Review</span>
+      </div>
+      <div class="sub-section-header"><span class="num">02</span><span class="name">System Attributes</span></div>
+      <div style="margin-top:18px">
+        <div class="field" style="margin-bottom:14px"><label>Star Color *</label><select><option>— Select —</option></select></div>
+        <div class="field" style="margin-bottom:14px"><label>Economy Type *</label><select><option>— Select —</option></select></div>
+        <div class="field" style="margin-bottom:14px"><label>Conflict Level *</label><select><option>— Select —</option></select></div>
+        <div class="field"><label>Dominant Lifeform *</label><select><option>— Select —</option></select></div>
+      </div>
+    </div>
+
+    <div class="preview-panel">
+      <div class="preview-header">
+        <div class="left">
+          <span class="eyebrow">Live Preview</span>
+          <span class="name">— Unnamed —</span>
+          <span class="eyebrow" style="margin-top:4px">Euclid · — Region</span>
+        </div>
+        <span class="draft-tag">★ Draft</span>
+      </div>
+      <div class="preview-radar">
+        <div class="cross h"></div>
+        <div class="cross v"></div>
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="ring r4"></div>
+        <div class="center-star"></div>
+        <div class="compass-rose"><span class="n">N</span><span class="w">W</span><span class="c">✦</span><span class="e">E</span><span class="s">S</span></div>
+      </div>
+      <div class="glyph-dashes">— — — — — — — — — — — —</div>
+      <div class="preview-stats">
+        <div class="row"><span class="lbl">Region</span><span class="val">unknown</span></div>
+        <div class="row"><span class="lbl">Reality</span><span class="val">Normal</span></div>
+        <div class="row"><span class="lbl">Star</span><span class="val">—</span></div>
+        <div class="row"><span class="lbl">Bodies</span><span class="val auto">Auto</span></div>
+        <div class="row"><span class="lbl">Planets Added</span><span class="val">0</span></div>
+        <div class="row"><span class="lbl">Submitter</span><span class="val">—</span></div>
+      </div>
+      <div class="help-fab">?</div>
+    </div>
+  </div>
+
+  <!-- ============ 07. TIER MAPPING ============ -->
+  <h2 class="section-title"><span class="num cinzel">07</span><span class="label">Coverage — what this unlocks</span></h2>
+  <p class="lede">Each archetype above replaces the dated chrome on a cluster of existing pages. Sequencing: do the shared components first (Card / Button / FormField / StatTile / TableContainer), then apply the new page archetypes top-down by impact.</p>
+  <div class="map-grid">
+    <div class="map-col tier-a">
+      <h3>Tier A · Cosmetic</h3>
+      <div class="count">9 pages</div>
+      <ul>
+        <li>Systems, Wizard, Landing <em>(reference)</em></li>
+        <li>Changelog, Docs <em>(already 2.0)</em></li>
+        <li>Dashboard — apply Hero + Stat tiles</li>
+        <li>CommunityStats — glass-ify community grid</li>
+        <li>CommunityDetail — glass region grid</li>
+        <li>Discoveries — hero + glass type cards</li>
+        <li>SystemDetail — hero block + glass planets</li>
+        <li>PendingApprovals — glass per-submission</li>
+        <li>RegionDetail — hero + glass system grid</li>
+      </ul>
+    </div>
+    <div class="map-col tier-b">
+      <h3>Tier B · Restyle</h3>
+      <div class="count">8 pages</div>
+      <ul>
+        <li>Analytics — glass tables, Cinzel headers</li>
+        <li>PartnerAnalytics — same as Analytics</li>
+        <li>Events — glass event cards + accent badges</li>
+        <li>Profile — form panel pattern</li>
+        <li>DBStats — glass table pattern</li>
+        <li>CsvImport — glass drop zone + form sections</li>
+        <li>DataRestrictions — glass toggle groups</li>
+        <li>PartnerManagement — glass modals</li>
+      </ul>
+    </div>
+    <div class="map-col tier-c">
+      <h3>Tier C · Full Rebuild</h3>
+      <div class="count">9 pages</div>
+      <ul>
+        <li>WarRoom — palette rethink, glass war cards</li>
+        <li>WarRoomAdmin — same</li>
+        <li>ApiKeys — glass CRUD + hero</li>
+        <li>ApprovalAudit — filter hero + glass results</li>
+        <li>Settings — form panels + accent active state</li>
+        <li>SubAdminManagement — glass user grid</li>
+        <li>UserManagement — glass user grid</li>
+        <li>ExtractorUsers — full glass + glow</li>
+        <li>Logs — dark glass log viewer</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="margin-top:48px;padding:24px;border:1px dashed var(--border-strong);border-radius:14px;color:var(--app-text-muted);font-size:13px;line-height:1.7">
+    <strong style="color:var(--app-text);font-family:Cinzel;letter-spacing:0.08em">SEQUENCING NOTE — </strong>
+    The fastest path to "site feels unified" is upgrading the shared components first: <span class="mono" style="color:var(--app-text)">Card</span>, <span class="mono" style="color:var(--app-text)">Button</span>, <span class="mono" style="color:var(--app-text)">FormField</span>, <span class="mono" style="color:var(--app-text)">StatCard</span>, and a new <span class="mono" style="color:var(--app-text)">TableContainer</span>. That alone moves every Tier A and most Tier B pages 60–70% of the way without touching any individual page. The Tier C work (WarRoom, ApiKeys, Settings, Audit, the user-management trio) is where actual page rebuilds happen — those are the 1–2 week investments.
+    <br><br>
+    <strong style="color:var(--app-text);font-family:Cinzel;letter-spacing:0.08em">IDENTITY — </strong>
+    The brand is already coherent: cosmic-compass mark + Cinzel wordmark + teal/purple/amber. The 2.0 pass is execution, not rebrand. The one thing worth deciding now: do we want the wizard live-preview to ship (the v1.1 mockup screenshot) — because that's a forward-looking feature, not a restyle, and it's the only "new pattern" in the queue.
+  </div>
+
+</div>
+
+<script>
+  // Generate region scatter dots
+  (function() {
+    var scatter = document.getElementById('scatter1');
+    if (!scatter) return;
+    var count = 180;
+    var cx = 50, cy = 50;
+    for (var i = 0; i < count; i++) {
+      var angle = Math.random() * Math.PI * 2;
+      var r = Math.pow(Math.random(), 0.6) * 42;
+      var x = cx + Math.cos(angle) * r;
+      var y = cy + Math.sin(angle) * r * 0.6;
+      var d = document.createElement('div');
+      d.className = 'dot';
+      d.style.left = x + '%';
+      d.style.top = y + '%';
+      d.style.opacity = 0.3 + Math.random() * 0.6;
+      d.style.width = d.style.height = (1 + Math.random() * 1.5) + 'px';
+      scatter.appendChild(d);
+    }
+  })();
+</script>
+
+</body>
+</html>
