@@ -146,7 +146,7 @@ export default function Navbar() {
       items: [
         { label: 'User Management', to: '/admin/users', visible: true },
         { label: 'API Keys', to: '/api-keys', visible: true },
-        { label: 'Partners (Legacy)', to: '/admin/partners', visible: true },
+        { label: 'Civilizations', to: '/admin/civilizations', visible: true },
         { label: 'Audit Log', to: '/admin/audit', visible: true },
       ]
     },
@@ -255,6 +255,13 @@ export default function Navbar() {
 
             {/* Profile + Auth */}
             {user && <Link className={`${navLink} text-green-400`} to="/profile">My Profile</Link>}
+            {/* "Acting as" civilization selector — only shown when the user
+                has more than one membership. Single-civ users don't need a
+                picker; super admin sees their override-target if they've
+                set one. */}
+            {user && (user.civMemberships?.length > 1) && (
+              <ActingAsChip user={user} onSwitch={auth.setActiveCiv} />
+            )}
             {!user ? (
               <button className="px-3 py-1 bg-blue-500 text-white rounded whitespace-nowrap" onClick={() => setShowLogin(true)}>Login</button>
             ) : (
@@ -330,5 +337,65 @@ export default function Navbar() {
       </div>
       <AdminLoginModal open={showLogin} onClose={() => setShowLogin(false)} />
     </header>
+  )
+}
+
+// "Acting as" civ selector chip — shown in the desktop nav for users who
+// belong to more than one civilization. Reads memberships from auth.user
+// and posts to /api/session/active_civ via auth.setActiveCiv on click.
+function ActingAsChip({ user, onSwitch }) {
+  const [open, setOpen] = useState(false)
+  const memberships = user.civMemberships || []
+  const active = memberships.find(m => m.civ_id === user.activeCivId) || memberships[0]
+  if (!active) return null
+
+  const handleSwitch = async (civId) => {
+    setOpen(false)
+    if (civId === user.activeCivId) return
+    try {
+      await onSwitch(civId)
+    } catch (err) {
+      console.error('Switch civ failed:', err)
+      alert(err.message || 'Failed to switch civilization')
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border whitespace-nowrap"
+        style={{
+          backgroundColor: 'rgba(255,255,255,0.05)',
+          borderColor: active.region_color || 'var(--app-accent-3)',
+          color: 'var(--app-text)',
+        }}
+        onClick={() => setOpen(o => !o)}
+        title={`Acting as ${active.display_name}`}
+      >
+        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: active.region_color || '#888' }} />
+        <span className="opacity-60">Acting as</span>
+        <span className="font-semibold">{active.tag}</span>
+        <ChevronDownIcon className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 mt-1 rounded-md border shadow-lg py-1 min-w-[200px] z-50"
+          style={{ backgroundColor: 'var(--app-card)', borderColor: 'var(--app-accent-3)' }}
+        >
+          {memberships.map(m => (
+            <button
+              key={m.civ_id}
+              onClick={() => handleSwitch(m.civ_id)}
+              className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-white/5"
+              style={m.civ_id === user.activeCivId ? { backgroundColor: 'rgba(255,255,255,0.06)' } : undefined}
+            >
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: m.region_color || '#888' }} />
+              <span className="flex-1">{m.display_name}</span>
+              <span className="text-[10px] uppercase opacity-60">{m.role}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

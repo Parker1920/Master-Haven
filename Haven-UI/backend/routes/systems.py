@@ -939,9 +939,18 @@ async def api_systems(
         total_pages = (total + limit - 1) // limit if total > 0 else 0
         offset = (page - 1) * limit
 
-        # Fetch systems with pagination
+        # Fetch systems with pagination.
+        # Parker 2026-05-11: include planet_count + moon_count subqueries so
+        # the L4 SystemCard text doesn't say "0 planets" when the system_thumb
+        # poster correctly shows 4 planets. Both columns are indexed
+        # (idx_planets_system_id from v1.32.0) so the subqueries are cheap.
         cursor.execute(f'''
-            SELECT s.*, r.custom_name as region_name
+            SELECT s.*, r.custom_name as region_name,
+                   (SELECT COUNT(*) FROM planets p
+                    WHERE p.system_id = s.id
+                      AND COALESCE(p.is_moon, 0) = 0) AS planet_count,
+                   (SELECT COUNT(*) FROM moons m
+                    WHERE m.planet_id IN (SELECT id FROM planets WHERE system_id = s.id)) AS moon_count
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
@@ -1069,6 +1078,14 @@ async def api_search(
     min_planets: int = None,
     max_planets: int = None,
     is_complete: str = None,
+    # Scope filters used by SearchOverlay's "scope chip" (Systems Tab v2).
+    # Pre-fix these were silently ignored — the chip claimed to scope but the
+    # backend returned global results, so users saw irrelevant hits.
+    reality: str = None,
+    galaxy: str = None,
+    rx: int = None,
+    ry: int = None,
+    rz: int = None,
     session: Optional[str] = Cookie(None)
 ):
     """Search systems by name, glyph code, galaxy, or description with optional advanced filters.
@@ -1081,6 +1098,7 @@ async def api_search(
         page: Page number (1-indexed, default 1)
         limit: Max results per page (default 20, max 50)
         star_type..is_complete: Advanced filter parameters
+        reality, galaxy, rx/ry/rz: scope chip filters from SearchOverlay
         session: Session cookie for permission checking
 
     Returns:
@@ -1133,6 +1151,19 @@ async def api_search(
             'max_planets': max_planets,
             'is_complete': is_complete,
         }, adv_where_clauses, adv_params)
+
+        # Scope-chip clauses (SearchOverlay) — apply on top of advanced filters.
+        # All are exact matches (galaxy/reality are NOCASE because galaxy strings
+        # vary in capitalization). rx/ry/rz must all be present or none.
+        if reality:
+            adv_where_clauses.append("s.reality = ? COLLATE NOCASE")
+            adv_params.append(reality)
+        if galaxy:
+            adv_where_clauses.append("s.galaxy = ? COLLATE NOCASE")
+            adv_params.append(galaxy)
+        if rx is not None and ry is not None and rz is not None:
+            adv_where_clauses.append("s.region_x = ? AND s.region_y = ? AND s.region_z = ?")
+            adv_params.extend([rx, ry, rz])
 
         adv_sql = ""
         if adv_where_clauses:

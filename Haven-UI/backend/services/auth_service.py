@@ -187,6 +187,46 @@ def get_submitter_identity(session_token: Optional[str]) -> dict:
     }
 
 
+def check_self_coauthor(coauthors, session_data: dict) -> bool:
+    """Check if the current session is listed as a co-author on a pending
+    submission (H-C2: prevents co-authors from approving systems that
+    credit them).
+
+    coauthors: list of strings (Discord usernames) or {username, profile_id}
+        dicts pulled from system_data.coauthors. Defaults to [].
+    session_data: the resolved session dict from get_session().
+
+    Returns True if the approver should be blocked. Super admin is exempt;
+    partner/sub-admin/member are not (the leaderboard fraud risk is
+    independent of tier — a partner can still benefit from coauthoring
+    a system someone else submitted).
+    """
+    if not coauthors or not session_data:
+        return False
+    if session_data.get('user_type') == 'super_admin':
+        return False
+
+    current_profile_id = session_data.get('profile_id')
+    current_username = (session_data.get('username') or '').strip()
+    normalized_current = normalize_username_for_dedup(current_username) if current_username else ''
+
+    for entry in coauthors:
+        if isinstance(entry, dict):
+            entry_username = (entry.get('username') or '').strip()
+            entry_profile_id = entry.get('profile_id')
+        else:
+            entry_username = str(entry or '').strip()
+            entry_profile_id = None
+
+        if entry_profile_id and current_profile_id and entry_profile_id == current_profile_id:
+            return True
+        if not entry_username:
+            continue
+        if normalized_current and normalize_username_for_dedup(entry_username) == normalized_current:
+            return True
+    return False
+
+
 def check_self_submission(submission: dict, session_data: dict) -> bool:
     """
     Check if a submission was made by the current user (self-approval prevention).

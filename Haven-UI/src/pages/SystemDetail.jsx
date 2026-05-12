@@ -1,1101 +1,853 @@
-import React, { useEffect, useState, useContext, useMemo } from 'react'
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import axios from 'axios'
-import Card from '../components/Card'
-import Button from '../components/Button'
-import GlyphDisplay from '../components/GlyphDisplay'
-import { AuthContext } from '../utils/AuthContext'
-import { getTradeGoodById } from '../utils/economyTradeGoods'
-import { getFaunaColor, getFloraColor, getSentinelColor } from '../utils/adjectiveColors'
-
-import { getPhotoUrl } from '../utils/api'
-import { formatDate } from '../hooks/useDateFormat'
-import { normalizeUsernameForUrl } from '../posters/_shared/identity'
-
 /**
- * System Detail Page
+ * SystemDetail — Level 5 of the Systems Tab v2.0.
+ *
  * Route: /systems/:id
- * Auth: Public (edit/delete require admin with matching discord_tag scope)
+ * Auth: Public (data restrictions enforced by backend)
  *
- * Displays full system information: star properties, economy, planets with
- * expandable detail rows, moon cards, space station trade goods, photos,
- * completeness grade breakdown, and contributor history.
+ * Layout (spec section 8.1):
+ *   ┌──────────────────┬───────────┐
+ *   │ Hero card +      │ Community │
+ *   │ stat row +       │ Coords    │
+ *   │ description      │ Contribs  │
+ *   │                  │ Actions   │
+ *   │                  │ Activity  │
+ *   ├──────────────────┴───────────┤
+ *   │     Planets grid             │
+ *   ├──────────────────────────────┤
+ *   │     Photos grid              │
+ *   └──────────────────────────────┘
  *
- * Key APIs:
- *   GET    /api/systems/:id
- *   DELETE /api/systems/:id  (admin only)
+ * Edit Mode (spec section 8.4):
+ *   - Toggle button at top right
+ *   - Editable fields: name, description
+ *   - Save submits to /api/submit_system with `id` set → pending_systems
+ *     row with edit_system_id, enters the normal approval queue. NO direct
+ *     PATCH on the live `systems` row.
+ *   - Discard re-fetches and reverts
  *
- * Color-coded adjective tiers for fauna/flora/sentinel use shared utility
- * functions from adjectiveColors.js. Star type badge colors are conditional
- * (Yellow/Red/Green/Blue/Purple).
+ * Photo lightbox: gathers system-level photos plus planet-level photos
+ * into a single ordered list, lazy-renders only when opened.
  */
 
-// Format a contributor date nicely
-function formatContribDate(dateStr) {
-  if (!dateStr) return null
-  try {
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return null
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch { return null }
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import axios from 'axios'
+import { AuthContext } from '../utils/AuthContext'
+import { getThumbnailUrl, getPhotoUrl } from '../utils/api'
+import Lightbox from '../components/Lightbox'
+import FromMapBanner from '../components/FromMapBanner'
+import ActivityFeed from '../components/ActivityFeed'
+import PlanetSphere from '../components/shared/PlanetSphere'
+
+const STAR_HEX = { Yellow: '#facc15', Blue: '#3b82f6', Red: '#ef4444', Green: '#10b981', Purple: '#a855f7' }
+const STAR_TEXT = { Yellow: '#422006' } // contrast on Yellow only; others use white
+const GRADE_STYLE = {
+  S: { background: 'var(--app-accent-amber)', color: '#422006' },
+  A: { background: '#34d399', color: '#022c22' },
+  B: { background: '#60a5fa', color: '#082f49' },
+  C: { background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.85)' },
+}
+const BIOME_TINT = {
+  Lush: '#10b981', Frozen: '#60a5fa', Scorched: '#f97316',
+  Barren: '#a8a29e', Toxic: '#84cc16', Exotic: '#a855f7',
+  Radioactive: '#a3e635', Marsh: '#06b6d4', Volcanic: '#ef4444',
+  Infested: '#84cc16', Desolate: '#a8a29e', Airless: '#94a3b8',
+  'Gas Giant': '#fbbf24',
 }
 
-// Contributors Modal Component
-function ContributorsModal({ system, onClose }) {
-  if (!system) return null
-
-  // Parse contributors JSON - supports both old ["name"] and new [{name, action, date}] formats
-  let contributors = []
-  if (system.contributors) {
-    try {
-      const raw = typeof system.contributors === 'string'
-        ? JSON.parse(system.contributors)
-        : system.contributors
-      // Normalize: old format strings become upload entries
-      contributors = (raw || []).map(entry =>
-        typeof entry === 'string'
-          ? { name: entry, action: 'upload', date: null }
-          : entry
-      )
-    } catch {
-      contributors = []
+function gatherPhotos(system) {
+  if (!system) return []
+  const out = []
+  function addPhotos(field, ownerLabel) {
+    if (!field) return
+    let list = field
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list) } catch { return }
+    }
+    if (!Array.isArray(list)) return
+    for (const p of list) {
+      if (!p) continue
+      const url = typeof p === 'string' ? p : (p.url || p.filename || p.path)
+      if (!url) continue
+      out.push({
+        url: getPhotoUrl(url),
+        thumbnailUrl: getThumbnailUrl(url),
+        caption: typeof p === 'object' ? (p.caption || '') : '',
+        uploadedBy: typeof p === 'object' ? (p.uploaded_by || p.uploader || '') : '',
+        uploadedAt: typeof p === 'object' ? (p.uploaded_at || '') : '',
+        owner: ownerLabel,
+      })
     }
   }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div
-        className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 border border-gray-700"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold text-purple-400">System Contributors</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none"
-          >
-            &times;
-          </button>
-        </div>
-
-        {/* Original Uploader */}
-        <div className="mb-4 p-3 bg-gray-900 rounded">
-          <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Original Uploader</div>
-          <div className="text-lg text-yellow-400 font-medium">
-            {system.discovered_by ? (
-              <Link to={`/voyager/${normalizeUsernameForUrl(system.discovered_by)}`}
-                className="hover:underline hover:text-yellow-300 transition-colors">
-                {system.discovered_by}
-              </Link>
-            ) : 'Unknown'}
-          </div>
-          {(system.discovered_at || (contributors[0] && contributors[0].date)) && (
-            <div className="text-xs text-gray-500 mt-1">
-              {formatContribDate(system.discovered_at || contributors[0]?.date)}
-            </div>
-          )}
-        </div>
-
-        {/* All Contributors */}
-        {contributors.length > 0 && (
-          <div className="p-3 bg-gray-900 rounded">
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">All Contributors</div>
-            <div className="space-y-2">
-              {contributors.map((entry, idx) => {
-                const isUpload = entry.action === 'upload'
-                return (
-                  <div
-                    key={idx}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg ${
-                      isUpload
-                        ? 'bg-yellow-600/20 border border-yellow-600/40'
-                        : 'bg-gray-700/60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={isUpload ? 'text-yellow-400 font-medium' : 'text-gray-300'}>
-                        {entry.name}
-                      </span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        isUpload
-                          ? 'bg-yellow-600/40 text-yellow-300'
-                          : 'bg-blue-600/40 text-blue-300'
-                      }`}>
-                        {isUpload ? 'OG' : 'edit'}
-                      </span>
-                    </div>
-                    {entry.date && (
-                      <span className="text-xs text-gray-500">
-                        {formatContribDate(entry.date)}
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* No data message */}
-        {!system.discovered_by && contributors.length === 0 && (
-          <div className="text-center text-gray-500 py-4">
-            No contributor information available for this system.
-          </div>
-        )}
-
-        <div className="mt-6 text-center">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white transition-colors"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+  addPhotos(system.photos, 'system')
+  for (const p of system.planets || []) {
+    addPhotos(p.photos, p.name)
+    for (const m of p.moons || []) addPhotos(m.photos, `${m.name} (moon of ${p.name})`)
+  }
+  return out
 }
 
 export default function SystemDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
   const auth = useContext(AuthContext)
+  const [searchParams] = useSearchParams()
   const [system, setSystem] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [expandedPlanets, setExpandedPlanets] = useState({})
-  const [showContributors, setShowContributors] = useState(false)
-  const [expandedGradeCategory, setExpandedGradeCategory] = useState(null)
-  const [showAllPlanets, setShowAllPlanets] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [draft, setDraft] = useState({ name: '', description: '' })
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [lightboxIdx, setLightboxIdx] = useState(null)
 
-  // Read planet-level filters from URL query params
-  const planetFilters = useMemo(() => {
-    const f = {}
-    const biome = searchParams.get('biome')
-    const weather = searchParams.get('weather')
-    const sentinel = searchParams.get('sentinel_level')
-    const resource = searchParams.get('resource')
-    if (biome) f.biome = biome
-    if (weather) f.weather = weather
-    if (sentinel) f.sentinel = sentinel
-    if (resource) f.resource = resource
-    return f
-  }, [searchParams])
-
-  const hasActiveFilters = Object.keys(planetFilters).length > 0 && !showAllPlanets
-
-  // Filter planets/moons based on active filters
-  function planetMatchesFilters(planet) {
-    if (!hasActiveFilters) return true
-    if (planetFilters.biome && planet.biome !== planetFilters.biome) return false
-    if (planetFilters.weather && planet.weather !== planetFilters.weather) return false
-    if (planetFilters.sentinel && (planet.sentinel || planet.sentinel_level) !== planetFilters.sentinel) return false
-    if (planetFilters.resource) {
-      const r = planetFilters.resource
-      const hasResource = planet.common_resource === r || planet.uncommon_resource === r || planet.rare_resource === r ||
-        (planet.materials && planet.materials.split(',').map(m => m.trim()).includes(r))
-      if (!hasResource) return false
-    }
-    return true
-  }
-
-  useEffect(() => {
-    loadSystem()
-  }, [id])
-
-  async function loadSystem() {
+  const reload = useCallback(async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const response = await axios.get(`/api/systems/${encodeURIComponent(id)}`)
-      setSystem(response.data)
+      const r = await axios.get(`/api/systems/${encodeURIComponent(id)}`)
+      setSystem(r.data)
+      setDraft({ name: r.data?.name || '', description: r.data?.description || '' })
       setError(null)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load system')
+      setError(err?.response?.data?.detail || 'Failed to load system')
     } finally {
       setLoading(false)
     }
+  }, [id])
+
+  useEffect(() => { reload() }, [reload])
+
+  const photos = useMemo(() => gatherPhotos(system), [system])
+
+  function showToast(message, kind = 'success') {
+    setToast({ message, kind })
+    setTimeout(() => setToast(null), 2500)
   }
 
-  async function handleDelete() {
-    if (!confirm(`Are you sure you want to delete the system "${system.name}"?`)) {
+  function startEdit() {
+    setDraft({ name: system?.name || '', description: system?.description || '' })
+    setEditMode(true)
+  }
+
+  function discardEdits() {
+    setEditMode(false)
+    setDraft({ name: system?.name || '', description: system?.description || '' })
+  }
+
+  async function saveEdits() {
+    if (!system) return
+    const trimmedName = (draft.name || '').trim()
+    if (!trimmedName) {
+      showToast('Name cannot be empty', 'error')
       return
     }
-
+    setSaving(true)
     try {
-      await axios.delete(`/api/systems/${encodeURIComponent(id)}`)
-      alert('System deleted successfully')
-      navigate('/systems')
+      // Per Parker's call (Phase 3 Q5): inline edits submit to pending_systems
+      // with edit_system_id, NOT a direct PATCH on the live row. The existing
+      // /api/submit_system endpoint reads the `id` field as edit_system_id
+      // and queues the row for normal approval review.
+      //
+      // M-S2: send ONLY the fields the user actually edited (plus the
+      // identity fields the approval handler needs to locate the row).
+      // Spreading the full `system` object previously dragged joined
+      // fields (region_name, completeness_breakdown, etc.) and nested
+      // arrays (planets, moons) into the pending row, where they either
+      // got stomped on approval or bloated the JSON blob unnecessarily.
+      const editPayload = {
+        id: system.id,
+        name: trimmedName,
+        description: draft.description,
+        // Identity fields the approval flow uses to locate the original
+        // system and route the pending row to the right civ scope.
+        glyph_code: system.glyph_code,
+        reality: system.reality,
+        galaxy: system.galaxy,
+        discord_tag: system.discord_tag,
+        region_x: system.region_x,
+        region_y: system.region_y,
+        region_z: system.region_z,
+      }
+      await axios.post('/api/submit_system', editPayload)
+      setEditMode(false)
+      showToast('Edits submitted for approval')
     } catch (err) {
-      alert(`Failed to delete system: ${err.response?.data?.detail || err.message}`)
+      const detail = err?.response?.data?.detail || 'Save failed'
+      showToast(detail, 'error')
+    } finally {
+      setSaving(false)
     }
-  }
-
-  function togglePlanetExpanded(index) {
-    setExpandedPlanets(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }))
   }
 
   if (loading) {
     return (
-      <div className="p-6">
-        <Card>
-          <div className="text-center py-8">Loading system...</div>
-        </Card>
+      <div className="space-y-4">
+        <div className="skeleton-card h-48" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="skeleton-card h-64 lg:col-span-2" />
+          <div className="skeleton-card h-64" />
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="p-6">
-        <Card>
-          <div className="text-center py-8 text-red-500">{error}</div>
-          <div className="text-center mt-4">
-            <Button onClick={() => navigate('/systems')}>Back to Systems</Button>
-          </div>
-        </Card>
+      <div className="haven-card p-8 text-center">
+        <h2 className="text-lg font-semibold mb-2">{error}</h2>
+        <button onClick={() => navigate('/systems')} className="haven-btn-ghost px-3 py-2 rounded text-sm">
+          Back to Systems
+        </button>
       </div>
     )
   }
 
-  if (!system) {
-    return (
-      <div className="p-6">
-        <Card>
-          <div className="text-center py-8">System not found</div>
-          <div className="text-center mt-4">
-            <Button onClick={() => navigate('/systems')}>Back to Systems</Button>
-          </div>
-        </Card>
-      </div>
-    )
-  }
+  if (!system) return null
+
+  const starHex = STAR_HEX[system.star_type] || '#facc15'
+  const starTextColor = STAR_TEXT[system.star_type] || 'white'
+  const grade = system.completeness_grade
+  const fromMap = searchParams.get('from_map') === '1'
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      {/* Header Section */}
-      <Card className="mb-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start gap-3 mb-4">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold mb-2 break-words">{system.name}</h1>
-            <div className="text-sm text-gray-400">
-              <span className="mr-4">Galaxy: {system.galaxy || 'Euclid'}</span>
-              {system.region_x !== null && system.region_x !== undefined && (
-                <span className="mr-4">Region: [{system.region_x}, {system.region_y}, {system.region_z}]</span>
-              )}
-              <span className="block sm:inline mt-1 sm:mt-0">ID: {system.id}</span>
-            </div>
-            {/* Glyph Code */}
-            {system.glyph_code && (
-              <div className="mt-2 flex items-center gap-3">
-                <GlyphDisplay glyphCode={system.glyph_code} size="large" />
-                <span className="text-purple-400 font-mono text-sm">({system.glyph_code})</span>
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-shrink-0">
-            <a
-              href={`/map/system/${system.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded text-white text-center font-medium transition-colors w-full sm:w-auto"
-            >
-              3D Map
-            </a>
-            <Button
-              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-              onClick={() => navigate(`/create?edit=${encodeURIComponent(system.id)}`)}
-            >
-              Edit
-            </Button>
-            <Button
-              className="bg-purple-600 hover:bg-purple-700 w-full sm:w-auto"
-              onClick={() => setShowContributors(true)}
-            >
-              Contributors
-            </Button>
-            {auth?.isAdmin && (
-              <Button
-                className="bg-red-600 hover:bg-red-700 w-full sm:w-auto"
-                onClick={handleDelete}
-              >
-                Delete
-              </Button>
-            )}
-            <Button
-              className="bg-gray-600 hover:bg-gray-700 w-full sm:w-auto"
-              onClick={() => navigate('/systems')}
-            >
-              Back
-            </Button>
-          </div>
-        </div>
+    <div className="space-y-4">
+      {fromMap && <FromMapBanner subject={system.name} />}
 
-        {/* Completeness Grade Panel */}
-        {system.completeness_grade && (() => {
-          const gradeStyles = {
-            'S': { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: 'Archive Quality' },
-            'A': { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: 'Well Documented' },
-            'B': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Partial Data' },
-            'C': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Basic Info' },
-          }
-          const g = gradeStyles[system.completeness_grade] || gradeStyles['C']
-          const b = system.completeness_breakdown || {}
-          const details = b.details || {}
-          const score = system.completeness_score || 0
-          const categories = [
-            { key: 'system_core', label: 'System Core', value: b.system_core || 0, max: 35 },
-            { key: 'system_extra', label: 'System Extra', value: b.system_extra || 0, max: 10 },
-            { key: 'planet_coverage', label: 'Planet Coverage', value: b.planet_coverage || 0, max: 10 },
-            { key: 'planet_environment', label: 'Planet Environment', value: b.planet_environment || 0, max: 25 },
-            { key: 'planet_life', label: 'Planet Life', value: b.planet_life || 0, max: 15 },
-            { key: 'space_station', label: 'Space Station', value: b.space_station || 0, max: 5 },
-          ]
-          const isPlanetCategory = (key) => key === 'planet_environment' || key === 'planet_life'
-          return (
-            <div className={`mb-4 p-4 rounded border ${g.bg} ${g.border}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <span className={`text-3xl font-black ${g.color}`}>{system.completeness_grade}</span>
-                  <div>
-                    <div className={`text-sm font-semibold ${g.color}`}>{g.label}</div>
-                    <div className="text-xs text-gray-400">{score}% complete{b.planet_count != null ? ` \u00B7 ${b.planet_count} planet${b.planet_count !== 1 ? 's' : ''}` : ''}</div>
-                  </div>
-                </div>
-                {/* Overall progress bar */}
-                <div className="w-32 sm:w-48">
-                  <div className="h-2 rounded-full bg-gray-700 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        score >= 85 ? 'bg-amber-400' : score >= 65 ? 'bg-emerald-400' : score >= 40 ? 'bg-blue-400' : 'bg-gray-400'
-                      }`}
-                      style={{ width: `${score}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-              {/* Category breakdown - clickable */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                {categories.map(cat => {
-                  const catDetails = details[cat.key]
-                  const hasDetails = catDetails && (Array.isArray(catDetails) ? catDetails.length > 0 : true)
-                  return (
-                    <button
-                      key={cat.key}
-                      type="button"
-                      className={`text-center rounded p-1.5 transition-colors ${
-                        hasDetails ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'
-                      } ${expandedGradeCategory === cat.key ? 'bg-white/5 ring-1 ring-white/10' : ''}`}
-                      onClick={() => hasDetails && setExpandedGradeCategory(expandedGradeCategory === cat.key ? null : cat.key)}
-                    >
-                      <div className="text-[10px] text-gray-400 mb-1 truncate" title={cat.label}>{cat.label}</div>
-                      <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            cat.value >= cat.max ? 'bg-amber-400' : cat.value >= cat.max * 0.65 ? 'bg-emerald-400' : cat.value >= cat.max * 0.4 ? 'bg-blue-400' : 'bg-gray-500'
-                          }`}
-                          style={{ width: `${cat.max > 0 ? (cat.value / cat.max) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{cat.value}/{cat.max}</div>
+      {editMode && (
+        <div
+          className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg"
+          style={{
+            background: 'rgba(255, 180, 76, 0.1)',
+            border: '1px solid rgba(255, 180, 76, 0.4)',
+          }}
+        >
+          <div className="flex items-center gap-2 text-sm">
+            <svg className="w-4 h-4" style={{ color: 'var(--app-accent-amber)' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            <span>
+              <span className="font-medium" style={{ color: 'var(--app-accent-amber)' }}>Edit Mode</span>
+              {' '}<span style={{ color: 'var(--muted)' }}>— changes submit for admin approval; click "Save changes" to send, or "Discard" to cancel</span>
+            </span>
+          </div>
+          <button onClick={discardEdits} className="haven-btn-ghost px-2.5 py-1 rounded text-xs">
+            Discard
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* LEFT: hero card */}
+        <div className="lg:col-span-2 haven-card overflow-hidden p-0">
+          <div
+            className="relative h-48 overflow-hidden"
+            style={{
+              background: `radial-gradient(circle at 30% 50%, ${starHex}40 0%, transparent 60%), linear-gradient(135deg, #0f1538, var(--app-bg))`,
+            }}
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                className="w-32 h-32 rounded-full"
+                style={{ background: `radial-gradient(circle, ${starHex} 0%, ${starHex}80 30%, transparent 70%)`, filter: 'blur(12px)' }}
+              />
+              <div
+                className="absolute w-16 h-16 rounded-full"
+                style={{ background: starHex, boxShadow: `0 0 40px ${starHex}` }}
+              />
+            </div>
+            <div className="absolute top-3 left-3 flex items-center gap-1.5">
+              {system.star_type && (
+                <span className="pill" style={{ background: starHex, color: starTextColor, fontWeight: 700 }}>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6" /></svg>
+                  {system.star_type}
+                </span>
+              )}
+              {system.economy_type && (
+                <span className="pill pill-muted backdrop-blur" style={{ background: 'rgba(0,0,0,0.6)' }}>
+                  {system.economy_type}{system.economy_level ? ` ${system.economy_level}` : ''}
+                </span>
+              )}
+            </div>
+            <div className="absolute top-3 right-3">
+              {grade && (
+                <span className="w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold mono" style={GRADE_STYLE[grade] || GRADE_STYLE.C}>
+                  {grade}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="p-5 space-y-4">
+            <div>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                {editMode ? (
+                  <input
+                    value={draft.name}
+                    onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                    className="haven-input text-2xl font-semibold px-2 py-1 flex-1 min-w-0"
+                    style={{ borderColor: 'var(--app-primary)' }}
+                    aria-label="System name"
+                  />
+                ) : (
+                  <h2 className="text-2xl font-semibold flex-1 min-w-0 truncate">{system.name}</h2>
+                )}
+                <div className="flex items-center gap-2">
+                  <ShowOnMapButton system={system} variant="ghost" />
+                  {!editMode && (
+                    <button onClick={startEdit} className="haven-btn-ghost px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
+                      <PencilIcon /> Edit
                     </button>
-                  )
-                })}
-              </div>
-              {/* Expanded detail panel */}
-              {expandedGradeCategory && details[expandedGradeCategory] && (
-                <div className="mt-3 pt-3 border-t border-white/10">
-                  {isPlanetCategory(expandedGradeCategory) ? (
-                    /* Planet-level breakdown: show each planet with its fields */
-                    <div className="space-y-2">
-                      {details[expandedGradeCategory].map((planet, pi) => (
-                        <div key={pi} className="bg-black/20 rounded p-2">
-                          <div className="text-xs font-medium text-gray-300 mb-1.5">
-                            {planet.name}
-                            <span className="ml-2 text-gray-500">{planet.filled}/{planet.total}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-x-4 gap-y-1">
-                            {planet.fields.map((f, fi) => (
-                              <div key={fi} className="flex items-center gap-1.5 text-xs">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                                  f.status === 'filled' ? 'bg-emerald-400' : f.status === 'skipped' ? 'bg-gray-600' : 'bg-red-400'
-                                }`} />
-                                <span className="text-gray-400">{f.name}:</span>
-                                <span className={f.status === 'filled' ? 'text-gray-200' : f.status === 'skipped' ? 'text-gray-600 italic' : 'text-red-400 italic'}>
-                                  {f.status === 'filled' ? f.value : f.status === 'skipped' ? 'N/A' : 'Missing'}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    /* System-level breakdown: flat field list */
-                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                      {details[expandedGradeCategory].map((f, fi) => (
-                        <div key={fi} className="flex items-center gap-1.5 text-xs">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                            f.status === 'filled' ? 'bg-emerald-400' : 'bg-red-400'
-                          }`} />
-                          <span className="text-gray-400">{f.name}:</span>
-                          <span className={f.status === 'filled' ? 'text-gray-200' : 'text-red-400 italic'}>
-                            {f.status === 'filled' ? f.value : 'Missing'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  )}
+                  {editMode && (
+                    <button
+                      onClick={saveEdits}
+                      disabled={saving}
+                      className="haven-btn-primary px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      {saving ? 'Submitting…' : 'Save changes'}
+                    </button>
                   )}
                 </div>
+              </div>
+              <p className="mono text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                {system.glyph_code || '—'}
+                {system.stellar_classification ? ` · ${system.stellar_classification}` : ''}
+                {system.discovered_by || system.personal_discord_username ? ` · discovered by ${system.discovered_by || system.personal_discord_username}` : ''}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Stat label="Planets" value={(system.planets || []).filter((p) => !p.is_moon).length} secondary={`+ ${(system.planets || []).reduce((acc, p) => acc + (p.moons?.length || 0), 0)} moons`} />
+              <Stat
+                label="Conflict"
+                value={system.conflict_level || '—'}
+                secondary={system.dominant_lifeform ? `${system.dominant_lifeform} dominant` : null}
+                valueClass={
+                  system.conflict_level === 'Low' ? 'grade-a'
+                  : system.conflict_level === 'High' ? 'text-red-400'
+                  : 'grade-s'
+                }
+              />
+              <Stat
+                label="Economy"
+                value={system.economy_level || '—'}
+                secondary={system.economy_type || null}
+              />
+              <Stat
+                label="Complete"
+                value={system.completeness_score != null ? `${system.completeness_score}%` : '—'}
+                secondary={system.completeness_score === 100 ? 'verified' : 'WIP'}
+                valueClass={
+                  system.completeness_score >= 85 ? 'grade-s'
+                  : system.completeness_score >= 65 ? 'grade-a'
+                  : system.completeness_score >= 40 ? 'grade-b' : 'grade-c'
+                }
+              />
+            </div>
+
+            <div>
+              <div className="text-[10px] uppercase tracking-wider font-semibold mb-1.5" style={{ color: 'var(--muted)' }}>Description</div>
+              {editMode ? (
+                <textarea
+                  value={draft.description}
+                  onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                  rows={4}
+                  className="haven-input w-full text-sm p-2"
+                />
+              ) : (
+                <p className="text-sm" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                  {system.description || <span style={{ color: 'var(--muted)' }}>No description yet.</span>}
+                </p>
               )}
             </div>
-          )
-        })()}
-
-        {/* Coordinates */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 p-4 bg-gray-800 rounded">
-          <div>
-            <div className="text-xs text-gray-400">X Coordinate</div>
-            <div className="text-lg font-mono">{system.x || '0'}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-400">Y Coordinate</div>
-            <div className="text-lg font-mono">{system.y || '0'}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-400">Z Coordinate</div>
-            <div className="text-lg font-mono">{system.z || '0'}</div>
           </div>
         </div>
 
-        {/* System Properties (from NMS live extraction) */}
-        {(system.star_type || system.economy_type || system.economy_level || system.conflict_level || system.dominant_lifeform || system.stellar_classification) && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 mb-4 p-4 bg-gray-800 rounded">
-            {system.star_type && (
-              <div>
-                <div className="text-xs text-gray-400">Star Type</div>
-                <div className={
-                  system.star_type === 'Yellow' ? 'text-yellow-400' :
-                  system.star_type === 'Red' ? 'text-red-400' :
-                  system.star_type === 'Green' ? 'text-green-400' :
-                  system.star_type === 'Blue' ? 'text-blue-400' :
-                  system.star_type === 'Purple' ? 'text-purple-400' : 'text-gray-400'
-                }>{system.star_type}</div>
+        {/* RIGHT: meta column */}
+        <div className="space-y-4">
+          <div className="haven-card p-4">
+            <div className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: 'var(--muted)' }}>Community</div>
+            {system.discord_tag && system.discord_tag !== 'personal' ? (
+              <div className="flex items-center gap-2">
+                <span className="pill pill-purple">{system.discord_tag}</span>
               </div>
-            )}
-            {system.stellar_classification && (
-              <div>
-                <div className="text-xs text-gray-400">Spectral Class</div>
-                <div className={`font-mono ${
-                  (() => {
-                    const firstChar = system.stellar_classification[0]?.toUpperCase();
-                    switch(firstChar) {
-                      case 'O': case 'B': return 'text-blue-300';
-                      case 'F': case 'G': return 'text-yellow-300';
-                      case 'K': case 'M': return 'text-red-400';
-                      case 'E': return 'text-green-400';
-                      case 'X': case 'Y': return 'text-purple-400';
-                      default: return 'text-gray-300';
-                    }
-                  })()
-                }`}>{system.stellar_classification}</div>
-              </div>
-            )}
-            {system.economy_type && (
-              <div>
-                <div className="text-xs text-gray-400">Economy</div>
-                <div className="text-green-400">{system.economy_type}</div>
-              </div>
-            )}
-            {system.economy_level && (
-              <div>
-                <div className="text-xs text-gray-400">Wealth</div>
-                <div className={
-                  system.economy_level === 'High' ? 'text-yellow-400' :
-                  system.economy_level === 'Medium' ? 'text-blue-400' : 'text-gray-300'
-                }>{system.economy_level}</div>
-              </div>
-            )}
-            {system.conflict_level && (
-              <div>
-                <div className="text-xs text-gray-400">Conflict</div>
-                <div className={
-                  system.conflict_level === 'High' ? 'text-red-400' :
-                  system.conflict_level === 'Medium' ? 'text-orange-400' :
-                  system.conflict_level === 'Pirate' ? 'text-purple-400' : 'text-green-400'
-                }>{system.conflict_level === 'Pirate' ? '☠️ Pirate' : system.conflict_level}</div>
-              </div>
-            )}
-            {system.dominant_lifeform && (
-              <div>
-                <div className="text-xs text-gray-400">Dominant Lifeform</div>
-                <div className={
-                  system.dominant_lifeform === "Vy'keen" ? 'text-red-400' :
-                  system.dominant_lifeform === 'Gek' ? 'text-yellow-400' :
-                  system.dominant_lifeform === 'Korvax' ? 'text-cyan-400' : 'text-gray-300'
-                }>{system.dominant_lifeform}</div>
-              </div>
-            )}
-            {system.game_mode && (
-              <div>
-                <div className="text-xs text-gray-400">Game Mode</div>
-                <div className={
-                  system.game_mode === 'Survival' ? 'text-orange-400' :
-                  system.game_mode === 'Permadeath' ? 'text-red-400' :
-                  system.game_mode === 'Creative' ? 'text-cyan-400' :
-                  system.game_mode === 'Relaxed' ? 'text-green-400' :
-                  system.game_mode === 'Custom' ? 'text-purple-400' : 'text-gray-300'
-                }>{system.game_mode}</div>
-              </div>
+            ) : (
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>Personal submission</div>
             )}
           </div>
-        )}
 
-        {/* Description */}
-        {system.description && (
-          <div className="mt-4">
-            <h3 className="font-semibold mb-2">Description</h3>
-            <p className="text-gray-300">{system.description}</p>
-          </div>
-        )}
-      </Card>
-
-      {/* Space Station Section */}
-      {system.space_station && (
-        <Card className="mb-6">
-          <h2 className="text-2xl font-bold mb-4">Space Station</h2>
-          <div className="bg-purple-900/30 border border-purple-600 rounded p-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <div className="text-xs text-gray-400">Name</div>
-                <div className="font-semibold">{system.space_station.name}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">Race</div>
-                <div>{system.space_station.race || 'Unknown'}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">Economy</div>
-                <div>{system.economy_type || 'Unknown'}</div>
-              </div>
+          <div className="haven-card p-4">
+            <div className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: 'var(--muted)' }}>Coordinates</div>
+            <div className="space-y-1.5 text-xs">
+              <Row label="Galaxy" value={system.galaxy || 'Euclid'} />
+              <Row label="Reality" value={system.reality || 'Normal'} />
+              <Row label="Region" value={`${system.region_x} · ${system.region_y} · ${system.region_z}`} mono />
+              {system.region_name && <Row label="Name" value={system.region_name} />}
+              {system.glyph_code && <Row label="Glyph" value={system.glyph_code} mono />}
             </div>
-
-            {/* Trade Goods */}
-            {system.space_station.trade_goods && system.space_station.trade_goods.length > 0 && (
-              <div>
-                <div className="text-xs text-gray-400 mb-2">Trade Goods Available</div>
-                <div className="flex flex-wrap gap-2">
-                  {system.space_station.trade_goods.map(goodId => {
-                    const good = getTradeGoodById(goodId)
-                    return (
-                      <span
-                        key={goodId}
-                        className="px-2 py-1 bg-purple-800/50 border border-purple-500 rounded text-sm"
-                        title={good?.description || ''}
-                      >
-                        {good?.name || goodId}
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            {(!system.space_station.trade_goods || system.space_station.trade_goods.length === 0) && (
-              <div className="text-xs text-gray-500 italic">
-                No trade goods recorded for this station
-              </div>
+            {system.glyph_code && (
+              <button
+                onClick={() => navigator.clipboard?.writeText(system.glyph_code).then(() => showToast('Glyph copied'))}
+                className="haven-btn-ghost w-full px-2 py-1.5 rounded text-xs mt-3"
+              >
+                Copy glyph
+              </button>
             )}
           </div>
-        </Card>
+
+          <div className="haven-card p-4 space-y-2">
+            <div className="text-[10px] uppercase tracking-wider mb-1 font-semibold" style={{ color: 'var(--muted)' }}>Actions</div>
+            <ShowOnMapButton system={system} variant="block" />
+            <Link
+              to={`/wizard?edit=${encodeURIComponent(system.id)}`}
+              className="haven-btn-ghost w-full px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-2"
+            >
+              <PencilIcon /> Full edit (Wizard)
+            </Link>
+          </div>
+
+          <div className="haven-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--muted)' }}>Recent Activity</div>
+            </div>
+            <ActivityFeed systemId={system.id} system={system} />
+          </div>
+        </div>
+      </div>
+
+      {/* PLANETS */}
+      {(system.planets || []).length > 0 && (
+        <div className="haven-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-semibold">Planets &amp; Moons ({system.planets.length})</h3>
+          </div>
+          {/* 2-up on lg+, gives each expandable card enough horizontal room
+              for sphere + name + 3 stats + expanded detail rows. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3" style={{ alignItems: 'start' }}>
+            {(system.planets || []).map((p, i) => <PlanetCard key={p.id || i} p={p} index={i + 1} />)}
+          </div>
+        </div>
       )}
 
-      {/* Planets Section */}
-      <Card>
-        {(() => {
-          const allPlanets = system.planets || []
-          const filteredPlanets = hasActiveFilters
-            ? allPlanets.filter(p => {
-                // Check planet itself
-                if (planetMatchesFilters(p)) return true
-                // Check its moons
-                if (p.moons && p.moons.some(m => planetMatchesFilters(m))) return true
-                return false
-              })
-            : allPlanets
-          const isFiltered = hasActiveFilters && filteredPlanets.length < allPlanets.length
+      {/* PHOTOS */}
+      {photos.length > 0 && (
+        <div className="haven-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-semibold">Photos ({photos.length})</h3>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {photos.map((p, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setLightboxIdx(i)}
+                className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                style={{ background: '#0f1538' }}
+                title={p.caption || `Photo ${i + 1}`}
+              >
+                <img
+                  src={p.thumbnailUrl || p.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.src = p.url }}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
-          return (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">
-                  Planets ({filteredPlanets.length}{isFiltered ? ` of ${allPlanets.length}` : ''})
-                </h2>
-                {Object.keys(planetFilters).length > 0 && (
-                  <div className="flex items-center gap-2">
-                    {isFiltered && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {Object.entries(planetFilters).map(([key, val]) => (
-                          <span key={key} className="text-xs px-2 py-0.5 rounded bg-cyan-600/20 border border-cyan-500/30 text-cyan-300">
-                            {key === 'sentinel_level' ? 'sentinel' : key}: {val}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => setShowAllPlanets(prev => !prev)}
-                      className={`text-xs px-3 py-1 rounded transition-colors ${
-                        showAllPlanets
-                          ? 'bg-gray-600 hover:bg-gray-500 text-white'
-                          : 'bg-cyan-600 hover:bg-cyan-500 text-white'
-                      }`}
-                    >
-                      {showAllPlanets ? 'Apply Filters' : 'Show All'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {filteredPlanets.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
-                  {allPlanets.length === 0 ? 'No planets in this system' : 'No planets match active filters'}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredPlanets.map((rawPlanet, index) => {
-                    // Filter moons within this planet when filters are active
-                    const filteredMoons = hasActiveFilters && rawPlanet.moons
-                      ? rawPlanet.moons.filter(m => planetMatchesFilters(m))
-                      : (rawPlanet.moons || [])
-                    const planet = { ...rawPlanet, moons: filteredMoons }
-                    return (
-              <div key={index} className="border border-gray-700 rounded overflow-hidden">
-                {/* Planet Header */}
-                <div
-                  className="bg-gray-800 p-4 cursor-pointer hover:bg-gray-750 transition-colors"
-                  onClick={() => togglePlanetExpanded(index)}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="text-xl font-semibold flex items-center gap-2">
-                        {planet.name}
-                        {planet.is_moon === 1 && <span className="text-sm text-purple-400">(Moon)</span>}
-                        {planet.data_source === 'remote' && (
-                          <span className="text-xs bg-amber-500 text-white px-1.5 py-0.5 rounded" title="Remote data - visit for full detail (weather, flora, fauna, sentinels)">
-                            📡 Remote
-                          </span>
-                        )}
-                      </h3>
-                      <div className="text-sm text-gray-400 mt-1 flex flex-wrap gap-x-4">
-                        {planet.biome && (
-                          <span className="text-green-400">{planet.biome}</span>
-                        )}
-                        {planet.planet_size && (
-                          <span>{planet.planet_size}</span>
-                        )}
-                        {planet.moons && planet.moons.length > 0 && (
-                          <span>{planet.moons.length} moon{planet.moons.length !== 1 ? 's' : ''}</span>
-                        )}
-                        <span className={getSentinelColor(planet.sentinel || planet.sentinel_level)}>
-                          Sentinel: {planet.sentinel || planet.sentinel_level || 'Unknown'}
-                        </span>
-                        {planet.fauna && (
-                          <span className={getFaunaColor(planet.fauna)}>Fauna: {planet.fauna}</span>
-                        )}
-                        {planet.flora && (
-                          <span className={getFloraColor(planet.flora)}>Flora: {planet.flora}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl">
-                        {expandedPlanets[index] ? '−' : '+'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Planet Details (Expanded) */}
-                {expandedPlanets[index] && (
-                  <div className="p-4 bg-gray-900/50 space-y-3">
-                    {/* Environment & Weather Section */}
-                    <div className="p-3 bg-emerald-900/15 border border-emerald-800/40 rounded-lg">
-                      <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                        <span>{'\u{1F30D}'}</span> Environment
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {planet.biome && (
-                          <div>
-                            <div className="text-xs text-gray-500">Biome</div>
-                            <div className="text-green-400 font-medium">{planet.biome}</div>
-                          </div>
-                        )}
-                        {planet.biome_subtype && planet.biome_subtype !== 'None_' && (
-                          <div>
-                            <div className="text-xs text-gray-500">Subtype</div>
-                            <div>{planet.biome_subtype}</div>
-                          </div>
-                        )}
-                        {planet.planet_size && (
-                          <div>
-                            <div className="text-xs text-gray-500">Size</div>
-                            <div>{planet.planet_size}</div>
-                          </div>
-                        )}
-                        {planet.weather && (
-                          <div>
-                            <div className="text-xs text-gray-500">Weather</div>
-                            <div className="text-blue-300">{planet.weather}</div>
-                          </div>
-                        )}
-                        {planet.climate && (
-                          <div>
-                            <div className="text-xs text-gray-500">Climate</div>
-                            <div>{planet.climate}</div>
-                          </div>
-                        )}
-                        {planet.storm_frequency && planet.storm_frequency !== 'Unknown' && (
-                          <div>
-                            <div className="text-xs text-gray-500">Storm Frequency</div>
-                            <div className={
-                              planet.storm_frequency === 'Always' ? 'text-red-400' :
-                              planet.storm_frequency === 'High' ? 'text-orange-400' :
-                              planet.storm_frequency === 'Low' ? 'text-yellow-400' : ''
-                            }>{planet.storm_frequency}</div>
-                          </div>
-                        )}
-                        {planet.weather_intensity && planet.weather_intensity !== 'Unknown' && (
-                          <div>
-                            <div className="text-xs text-gray-500">Weather Intensity</div>
-                            <div className={planet.weather_intensity === 'Extreme' ? 'text-red-400' : ''}>{planet.weather_intensity}</div>
-                          </div>
-                        )}
-                        {planet.has_water === 1 && (
-                          <div>
-                            <div className="text-xs text-gray-500">Water</div>
-                            <div className="text-cyan-400">Present {'\u{1F30A}'}</div>
-                          </div>
-                        )}
-                        {planet.building_density && planet.building_density !== 'Unknown' && (
-                          <div>
-                            <div className="text-xs text-gray-500">Building Density</div>
-                            <div>{planet.building_density}</div>
-                          </div>
-                        )}
-                      </div>
-                      {(planet.weather_text || planet.sentinels_text) && (
-                        <div className="mt-2 pt-2 border-t border-emerald-800/30 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {planet.weather_text && (
-                            <div className="text-xs text-gray-400 italic">{planet.weather_text}</div>
-                          )}
-                          {planet.sentinels_text && (
-                            <div className="text-xs text-gray-400 italic">{planet.sentinels_text}</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Life Section */}
-                    <div className="p-3 bg-amber-900/15 border border-amber-800/40 rounded-lg">
-                      <div className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                        <span>{'\u{1F43E}'}</span> Life & Sentinels
-                      </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="text-center p-2 bg-white/5 rounded-lg">
-                          <div className="text-xs text-gray-500 mb-0.5">Sentinels</div>
-                          <div className={`font-medium ${getSentinelColor(planet.sentinel || planet.sentinel_level)}`}>
-                            {planet.sentinel || planet.sentinel_level || 'Unknown'}
-                          </div>
-                        </div>
-                        <div className="text-center p-2 bg-white/5 rounded-lg">
-                          <div className="text-xs text-gray-500 mb-0.5">Fauna</div>
-                          <div className={`font-medium ${getFaunaColor(planet.fauna)}`}>
-                            {planet.fauna || 'N/A'}
-                            {planet.fauna_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.fauna_count})</span>}
-                          </div>
-                        </div>
-                        <div className="text-center p-2 bg-white/5 rounded-lg">
-                          <div className="text-xs text-gray-500 mb-0.5">Flora</div>
-                          <div className={`font-medium ${getFloraColor(planet.flora)}`}>
-                            {planet.flora || 'N/A'}
-                            {planet.flora_count > 0 && <span className="text-xs text-gray-500 ml-1">({planet.flora_count})</span>}
-                          </div>
-                        </div>
-                      </div>
-                      {(planet.fauna_text || planet.flora_text) && (
-                        <div className="mt-2 pt-2 border-t border-amber-800/30 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {planet.fauna_text && (
-                            <div className="text-xs text-gray-400 italic">{planet.fauna_text}</div>
-                          )}
-                          {planet.flora_text && (
-                            <div className="text-xs text-gray-400 italic">{planet.flora_text}</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Hazards Section */}
-                    {(planet.hazard_temperature !== 0 || planet.hazard_radiation !== 0 || planet.hazard_toxicity !== 0) && (
-                      <div className="p-3 bg-red-900/15 border border-red-800/40 rounded-lg">
-                        <div className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                          <span>{'\u{26A0}\u{FE0F}'}</span> Environmental Hazards
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          {planet.hazard_temperature !== 0 && (
-                            <div className="text-center p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Temperature</div>
-                              <div className={`font-medium ${planet.hazard_temperature > 0 ? 'text-orange-400' : 'text-cyan-400'}`}>
-                                {planet.hazard_temperature > 0 ? '+' : ''}{planet.hazard_temperature?.toFixed(1)}°
-                              </div>
-                            </div>
-                          )}
-                          {planet.hazard_radiation !== 0 && (
-                            <div className="text-center p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Radiation</div>
-                              <div className="text-yellow-400 font-medium">{planet.hazard_radiation?.toFixed(1)} rad</div>
-                            </div>
-                          )}
-                          {planet.hazard_toxicity !== 0 && (
-                            <div className="text-center p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Toxicity</div>
-                              <div className="text-green-500 font-medium">{planet.hazard_toxicity?.toFixed(1)} tox</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Resources Section */}
-                    {(planet.common_resource || planet.uncommon_resource || planet.rare_resource || planet.materials) && (
-                      <div className="p-3 bg-blue-900/15 border border-blue-800/40 rounded-lg">
-                        <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                          <span>{'\u{1F48E}'}</span> Resources
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {planet.common_resource && planet.common_resource !== 'Unknown' && (
-                            <div className="p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Common</div>
-                              <div className="text-gray-300">{planet.common_resource}</div>
-                            </div>
-                          )}
-                          {planet.uncommon_resource && planet.uncommon_resource !== 'Unknown' && (
-                            <div className="p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Uncommon</div>
-                              <div className="text-blue-300">{planet.uncommon_resource}</div>
-                            </div>
-                          )}
-                          {planet.rare_resource && planet.rare_resource !== 'Unknown' && (
-                            <div className="p-2 bg-white/5 rounded-lg">
-                              <div className="text-xs text-gray-500 mb-0.5">Rare</div>
-                              <div className="text-purple-400">{planet.rare_resource}</div>
-                            </div>
-                          )}
-                        </div>
-                        {planet.materials && (
-                          <div className="mt-2 pt-2 border-t border-blue-800/30">
-                            <div className="text-xs text-gray-500 mb-1">All Materials</div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {planet.materials.split(',').map((mat, mi) => (
-                                <span key={mi} className="px-2 py-0.5 bg-blue-900/40 border border-blue-700/40 rounded text-xs text-blue-200">{mat.trim()}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Planet Attributes Section */}
-                    {(() => {
-                      const attrs = [
-                        { key: 'has_rings', label: 'Has Rings', icon: '\u{1FA90}' },
-                        { key: 'is_dissonant', label: 'Dissonant', icon: '\u{1F50A}' },
-                        { key: 'is_infested', label: 'Infested', icon: '\u{1F9A0}' },
-                        { key: 'extreme_weather', label: 'Extreme Weather', icon: '\u{26A1}' },
-                        { key: 'water_world', label: 'Water World', icon: '\u{1F30A}' },
-                        { key: 'vile_brood', label: 'Vile Brood', icon: '\u{1F480}' },
-                        { key: 'ancient_bones', label: 'Ancient Bones', icon: '\u{1F9B4}' },
-                        { key: 'salvageable_scrap', label: 'Salvageable Scrap', icon: '\u{2699}' },
-                        { key: 'storm_crystals', label: 'Storm Crystals', icon: '\u{1F48E}' },
-                        { key: 'gravitino_balls', label: 'Gravitino Balls', icon: '\u{1F7E3}' },
-                        { key: 'is_gas_giant', label: 'Gas Giant', icon: '\u{1F310}' },
-                        { key: 'is_bubble', label: 'Bubble Planet', icon: '\u{1FAE7}' },
-                        { key: 'is_floating_islands', label: 'Floating Islands', icon: '\u{1F3DD}' },
-                      ].filter(a => planet[a.key])
-                      const hasExoticTrophy = planet.exotic_trophy && planet.exotic_trophy.trim()
-                      if (attrs.length === 0 && !hasExoticTrophy) return null
-                      return (
-                        <div className="p-3 bg-purple-900/15 border border-purple-800/40 rounded-lg">
-                          <div className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                            <span>{'\u{2728}'}</span> Special Attributes
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {attrs.map(a => (
-                              <span key={a.key} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/20 border border-purple-500/40 rounded-full text-sm text-purple-200">
-                                <span>{a.icon}</span> {a.label}
-                              </span>
-                            ))}
-                            {hasExoticTrophy && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-yellow-500/20 border border-yellow-500/40 rounded-full text-sm text-yellow-200">
-                                <span>{'\u{1F3C6}'}</span> {planet.exotic_trophy}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })()}
-
-                    {/* Additional Info */}
-                    {(planet.base_location || planet.description || planet.notes) && (
-                      <div className="p-3 bg-gray-800/50 border border-gray-700/50 rounded-lg space-y-2">
-                        {planet.base_location && (
-                          <div>
-                            <span className="text-xs text-gray-500">Base Location: </span>
-                            <span className="text-gray-300">{planet.base_location}</span>
-                          </div>
-                        )}
-                        {planet.description && (
-                          <div>
-                            <span className="text-xs text-gray-500">Description: </span>
-                            <span className="text-gray-300">{planet.description}</span>
-                          </div>
-                        )}
-                        {planet.notes && (
-                          <div>
-                            <span className="text-xs text-gray-500">Notes: </span>
-                            <span className="text-sm text-gray-300">{planet.notes}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {planet.photo && (
-                      <div>
-                        <img
-                          src={getPhotoUrl(planet.photo)}
-                          alt={planet.name}
-                          className="w-full max-w-md rounded-lg border border-gray-700"
-                        />
-                      </div>
-                    )}
-
-                    {/* Moons */}
-                    {planet.moons && planet.moons.length > 0 && (
-                      <div className="p-3 bg-cyan-900/15 border border-cyan-800/40 rounded-lg">
-                        <div className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                          <span>{'\u{1F319}'}</span> Moons ({planet.moons.length})
-                        </div>
-                        <div className="space-y-3">
-                          {planet.moons.map((moon, moonIndex) => (
-                            <div key={moonIndex} className="bg-gray-800/80 rounded-lg border border-cyan-800/30 overflow-hidden">
-                              <div className="px-3 py-2 bg-cyan-900/20 border-b border-cyan-800/30">
-                                <span className="font-medium text-cyan-200">{moon.name || `Moon ${moonIndex + 1}`}</span>
-                                {moon.biome && <span className="ml-2 text-xs text-green-400">{moon.biome}</span>}
-                              </div>
-                              <div className="p-3">
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                                  <div className="text-center p-1.5 bg-white/5 rounded">
-                                    <div className="text-[10px] text-gray-500">Sentinels</div>
-                                    <div className={`text-sm ${getSentinelColor(moon.sentinel)}`}>
-                                      {moon.sentinel || 'Unknown'}
-                                    </div>
-                                  </div>
-                                  <div className="text-center p-1.5 bg-white/5 rounded">
-                                    <div className="text-[10px] text-gray-500">Fauna</div>
-                                    <div className={`text-sm ${getFaunaColor(moon.fauna)}`}>
-                                      {moon.fauna || 'N/A'}
-                                    </div>
-                                  </div>
-                                  <div className="text-center p-1.5 bg-white/5 rounded">
-                                    <div className="text-[10px] text-gray-500">Flora</div>
-                                    <div className={`text-sm ${getFloraColor(moon.flora)}`}>
-                                      {moon.flora || 'N/A'}
-                                    </div>
-                                  </div>
-                                  {(moon.climate || moon.weather) && (
-                                    <div className="text-center p-1.5 bg-white/5 rounded">
-                                      <div className="text-[10px] text-gray-500">Weather</div>
-                                      <div className="text-sm text-blue-300">{moon.weather || moon.climate}</div>
-                                    </div>
-                                  )}
-                                </div>
-                                {moon.materials && (
-                                  <div className="mt-2">
-                                    <div className="flex flex-wrap gap-1">
-                                      {moon.materials.split(',').map((mat, mi) => (
-                                        <span key={mi} className="px-1.5 py-0.5 bg-blue-900/30 border border-blue-700/30 rounded text-xs text-blue-200">{mat.trim()}</span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                {/* Moon Attributes */}
-                                {(() => {
-                                  const moonAttrs = [
-                                    { key: 'has_rings', label: 'Rings', icon: '\u{1FA90}' },
-                                    { key: 'is_dissonant', label: 'Dissonant', icon: '\u{1F50A}' },
-                                    { key: 'is_infested', label: 'Infested', icon: '\u{1F9A0}' },
-                                    { key: 'extreme_weather', label: 'Extreme', icon: '\u{26A1}' },
-                                    { key: 'water_world', label: 'Water', icon: '\u{1F30A}' },
-                                    { key: 'vile_brood', label: 'Vile Brood', icon: '\u{1F480}' },
-                                  ].filter(a => moon[a.key])
-                                  const hasMoonTrophy = moon.exotic_trophy && moon.exotic_trophy.trim()
-                                  if (moonAttrs.length === 0 && !hasMoonTrophy) return null
-                                  return (
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                      {moonAttrs.map(a => (
-                                        <span key={a.key} className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/15 border border-purple-500/30 rounded-full text-xs text-purple-300">
-                                          <span>{a.icon}</span> {a.label}
-                                        </span>
-                                      ))}
-                                      {hasMoonTrophy && (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-500/15 border border-yellow-500/30 rounded-full text-xs text-yellow-300">
-                                          <span>{'\u{1F3C6}'}</span> {moon.exotic_trophy}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )
-                                })()}
-                                {(moon.description || moon.notes) && (
-                                  <div className="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400">
-                                    {moon.description && <div>{moon.description}</div>}
-                                    {moon.notes && <div className="italic">{moon.notes}</div>}
-                                  </div>
-                                )}
-                                {moon.photo && (
-                                  <div className="mt-2">
-                                    <img
-                                      src={getPhotoUrl(moon.photo)}
-                                      alt={moon.name}
-                                      className="max-w-xs max-h-32 rounded border border-gray-700"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )
-        })()}
-      </Card>
-
-      {/* Contributors Modal */}
-      {showContributors && (
-        <ContributorsModal
-          system={system}
-          onClose={() => setShowContributors(false)}
+      {lightboxIdx != null && (
+        <Lightbox
+          photos={photos}
+          index={lightboxIdx}
+          onChange={setLightboxIdx}
+          onClose={() => setLightboxIdx(null)}
         />
       )}
+
+      {toast && (
+        <div
+          className="fixed bottom-6 left-1/2 z-[80]"
+          style={{
+            transform: 'translateX(-50%)',
+            background: 'var(--app-card)',
+            border: `1px solid ${toast.kind === 'error' ? '#ef4444' : 'var(--app-primary)'}`,
+            borderRadius: 8,
+            padding: '0.625rem 1rem',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            animation: 'slideDown 200ms',
+          }}
+        >
+          <div className="flex items-center gap-2 text-sm">
+            {toast.kind === 'error'
+              ? <span style={{ color: '#fca5a5' }}>✕</span>
+              : <span style={{ color: 'var(--app-primary)' }}>✓</span>}
+            {toast.message}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, secondary, valueClass }) {
+  return (
+    <div className="p-3 rounded-lg" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-soft)' }}>
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>{label}</div>
+      <div className={`text-xl font-bold ${valueClass || ''}`}>{value}</div>
+      {secondary && <div className="text-[10px]" style={{ color: 'var(--muted)' }}>{secondary}</div>}
+    </div>
+  )
+}
+
+function Row({ label, value, mono }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span style={{ color: 'var(--muted)' }}>{label}</span>
+      <span className={mono ? 'mono text-right' : 'text-right'}>{value}</span>
+    </div>
+  )
+}
+
+function PencilIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  )
+}
+
+function ShowOnMapButton({ system, variant = 'ghost' }) {
+  const href = `/map?focus=system:${encodeURIComponent(system.id)}`
+  const common = (
+    <>
+      <svg className="w-3.5 h-3.5" style={{ color: 'var(--app-primary)' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+      </svg>
+      Show on Map
+    </>
+  )
+  if (variant === 'block') {
+    return (
+      <Link to={href} className="haven-btn-ghost w-full px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+        {common}
+      </Link>
+    )
+  }
+  return (
+    <Link to={href} className="haven-btn-ghost px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
+      {common}
+    </Link>
+  )
+}
+
+// Wonders Page Notes (migration v1.76.0 — wizard rebuild). Renders only when
+// at least one field is populated so old systems show no extra chrome.
+function WondersNotes({ row }) {
+  if (!row) return null
+  const fields = [
+    ['Estimated Age', row.estimated_age],
+    ['Core Element', row.core_element],
+    ['Root Structure', row.root_structure],
+    ['Nutrient Source', row.nutrient_source],
+  ].filter(([, v]) => v != null && v !== '')
+  if (fields.length === 0 && !row.lore_notes) return null
+  return (
+    <div
+      className="mt-2 p-2 rounded text-[10px] space-y-0.5"
+      style={{
+        background: 'rgba(255, 180, 76, 0.07)',
+        border: '1px solid rgba(255, 180, 76, 0.30)',
+      }}
+    >
+      <div className="font-semibold uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--app-accent-amber)' }}>
+        ★ Wonders Notes
+      </div>
+      {fields.map(([label, v]) => (
+        <div key={label}><span style={{ color: 'var(--muted)' }}>{label}: </span><span>{v}</span></div>
+      ))}
+      {row.lore_notes && (
+        <div className="italic whitespace-pre-line mt-1" style={{ color: 'rgba(255,255,255,0.85)' }}>
+          {row.lore_notes}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Aggregate per-row boolean flags into a deduped list of badge labels.
+const FEATURE_FLAGS = [
+  ['vile_brood', 'Vile Brood'],
+  ['ancient_bones', 'Ancient Bones'],
+  ['storm_crystals', 'Storm Crystals'],
+  ['gravitino_balls', 'Gravitino Balls'],
+  ['salvageable_scrap', 'Salvageable Scrap'],
+  ['is_dissonant', 'Dissonant'],
+  ['dissonance', 'Dissonant'],
+  ['is_infested', 'Infested'],
+  ['infested', 'Infested'],
+  ['water_world', 'Water World'],
+  ['has_water', 'Water'],
+  ['is_bubble', 'Bubble Planet'],
+  ['is_floating_islands', 'Floating Islands'],
+  ['has_rings', 'Has Rings'],
+  ['is_gas_giant', 'Gas Giant'],
+  ['extreme_weather', 'Extreme Weather'],
+]
+
+function featureBadges(row) {
+  if (!row) return []
+  const seen = new Set()
+  const out = []
+  for (const [key, label] of FEATURE_FLAGS) {
+    if (row[key] && !seen.has(label)) { seen.add(label); out.push(label) }
+  }
+  return out
+}
+
+function PlanetCard({ p, index }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const moonCount = (p.moons || []).length
+  const features = featureBadges(p)
+  const materials = (p.materials || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const resources = [
+    p.common_resource && { tier: 'Common', name: p.common_resource },
+    p.uncommon_resource && { tier: 'Uncommon', name: p.uncommon_resource },
+    p.rare_resource && { tier: 'Rare', name: p.rare_resource },
+  ].filter(Boolean)
+
+  return (
+    <div
+      className="haven-card overflow-hidden"
+      style={{ transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+    >
+      {/* Compact header — always visible, click to expand */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-3 hover:bg-white/5 transition-colors"
+        aria-expanded={expanded}
+      >
+        <div className="flex gap-3 items-start">
+          {/* Parametric sphere or photo */}
+          <div className="shrink-0">
+            <PlanetSphere
+              size={88}
+              biome={p.biome}
+              photo={p.photo}
+              hasRings={!!p.has_rings}
+              waterWorld={!!p.water_world}
+              isDissonant={!!(p.is_dissonant || p.dissonance)}
+              extremeWeather={!!p.extreme_weather}
+              isGasGiant={!!p.is_gas_giant}
+              isBubble={!!p.is_bubble}
+              isFloatingIslands={!!p.is_floating_islands}
+              moonCount={moonCount}
+              exoticTrophy={p.exotic_trophy}
+              badge={`P${index}`}
+            />
+          </div>
+          {/* Right column: name + biome/weather + 3 stats */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-sm font-semibold truncate">{p.name || `Planet ${index}`}</div>
+              <svg
+                className="w-4 h-4 shrink-0 mt-0.5"
+                style={{ color: 'var(--muted)', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms' }}
+                fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--muted)' }}>
+              {p.biome || '—'}{p.weather ? ` · ${p.weather}` : ''}
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[11px] mt-2">
+              <div><div style={{ color: 'var(--muted)' }}>Fauna</div><div className="font-bold truncate">{p.fauna || '—'}</div></div>
+              <div><div style={{ color: 'var(--muted)' }}>Flora</div><div className="font-bold truncate">{p.flora || '—'}</div></div>
+              <div><div style={{ color: 'var(--muted)' }}>Sent.</div><div className="font-bold truncate" title={p.sentinel || ''}>{p.sentinel || '—'}</div></div>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      {/* Expanded detail block */}
+      {expanded && (
+        <div
+          className="px-3 pb-3 pt-1 space-y-2"
+          style={{ borderTop: '1px solid var(--border-soft)' }}
+        >
+          {features.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-2">
+              {features.map((f) => <span key={f} className="pill pill-amber text-[10px]">★ {f}</span>)}
+            </div>
+          )}
+
+          {materials.length > 0 && (
+            <DetailRow label="Materials">
+              <span className="flex flex-wrap gap-1">
+                {materials.map((m, i) => <span key={i} className="pill pill-muted text-[10px]">{m}</span>)}
+              </span>
+            </DetailRow>
+          )}
+
+          {resources.length > 0 && (
+            <DetailRow label="Resources">
+              <span className="flex flex-wrap gap-1">
+                {resources.map((r, i) => (
+                  <span key={i} className="pill pill-blue text-[10px]">
+                    <span className="opacity-60">{r.tier}:</span>&nbsp;{r.name}
+                  </span>
+                ))}
+              </span>
+            </DetailRow>
+          )}
+
+          {(p.hazard_radiation || p.hazard_temperature || p.hazard_toxicity || p.storm_frequency || p.building_density) && (
+            <DetailRow label="Conditions">
+              <span className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                {p.hazard_radiation && <span><span style={{ color: 'var(--muted)' }}>Rad:</span> {p.hazard_radiation}</span>}
+                {p.hazard_temperature && <span><span style={{ color: 'var(--muted)' }}>Temp:</span> {p.hazard_temperature}</span>}
+                {p.hazard_toxicity && <span><span style={{ color: 'var(--muted)' }}>Tox:</span> {p.hazard_toxicity}</span>}
+                {p.storm_frequency && <span><span style={{ color: 'var(--muted)' }}>Storms:</span> {p.storm_frequency}</span>}
+                {p.building_density && <span><span style={{ color: 'var(--muted)' }}>Bldgs:</span> {p.building_density}</span>}
+              </span>
+            </DetailRow>
+          )}
+
+          {p.exotic_trophy && (
+            <DetailRow label="Exotic Trophy">
+              <span style={{ color: 'var(--app-accent-amber)' }}>★ {p.exotic_trophy}</span>
+            </DetailRow>
+          )}
+
+          {p.base_location && (
+            <DetailRow label="Base"><span className="mono">{p.base_location}</span></DetailRow>
+          )}
+
+          {p.notes && (
+            <DetailRow label="Notes">
+              <span className="italic whitespace-pre-line" style={{ color: 'rgba(255,255,255,0.85)' }}>{p.notes}</span>
+            </DetailRow>
+          )}
+
+          <WondersNotes row={p} />
+
+          {/* Moons — nested expandable cards */}
+          {moonCount > 0 && (
+            <div className="pt-2 mt-2" style={{ borderTop: '1px solid var(--border-soft)' }}>
+              <div className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: 'var(--muted)' }}>
+                Moons ({moonCount})
+              </div>
+              <div className="space-y-2">
+                {(p.moons || []).map((m, mi) => <MoonCard key={m.id || mi} m={m} index={mi + 1} />)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MoonCard({ m, index }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const features = featureBadges(m)
+  const materials = (m.materials || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const resources = [
+    m.common_resource && { tier: 'Common', name: m.common_resource },
+    m.uncommon_resource && { tier: 'Uncommon', name: m.uncommon_resource },
+    m.rare_resource && { tier: 'Rare', name: m.rare_resource },
+  ].filter(Boolean)
+
+  return (
+    <div className="rounded overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-soft)' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-2 hover:bg-white/5 transition-colors"
+        aria-expanded={expanded}
+      >
+        <div className="flex gap-2 items-center">
+          <div className="shrink-0">
+            <PlanetSphere
+              size={48}
+              biome={m.biome}
+              photo={m.photo}
+              waterWorld={!!m.water_world}
+              isDissonant={!!(m.is_dissonant || m.dissonance)}
+              extremeWeather={!!m.extreme_weather}
+              isBubble={!!m.is_bubble}
+              isFloatingIslands={!!m.is_floating_islands}
+              isMoon
+              badge={`M${index}`}
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">{m.name || `Moon ${index}`}</div>
+            <div className="text-[10px]" style={{ color: 'var(--muted)' }}>
+              {m.biome || '—'}{m.weather || m.climate ? ` · ${m.weather || m.climate}` : ''}
+            </div>
+          </div>
+          <svg
+            className="w-3.5 h-3.5 shrink-0"
+            style={{ color: 'var(--muted)', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms' }}
+            fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-2 pb-2 pt-1 space-y-1.5 text-[11px]" style={{ borderTop: '1px solid var(--border-soft)' }}>
+          <div className="grid grid-cols-3 gap-1 pt-2">
+            <div><div style={{ color: 'var(--muted)' }}>Fauna</div><div className="font-bold truncate">{m.fauna || '—'}</div></div>
+            <div><div style={{ color: 'var(--muted)' }}>Flora</div><div className="font-bold truncate">{m.flora || '—'}</div></div>
+            <div><div style={{ color: 'var(--muted)' }}>Sent.</div><div className="font-bold truncate" title={m.sentinel || ''}>{m.sentinel || '—'}</div></div>
+          </div>
+          {features.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {features.map((f) => <span key={f} className="pill pill-amber text-[10px]">★ {f}</span>)}
+            </div>
+          )}
+          {materials.length > 0 && (
+            <DetailRow label="Materials">
+              <span className="flex flex-wrap gap-1">
+                {materials.map((mat, i) => <span key={i} className="pill pill-muted text-[10px]">{mat}</span>)}
+              </span>
+            </DetailRow>
+          )}
+          {resources.length > 0 && (
+            <DetailRow label="Resources">
+              <span className="flex flex-wrap gap-1">
+                {resources.map((r, i) => (
+                  <span key={i} className="pill pill-blue text-[10px]">
+                    <span className="opacity-60">{r.tier}:</span>&nbsp;{r.name}
+                  </span>
+                ))}
+              </span>
+            </DetailRow>
+          )}
+          {m.base_location && <DetailRow label="Base"><span className="mono">{m.base_location}</span></DetailRow>}
+          {m.notes && (
+            <DetailRow label="Notes">
+              <span className="italic whitespace-pre-line" style={{ color: 'rgba(255,255,255,0.85)' }}>{m.notes}</span>
+            </DetailRow>
+          )}
+          <WondersNotes row={m} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-start gap-2 text-[11px]">
+      <span className="shrink-0 mono uppercase tracking-wider" style={{ color: 'var(--muted)', minWidth: 70 }}>{label}</span>
+      <div className="flex-1 min-w-0">{children}</div>
     </div>
   )
 }

@@ -351,18 +351,33 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
     System-level filters match directly on the systems table. Planet-level filters use EXISTS
     subqueries to avoid JOIN-based row duplication.
     """
-    if params_dict.get('star_type'):
-        where_clauses.append("s.star_type = ?")
-        params.append(params_dict['star_type'])
+    # Comma-separated lists collapse to SQL IN (...) for OR-logic multi-select.
+    # Single values still work — _split_csv returns a 1-element list. Per spec
+    # section 3.3, star_type / economy_level / conflict_level / completeness
+    # grade are OR-logic multi-select.
+    def _split_csv(v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return [p.strip() for p in s.split(',') if p.strip()]
+
+    star_types = _split_csv(params_dict.get('star_type'))
+    if star_types:
+        where_clauses.append(f"s.star_type IN ({','.join(['?'] * len(star_types))})")
+        params.extend(star_types)
     if params_dict.get('economy_type'):
         where_clauses.append("s.economy_type = ?")
         params.append(params_dict['economy_type'])
-    if params_dict.get('economy_level'):
-        where_clauses.append("s.economy_level = ?")
-        params.append(params_dict['economy_level'])
-    if params_dict.get('conflict_level'):
-        where_clauses.append("s.conflict_level = ?")
-        params.append(params_dict['conflict_level'])
+    economy_levels = _split_csv(params_dict.get('economy_level'))
+    if economy_levels:
+        where_clauses.append(f"s.economy_level IN ({','.join(['?'] * len(economy_levels))})")
+        params.extend(economy_levels)
+    conflict_levels = _split_csv(params_dict.get('conflict_level'))
+    if conflict_levels:
+        where_clauses.append(f"s.conflict_level IN ({','.join(['?'] * len(conflict_levels))})")
+        params.extend(conflict_levels)
     if params_dict.get('dominant_lifeform'):
         where_clauses.append("s.dominant_lifeform = ?")
         params.append(params_dict['dominant_lifeform'])
@@ -371,12 +386,21 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
         params.append(params_dict['stellar_classification'])
     is_complete_val = params_dict.get('is_complete')
     if is_complete_val is not None:
-        if isinstance(is_complete_val, str) and is_complete_val in ('S', 'A', 'B', 'C'):
-            grade_thresholds = {'S': (85, 100), 'A': (65, 84), 'B': (40, 64), 'C': (0, 39)}
-            low, high = grade_thresholds[is_complete_val]
-            where_clauses.append("s.is_complete BETWEEN ? AND ?")
-            params.extend([low, high])
+        grade_thresholds = {'S': (85, 100), 'A': (65, 84), 'B': (40, 64), 'C': (0, 39)}
+        grades = _split_csv(is_complete_val) if isinstance(is_complete_val, str) else None
+        if grades and all(g in grade_thresholds for g in grades):
+            # 1+ valid grade letters → OR'd BETWEEN clauses. Single-letter case
+            # produces "((s.is_complete BETWEEN ? AND ?))" — extra parens are
+            # harmless and avoid a special-case branch.
+            grade_clauses = []
+            for g in grades:
+                low, high = grade_thresholds[g]
+                grade_clauses.append("(s.is_complete BETWEEN ? AND ?)")
+                params.extend([low, high])
+            where_clauses.append("(" + " OR ".join(grade_clauses) + ")")
         elif is_complete_val:
+            # Legacy boolean / truthy fallback — used when callers send
+            # `is_complete=true` rather than a grade letter.
             where_clauses.append("s.is_complete >= 65")
         else:
             where_clauses.append("s.is_complete < 65")

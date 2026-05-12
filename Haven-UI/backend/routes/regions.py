@@ -16,7 +16,9 @@ from services.auth_service import (
     verify_session,
     require_feature,
     verify_api_key,
+    normalize_username_for_dedup,
 )
+from services.civilizations import civ_scope_filter
 from services.dispatch import fire_and_forget
 from services.restrictions import (
     get_restriction_for_system,
@@ -66,7 +68,7 @@ from db import _build_advanced_filter_clauses
 
 
 @router.get('/api/regions/grouped')
-async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit: int = 0,
+async def api_regions_grouped(include_systems: bool = False, page: int = 0, limit: int = 0,
                                discord_tag: str = None,
                                reality: str = None,
                                galaxy: str = None,
@@ -168,17 +170,37 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
         regions = []
 
         if not include_systems:
-            # Fast path: return just region summaries without nested data
+            # Fast path: return just region summaries without nested data.
+            # The SELECT pulls the few extra fields the card footer needs
+            # (score for Grade S, submitter for contributor count) so we
+            # don't have to make a second pass over the systems table.
             all_region_coords = [(r['region_x'], r['region_y'], r['region_z']) for r in all_region_rows]
             visible_counts = {}
+            # Per-region aggregates for grade S count + unique contributor
+            # count. Keyed by (rx, ry, rz). Contributors stored as a set
+            # so we can len() at response build time.
+            grade_s_counts = {}
+            contributor_sets = {}
 
             if all_region_coords:
                 cursor.execute("CREATE TEMP TABLE IF NOT EXISTS _tmp_region_coords (rx INTEGER, ry INTEGER, rz INTEGER)")
                 cursor.execute("DELETE FROM _tmp_region_coords")
                 cursor.executemany("INSERT INTO _tmp_region_coords VALUES (?, ?, ?)", all_region_coords)
 
+                # NOTE: `completeness_score` was renamed/repurposed in v1.34.0
+                # — only `is_complete` exists on the systems table now, and
+                # it holds the 0-100 score (not the legacy boolean). The
+                # downstream Python still calls .get('completeness_score')
+                # first as a forward-compat shim; that returns None here and
+                # falls through to is_complete cleanly.
+                # `submitter_id` is pulled too because a few legacy rows
+                # have it set but lack personal_discord_username — without
+                # it those contributors would be invisible.
                 cursor.execute(f'''
-                    SELECT s.id, s.discord_tag, s.region_x, s.region_y, s.region_z FROM systems s
+                    SELECT s.id, s.discord_tag, s.region_x, s.region_y, s.region_z,
+                           s.is_complete, s.profile_id, s.submitter_id,
+                           s.personal_discord_username, s.discovered_by
+                    FROM systems s
                     INNER JOIN _tmp_region_coords t ON s.region_x = t.rx AND s.region_y = t.ry AND s.region_z = t.rz
                     WHERE 1=1 {combined_filter}
                 ''', filter_params)
@@ -186,13 +208,65 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
                 all_systems = [dict(row) for row in cursor.fetchall()]
                 visible_systems = apply_data_restrictions(all_systems, session_data)
 
+                # Map system_id → (rx,ry,rz) so we can attribute coauthor
+                # rows (which only carry system_id) back to a region.
+                system_id_to_key = {}
+                visible_system_ids = []
                 for system in visible_systems:
                     rx = system.get('region_x')
                     ry = system.get('region_y')
                     rz = system.get('region_z')
-                    if rx is not None and ry is not None and rz is not None:
-                        key = (rx, ry, rz)
-                        visible_counts[key] = visible_counts.get(key, 0) + 1
+                    if rx is None or ry is None or rz is None:
+                        continue
+                    key = (rx, ry, rz)
+                    system_id_to_key[system['id']] = key
+                    visible_system_ids.append(system['id'])
+                    visible_counts[key] = visible_counts.get(key, 0) + 1
+                    # Grade S threshold (services/completeness.py): score >= 85.
+                    score = system.get('completeness_score')
+                    if score is None:
+                        score = system.get('is_complete')
+                    if score is not None and score >= 85:
+                        grade_s_counts[key] = grade_s_counts.get(key, 0) + 1
+                    # Primary submitter — exactly ONE identity per system
+                    # row. profile_id is preferred (canonical FK), then a
+                    # normalized username from either column. submitter_id
+                    # is only used when nothing else is available because
+                    # the same person commonly has both profile_id AND a
+                    # username on the row — counting all three would
+                    # multi-count one person.
+                    s = contributor_sets.setdefault(key, set())
+                    pid = system.get('profile_id')
+                    if pid:
+                        s.add(('p', pid))
+                    else:
+                        norm = (normalize_username_for_dedup(system.get('personal_discord_username') or '')
+                                or normalize_username_for_dedup(system.get('discovered_by') or ''))
+                        if norm:
+                            s.add(('u', norm))
+                        elif system.get('submitter_id'):
+                            s.add(('s', system['submitter_id']))
+
+                # Co-author rows. Wizard v1 (migration 1.75.0) introduced
+                # system_coauthors so multi-member submissions credit the
+                # whole crew. Each row already stores a normalized
+                # username; profile_id may be NULL for legacy/anon entries.
+                if visible_system_ids:
+                    placeholders = ','.join(['?'] * len(visible_system_ids))
+                    cursor.execute(f'''
+                        SELECT system_id, profile_id, username_normalized
+                        FROM system_coauthors
+                        WHERE system_id IN ({placeholders})
+                    ''', visible_system_ids)
+                    for ca_row in cursor.fetchall():
+                        key = system_id_to_key.get(ca_row['system_id'])
+                        if key is None:
+                            continue
+                        s = contributor_sets.setdefault(key, set())
+                        if ca_row['profile_id']:
+                            s.add(('p', ca_row['profile_id']))
+                        elif ca_row['username_normalized']:
+                            s.add(('u', ca_row['username_normalized']))
 
             true_total_regions = sum(1 for r in all_region_rows if visible_counts.get((r['region_x'], r['region_y'], r['region_z']), 0) > 0)
 
@@ -206,13 +280,16 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
             for region_row in region_rows_paginated:
                 region = dict(region_row)
                 rx, ry, rz = region['region_x'], region['region_y'], region['region_z']
+                key = (rx, ry, rz)
 
                 if region['custom_name']:
                     region['display_name'] = region['custom_name']
                 else:
                     region['display_name'] = f"Region ({rx}, {ry}, {rz})"
 
-                region['system_count'] = visible_counts.get((rx, ry, rz), 0)
+                region['system_count'] = visible_counts.get(key, 0)
+                region['grade_s_count'] = grade_s_counts.get(key, 0)
+                region['contributor_count'] = len(contributor_sets.get(key, set()))
                 region['systems'] = []
                 regions.append(region)
 
@@ -330,6 +407,55 @@ async def api_regions_grouped(include_systems: bool = True, page: int = 0, limit
 
             region['systems'] = region_systems
             region['system_count'] = len(region_systems)
+
+            # Grade-S count and unique-contributor count for the region card
+            # footer. Uses the same logic as the fast path so numbers match.
+            #   - Grade S: score >= 85 from `is_complete` (v1.34.0 repurposed).
+            #   - Contributors: union of primary submitter identities on each
+            #     system row + every system_coauthors row for those systems.
+            #     Usernames pass through normalize_username_for_dedup so
+            #     `turpitzz` and `turpitzz#9999` count as one person.
+            grade_s = 0
+            contributors = set()
+            sys_ids_in_region = []
+            for s in region_systems:
+                sys_ids_in_region.append(s['id'])
+                score = s.get('completeness_score')
+                if score is None:
+                    score = s.get('is_complete')
+                if score is not None and score >= 85:
+                    grade_s += 1
+                # One identity per system: profile_id preferred, then a
+                # normalized username, then submitter_id as last resort.
+                # Adding all three would count one person N times.
+                pid = s.get('profile_id')
+                if pid:
+                    contributors.add(('p', pid))
+                else:
+                    norm = (normalize_username_for_dedup(s.get('personal_discord_username') or '')
+                            or normalize_username_for_dedup(s.get('discovered_by') or ''))
+                    if norm:
+                        contributors.add(('u', norm))
+                    elif s.get('submitter_id'):
+                        contributors.add(('s', s['submitter_id']))
+
+            # Fold in coauthors for these systems. system_coauthors stores
+            # username_normalized directly, so no further normalization.
+            if sys_ids_in_region:
+                placeholders = ','.join(['?'] * len(sys_ids_in_region))
+                cursor.execute(f'''
+                    SELECT profile_id, username_normalized
+                    FROM system_coauthors
+                    WHERE system_id IN ({placeholders})
+                ''', sys_ids_in_region)
+                for ca_row in cursor.fetchall():
+                    if ca_row['profile_id']:
+                        contributors.add(('p', ca_row['profile_id']))
+                    elif ca_row['username_normalized']:
+                        contributors.add(('u', ca_row['username_normalized']))
+
+            region['grade_s_count'] = grade_s
+            region['contributor_count'] = len(contributors)
 
             if region['custom_name']:
                 region['display_name'] = region['custom_name']
@@ -1121,35 +1247,30 @@ async def api_list_pending_region_names(session: Optional[str] = Cookie(None)):
                     END,
                     submission_date DESC"""
 
-        if is_super:
-            cursor.execute(f'SELECT {select_cols} FROM pending_region_names {order_clause}')
-        elif is_haven_sub_admin:
-            additional_tags = session_data.get('additional_discord_tags', [])
-            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
-            all_tags = ['Haven'] + additional_tags
-            placeholders = ','.join(['?' for _ in all_tags])
-
-            if can_approve_personal:
-                cursor.execute(f'''
-                    SELECT {select_cols} FROM pending_region_names
-                    WHERE discord_tag IN ({placeholders})
-                       OR discord_tag = 'personal'
-                       OR discord_tag IS NULL
-                    {order_clause}
-                ''', all_tags)
-            else:
-                cursor.execute(f'''
-                    SELECT {select_cols} FROM pending_region_names
-                    WHERE discord_tag IN ({placeholders})
-                       OR discord_tag IS NULL
-                    {order_clause}
-                ''', all_tags)
+        # Single-query scoping via civ_scope_filter (migration 1.80.0).
+        # Region-name submissions with NULL discord_tag are visible to any
+        # leader-tier user — these are typically untagged Haven region
+        # proposals that any member of the broader admin pool reviews.
+        scope_clause, scope_params = civ_scope_filter(session_data, column='discord_tag')
+        if scope_clause == '1=0':
+            pending = []
+            rows = []
         else:
+            can_approve_personal = bool(
+                session_data.get('can_approve_personal_uploads', False)
+                or any(m.get('can_approve_personal_uploads')
+                       for m in (session_data.get('civ_memberships') or []))
+            )
+            personal_clause = " OR discord_tag = 'personal'" if can_approve_personal else ''
+            # Super admin (1=1) doesn't need the IS NULL branch — they
+            # already match everything. Other tiers explicitly include
+            # NULL-tag proposals.
+            null_clause = "" if scope_clause == '1=1' else " OR discord_tag IS NULL"
             cursor.execute(f'''
                 SELECT {select_cols} FROM pending_region_names
-                WHERE discord_tag = ?
+                WHERE ({scope_clause}){personal_clause}{null_clause}
                 {order_clause}
-            ''', (partner_tag,))
+            ''', scope_params)
 
         rows = cursor.fetchall()
         pending = [dict(row) for row in rows]

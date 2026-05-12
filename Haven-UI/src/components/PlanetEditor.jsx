@@ -7,7 +7,7 @@ import Modal from './Modal'
  * Planet editor - thin wrapper around CelestialBodyEditor that adds moon management.
  * Props: planet, index, onChange, onRemove, onSave.
  */
-export default function PlanetEditor({ planet, index, onChange, onRemove, onSave }) {
+export default function PlanetEditor({ planet, index, onChange, onRemove, onSave, openHelp }) {
   const [moonModalOpen, setMoonModalOpen] = useState(false)
   const [editingMoonIndex, setEditingMoonIndex] = useState(null)
   const [editingMoon, setEditingMoon] = useState(null)
@@ -23,7 +23,10 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       name: '', biome: '', weather: '', sentinel: 'None',
       fauna: 'N/A', flora: 'N/A', materials: '', notes: '', photo: null,
       has_rings: 0, is_dissonant: 0, is_infested: 0,
-      extreme_weather: 0, water_world: 0, vile_brood: 0, exotic_trophy: ''
+      extreme_weather: 0, water_world: 0, vile_brood: 0, exotic_trophy: '',
+      // Wonders Page Notes (migration 1.76.0)
+      estimated_age: '', core_element: '', lore_notes: '',
+      root_structure: '', nutrient_source: ''
     })
     setMoonModalOpen(true)
   }
@@ -65,6 +68,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       onChange={onChange}
       onRemove={onRemove}
       onSave={onSave}
+      openHelp={openHelp}
     >
       {/* Moon management — planet-only feature */}
       <div className="mt-3 mb-1">
@@ -82,7 +86,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
       </div>
       {moonModalOpen && (
         <Modal title={editingMoonIndex === -1 ? 'Add Moon' : 'Edit Moon'} onClose={() => setMoonModalOpen(false)}>
-          <MoonEditor moon={editingMoon} index={editingMoonIndex} onChange={(idx, m) => setEditingMoon(m)} onSave={commitMoon} onRemove={() => setMoonModalOpen(false)} />
+          <MoonEditor moon={editingMoon} index={editingMoonIndex} onChange={(idx, m) => setEditingMoon(m)} onSave={commitMoon} onRemove={() => setMoonModalOpen(false)} openHelp={openHelp} />
         </Modal>
       )}
     </CelestialBodyEditor>

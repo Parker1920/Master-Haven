@@ -33,7 +33,7 @@ Go to **Create**. The wizard walks you through one screen at a time. Required fi
 | **System name** | Whatever the system is called in-game. |
 | **Star color** | Yellow, Red, Green, Blue, or Purple. |
 | **Economy type** | Trading, Mining, Technology, etc. — or **Abandoned** for empty systems. |
-| **Dominant lifeform** | Gek / Vy'keen / Korvax / Robots / Atlas / Diplomats / None. |
+| **Dominant lifeform** | Gek / Vy'keen / Korvax / **None** (no race, never was) / **Abandoned** (empty buildings, race left). |
 | **Your Discord username** | So your contribution gets credited. |
 | **Your Discord community** | Voyager's Haven, IEA, B.E.S, or "Personal" if you're not in one. |
 

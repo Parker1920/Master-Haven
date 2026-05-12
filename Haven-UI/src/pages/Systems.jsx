@@ -1,485 +1,135 @@
-import React, { useEffect, useState, useContext, useMemo } from 'react'
-import axios from 'axios'
-import Card from '../components/Card'
-import Button from '../components/Button'
-import FormField from '../components/FormField'
+/**
+ * Systems Browser — v2.0 orchestrator.
+ *
+ * Route: /systems
+ * Auth: Public
+ *
+ * Mounts the v2.0 chrome (URL bar, unified search/filter card, breadcrumbs)
+ * and one of four level grids based on the current hierarchy selection.
+ * System Detail (Level 5) is a separate route (Phase 5).
+ *
+ * Shared state (hierarchy, scope, filters, history, dropdowns, recently-
+ * viewed) lives in SystemsContext so chrome and level components don't have
+ * to prop-drill through this orchestrator.
+ */
+
+import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { SystemsProvider, useSystems } from '../contexts/SystemsContext'
+import useFilters from '../hooks/useFilters'
+import URLBar from '../components/URLBar'
+import SearchOverlay from '../components/SearchOverlay'
+import FilterPillsRow from '../components/FilterPillsRow'
+import BreadcrumbBar from '../components/BreadcrumbBar'
+import SavedSearchesDropdown from '../components/SavedSearchesDropdown'
+import RecentlyViewedDropdown from '../components/RecentlyViewedDropdown'
 import RealitySelector from '../components/RealitySelector'
 import GalaxyGrid from '../components/GalaxyGrid'
 import RegionBrowser from '../components/RegionBrowser'
 import SystemsList from '../components/SystemsList'
-import DiscordTagBadge from '../components/DiscordTagBadge'
-import AdvancedFilters, { EMPTY_FILTERS } from '../components/AdvancedFilters'
-import {
-  MagnifyingGlassIcon,
-  ChevronRightIcon,
-  HomeIcon,
-  XMarkIcon,
-  FunnelIcon
-} from '@heroicons/react/24/outline'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AuthContext } from '../utils/AuthContext'
-import useDebounce from '../hooks/useDebounce'
+import FilterModal from '../components/FilterModal'
+import CompareBar from '../components/CompareBar'
+import ComparePanel from '../components/ComparePanel'
 
-/**
- * Systems Browser
- * Route: /systems
- * Auth: Public
- *
- * Hierarchical drill-down browser: Reality -> Galaxy -> Region -> System.
- * Each level loads data lazily when selected. Supports full-text search
- * with debounce, discord tag filtering, and advanced filters (star type,
- * biome, weather, sentinel, resources, economy, completeness grade, etc.).
- *
- * URL params preserve navigation state (reality, galaxy, rx/ry/rz/rname).
- *
- * Key APIs:
- *   GET /api/systems/search?q=...  (full-text search)
- *   GET /api/discord_tags          (community filter dropdown)
- *   Galaxy/region/system list APIs are delegated to child components
- *     (GalaxyGrid, RegionBrowser, SystemsList)
- */
 export default function Systems() {
-  const navigate = useNavigate()
-  const auth = useContext(AuthContext)
-  const [searchParams, setSearchParams] = useSearchParams()
+  return (
+    <SystemsProvider>
+      <SystemsBrowser />
+    </SystemsProvider>
+  )
+}
 
-  // Hierarchy state - can be controlled via URL params
-  const [selectedReality, setSelectedReality] = useState(searchParams.get('reality') || null)
-  const [selectedGalaxy, setSelectedGalaxy] = useState(searchParams.get('galaxy') || null)
-  const [selectedRegion, setSelectedRegion] = useState(() => {
-    const rx = searchParams.get('rx')
-    const ry = searchParams.get('ry')
-    const rz = searchParams.get('rz')
-    if (rx && ry && rz) {
-      return {
-        region_x: parseInt(rx),
-        region_y: parseInt(ry),
-        region_z: parseInt(rz),
-        display_name: searchParams.get('rname') || null
-      }
-    }
-    return null
-  })
-
-  // Search state
-  const [q, setQ] = useState('')
-  const debouncedQuery = useDebounce(q, 300)
-  const [searchResults, setSearchResults] = useState([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [searchPage, setSearchPage] = useState(1)
-  const [searchTotalPages, setSearchTotalPages] = useState(1)
-  const [searchTotal, setSearchTotal] = useState(0)
-
-  // Discord tag filtering
-  const [discordTags, setDiscordTags] = useState([])
-  const [filterTag, setFilterTag] = useState('all')
-
-  // View All Systems mode - shows all systems for a discord tag across all regions
-  const [viewAllSystems, setViewAllSystems] = useState(false)
-
-  // Mobile filter panel toggle
-  const [showFilters, setShowFilters] = useState(false)
-
-  // Advanced filters state
-  const [advancedFilters, setAdvancedFilters] = useState({ ...EMPTY_FILTERS })
-
-  // Fetch discord tags for filter dropdown
-  useEffect(() => {
-    axios.get('/api/discord_tags').then(r => {
-      setDiscordTags(r.data.tags || [])
-    }).catch(() => {})
-  }, [])
-
-  // Reset to page 1 whenever the query changes
-  useEffect(() => {
-    setSearchPage(1)
-  }, [debouncedQuery])
-
-  // Backend search when query or page changes
-  useEffect(() => {
-    if (!debouncedQuery.trim()) {
-      setSearchResults([])
-      setSearchTotalPages(1)
-      setSearchTotal(0)
-      return
-    }
-
-    setIsSearching(true)
-    axios.get('/api/systems/search', {
-      params: { q: debouncedQuery, page: searchPage, limit: 20 }
-    })
-      .then(r => {
-        setSearchResults(r.data.results || [])
-        setSearchTotalPages(r.data.total_pages || 1)
-        setSearchTotal(r.data.total || 0)
-      })
-      .catch(() => {
-        setSearchResults([])
-        setSearchTotalPages(1)
-        setSearchTotal(0)
-      })
-      .finally(() => setIsSearching(false))
-  }, [debouncedQuery, searchPage])
-
-  // Update URL when selection changes
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (selectedReality) params.set('reality', selectedReality)
-    if (selectedGalaxy) params.set('galaxy', selectedGalaxy)
-    if (selectedRegion) {
-      params.set('rx', selectedRegion.region_x.toString())
-      params.set('ry', selectedRegion.region_y.toString())
-      params.set('rz', selectedRegion.region_z.toString())
-      if (selectedRegion.display_name) {
-        params.set('rname', selectedRegion.display_name)
-      }
-    }
-    setSearchParams(params, { replace: true })
-  }, [selectedReality, selectedGalaxy, selectedRegion])
-
-  // Selection handlers with hierarchy reset
-  function handleRealitySelect(reality) {
-    setSelectedReality(reality)
-    setSelectedGalaxy(null)
-    setSelectedRegion(null)
-  }
-
-  function handleGalaxySelect(galaxy) {
-    setSelectedGalaxy(galaxy)
-    setSelectedRegion(null)
-  }
-
-  function handleRegionSelect(region) {
-    setSelectedRegion(region)
-    setViewAllSystems(false) // Exit view all mode when selecting a region
-  }
-
-  // Handler for View All Systems button in RegionBrowser
-  function handleViewAllSystems() {
-    setViewAllSystems(true)
-    setSelectedRegion(null) // Clear any selected region
-  }
-
-  // Breadcrumb navigation
-  function goToLevel(level) {
-    if (level === 'root') {
-      setSelectedReality(null)
-      setSelectedGalaxy(null)
-      setSelectedRegion(null)
-      setViewAllSystems(false)
-    } else if (level === 'reality') {
-      setSelectedGalaxy(null)
-      setSelectedRegion(null)
-      setViewAllSystems(false)
-    } else if (level === 'galaxy') {
-      setSelectedRegion(null)
-      setViewAllSystems(false)
-    } else if (level === 'viewAll') {
-      // Go back to region browser from view all systems
-      setViewAllSystems(false)
-    }
-  }
-
-  // Determine current hierarchy depth
-  const currentLevel = useMemo(() => {
-    if (viewAllSystems) return 'viewAllSystems'
-    if (selectedRegion) return 'systems'
-    if (selectedGalaxy) return 'regions'
-    if (selectedReality) return 'galaxies'
-    return 'realities'
-  }, [selectedReality, selectedGalaxy, selectedRegion, viewAllSystems])
-
-  // Breadcrumb items
-  const breadcrumbs = useMemo(() => {
-    const items = [
-      { label: 'Systems', level: 'root', active: currentLevel === 'realities' }
-    ]
-
-    if (selectedReality) {
-      items.push({
-        label: selectedReality,
-        level: 'reality',
-        active: currentLevel === 'galaxies'
-      })
-    }
-
-    if (selectedGalaxy) {
-      items.push({
-        label: selectedGalaxy,
-        level: 'galaxy',
-        active: currentLevel === 'regions'
-      })
-    }
-
-    if (viewAllSystems) {
-      items.push({
-        label: `All ${filterTag} Systems`,
-        level: 'viewAll',
-        active: currentLevel === 'viewAllSystems'
-      })
-    } else if (selectedRegion) {
-      const regionName = selectedRegion.display_name || selectedRegion.custom_name ||
-        `(${selectedRegion.region_x}, ${selectedRegion.region_y}, ${selectedRegion.region_z})`
-      items.push({
-        label: regionName,
-        level: 'region',
-        active: currentLevel === 'systems'
-      })
-    }
-
-    return items
-  }, [selectedReality, selectedGalaxy, selectedRegion, currentLevel, viewAllSystems, filterTag])
+function SystemsBrowser() {
+  const { level } = useSystems()
+  const { activeFilterCount } = useFilters()
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [comparePanelOpen, setComparePanelOpen] = useState(false)
 
   return (
-    <div className="space-y-6">
-      {/* Header with Search and Breadcrumbs */}
-      <div className="space-y-4">
-        {/* Search Bar */}
-        <div className="flex gap-2">
-          <FormField className="flex-1">
-            <div className="relative">
-              <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                aria-label="Search systems"
-                className="w-full pl-10 pr-3 py-2 rounded bg-gray-800 border border-gray-700 focus:border-cyan-500 focus:outline-none"
-                value={q}
-                onChange={e => setQ(e.target.value)}
-                placeholder="Search all systems..."
-              />
-              {isSearching && (
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-cyan-400 text-sm">
-                  ...
-                </span>
-              )}
-            </div>
-          </FormField>
+    <div className="space-y-4">
+      <URLBar />
 
-          {/* Mobile filter toggle */}
-          <button
-            className={`lg:hidden px-3 py-2 rounded border transition-colors flex items-center gap-1.5 ${
-              showFilters || filterTag !== 'all'
-                ? 'bg-cyan-600 border-cyan-500 text-white'
-                : 'bg-gray-700 border-gray-600 text-gray-300'
-            }`}
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            {showFilters ? <XMarkIcon className="w-5 h-5" /> : <FunnelIcon className="w-5 h-5" />}
-          </button>
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold" style={{ color: 'var(--app-text)' }}>
+            Systems Browser
+          </h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            Drill from realities to individual star systems
+          </p>
+        </div>
+        <Link
+          to="/wizard"
+          className="px-4 py-2 rounded-lg flex items-center gap-2 text-sm haven-btn-primary"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          New System
+        </Link>
+      </div>
 
-          {/* Desktop filter */}
-          <div className="hidden lg:flex gap-2">
-            <select
-              className="px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
-              value={filterTag}
-              onChange={e => setFilterTag(e.target.value)}
-            >
-              <option value="all">All Communities</option>
-              <option value="untagged">Untagged Only</option>
-              <option value="personal">Personal Only</option>
-              {discordTags.map(t => (
-                <option key={t.tag} value={t.tag}>{t.name}</option>
-              ))}
-            </select>
-            <Link to="/wizard"><Button variant="neutral">New System</Button></Link>
+      <div className="haven-card p-3 sm:p-4 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <SearchOverlay />
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 lg:items-center">
+            <SavedSearchesDropdown />
+            <RecentlyViewedDropdown />
+            <FiltersButton activeCount={activeFilterCount} onClick={() => setFilterOpen(true)} />
           </div>
         </div>
 
-        {/* Mobile filter panel */}
-        {showFilters && (
-          <div className="lg:hidden bg-gray-800/50 rounded-lg p-4 space-y-4 border border-gray-700">
-            <div>
-              <label className="block text-xs text-gray-400 mb-2">Community Filter</label>
-              <select
-                className="w-full px-3 py-2 rounded bg-gray-700 text-white border border-gray-600"
-                value={filterTag}
-                onChange={e => setFilterTag(e.target.value)}
-              >
-                <option value="all">All Communities</option>
-                <option value="untagged">Untagged Only</option>
-                <option value="personal">Personal Only</option>
-                {discordTags.map(t => (
-                  <option key={t.tag} value={t.tag}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-2 pt-2 border-t border-gray-700">
-              <Button
-                onClick={() => setFilterTag('all')}
-                variant="ghost"
-                className="flex-1"
-              >
-                Clear Filter
-              </Button>
-              <Link to="/wizard" className="flex-1">
-                <Button variant="neutral" className="w-full">New System</Button>
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {/* Advanced Filters */}
-        <AdvancedFilters
-          filters={advancedFilters}
-          onChange={setAdvancedFilters}
-          reality={selectedReality}
-          galaxy={selectedGalaxy}
-        />
-
-        {/* Breadcrumb Navigation */}
-        <nav className="flex items-center gap-1 text-sm flex-wrap">
-          {breadcrumbs.map((item, idx) => (
-            <React.Fragment key={item.level}>
-              {idx > 0 && (
-                <ChevronRightIcon className="w-4 h-4 text-gray-500 shrink-0" />
-              )}
-              {item.active ? (
-                <span className="px-2 py-1 rounded bg-cyan-600 text-white font-medium">
-                  {idx === 0 && <HomeIcon className="w-4 h-4 inline mr-1" />}
-                  {item.label}
-                </span>
-              ) : (
-                <button
-                  onClick={() => goToLevel(item.level)}
-                  className="px-2 py-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
-                >
-                  {idx === 0 && <HomeIcon className="w-4 h-4 inline mr-1" />}
-                  {item.label}
-                </button>
-              )}
-            </React.Fragment>
-          ))}
-        </nav>
+        <FilterPillsRow />
       </div>
 
-      {/* Search Results (always visible when searching) */}
-      {debouncedQuery.trim() && (searchResults.length > 0 || isSearching) && (
-        <Card className="border-cyan-500/50">
-          <h3 className="text-lg font-semibold mb-3 text-cyan-400">
-            Search Results {searchTotal > 0 && `(${searchTotal} match${searchTotal === 1 ? '' : 'es'})`}
-          </h3>
-          {isSearching ? (
-            <div className="text-gray-400 py-4 text-center">Searching...</div>
-          ) : (
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {searchResults.map(system => (
-                <div
-                  key={system.id}
-                  className="p-3 bg-gray-800 rounded hover:bg-gray-700 cursor-pointer flex items-center justify-between transition-colors"
-                  onClick={() => navigate(`/systems/${encodeURIComponent(system.id)}`)}
-                >
-                  <div>
-                    <div className="font-semibold flex items-center gap-2">
-                      {system.name}
-                      <DiscordTagBadge tag={system.discord_tag} />
-                      {system.star_type && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          system.star_type === 'Yellow' ? 'bg-yellow-500 text-black' :
-                          system.star_type === 'Red' ? 'bg-red-500 text-white' :
-                          system.star_type === 'Blue' ? 'bg-blue-500 text-white' :
-                          system.star_type === 'Green' ? 'bg-green-500 text-white' :
-                          system.star_type === 'Purple' ? 'bg-purple-500 text-white' :
-                          'bg-gray-500 text-white'
-                        }`}>
-                          {system.star_type}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-400">
-                      {system.region_name ? (
-                        <span className="text-purple-400">{system.region_name}</span>
-                      ) : (
-                        <span>Region ({system.region_x}, {system.region_y}, {system.region_z})</span>
-                      )}
-                      <span className="ml-2">• {system.galaxy || 'Euclid'}</span>
-                      <span className="ml-2">• {system.reality || 'Normal'}</span>
-                      {system.glyph_code && (
-                        <span className="ml-2 font-mono text-purple-400">({system.glyph_code})</span>
-                      )}
-                    </div>
-                  </div>
-                  <Button variant="ghost" className="text-sm shrink-0">View →</Button>
-                </div>
-              ))}
-            </div>
-          )}
-          {!isSearching && searchTotalPages > 1 && (
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700">
-              <Button
-                variant="ghost"
-                className="text-sm"
-                onClick={() => setSearchPage(p => Math.max(1, p - 1))}
-                disabled={searchPage <= 1}
-              >
-                ← Prev
-              </Button>
-              <span className="text-sm text-gray-400">
-                Page {searchPage} of {searchTotalPages}
-              </span>
-              <Button
-                variant="ghost"
-                className="text-sm"
-                onClick={() => setSearchPage(p => Math.min(searchTotalPages, p + 1))}
-                disabled={searchPage >= searchTotalPages}
-              >
-                Next →
-              </Button>
-            </div>
-          )}
-        </Card>
-      )}
+      <BreadcrumbBar />
 
-      {/* Hierarchy Content */}
       <div className="min-h-[400px]">
-        {currentLevel === 'realities' && (
-          <RealitySelector
-            onSelect={handleRealitySelect}
-            selectedReality={selectedReality}
-          />
-        )}
-
-        {currentLevel === 'galaxies' && (
-          <GalaxyGrid
-            reality={selectedReality}
-            onSelect={handleGalaxySelect}
-            selectedGalaxy={selectedGalaxy}
-            filters={advancedFilters}
-            discordTag={filterTag}
-          />
-        )}
-
-        {currentLevel === 'regions' && (
-          <RegionBrowser
-            reality={selectedReality}
-            galaxy={selectedGalaxy}
-            onSelect={handleRegionSelect}
-            selectedRegion={selectedRegion}
-            discordTag={filterTag}
-            filters={advancedFilters}
-            onViewAllSystems={handleViewAllSystems}
-          />
-        )}
-
-        {currentLevel === 'systems' && (
-          <SystemsList
-            reality={selectedReality}
-            galaxy={selectedGalaxy}
-            region={selectedRegion}
-            discordTag={filterTag}
-            filters={advancedFilters}
-          />
-        )}
-
-        {currentLevel === 'viewAllSystems' && (
-          <SystemsList
-            reality={selectedReality}
-            galaxy={selectedGalaxy}
-            discordTag={filterTag}
-            globalMode={true}
-            globalModeTitle={`All ${filterTag} Systems in ${selectedGalaxy}`}
-            filters={advancedFilters}
-          />
-        )}
+        {level === 'reality' && <RealitySelector />}
+        {level === 'galaxy' && <GalaxyGrid />}
+        {level === 'region' && <RegionBrowser />}
+        {level === 'system' && <SystemsList />}
       </div>
+
+      <FilterModal open={filterOpen} onClose={() => setFilterOpen(false)} />
+      <CompareBar onOpen={() => setComparePanelOpen(true)} />
+      <ComparePanel open={comparePanelOpen} onClose={() => setComparePanelOpen(false)} />
     </div>
+  )
+}
+
+function FiltersButton({ activeCount, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full lg:w-auto px-3 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2"
+      style={{
+        background: 'var(--app-primary-dim)',
+        color: 'var(--app-primary)',
+        border: '1px solid rgba(0, 194, 179, 0.3)',
+      }}
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+        />
+      </svg>
+      Filters
+      {activeCount > 0 && (
+        <span
+          className="mono text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+          style={{ background: 'var(--app-primary)', color: '#042422' }}
+        >
+          {activeCount}
+        </span>
+      )}
+    </button>
   )
 }

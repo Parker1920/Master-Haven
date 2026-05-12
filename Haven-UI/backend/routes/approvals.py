@@ -30,9 +30,11 @@ from glyph_decoder import (
     get_system_classification,
     galactic_coords_to_glyph,
 )
+from services.coauthors import persist_system_coauthors
 from services.auth_service import (
     get_session,
     verify_session,
+    check_self_coauthor,
     require_feature,
     check_self_submission,
     get_submitter_identity,
@@ -44,6 +46,7 @@ from services.completeness import (
     calculate_completeness_score,
     update_completeness_score,
 )
+from services.civilizations import civ_scope_filter
 from services.dispatch import fire_and_forget
 
 logger = logging.getLogger('control.room')
@@ -287,11 +290,26 @@ async def submit_system(
             _raw_for_norm = personal_discord_username or payload.get('discovered_by') or 'Unknown'
         username_normalized = normalize_username_for_dedup(_raw_for_norm)
 
-        # Insert submission with source tracking, discord_tag, personal_discord_username, edit tracking, and submitter identity
+        # ----- Wizard v1 fields (May 2026 rebuild) -----
+        # game_version, submitter_notes, expedition_id are stored as dedicated
+        # columns. coauthors[] stays in the system_data JSON blob; on approve
+        # it expands into system_coauthors rows. conflict_resolution is a
+        # transient per-field {field: 'mine'|'theirs'} map applied at approval
+        # time — kept in the JSON blob for the approver to inspect.
+        wizard_game_version = payload.get('game_version') or None
+        wizard_submitter_notes = payload.get('submitter_notes') or None
+        wizard_expedition_id = payload.get('expedition_id')
+        try:
+            wizard_expedition_id = int(wizard_expedition_id) if wizard_expedition_id else None
+        except (TypeError, ValueError):
+            wizard_expedition_id = None
+
+        # Insert submission with source tracking, discord_tag, personal_discord_username,
+        # edit tracking, submitter identity, and wizard v1 fields.
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, galaxy, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id, username_normalized)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, galaxy, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id, username_normalized, game_version, submitter_notes, expedition_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
@@ -310,9 +328,77 @@ async def submit_system(
             submitter_identity['type'] if submitter_identity['type'] != 'anonymous' else None,
             submitter_identity.get('profile_id'),
             username_normalized,
+            wizard_game_version,
+            wizard_submitter_notes,
+            wizard_expedition_id,
         ))
 
         submission_id = cursor.lastrowid
+
+        # ----- Deferred region name submission (Wizard v1 Option B) -----
+        # The wizard now holds the proposed region name in local state and
+        # ships it with the system payload so the user's discord identity
+        # is attached. Only insert when the region is genuinely unnamed
+        # AND has no pending name AND the caller actually included one.
+        proposed_region_name_raw = payload.get('proposed_region_name')
+        proposed_region_name = (
+            proposed_region_name_raw.strip()
+            if isinstance(proposed_region_name_raw, str) else ''
+        )
+        if proposed_region_name and payload.get('region_x') is not None:
+            rx = payload.get('region_x')
+            ry = payload.get('region_y')
+            rz = payload.get('region_z')
+            r_reality = payload.get('reality', 'Normal') or 'Normal'
+            r_galaxy = payload.get('galaxy', 'Euclid') or 'Euclid'
+
+            try:
+                cursor.execute('''
+                    SELECT 1 FROM regions
+                    WHERE region_x = ? AND region_y = ? AND region_z = ?
+                      AND reality = ? AND galaxy = ?
+                      AND custom_name IS NOT NULL
+                ''', (rx, ry, rz, r_reality, r_galaxy))
+                already_named = cursor.fetchone()
+
+                cursor.execute('''
+                    SELECT 1 FROM pending_region_names
+                    WHERE region_x = ? AND region_y = ? AND region_z = ?
+                      AND reality = ? AND galaxy = ?
+                      AND status = 'pending'
+                ''', (rx, ry, rz, r_reality, r_galaxy))
+                already_pending = cursor.fetchone()
+
+                if not already_named and not already_pending:
+                    region_submitted_by = (
+                        (personal_discord_username or '').strip()
+                        or (submitter_identity.get('username') or '').strip()
+                        or 'anonymous'
+                    )
+                    cursor.execute('''
+                        INSERT INTO pending_region_names
+                        (region_x, region_y, region_z, proposed_name,
+                         submitted_by, submitted_by_ip, submission_date,
+                         status, discord_tag, personal_discord_username,
+                         reality, galaxy, submitter_profile_id, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        rx, ry, rz, proposed_region_name,
+                        region_submitted_by, client_ip,
+                        datetime.now(timezone.utc).isoformat(),
+                        discord_tag, personal_discord_username,
+                        r_reality, r_galaxy,
+                        submitter_identity.get('profile_id'),
+                        source,
+                    ))
+                    logger.info(
+                        f"Deferred region name '{proposed_region_name}' queued for "
+                        f"({rx},{ry},{rz})/{r_galaxy}/{r_reality} by {region_submitted_by}"
+                    )
+            except Exception as region_err:
+                # A region-name failure must NOT block the system submission.
+                logger.warning(f"Deferred region name insert failed: {region_err}")
+
         conn.commit()
 
         source_info = f" via {api_key_name}" if api_key_name else ""
@@ -386,8 +472,14 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         raise HTTPException(status_code=401, detail="Admin authentication required")
 
     is_super = session_data.get('user_type') == 'super_admin'
-    is_haven_sub_admin = session_data.get('is_haven_sub_admin', False)
-    partner_tag = session_data.get('discord_tag')
+    # Whether the user can approve personal uploads. Was historically only
+    # set on Haven sub-admins; with civilizations, any membership row can
+    # carry this flag (set per-civ on the civilization_members row).
+    can_approve_personal = bool(
+        session_data.get('can_approve_personal_uploads', False)
+        or any(m.get('can_approve_personal_uploads')
+               for m in (session_data.get('civ_memberships') or []))
+    )
 
     conn = None
     try:
@@ -395,78 +487,29 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        if is_super:
-            # Super admin sees ALL submissions
-            cursor.execute('''
-                SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
-                       personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
-                FROM pending_systems
-                ORDER BY
-                    CASE status
-                        WHEN 'pending' THEN 1
-                        WHEN 'approved' THEN 2
-                        WHEN 'rejected' THEN 3
-                    END,
-                    submission_date DESC
-            ''')
-        elif is_haven_sub_admin:
-            # Haven sub-admins see submissions tagged with "Haven" + any additional discord tags
-            additional_tags = session_data.get('additional_discord_tags', [])
-            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
-            all_tags = ['Haven'] + additional_tags
+        # Single scoping path (civ_scope_filter collapses the old 3-branch
+        # super_admin / is_haven_sub_admin / partner mess into one query).
+        # Personal-upload visibility ORs in when the user has it enabled.
+        scope_clause, scope_params = civ_scope_filter(session_data, column='discord_tag')
+        where_parts = [scope_clause]
+        if can_approve_personal and not is_super:
+            where_parts = [f"(({scope_clause}) OR discord_tag = 'personal')"]
+        where_sql = ' AND '.join(where_parts) if where_parts else '1=1'
 
-            # Build dynamic query with placeholders
-            placeholders = ','.join(['?' for _ in all_tags])
-
-            # If can_approve_personal_uploads, also include submissions with discord_tag = 'personal' (personal uploads)
-            if can_approve_personal:
-                cursor.execute(f'''
-                    SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
-                           reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
-                           personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
-                    FROM pending_systems
-                    WHERE discord_tag IN ({placeholders})
-                       OR discord_tag = 'personal'
-                    ORDER BY
-                        CASE status
-                            WHEN 'pending' THEN 1
-                            WHEN 'approved' THEN 2
-                            WHEN 'rejected' THEN 3
-                        END,
-                        submission_date DESC
-                ''', all_tags)
-            else:
-                cursor.execute(f'''
-                    SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
-                           reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
-                           personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
-                    FROM pending_systems
-                    WHERE discord_tag IN ({placeholders})
-                    ORDER BY
-                        CASE status
-                            WHEN 'pending' THEN 1
-                            WHEN 'approved' THEN 2
-                            WHEN 'rejected' THEN 3
-                        END,
-                        submission_date DESC
-                ''', all_tags)
-        else:
-            # Partners and partner sub-admins only see submissions tagged with their discord_tag
-            cursor.execute('''
-                SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
-                       reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
-                       personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
-                FROM pending_systems
-                WHERE discord_tag = ?
-                ORDER BY
-                    CASE status
-                        WHEN 'pending' THEN 1
-                        WHEN 'approved' THEN 2
-                        WHEN 'rejected' THEN 3
-                    END,
-                    submission_date DESC
-            ''', (partner_tag,))
+        cursor.execute(f'''
+            SELECT id, submitted_by, submission_date, status, system_name, system_region, galaxy,
+                   reviewed_by, review_date, rejection_reason, source, api_key_name, discord_tag,
+                   personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type
+            FROM pending_systems
+            WHERE {where_sql}
+            ORDER BY
+                CASE status
+                    WHEN 'pending' THEN 1
+                    WHEN 'approved' THEN 2
+                    WHEN 'rejected' THEN 3
+                END,
+                submission_date DESC
+        ''', scope_params)
 
         rows = cursor.fetchall()
         submissions = [dict(row) for row in rows]
@@ -496,9 +539,23 @@ async def get_pending_systems(session: Optional[str] = Cookie(None)):
             for sub in submissions:
                 sub['is_self_submission'] = is_self_submission(sub)
 
-        # Hide personal_discord_username for Haven sub-admins (only super admin sees contact info)
-        # But keep discord_tag so frontend can distinguish personal uploads from Haven submissions
-        if is_haven_sub_admin:
+        # Hide personal_discord_username for sub-admin-tier viewers (only
+        # super admin and leader-tier members see contact info). Keeps the
+        # legacy is_haven_sub_admin flag as the trigger, but generalizes
+        # to "any sub_admin role on any of the user's civs" so the same
+        # rule applies under the new civilizations model.
+        is_haven_sub_admin = session_data.get('is_haven_sub_admin', False)
+        viewer_is_sub_admin_only = (
+            session_data.get('user_type') == 'sub_admin'
+            or is_haven_sub_admin
+            or (
+                session_data.get('user_type') not in ('super_admin', 'partner')
+                and all(m.get('role') == 'sub_admin'
+                        for m in (session_data.get('civ_memberships') or []))
+                and bool(session_data.get('civ_memberships'))
+            )
+        )
+        if viewer_is_sub_admin_only:
             for submission in submissions:
                 submission['personal_discord_username'] = None
 
@@ -572,30 +629,27 @@ async def get_pending_count(session: Optional[str] = Cookie(None)):
             self_params = [logged_in_account_id, logged_in_account_type,
                            logged_in_username, logged_in_username]
 
-            if is_haven_sub_admin:
-                additional_tags = session_data.get('additional_discord_tags', []) or []
-                can_approve_personal = session_data.get('can_approve_personal_uploads', False)
-                all_tags = ['Haven'] + additional_tags
-                placeholders = ','.join(['?' for _ in all_tags])
-
-                if can_approve_personal:
-                    tag_clause = f"(discord_tag IN ({placeholders}) OR discord_tag = 'personal')"
-                else:
-                    tag_clause = f"discord_tag IN ({placeholders})"
-
-                cursor.execute(
-                    f"SELECT COUNT(*) FROM pending_systems WHERE status = 'pending' AND {tag_clause} AND {self_sub_clause}",
-                    all_tags + self_params,
-                )
-                system_count = cursor.fetchone()[0]
-            elif partner_tag:
-                cursor.execute(
-                    f"SELECT COUNT(*) FROM pending_systems WHERE status = 'pending' AND discord_tag = ? AND {self_sub_clause}",
-                    [partner_tag] + self_params,
-                )
-                system_count = cursor.fetchone()[0]
-            else:
+            scope_clause, scope_params = civ_scope_filter(session_data, column='discord_tag')
+            # `1=0` means the user has no civ memberships at all → nothing
+            # to count. Short-circuit so we don't run the query for free.
+            if scope_clause == '1=0':
                 system_count = 0
+            else:
+                can_approve_personal = bool(
+                    session_data.get('can_approve_personal_uploads', False)
+                    or any(m.get('can_approve_personal_uploads')
+                           for m in (session_data.get('civ_memberships') or []))
+                )
+                tag_clause = (
+                    f"(({scope_clause}) OR discord_tag = 'personal')"
+                    if can_approve_personal else scope_clause
+                )
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM pending_systems "
+                    f"WHERE status = 'pending' AND {tag_clause} AND {self_sub_clause}",
+                    scope_params + self_params,
+                )
+                system_count = cursor.fetchone()[0]
 
         # Count pending region names (these don't have discord_tag filtering yet)
         cursor.execute("SELECT COUNT(*) FROM pending_region_names WHERE status = 'pending'")
@@ -811,6 +865,14 @@ async def approve_system(
         # Parse system data
         system_data = json.loads(submission['system_data'])
 
+        # H-C2: prevent co-authors from approving systems that credit them.
+        # Independent of tier (a partner can still benefit from coauthor credit).
+        if check_self_coauthor(system_data.get('coauthors') or [], session_data):
+            raise HTTPException(
+                status_code=403,
+                detail="You are listed as a co-author on this submission. Another admin must review it."
+            )
+
         # Normalize empty glyph_code to None (NULL) to avoid unique constraint issues
         # The unique index only applies WHERE glyph_code IS NOT NULL, so empty strings cause conflicts
         if not system_data.get('glyph_code'):
@@ -1015,6 +1077,16 @@ async def approve_system(
             # Add edit entry (same person can appear multiple times with different edits)
             contributors_list.append({"name": updater_username, "action": "edit", "date": now_iso})
 
+            # Wizard v1: copy game_version + expedition_id from pending row to systems
+            wizard_game_version = (
+                submission.get('game_version')
+                or system_data.get('game_version')
+            )
+            wizard_expedition_id = (
+                submission.get('expedition_id')
+                or system_data.get('expedition_id')
+            )
+
             # UPDATE existing system - PRESERVE discovered_by/discovered_at, UPDATE last_updated_by/last_updated_at
             cursor.execute('''
                 UPDATE systems
@@ -1027,7 +1099,9 @@ async def approve_system(
                     conflict_level = ?, dominant_lifeform = ?,
                     discord_tag = ?, personal_discord_username = ?,
                     stellar_classification = ?,
-                    last_updated_by = ?, last_updated_at = ?, contributors = ?
+                    last_updated_by = ?, last_updated_at = ?, contributors = ?,
+                    game_version = COALESCE(?, game_version),
+                    expedition_id = COALESCE(?, expedition_id)
                 WHERE id = ?
             ''', (
                 system_data.get('name'),
@@ -1056,6 +1130,8 @@ async def approve_system(
                 updater_username,
                 datetime.now(timezone.utc).isoformat(),
                 json.dumps(contributors_list),
+                wizard_game_version,
+                wizard_expedition_id,
                 system_id
             ))
             logger.info(f"Updated system {system_id}, preserving discovered_by='{original_discovered_by}', added contributor '{updater_username}'")
@@ -1075,14 +1151,25 @@ async def approve_system(
             discoverer_username = submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
             now_iso = datetime.now(timezone.utc).isoformat()
 
-            # INSERT new system (including new tracking fields)
+            # Wizard v1: pull game_version + expedition_id from pending row
+            new_game_version = (
+                submission.get('game_version')
+                or system_data.get('game_version')
+            )
+            new_expedition_id = (
+                submission.get('expedition_id')
+                or system_data.get('expedition_id')
+            )
+
+            # INSERT new system (including new tracking fields + wizard v1 fields)
             cursor.execute('''
                 INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                     glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
-                    contributors, created_at, game_mode, profile_id, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contributors, created_at, game_mode, profile_id, source,
+                    game_version, expedition_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -1116,6 +1203,8 @@ async def approve_system(
                 system_data.get('game_mode') or submission.get('game_mode', 'Normal'),
                 submission.get('submitter_profile_id'),
                 submission.get('source', 'manual'),
+                new_game_version,
+                new_expedition_id,
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -1150,7 +1239,16 @@ async def approve_system(
                         weather_text = ?, sentinels_text = ?, flora_text = ?, fauna_text = ?,
                         has_rings = ?, is_dissonant = ?, is_infested = ?, extreme_weather = ?, water_world = ?, vile_brood = ?,
                         ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, is_gas_giant = ?, exotic_trophy = ?,
-                        is_bubble = ?, is_floating_islands = ?
+                        is_bubble = ?, is_floating_islands = ?,
+                        -- M-W1: Wonders Notes are now overwriteable. The
+                        -- wizard always re-sends the existing value in edit
+                        -- mode (originalSystem snapshot), so a blank means
+                        -- the user deliberately cleared the field.
+                        estimated_age = ?,
+                        core_element = ?,
+                        lore_notes = ?,
+                        root_structure = ?,
+                        nutrient_source = ?
                     WHERE id = ?
                 ''', (
                     planet.get('x', 0),
@@ -1201,6 +1299,13 @@ async def approve_system(
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
                     1 if planet.get('is_floating_islands') else 0,
+                    # Wonders Page Notes — COALESCE protects existing values
+                    # on edit when the submitter leaves them blank.
+                    planet.get('estimated_age') or None,
+                    planet.get('core_element') or None,
+                    planet.get('lore_notes') or None,
+                    planet.get('root_structure') or None,
+                    planet.get('nutrient_source') or None,
                     existing_planet_id
                 ))
                 planet_id = existing_planet_id
@@ -1218,9 +1323,10 @@ async def approve_system(
                         weather_text, sentinels_text, flora_text, fauna_text,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
-                        is_bubble, is_floating_islands
+                        is_bubble, is_floating_islands,
+                        estimated_age, core_element, lore_notes, root_structure, nutrient_source
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     system_id,
                     planet_name,
@@ -1271,7 +1377,13 @@ async def approve_system(
                     1 if planet.get('is_gas_giant') else 0,
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
-                    1 if planet.get('is_floating_islands') else 0
+                    1 if planet.get('is_floating_islands') else 0,
+                    # Wonders Page Notes (migration 1.76.0)
+                    planet.get('estimated_age'),
+                    planet.get('core_element'),
+                    planet.get('lore_notes'),
+                    planet.get('root_structure'),
+                    planet.get('nutrient_source')
                 ))
                 planet_id = cursor.lastrowid
                 if is_edit:
@@ -1289,8 +1401,9 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
-                        biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
+                        estimated_age, core_element, lore_notes, root_structure, nutrient_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -1327,6 +1440,12 @@ async def approve_system(
                     moon.get('uncommon_resource'),
                     moon.get('rare_resource'),
                     moon.get('plant_resource'),
+                    # Wonders Page Notes (migration 1.76.0)
+                    moon.get('estimated_age'),
+                    moon.get('core_element'),
+                    moon.get('lore_notes'),
+                    moon.get('root_structure'),
+                    moon.get('nutrient_source'),
                 ))
 
         # Handle root-level moons (from Haven Extractor which sends moons as flat list)
@@ -1342,8 +1461,9 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
-                        biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
+                        estimated_age, core_element, lore_notes, root_structure, nutrient_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,  # Attach to last planet
                     moon.get('name'),
@@ -1380,6 +1500,12 @@ async def approve_system(
                     moon.get('uncommon_resource'),
                     moon.get('rare_resource'),
                     moon.get('plant_resource'),
+                    # Wonders Page Notes (migration 1.76.0)
+                    moon.get('estimated_age'),
+                    moon.get('core_element'),
+                    moon.get('lore_notes'),
+                    moon.get('root_structure'),
+                    moon.get('nutrient_source'),
                 ))
 
         # Insert space station if present
@@ -1399,6 +1525,21 @@ async def approve_system(
                 station.get('z') or 0,
                 trade_goods_json
             ))
+
+        # Wizard v1: persist coauthors. coauthors[] lives in system_data JSON;
+        # SEPARATE from primary submitter — leaderboard treats them distinctly.
+        # Imported eagerly at module top (services.coauthors) so a stray
+        # init-order issue can't drop coauthors silently. Pass submitter
+        # identity so the helper can H-C1-block self-co-author entries.
+        submitter_username_for_coauthors = (
+            submission.get('personal_discord_username')
+            or submission.get('submitted_by')
+        )
+        persist_system_coauthors(
+            cursor, system_id, system_data.get('coauthors') or [],
+            submitter_username=submitter_username_for_coauthors,
+            submitter_profile_id=submission.get('submitter_profile_id'),
+        )
 
         # Calculate and store completeness score
         update_completeness_score(cursor, system_id)
@@ -1452,11 +1593,24 @@ async def approve_system(
             current_username,
         )
 
+        # Post-approval poster invalidation. system_thumb fires every time
+        # (covers both first upload and edit-via-approval per Parker spec).
+        # region_thumb is threshold-gated inside the helper.
+        _rcoords = None
+        try:
+            rx, ry, rz = system_data.get('region_x'), system_data.get('region_y'), system_data.get('region_z')
+            if rx is not None and ry is not None and rz is not None:
+                _rcoords = (int(rx), int(ry), int(rz))
+        except (TypeError, ValueError):
+            pass
         fire_and_forget(
             _invalidate_posters_async,
             submitted_by=submission.get('submitted_by') or submission.get('personal_discord_username'),
             galaxy=system_data.get('galaxy', 'Euclid'),
             discord_tag=submission.get('discord_tag'),
+            system_id=system_id,
+            region_coords=_rcoords,
+            reality=system_data.get('reality') or 'Normal',
         )
 
         return {
@@ -1492,6 +1646,9 @@ def _invalidate_posters_for_submission(
     submitted_by: Optional[str],
     galaxy: Optional[str],
     discord_tag: Optional[str] = None,
+    system_id: Optional[str] = None,
+    region_coords: Optional[tuple] = None,
+    reality: Optional[str] = None,
 ):
     """Drop cached PNGs for everything the new system affects.
 
@@ -1500,6 +1657,12 @@ def _invalidate_posters_for_submission(
     submitter's per-community card if present, and the submitter's voyager
     cards. Each invalidate() call is independent — one failure does not
     block the others.
+
+    Parker 2026-05-11: also invalidate `system_thumb` for the specific
+    system_id on approval (first upload OR subsequent edit). `region_thumb`
+    invalidation is threshold-based — only fire when the region's system
+    count has grown ≥10 since the last cached render, OR the cache is
+    >7 days old. See _should_refresh_region_thumb().
     """
     try:
         from services.poster_service import invalidate
@@ -1539,14 +1702,91 @@ def _invalidate_posters_for_submission(
             _try('voyager', slug)
             _try('voyager_og', slug)
 
+    # system_thumb — always invalidate this exact system on approval/edit.
+    # The og_system card too (per-system social embed).
+    if system_id:
+        _try('system_thumb', str(system_id))
+        _try('og_system', str(system_id))
+
+    # region_thumb — threshold-based: only invalidate if the region has
+    # grown enough OR the cache is stale. Cheap to compute since we just
+    # need the current system_count for that region.
+    if region_coords and len(region_coords) == 3:
+        rx, ry, rz = region_coords
+        try:
+            if _should_refresh_region_thumb(rx, ry, rz, reality, galaxy):
+                _try('region_thumb', f'{rx}_{ry}_{rz}')
+        except Exception as e:
+            logger.warning(f"Region thumb refresh check failed: {e}")
+
+
+def _should_refresh_region_thumb(rx, ry, rz, reality, galaxy):
+    """Return True when the region_thumb cached PNG is stale enough to drop.
+
+    Rules:
+      - No cache row yet → False (next view will lazy-render fresh anyway)
+      - Cache row >7 days old → True (safety-net for slow-drip changes)
+      - system_count grew by ≥ 10 since last render → True
+      - system_count grew by ≥ 10% since last render → True (small regions)
+    """
+    from db import get_db_connection
+    from datetime import datetime, timezone, timedelta
+
+    cache_key = f'{rx}_{ry}_{rz}'
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT generated_at, system_count_at_render
+            FROM poster_cache
+            WHERE poster_type = 'region_thumb' AND cache_key = ?
+            LIMIT 1
+        """, (cache_key,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        # Time-based safety net
+        try:
+            gen = datetime.fromisoformat(row['generated_at'].replace('Z', '+00:00'))
+            if gen.tzinfo is None:
+                gen = gen.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - gen > timedelta(days=7):
+                return True
+        except (ValueError, KeyError, TypeError):
+            pass
+
+        # Count-based threshold
+        last_count = row['system_count_at_render'] or 0
+        params = [rx, ry, rz]
+        where = "region_x = ? AND region_y = ? AND region_z = ?"
+        if reality:
+            where += " AND COALESCE(reality, 'Normal') = ?"
+            params.append(reality)
+        if galaxy:
+            where += " AND COALESCE(galaxy, 'Euclid') = ?"
+            params.append(galaxy)
+        cursor.execute(f"SELECT COUNT(*) AS c FROM systems WHERE {where}", params)
+        current_count = cursor.fetchone()['c']
+        if current_count - last_count >= 10:
+            return True
+        if last_count > 0 and (current_count - last_count) / last_count >= 0.10:
+            return True
+    return False
+
 
 async def _invalidate_posters_async(
     submitted_by: Optional[str],
     galaxy: Optional[str],
     discord_tag: Optional[str] = None,
+    system_id: Optional[str] = None,
+    region_coords: Optional[tuple] = None,
+    reality: Optional[str] = None,
 ):
     """Async wrapper so fire_and_forget can schedule it as a coroutine."""
-    _invalidate_posters_for_submission(submitted_by, galaxy, discord_tag)
+    _invalidate_posters_for_submission(
+        submitted_by, galaxy, discord_tag,
+        system_id=system_id, region_coords=region_coords, reality=reality,
+    )
 
 
 @router.post('/api/reject_system/{submission_id}')
@@ -1834,6 +2074,14 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
 
                 # Parse and process system data
                 system_data = json.loads(submission['system_data'])
+
+                # H-C2 batch: also skip submissions that credit this approver
+                # as a co-author. Same "skipped, not failed" semantics so the
+                # frontend doesn't surface them as errors.
+                if check_self_coauthor(system_data.get('coauthors') or [], session_snapshot):
+                    processed += 1
+                    continue
+
                 if not system_data.get('glyph_code'):
                     system_data['glyph_code'] = None
 
@@ -2081,9 +2329,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             weather_text, sentinels_text, flora_text, fauna_text,
                             has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                             ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
-                            is_bubble, is_floating_islands
+                            is_bubble, is_floating_islands,
+                            estimated_age, core_element, lore_notes, root_structure, nutrient_source
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         planet.get('name'),
@@ -2134,7 +2383,13 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         1 if planet.get('is_gas_giant') else 0,
                         planet.get('exotic_trophy'),
                         1 if planet.get('is_bubble') else 0,
-                        1 if planet.get('is_floating_islands') else 0
+                        1 if planet.get('is_floating_islands') else 0,
+                        # Wonders Page Notes (migration 1.76.0)
+                        planet.get('estimated_age'),
+                        planet.get('core_element'),
+                        planet.get('lore_notes'),
+                        planet.get('root_structure'),
+                        planet.get('nutrient_source')
                     ))
                     planet_id = cursor.lastrowid
 
@@ -2144,8 +2399,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                                 has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                                 ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                                 is_bubble, is_floating_islands,
-                                biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
+                                estimated_age, core_element, lore_notes, root_structure, nutrient_source)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             planet_id,
                             moon.get('name'),
@@ -2182,6 +2438,12 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             moon.get('uncommon_resource'),
                             moon.get('rare_resource'),
                             moon.get('plant_resource'),
+                            # Wonders Page Notes (migration 1.76.0)
+                            moon.get('estimated_age'),
+                            moon.get('core_element'),
+                            moon.get('lore_notes'),
+                            moon.get('root_structure'),
+                            moon.get('nutrient_source'),
                         ))
 
                 # Insert space station if present
@@ -2201,6 +2463,22 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         station.get('z') or 0,
                         trade_goods_json
                     ))
+
+                # Wizard v1: persist co-authors. Mirrors the single-approve
+                # handler at approvals.py:~1538 — the batch handler used to
+                # silently drop coauthors on approval (only the single path
+                # called persist_system_coauthors), so submissions approved
+                # in bulk credited the primary submitter but no one else.
+                # Same self-co-author guard via submitter context.
+                submitter_username_for_coauthors = (
+                    submission.get('personal_discord_username')
+                    or submission.get('submitted_by')
+                )
+                persist_system_coauthors(
+                    cursor, system_id, system_data.get('coauthors') or [],
+                    submitter_username=submitter_username_for_coauthors,
+                    submitter_profile_id=submission.get('submitter_profile_id'),
+                )
 
                 # Calculate and store completeness score
                 update_completeness_score(cursor, system_id)
@@ -2241,10 +2519,20 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                 conn.commit()
 
                 processed += 1
+                _rcoords = None
+                try:
+                    rx_, ry_, rz_ = system_data.get('region_x'), system_data.get('region_y'), system_data.get('region_z')
+                    if rx_ is not None and ry_ is not None and rz_ is not None:
+                        _rcoords = (int(rx_), int(ry_), int(rz_))
+                except (TypeError, ValueError):
+                    pass
                 approved_meta.append({
                     'submitted_by': submission.get('submitted_by') or submission.get('personal_discord_username'),
                     'galaxy': system_data.get('galaxy', 'Euclid'),
                     'discord_tag': submission.get('discord_tag'),
+                    'system_id': system_id,
+                    'region_coords': _rcoords,
+                    'reality': system_data.get('reality') or 'Normal',
                 })
 
             except Exception as e:
@@ -2315,6 +2603,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                     submitted_by=meta['submitted_by'],
                     galaxy=meta['galaxy'],
                     discord_tag=meta['discord_tag'],
+                    system_id=meta.get('system_id'),
+                    region_coords=meta.get('region_coords'),
+                    reality=meta.get('reality'),
                 )
             except Exception as inv_err:
                 logger.warning(f"Batch job {job_id}: poster invalidation for one submission failed: {inv_err}")

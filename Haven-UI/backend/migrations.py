@@ -16,10 +16,10 @@ Version Scheme: MAJOR.MINOR.PATCH
     - PATCH: Small fixes, default changes
 """
 
+import json
 import sqlite3
 import logging
 import shutil
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Tuple, Optional
@@ -2059,7 +2059,15 @@ def migration_1_32_0_filter_indexes(conn: sqlite3.Connection):
     # Planet-level filter indexes
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_system_id ON planets(system_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_biome ON planets(biome)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_sentinel_level ON planets(sentinel_level)')
+    # Column renamed sentinel_level → sentinel in v1.45.2; check before
+    # indexing so fresh-init DBs (where init_database created the new schema)
+    # don't fail when applying this historical migration.
+    cursor.execute("PRAGMA table_info(planets)")
+    planet_cols = {row[1] for row in cursor.fetchall()}
+    if 'sentinel_level' in planet_cols:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_sentinel_level ON planets(sentinel_level)')
+    elif 'sentinel' in planet_cols:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_sentinel ON planets(sentinel)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_weather ON planets(weather)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_planets_is_moon ON planets(is_moon)')
     logger.info("Created planet-level filter indexes")
@@ -5638,3 +5646,688 @@ def migration_1_74_0(conn):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC)")
     conn.commit()
     logger.info("Created batch_jobs table for async batch-approval tracking")
+
+
+@register_migration("1.75.0", "Wizard v1 rebuild: game_version, submitter_notes, expedition_id, expeditions table, system_coauthors table")
+def migration_1_75_0(conn):
+    """
+    Schema additions for the Wizard v1 rebuild (May 2026).
+
+    New columns:
+    - systems.game_version              TEXT  — NMS engine version (e.g. "6.18", "Worlds Part 2")
+    - pending_systems.game_version      TEXT  — same, on pending row for round-trip
+    - pending_systems.submitter_notes   TEXT  — admin-only review context. NOT copied to systems on approve
+    - systems.expedition_id             INTEGER  — link to expeditions(id)
+    - pending_systems.expedition_id     INTEGER  — same, on pending row
+
+    New tables:
+    - expeditions          — community-scoped charting campaigns
+    - system_coauthors     — many-to-many credit table; co-author counts are tracked
+                             SEPARATELY from primary submission counts in analytics
+    """
+    cursor = conn.cursor()
+
+    # --- Column additions (idempotent) ---
+    def _add_col(table: str, name: str, type_def: str):
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {type_def}")
+            logger.info(f"Added {table}.{name}")
+        except sqlite3.OperationalError as e:
+            if 'duplicate column' not in str(e).lower():
+                raise
+
+    _add_col('systems', 'game_version', 'TEXT')
+    _add_col('pending_systems', 'game_version', 'TEXT')
+    _add_col('pending_systems', 'submitter_notes', 'TEXT')
+    _add_col('systems', 'expedition_id', 'INTEGER')
+    _add_col('pending_systems', 'expedition_id', 'INTEGER')
+
+    # --- expeditions table ---
+    # status: 'active' | 'completed' | 'archived'. discord_tag scopes visibility
+    # to a community (per Parker: "whole community can see expeditions").
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS expeditions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            owner_profile_id INTEGER,
+            owner_username TEXT,
+            discord_tag TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            description TEXT,
+            started_at TEXT,
+            ended_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            UNIQUE(slug)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expeditions_status ON expeditions(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expeditions_discord_tag ON expeditions(discord_tag, status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expeditions_owner ON expeditions(owner_profile_id)")
+    logger.info("Created expeditions table")
+
+    # --- system_coauthors table ---
+    # Composite PK avoids dupes; profile_id may be NULL for legacy/anon coauthors so
+    # username_normalized is the dedup field. credited_at is the approval timestamp.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS system_coauthors (
+            system_id TEXT NOT NULL,
+            profile_id INTEGER,
+            username TEXT NOT NULL,
+            username_normalized TEXT NOT NULL,
+            credited_at TEXT NOT NULL,
+            PRIMARY KEY (system_id, username_normalized)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_coauthors_profile ON system_coauthors(profile_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_coauthors_username ON system_coauthors(username_normalized)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_coauthors_system ON system_coauthors(system_id)")
+    logger.info("Created system_coauthors table")
+
+    # --- expedition_id index on systems for leaderboard queries ---
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_systems_expedition ON systems(expedition_id)")
+
+    conn.commit()
+    logger.info("Migration 1.75.0 complete")
+
+
+@register_migration("1.76.0", "Wonders Page Notes: estimated_age, core_element, lore_notes, root_structure, nutrient_source on planets + moons")
+def migration_1_76_0(conn):
+    """
+    Preserve the procedurally-generated narrative text NMS surfaces on a
+    planet/moon's Log Exploration Guide page (visible in the Wonders
+    Catalogue after upload). All five are free-form text — no record math.
+
+    Columns added to both planets and moons:
+    - estimated_age      TEXT  — e.g. "approximately 6.04 billion years"
+    - core_element       TEXT  — e.g. "Gold", "Cadmium", "Water"
+    - lore_notes         TEXT  — multi-paragraph procgen origin/history blurb
+    - root_structure     TEXT  — lush/exotic biome flora-system description
+    - nutrient_source    TEXT  — how local life feeds
+    """
+    cursor = conn.cursor()
+
+    def _add_col(table: str, name: str, type_def: str):
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {type_def}")
+            logger.info(f"Added {table}.{name}")
+        except sqlite3.OperationalError as e:
+            if 'duplicate column' not in str(e).lower():
+                raise
+
+    for table in ('planets', 'moons'):
+        _add_col(table, 'estimated_age', 'TEXT')
+        _add_col(table, 'core_element', 'TEXT')
+        _add_col(table, 'lore_notes', 'TEXT')
+        _add_col(table, 'root_structure', 'TEXT')
+        _add_col(table, 'nutrient_source', 'TEXT')
+
+    conn.commit()
+    logger.info("Migration 1.76.0 complete")
+
+
+@register_migration("1.77.0", "Systems Tab v2.0: user_saved_searches table for named filter sets")
+def migration_1_77_0(conn):
+    """
+    Per-user named filter sets that follow a user across devices.
+
+    Owned by the Systems Tab v2.0 redesign (spec section 3.5). The Saved
+    Searches dropdown sits next to the search bar and lets a user persist
+    full filter snapshots ("T3 Wealthy Tech w/ Moons", "Paradise Hunting",
+    etc.). State is profile-scoped, not device-local — recently-viewed
+    history stays in localStorage; saved searches live here.
+
+    Schema choices to call out:
+    - INTEGER PK to match the rest of Haven's schema (user_profiles.id,
+      systems.id, etc.). The dispatch's example SQL used TEXT ids — that
+      was a copy-paste shape from the mockup, not a real constraint.
+    - filters_json stores the full filter snapshot serialized; the
+      shape is owned by the frontend and validated at write time in
+      routes/user.py (we just check it parses as JSON).
+    - 50-row hard cap enforced in the route handler, not at the DB
+      layer, so we can return a friendly 400 instead of a constraint
+      violation.
+    - Cascade delete on profile removal so we don't leak saved searches
+      when a profile is deleted.
+    """
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_saved_searches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            filters_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_saved_searches_user
+        ON user_saved_searches(user_id, created_at DESC)
+    """)
+    conn.commit()
+    logger.info("Created user_saved_searches table for Systems Tab v2.0 saved filter sets")
+
+
+@register_migration("1.78.0", "Poster cache: system_count_at_render column for region_thumb threshold refresh")
+def migration_1_78_0(conn):
+    """
+    Adds `system_count_at_render` to `poster_cache` so region_thumb knows
+    when to invalidate.
+
+    Parker 2026-05-11: region posters refresh after the region grows by
+    >= 10 systems OR >= 10% since the cached render. We persist the
+    `system_count_at_render` value at render time and compare on each new
+    system approval. See routes/approvals.py:_should_refresh_region_thumb.
+
+    All other poster types ignore this column; it defaults to NULL on the
+    existing rows.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(poster_cache)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'system_count_at_render' not in cols:
+        cursor.execute("ALTER TABLE poster_cache ADD COLUMN system_count_at_render INTEGER")
+        logger.info("Added poster_cache.system_count_at_render")
+    conn.commit()
+
+
+@register_migration("1.79.0", "Backfill planet/moon biome/weather/sentinel/fauna/flora from the notes field where the upload parked them")
+def migration_1_79_0(conn):
+    """
+    Recover planet and moon detail data that legacy uploaders crammed into
+    the `notes` column instead of the dedicated biome/weather/sentinel/
+    fauna/flora columns.
+
+    Findings from investigation (Parker 2026-05-11):
+      - 898 planets have empty biome but populated notes
+      - Of those, 420 use the canonical `Biome: X, Weather: Y, Sentinels: Z,
+        Flora: W, Fauna: V` 5-part comma format (Wonders Guide format)
+      - 116 use a 4-part variant (usually missing flora or sentinel)
+      - 269 are real free-form user notes that should NOT be touched
+      - 174 moons have the same problem (some use space-separated labels)
+
+    This migration:
+      - Adds `notes_legacy` TEXT column on both `planets` and `moons` so the
+        original notes text is preserved for audit/rollback
+      - Walks rows where biome is empty/NULL AND notes contains the
+        `Biome:` label
+      - Parses labeled chunks tolerant to comma OR whitespace separators
+      - Backfills empty/N/A columns only — never clobbers data
+      - Strips trailing " planet" / " moon" from biome values
+      - Fixes the common 'Copius' → 'Copious' typo
+      - On successful parse, moves notes → notes_legacy and clears notes
+      - On free-form notes, leaves the row untouched
+
+    Safety:
+      - Idempotent (re-running is a no-op since notes is cleared post-parse)
+      - Never destructive — original text retained in notes_legacy
+      - Only fills columns that were empty; existing data is sacred
+    """
+    import re
+    cursor = conn.cursor()
+
+    # 1. Add notes_legacy columns (idempotent)
+    for table in ('planets', 'moons'):
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if 'notes_legacy' not in existing_cols:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN notes_legacy TEXT")
+            logger.info(f"Added {table}.notes_legacy")
+
+    # 2. Compile regexes for parsing
+    # Match `Label: value` where value runs until the next label or end-of-string.
+    # The look-ahead handles both `,` separators and whitespace separators.
+    LABEL_PATTERN = re.compile(
+        r'\b(Biome|Weather|Sentinels?|Flora|Fauna)\s*:\s*'
+        r'(.+?)'
+        r'(?=\s*[,;.]?\s*\b(?:Biome|Weather|Sentinels?|Flora|Fauna)\s*:|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def _is_empty(v):
+        """Return True if a column value should be considered empty."""
+        if v is None:
+            return True
+        if not isinstance(v, str):
+            return False
+        s = v.strip()
+        return s == '' or s.upper() in ('N/A', 'NONE')
+
+    def _normalize_value(field, raw):
+        s = raw.strip()
+        # Strip trailing punctuation
+        s = s.rstrip('.;, \t')
+        # Strip trailing " planet" / " moon" from biome
+        if field == 'biome':
+            for suffix in (' planet', ' Planet', ' moon', ' Moon'):
+                if s.endswith(suffix):
+                    s = s[: -len(suffix)].rstrip()
+                    break
+        # Common typo fixes
+        if s == 'Copius':
+            s = 'Copious'
+        # Capitalize first letter for biome / weather / sentinel
+        if s and s[0].islower() and field in ('biome', 'weather', 'sentinel'):
+            s = s[0].upper() + s[1:]
+        return s
+
+    def _strip_field_suffix(text, suffixes):
+        """Strip a trailing suffix word (case-insensitive). 'rich Flora' -> 'rich'."""
+        s = text.strip()
+        for suffix in suffixes:
+            if s.lower().endswith(' ' + suffix.lower()):
+                return s[: -(len(suffix) + 1)].strip()
+        return s
+
+    def _parse_notes(notes):
+        """Return dict of {biome, weather, sentinel, fauna, flora} parsed from
+        the notes string, or None if nothing parses.
+
+        Handles two formats observed in production:
+          1. Labeled: 'Biome: X, Weather: Y, Sentinels: Z, Flora: W, Fauna: V'
+          2. Positional 5-part: 'biome, weather, X sentinels, X Flora, X fauna'
+             (used in 302 of the 612 affected rows — strip the suffix word
+             off positions 3/4/5 to get the actual value)
+        """
+        if not notes:
+            return None
+        out = {}
+
+        # Path 1: labeled format
+        for m in LABEL_PATTERN.finditer(notes):
+            label = m.group(1).lower()
+            col = 'sentinel' if label.startswith('sentinel') else label
+            if col in ('biome', 'weather', 'sentinel', 'fauna', 'flora'):
+                value = _normalize_value(col, m.group(2))
+                if value:
+                    out.setdefault(col, value)
+        if out:
+            return out
+
+        # Path 2: positional 5-part split (no colons, comma-separated).
+        # Reject anything that looks even slightly free-form by requiring
+        # the trailing "sentinels"/"flora"/"fauna" suffix words on parts 3/4/5.
+        if ':' in notes:
+            return None  # Labeled format that path 1 couldn't parse — leave alone
+        parts = [p.strip() for p in notes.split(',')]
+        if len(parts) != 5:
+            return None  # 4-part is ambiguous; skip
+        p_biome, p_weather, p_sent, p_flora, p_fauna = parts
+        # Sentinels suffix is mandatory; flora/fauna labels are usually
+        # present but tolerated absent for safety.
+        sent_lc = p_sent.lower()
+        if not (sent_lc.endswith(' sentinels') or sent_lc.endswith(' sentinel')):
+            return None  # Doesn't match expected positional shape
+        out['biome']   = _normalize_value('biome',   p_biome)
+        out['weather'] = _normalize_value('weather', p_weather)
+        out['sentinel'] = _normalize_value('sentinel', _strip_field_suffix(p_sent, ['sentinels', 'sentinel']))
+        out['flora']   = _normalize_value('flora',   _strip_field_suffix(p_flora, ['Flora', 'flora']))
+        out['fauna']   = _normalize_value('fauna',   _strip_field_suffix(p_fauna, ['Fauna', 'fauna']))
+        # Drop any empty values that ended up as ''
+        out = {k: v for k, v in out.items() if v}
+        return out if out else None
+
+    def _backfill_table(table):
+        cursor.execute(f"""
+            SELECT id, notes, biome, weather, sentinel, fauna, flora
+            FROM {table}
+            WHERE notes IS NOT NULL AND notes != ''
+              AND (biome IS NULL OR biome = '')
+        """)
+        rows = cursor.fetchall()
+        parsed = 0
+        skipped = 0
+        for row in rows:
+            row_id, notes, biome, weather, sentinel, fauna, flora = row
+            fields = _parse_notes(notes)
+            # Fallback for bare positional rows: if the planet's fauna/flora
+            # are still the bogus default 'N/A' AND sentinel is 'None' AND
+            # notes has exactly 5 comma parts, this is almost certainly a
+            # misfile. Accept without requiring suffix labels.
+            if not fields and ':' not in (notes or ''):
+                parts = [p.strip() for p in (notes or '').split(',')]
+                if (len(parts) == 5
+                        and _is_empty(fauna) and _is_empty(flora)
+                        and (_is_empty(sentinel) or (sentinel or '').strip().lower() in ('none', 'n/a'))
+                        and all(len(p) < 80 for p in parts)):
+                    p_biome, p_weather, p_sent, p_flora, p_fauna = parts
+                    candidate = {
+                        'biome': _normalize_value('biome', p_biome),
+                        'weather': _normalize_value('weather', p_weather),
+                        'sentinel': _normalize_value('sentinel', _strip_field_suffix(p_sent, ['sentinels', 'sentinel'])),
+                        'flora': _normalize_value('flora', _strip_field_suffix(p_flora, ['Flora', 'flora'])),
+                        'fauna': _normalize_value('fauna', _strip_field_suffix(p_fauna, ['Fauna', 'fauna'])),
+                    }
+                    fields = {k: v for k, v in candidate.items() if v}
+            if not fields:
+                skipped += 1
+                continue
+            # Only update columns that are currently empty
+            updates = {}
+            if 'biome' in fields and _is_empty(biome):
+                updates['biome'] = fields['biome']
+            if 'weather' in fields and _is_empty(weather):
+                updates['weather'] = fields['weather']
+            if 'sentinel' in fields and _is_empty(sentinel):
+                updates['sentinel'] = fields['sentinel']
+            # sentinel_level is the older "amount" enum (Low/Standard/etc.);
+            # if it's also empty/None mirror sentinel into it for back-compat
+            # — only when sentinel value clearly fits the canonical set.
+            if 'fauna' in fields and _is_empty(fauna):
+                updates['fauna'] = fields['fauna']
+            if 'flora' in fields and _is_empty(flora):
+                updates['flora'] = fields['flora']
+
+            if not updates:
+                skipped += 1
+                continue
+
+            # Move original notes → notes_legacy, clear notes
+            set_clauses = [f"{k} = ?" for k in updates] + ['notes_legacy = ?', 'notes = NULL']
+            params = list(updates.values()) + [notes, row_id]
+            cursor.execute(
+                f"UPDATE {table} SET {', '.join(set_clauses)} WHERE id = ?",
+                params,
+            )
+            parsed += 1
+        logger.info(f"  {table}: parsed {parsed}, skipped {skipped} (no fields matched)")
+        return parsed
+
+    # 3. Run backfill on both tables
+    logger.info("Migration 1.79.0: backfilling planet+moon detail columns from notes…")
+    planets_updated = _backfill_table('planets')
+    moons_updated = _backfill_table('moons')
+    conn.commit()
+    logger.info(f"Migration 1.79.0 complete: {planets_updated} planets, {moons_updated} moons backfilled")
+
+
+@register_migration("1.80.0", "Civilizations as first-class entities — N:M membership replacing 1:1 partner ownership")
+def migration_1_80_0(conn):
+    """
+    Civilizations refactor (Option B).
+
+    Reframes a "civ" from "the discord_tag string on a single tier-2 user_profiles
+    row" into a real entity with N:M membership. After this migration:
+      - A civilization can have multiple leaders / co-leaders.
+      - A member can belong to multiple civilizations with a role per membership.
+      - Civ-level brand fields (display_name, region_color, theme_settings,
+        enabled_features_default) live on the civilization row, not on a profile.
+      - War room enrollment moves from partner_id → civ_id, retiring the legacy
+        partner_accounts JOIN entirely.
+      - Audit logs gain `acting_civ_tag` so we record which civ a member was
+        acting on behalf of (matters once "acting as" UX lands).
+
+    The migration is idempotent: every CREATE/ALTER is guarded, and the backfill
+    is keyed by (tag) / (civ_id, profile_id) so re-running is a no-op.
+
+    Legacy `user_profiles.partner_discord_tag`, `parent_profile_id`,
+    `additional_discord_tags` columns are kept in place as deprecated reads —
+    nothing in this migration drops them. The session builder + scoping queries
+    will be rewired to consume `civilization_members` directly in the same
+    release; the old columns survive only so an emergency rollback to the prior
+    server code path is possible without restoring a backup.
+    """
+    # Migration connections don't set row_factory by default; we need column-
+    # name access on a few of the backfill SELECTs below, so set it locally.
+    # Save and restore so we don't leak state into later migrations.
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    def _add_col(table: str, name: str, type_def: str):
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {type_def}")
+            logger.info(f"Added {table}.{name}")
+        except sqlite3.OperationalError as e:
+            if 'duplicate column' not in str(e).lower():
+                raise
+
+    # ----- 1. civilizations table -----
+    # `tag` is the immutable civ key (the same string that's been on systems
+    # forever, e.g. 'Haven', 'GHUB'). Display_name / region_color /
+    # theme_settings used to live on user_profiles and have moved here so
+    # they're authoritative across all members.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS civilizations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tag TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            region_color TEXT,
+            theme_settings TEXT,
+            enabled_features_default TEXT,
+            default_reality TEXT,
+            default_galaxy TEXT,
+            founder_profile_id INTEGER,
+            founded_at TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_civilizations_tag ON civilizations(tag)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_civilizations_active ON civilizations(is_active)")
+
+    # ----- 2. civilization_members table -----
+    # Composite PK: a profile can only be on a civ once. `role` controls
+    # capability ('leader' and 'co_leader' are functionally identical per
+    # Parker's spec; 'sub_admin' is delegated). `enabled_features` here is
+    # an OPTIONAL per-member override of the civ's default set — when NULL
+    # the member inherits civilizations.enabled_features_default.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS civilization_members (
+            civ_id INTEGER NOT NULL,
+            profile_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            enabled_features TEXT,
+            can_approve_personal_uploads INTEGER NOT NULL DEFAULT 0,
+            joined_at TEXT NOT NULL,
+            joined_via TEXT,
+            PRIMARY KEY (civ_id, profile_id),
+            FOREIGN KEY (civ_id) REFERENCES civilizations(id),
+            FOREIGN KEY (profile_id) REFERENCES user_profiles(id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_civ_members_profile ON civilization_members(profile_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_civ_members_civ_role ON civilization_members(civ_id, role)")
+
+    # ----- 3. home_civ_id on user_profiles -----
+    # "Acting as" UX defaults to this civ at login when the user has >1
+    # membership. NULL is fine — UX falls back to "first membership" or
+    # prompts the user to pick.
+    _add_col('user_profiles', 'home_civ_id', 'INTEGER')
+
+    # ----- 4. civ_id on war_room_enrollment -----
+    # Phase-2-of-Option-B kills the partner_accounts JOIN: enrollment is
+    # now keyed by civilization, and any member of that civ can act on its
+    # behalf in the war room. partner_id stays in place for one release as
+    # a fallback / debug aid; nothing should read it after this migration.
+    _add_col('war_room_enrollment', 'civ_id', 'INTEGER')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_war_room_enrollment_civ ON war_room_enrollment(civ_id, is_active)")
+
+    # ----- 5. acting_civ_tag audit context -----
+    # When a member of multiple civs takes an action, record which civ
+    # context they were acting in. NULL on rows that pre-date this column
+    # — analytics can fall back to discord_tag-on-system for those.
+    _add_col('approval_audit_log', 'acting_civ_tag', 'TEXT')
+    _add_col('pending_systems', 'acting_civ_tag', 'TEXT')
+
+    conn.commit()
+
+    # ============================================================================
+    # Backfill
+    # ============================================================================
+
+    # Pull the unicode-aware username normalizer used by other identity
+    # backfills; falls back to a no-op lambda if the import fails so the
+    # rest of the migration still runs and we don't hard-fail on a fresh DB.
+    try:
+        from services.auth_service import normalize_username_for_dedup as _norm
+    except Exception as e:
+        logger.warning(f"Migration 1.80.0: could not import normalize_username_for_dedup ({e}); using passthrough")
+        _norm = lambda u: (u or '').strip().lower()
+
+    now_iso = "datetime('now')"  # SQLite-side timestamp for backfilled rows
+
+    # ----- 5a. civilizations from existing tier-2 partner profiles -----
+    # One civilization per partner_discord_tag found on a tier-2 row. Brand
+    # fields (display_name, region_color, theme_settings, default_reality,
+    # default_galaxy) snapshotted from the partner profile that owns it
+    # today. ON CONFLICT DO NOTHING keeps the migration idempotent on
+    # re-run and protects existing rows from a destructive re-snapshot.
+    cursor.execute(f"""
+        INSERT INTO civilizations
+            (tag, display_name, region_color, theme_settings,
+             enabled_features_default, default_reality, default_galaxy,
+             founder_profile_id, founded_at, is_active, created_at)
+        SELECT
+            partner_discord_tag,
+            COALESCE(display_name, partner_discord_tag),
+            region_color,
+            theme_settings,
+            enabled_features,
+            default_reality,
+            default_galaxy,
+            id,
+            created_at,
+            is_active,
+            {now_iso}
+        FROM user_profiles
+        WHERE tier = 2 AND partner_discord_tag IS NOT NULL AND partner_discord_tag != ''
+        ON CONFLICT(tag) DO NOTHING
+    """)
+    civs_created = cursor.rowcount
+    logger.info(f"Migration 1.80.0: created {civs_created} civilization rows")
+
+    # Build a tag → civ_id lookup for the membership inserts below
+    cursor.execute("SELECT id, tag FROM civilizations")
+    civ_id_by_tag = {row['tag']: row['id'] for row in cursor.fetchall()}
+
+    # ----- 5b. leader memberships for tier-2 profiles -----
+    cursor.execute("""
+        SELECT id AS profile_id, partner_discord_tag, enabled_features, can_approve_personal_uploads
+        FROM user_profiles
+        WHERE tier = 2 AND partner_discord_tag IS NOT NULL AND partner_discord_tag != ''
+    """)
+    leader_rows = cursor.fetchall()
+    leaders_inserted = 0
+    for row in leader_rows:
+        civ_id = civ_id_by_tag.get(row['partner_discord_tag'])
+        if not civ_id:
+            continue
+        cursor.execute(f"""
+            INSERT INTO civilization_members
+                (civ_id, profile_id, role, enabled_features, can_approve_personal_uploads,
+                 joined_at, joined_via)
+            VALUES (?, ?, 'leader', NULL, ?, {now_iso}, 'founder')
+            ON CONFLICT(civ_id, profile_id) DO NOTHING
+        """, (civ_id, row['profile_id'], row['can_approve_personal_uploads'] or 0))
+        leaders_inserted += cursor.rowcount
+    logger.info(f"Migration 1.80.0: inserted {leaders_inserted} leader memberships")
+
+    # ----- 5c. sub-admin memberships -----
+    # Two source patterns to migrate:
+    #   (i)  tier-3 with parent_profile_id set → sub_admin under that parent's civ
+    #   (ii) tier-3 with parent_profile_id IS NULL but additional_discord_tags
+    #        populated (the "Haven sub-admin" legacy pattern) → one sub_admin
+    #        membership row per tag in the list
+    cursor.execute("""
+        SELECT id AS profile_id, parent_profile_id, additional_discord_tags,
+               enabled_features, can_approve_personal_uploads
+        FROM user_profiles
+        WHERE tier = 3
+    """)
+    sub_admins_inserted = 0
+    for row in cursor.fetchall():
+        per_member_features = row['enabled_features']  # carried as override
+        cap = row['can_approve_personal_uploads'] or 0
+
+        if row['parent_profile_id']:
+            # Pattern (i): single civ — the parent leader's civ
+            cursor.execute("""
+                SELECT partner_discord_tag FROM user_profiles WHERE id = ?
+            """, (row['parent_profile_id'],))
+            parent = cursor.fetchone()
+            parent_tag = parent['partner_discord_tag'] if parent else None
+            target_tags = [parent_tag] if parent_tag else []
+        else:
+            # Pattern (ii): Haven sub-admin — fan out across all civs they cover
+            try:
+                target_tags = json.loads(row['additional_discord_tags'] or '[]')
+            except Exception:
+                target_tags = []
+            if not target_tags:
+                # legacy Haven sub-admin with no extras → default to Haven civ
+                target_tags = ['Haven']
+
+        for tag in target_tags:
+            civ_id = civ_id_by_tag.get(tag)
+            if not civ_id:
+                logger.warning(f"Migration 1.80.0: sub_admin profile={row['profile_id']} references civ '{tag}' which doesn't exist; skipping")
+                continue
+            cursor.execute(f"""
+                INSERT INTO civilization_members
+                    (civ_id, profile_id, role, enabled_features, can_approve_personal_uploads,
+                     joined_at, joined_via)
+                VALUES (?, ?, 'sub_admin', ?, ?, {now_iso}, 'legacy_migration')
+                ON CONFLICT(civ_id, profile_id) DO NOTHING
+            """, (civ_id, row['profile_id'], per_member_features, cap))
+            sub_admins_inserted += cursor.rowcount
+    logger.info(f"Migration 1.80.0: inserted {sub_admins_inserted} sub_admin memberships")
+
+    # ----- 5d. war_room_enrollment.civ_id backfill -----
+    # Each enrollment row has a partner_id pointing at the legacy
+    # partner_accounts table. Join through that → discord_tag → civilizations
+    # to get the new civ_id. Rows whose partner_id doesn't resolve get
+    # logged + left at NULL; the war_room routes will treat NULL civ_id as
+    # an unenrolled / orphaned row.
+    cursor.execute("""
+        UPDATE war_room_enrollment
+        SET civ_id = (
+            SELECT civilizations.id
+            FROM partner_accounts
+            JOIN civilizations ON civilizations.tag = partner_accounts.discord_tag
+            WHERE partner_accounts.id = war_room_enrollment.partner_id
+        )
+        WHERE civ_id IS NULL
+    """)
+    war_rows_filled = cursor.rowcount
+    cursor.execute("SELECT COUNT(*) FROM war_room_enrollment WHERE civ_id IS NULL")
+    war_rows_orphan = cursor.fetchone()[0]
+    if war_rows_orphan:
+        logger.warning(f"Migration 1.80.0: {war_rows_orphan} war_room_enrollment rows have no resolvable civ_id (partner_id points to a missing or untagged partner_accounts row)")
+    logger.info(f"Migration 1.80.0: backfilled civ_id on {war_rows_filled} war_room_enrollment rows")
+
+    # ----- 5e. user_profiles.home_civ_id default -----
+    # For existing partners, default home_civ_id to their own civ — so
+    # logging in pre-selects their familiar civ in the new "acting as"
+    # selector. Sub-admins default to NULL (first membership wins at runtime).
+    cursor.execute("""
+        UPDATE user_profiles
+        SET home_civ_id = (
+            SELECT id FROM civilizations WHERE tag = user_profiles.partner_discord_tag
+        )
+        WHERE tier = 2 AND home_civ_id IS NULL
+          AND partner_discord_tag IS NOT NULL AND partner_discord_tag != ''
+    """)
+    home_civ_set = cursor.rowcount
+    logger.info(f"Migration 1.80.0: set home_civ_id on {home_civ_set} partner profiles")
+
+    conn.commit()
+
+    # ----- 6. Sanity check -----
+    cursor.execute("SELECT COUNT(*) FROM civilizations")
+    total_civs = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM civilization_members")
+    total_members = cursor.fetchone()[0]
+    cursor.execute("SELECT role, COUNT(*) FROM civilization_members GROUP BY role")
+    role_counts = {r[0]: r[1] for r in cursor.fetchall()}
+    logger.info(
+        f"Migration 1.80.0 complete: {total_civs} civilizations, {total_members} memberships ({role_counts})"
+    )
+
+    # Restore the connection's prior row_factory so later migrations and the
+    # rest of startup see the same shape they had before this migration ran.
+    conn.row_factory = prev_factory

@@ -11,6 +11,7 @@ from constants import (
     TIER_SUPER_ADMIN, TIER_PARTNER, TIER_SUB_ADMIN,
     TIER_MEMBER, TIER_MEMBER_READONLY, TIER_TO_USER_TYPE,
     normalize_discord_username,
+    SESSION_TIMEOUT_MINUTES, SESSION_COOKIE_SECONDS,
 )
 from db import get_db_connection
 from services.auth_service import (
@@ -29,8 +30,10 @@ logger = logging.getLogger('control.room')
 
 router = APIRouter(tags=["profiles"])
 
-# Session timeout - matches the value in control_room_api.py
-SESSION_TIMEOUT_MINUTES = 20
+# Session timeout — imported from constants.py (single source of truth).
+# Both the server-side `expires_at` and the cookie's `max_age` use these
+# values, and the SessionCookieRefreshMiddleware slides them forward on
+# every authenticated request so an active user stays logged in.
 
 
 # ============================================================================
@@ -306,7 +309,7 @@ async def profile_login(credentials: dict, response: Response):
         }
 
         response.set_cookie(key='session', value=session_token,
-                            httponly=True, max_age=600, samesite='lax')
+                            httponly=True, max_age=SESSION_COOKIE_SECONDS, samesite='lax')
 
         return {
             'status': 'ok',

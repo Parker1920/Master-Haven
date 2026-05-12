@@ -5,7 +5,11 @@ import Select from 'react-select'
 const darkThemeStyles = {
   container: (base) => ({
     ...base,
-    minWidth: '220px'
+    // No minWidth: parent column width wins. Previous `220px` floor was
+    // overflowing the 3-column planet/moon grid on desktop (each column
+    // resolves to ~190-200px inside the wizard form area at 1280px),
+    // causing dropdowns to spill into the next column.
+    width: '100%',
   }),
   control: (base, state) => ({
     ...base,

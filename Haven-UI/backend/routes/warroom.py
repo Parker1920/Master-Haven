@@ -42,29 +42,78 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 def get_war_room_partner_info(session: dict) -> dict:
-    """Get partner info for War Room operations. Returns None if not enrolled."""
+    """Get war room context for the current session. Returns None if not enrolled.
+
+    Resolution order (migration 1.80.0+):
+      1. Super admin → returns is_super_admin=True with no enrollment.
+      2. Active "acting as" civilization → look up its war_room_enrollment.
+      3. Any other civ the user belongs to that has an active enrollment.
+      4. Legacy fallback: session.partner_id JOIN partner_accounts (kept for
+         the transitional window before war_room_enrollment.partner_id is
+         dropped).
+
+    Brand fields (display_name / region_color / discord_tag) now come from
+    the `civilizations` table rather than `partner_accounts` — civ-level
+    branding is authoritative for war room since v1.80.0.
+
+    The returned `partner_id` is kept for downstream code that still writes
+    `actor_partner_id`/`target_partner_id` columns; it's the legacy
+    `war_room_enrollment.partner_id` value, derived once here so callers
+    don't need to know about the dual-keying.
+    """
     if not session:
         return None
 
     user_type = session.get('user_type')
-    partner_id = None
 
     if user_type == 'super_admin':
         return {'is_super_admin': True, 'partner_id': None}
 
-    if user_type == 'partner':
-        partner_id = session.get('partner_id')
-    elif user_type == 'sub_admin':
-        # Sub-admin's parent partner is stored as 'partner_id' in session
-        partner_id = session.get('partner_id')
-
-    if not partner_id:
-        return None
-
-    # Check if enrolled in War Room
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        # Build civ_id priority list: the active_civ_id first, then every
+        # other civ the user is a member of. We pick the first that has
+        # an active enrollment.
+        candidate_civ_ids = []
+        active_civ_id = session.get('active_civ_id')
+        if active_civ_id:
+            candidate_civ_ids.append(active_civ_id)
+        for m in session.get('civ_memberships') or []:
+            if m.get('civ_id') and m['civ_id'] not in candidate_civ_ids:
+                candidate_civ_ids.append(m['civ_id'])
+
+        if candidate_civ_ids:
+            placeholders = ','.join(['?'] * len(candidate_civ_ids))
+            cursor.execute(f'''
+                SELECT wre.id, wre.partner_id, wre.civ_id,
+                       c.display_name, c.tag, c.region_color
+                FROM war_room_enrollment wre
+                JOIN civilizations c ON c.id = wre.civ_id
+                WHERE wre.civ_id IN ({placeholders}) AND wre.is_active = 1
+                ORDER BY CASE wre.civ_id
+                    {' '.join(f'WHEN {cid} THEN {i}' for i, cid in enumerate(candidate_civ_ids))}
+                END ASC
+                LIMIT 1
+            ''', candidate_civ_ids)
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'is_super_admin': False,
+                    'partner_id': row[1],   # legacy column kept for downstream writes
+                    'civ_id': row[2],
+                    'enrollment_id': row[0],
+                    'display_name': row[3],
+                    'discord_tag': row[4],
+                    'region_color': row[5],
+                }
+
+        # Legacy fallback (kept for any session that pre-dates the civ
+        # migration — shouldn't happen in practice after restart, but
+        # protects existing in-memory sessions across the rollout).
+        partner_id = session.get('partner_id')
+        if not partner_id:
+            return None
         cursor.execute('''
             SELECT wre.id, pa.display_name, pa.discord_tag, pa.region_color
             FROM war_room_enrollment wre
@@ -74,14 +123,13 @@ def get_war_room_partner_info(session: dict) -> dict:
         row = cursor.fetchone()
         if not row:
             return None
-
         return {
             'is_super_admin': False,
             'partner_id': partner_id,
             'enrollment_id': row[0],
             'display_name': row[1],
             'discord_tag': row[2],
-            'region_color': row[3]
+            'region_color': row[3],
         }
     finally:
         conn.close()

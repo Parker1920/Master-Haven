@@ -5,7 +5,7 @@ import CelestialBodyEditor from './CelestialBodyEditor'
  * Moon editor - thin wrapper around CelestialBodyEditor with type="moon".
  * Props: moon, index, onChange, onRemove, onSave.
  */
-export default function MoonEditor({ moon, index, onChange, onRemove, onSave }) {
+export default function MoonEditor({ moon, index, onChange, onRemove, onSave, openHelp }) {
   return (
     <CelestialBodyEditor
       type="moon"
@@ -14,6 +14,7 @@ export default function MoonEditor({ moon, index, onChange, onRemove, onSave }) 
       onChange={onChange}
       onRemove={onRemove}
       onSave={onSave}
+      openHelp={openHelp}
     />
   )
 }

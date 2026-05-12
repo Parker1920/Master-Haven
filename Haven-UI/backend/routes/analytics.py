@@ -137,12 +137,31 @@ async def get_submission_leaderboard(
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
+        # Wizard v1: pre-compute co-authored counts per normalized username so
+        # the leaderboard can show "systems submitted" AND "co-authored" as
+        # SEPARATE columns. Single batched query is cheaper than N+1 lookups.
+        primary_norms = [r['normalized_name'] for r in rows if r['normalized_name']]
+        coauthor_count_by_norm: dict = {}
+        if primary_norms:
+            placeholders = ','.join('?' * len(primary_norms))
+            cursor.execute(f"""
+                SELECT username_normalized, COUNT(DISTINCT system_id) AS coauthored
+                FROM system_coauthors
+                WHERE username_normalized IN ({placeholders})
+                GROUP BY username_normalized
+            """, primary_norms)
+            coauthor_count_by_norm = {r['username_normalized']: r['coauthored'] for r in cursor.fetchall()}
+
         leaderboard = []
         for row in rows:
             entry = dict(row)
             total = entry['total_submissions']
             approved = entry['approved'] or 0
             entry['approval_rate'] = round((approved / total * 100), 1) if total > 0 else 0
+            # Wizard v1: separate coauthor tally
+            entry['coauthored_count'] = coauthor_count_by_norm.get(
+                entry.get('normalized_name'), 0
+            )
 
             # For users with multiple sources (discord communities or personal), fetch breakdown
             tags = [t.strip() for t in (entry.get('discord_tags') or '').split(',') if t.strip()]
@@ -1781,7 +1800,11 @@ async def public_voyager_fingerprint(username: str):
             FROM systems s
             WHERE {sys_norm} = ?
               AND s.dominant_lifeform IS NOT NULL
-              AND s.dominant_lifeform NOT IN ('Unknown', 'None', '')
+              -- Exclude no-race answers from a "races encountered" rollup.
+              -- Both 'None' (never had a race) and 'Abandoned' (race left)
+              -- are legitimate answers but neither represents a race the
+              -- voyager actually encountered.
+              AND s.dominant_lifeform NOT IN ('Unknown', 'None', 'Abandoned', '')
             GROUP BY LOWER(s.dominant_lifeform)
             ORDER BY cnt DESC
         ''', (input_normalized,))

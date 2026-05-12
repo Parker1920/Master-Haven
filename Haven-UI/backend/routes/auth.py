@@ -28,6 +28,7 @@ from services.auth_service import (
     normalize_username_for_dedup,
     get_or_create_profile,
 )
+from services.civilizations import load_memberships_for_profile, pick_active_civ
 
 from db import get_db_connection, get_db
 
@@ -40,6 +41,7 @@ from constants import (
     TIER_MEMBER_READONLY,
     TIER_TO_USER_TYPE,
     SESSION_TIMEOUT_MINUTES,
+    SESSION_COOKIE_SECONDS,
 )
 
 logger = logging.getLogger('control.room')
@@ -54,7 +56,7 @@ router = APIRouter()
 @router.get('/api/status')
 async def api_status():
     """Health check endpoint. Public. Returns API version for frontend compatibility checks."""
-    return {'status': 'ok', 'version': '1.55.0', 'api': 'Master Haven'}
+    return {'status': 'ok', 'version': '1.58.0', 'api': 'Master Haven'}
 
 
 # ============================================================================
@@ -97,6 +99,17 @@ async def admin_status(session: Optional[str] = Cookie(None)):
         elif user_type == 'sub_admin':
             account_id = session_data.get('sub_admin_id')
 
+    # Civ memberships expose only the public-facing fields — internal flags
+    # like is_leader_like are derivable client-side from `role`.
+    memberships = session_data.get('civ_memberships') or []
+    public_memberships = [{
+        'civ_id': m['civ_id'],
+        'tag': m['tag'],
+        'display_name': m['display_name'],
+        'region_color': m.get('region_color'),
+        'role': m['role'],
+    } for m in memberships]
+
     return {
         'logged_in': True,
         'user_type': user_type,
@@ -111,7 +124,13 @@ async def admin_status(session: Optional[str] = Cookie(None)):
         'default_reality': session_data.get('default_reality'),
         'default_galaxy': session_data.get('default_galaxy'),
         'parent_display_name': session_data.get('parent_display_name'),  # For sub-admins
-        'is_haven_sub_admin': session_data.get('is_haven_sub_admin', False)  # True if sub-admin under Haven
+        'is_haven_sub_admin': session_data.get('is_haven_sub_admin', False),  # True if sub-admin under Haven
+        # ---- Civilizations (migration 1.80.0) ----
+        # Frontend uses these to render the "Acting as" selector + brand.
+        'civ_memberships': public_memberships,
+        'civ_tags': session_data.get('civ_tags') or [],
+        'active_civ_id': session_data.get('active_civ_id'),
+        'home_civ_id': session_data.get('home_civ_id'),
     }
 
 
@@ -140,7 +159,8 @@ async def admin_login(credentials: dict, response: Response):
             SELECT id, username, username_normalized, password_hash, display_name, tier,
                    partner_discord_tag, enabled_features, theme_settings, region_color,
                    parent_profile_id, additional_discord_tags, can_approve_personal_uploads,
-                   default_civ_tag, default_reality, default_galaxy, is_active
+                   default_civ_tag, default_reality, default_galaxy, is_active,
+                   home_civ_id
             FROM user_profiles WHERE username_normalized = ?
         """, (normalized,))
         profile = cursor.fetchone()
@@ -184,12 +204,35 @@ async def admin_login(credentials: dict, response: Response):
             user_type = TIER_TO_USER_TYPE.get(tier, 'member')
             enabled_features = json.loads(profile['enabled_features'] or '[]')
 
+            # ----------------------------------------------------------------
+            # Civilizations (migration 1.80.0)
+            # ----------------------------------------------------------------
+            # Pull the user's civ memberships from the new N:M table. For
+            # tier 1 (super admin) this returns whatever's there (usually
+            # empty — super admin acts across all civs regardless). For
+            # tier 2/3 it returns one row per civ they belong to. For
+            # tier 4/5 it's almost always empty (a regular member doesn't
+            # "run" a civ, they just submit to one).
+            home_civ_id = profile.get('home_civ_id') if isinstance(profile, dict) else None
+            memberships = load_memberships_for_profile(cursor, profile['id'])
+            active_membership = pick_active_civ(memberships, home_civ_id)
+            civ_tags = [m['tag'] for m in memberships if m['civ_is_active']]
+
+            # Back-compat resolved discord_tag: legacy code reads
+            # session.discord_tag as the "current civ context." Use the
+            # active membership's tag when we have one, otherwise fall
+            # back to the legacy column for users not yet migrated.
+            resolved_discord_tag = (
+                active_membership['tag'] if active_membership
+                else (profile['partner_discord_tag'] or profile['default_civ_tag'])
+            )
+
             # Build session dict
             session_dict = {
                 'user_type': user_type,
                 'profile_id': profile['id'],
                 'username': profile['username'],
-                'discord_tag': profile['partner_discord_tag'] or profile['default_civ_tag'],
+                'discord_tag': resolved_discord_tag,
                 'partner_id': profile['id'] if tier == TIER_PARTNER else profile['parent_profile_id'],
                 'display_name': profile['display_name'] or profile['username'],
                 'enabled_features': enabled_features,
@@ -197,9 +240,16 @@ async def admin_login(credentials: dict, response: Response):
                 'default_civ_tag': profile['default_civ_tag'],
                 'default_reality': profile['default_reality'] or None,
                 'default_galaxy': profile['default_galaxy'] or None,
+                # ---- new civ fields ----
+                'civ_memberships': memberships,
+                'civ_tags': civ_tags,
+                'active_civ_id': active_membership['civ_id'] if active_membership else None,
+                'home_civ_id': home_civ_id,
             }
 
-            # Sub-admin specific fields
+            # Sub-admin specific fields (legacy back-compat — kept so
+            # scoping branches that haven't migrated to civ_scope_filter
+            # yet keep returning the same results)
             if tier == TIER_SUB_ADMIN:
                 is_haven_sub_admin = profile['parent_profile_id'] is None
                 additional_discord_tags = json.loads(profile['additional_discord_tags'] or '[]') if is_haven_sub_admin else []
@@ -211,12 +261,16 @@ async def admin_login(credentials: dict, response: Response):
                                    (profile['parent_profile_id'],))
                     parent = cursor.fetchone()
                     if parent:
-                        session_dict['discord_tag'] = parent['partner_discord_tag']
+                        # Prefer the new active_membership for discord_tag,
+                        # fall back to legacy parent partner tag.
+                        if not active_membership:
+                            session_dict['discord_tag'] = parent['partner_discord_tag']
                         session_dict['parent_display_name'] = parent['display_name']
                     else:
                         session_dict['parent_display_name'] = 'Unknown'
                 else:
-                    session_dict['discord_tag'] = None  # Haven sub-admin
+                    if not active_membership:
+                        session_dict['discord_tag'] = None  # Haven sub-admin pre-civ
                     session_dict['parent_display_name'] = 'Haven'
 
                 session_dict['sub_admin_id'] = profile['id']
@@ -228,7 +282,7 @@ async def admin_login(credentials: dict, response: Response):
             create_session(session_token, session_dict)
 
             response.set_cookie(key='session', value=session_token,
-                                httponly=True, max_age=600, samesite='lax')
+                                httponly=True, max_age=SESSION_COOKIE_SECONDS, samesite='lax')
 
             result = {
                 'status': 'ok',
@@ -268,7 +322,7 @@ async def admin_login(credentials: dict, response: Response):
                     'tier': TIER_SUPER_ADMIN,
                 })
                 response.set_cookie(key='session', value=session_token,
-                                    httponly=True, max_age=600, samesite='lax')
+                                    httponly=True, max_age=SESSION_COOKIE_SECONDS, samesite='lax')
                 return {
                     'status': 'ok', 'logged_in': True, 'user_type': 'super_admin',
                     'username': username, 'discord_tag': None, 'display_name': 'Super Admin',
@@ -295,7 +349,7 @@ async def admin_login(credentials: dict, response: Response):
                 'partner_id': row['id'], 'display_name': row['display_name'] or username,
                 'enabled_features': enabled_features, 'tier': TIER_PARTNER,
             })
-            response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
+            response.set_cookie(key='session', value=session_token, httponly=True, max_age=SESSION_COOKIE_SECONDS, samesite='lax')
             return {
                 'status': 'ok', 'logged_in': True, 'user_type': 'partner', 'username': username,
                 'discord_tag': row['discord_tag'], 'display_name': row['display_name'] or username,
@@ -341,7 +395,7 @@ async def admin_login(credentials: dict, response: Response):
             'can_approve_personal_uploads': can_approve_personal_uploads,
             'tier': TIER_SUB_ADMIN,
         })
-        response.set_cookie(key='session', value=session_token, httponly=True, max_age=600, samesite='lax')
+        response.set_cookie(key='session', value=session_token, httponly=True, max_age=SESSION_COOKIE_SECONDS, samesite='lax')
         return {
             'status': 'ok', 'logged_in': True, 'user_type': 'sub_admin', 'username': username,
             'discord_tag': discord_tag, 'display_name': sub_row['display_name'] or username,
@@ -364,6 +418,134 @@ async def admin_logout(response: Response, session: Optional[str] = Cookie(None)
         destroy_session(session)
     response.delete_cookie('session')
     return {'status': 'ok'}
+
+
+# ============================================================================
+# "Acting as" civ selector
+# ============================================================================
+
+@router.post('/api/session/active_civ')
+async def set_active_civ(payload: dict, session: Optional[str] = Cookie(None)):
+    """Switch the "acting as" civilization for the current session.
+
+    The caller passes `civ_id` (integer) — must be one of the civs the user
+    is a member of. Super admin can target any civilization. On success the
+    server updates the in-memory session AND returns the new active civ
+    in the response so the frontend can re-render without a round trip.
+
+    Returns 400 if civ_id is missing, 403 if the user isn't a member.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    civ_id = payload.get('civ_id')
+    if not isinstance(civ_id, int):
+        raise HTTPException(status_code=400, detail='civ_id (integer) is required')
+
+    memberships = session_data.get('civ_memberships') or []
+    is_super = session_data.get('user_type') == 'super_admin'
+
+    target = next((m for m in memberships if m['civ_id'] == civ_id), None)
+
+    # Super admin can switch to any civilization, not just one they're a
+    # member of. Load on demand.
+    if not target and is_super:
+        conn = None
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, tag, display_name, region_color, theme_settings,
+                       default_reality, default_galaxy, is_active
+                FROM civilizations WHERE id = ?
+            """, (civ_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Civilization not found')
+            try:
+                theme = json.loads(row['theme_settings'] or '{}')
+            except Exception:
+                theme = {}
+            target = {
+                'civ_id': row['id'],
+                'tag': row['tag'],
+                'display_name': row['display_name'],
+                'region_color': row['region_color'],
+                'theme_settings': theme,
+                'role': 'super_admin_override',
+                'is_leader_like': True,
+                'enabled_features': ['all'],
+                'can_approve_personal_uploads': True,
+                'default_reality': row['default_reality'],
+                'default_galaxy': row['default_galaxy'],
+                'civ_is_active': bool(row['is_active']),
+            }
+        finally:
+            if conn:
+                conn.close()
+
+    if not target:
+        raise HTTPException(status_code=403, detail='You are not a member of that civilization')
+    if not target['civ_is_active']:
+        raise HTTPException(status_code=400, detail='That civilization is no longer active')
+
+    # Mutate the in-memory session in place. get_session() already extended
+    # expires_at on the way in, and the cookie-refresh middleware will
+    # re-issue the cookie on the way out, so the user stays logged in.
+    session_data['active_civ_id'] = target['civ_id']
+    session_data['discord_tag'] = target['tag']
+
+    return {
+        'status': 'ok',
+        'active_civ': {
+            'civ_id': target['civ_id'],
+            'tag': target['tag'],
+            'display_name': target['display_name'],
+            'region_color': target.get('region_color'),
+            'role': target['role'],
+        },
+    }
+
+
+@router.post('/api/session/home_civ')
+async def set_home_civ(payload: dict, session: Optional[str] = Cookie(None)):
+    """Persist the user's home civilization (default "acting as" on login).
+
+    Pass `civ_id` or `null` to clear. Must be a civ the user is a member of
+    (super admin can set any). Updates `user_profiles.home_civ_id` and the
+    in-memory session.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    profile_id = session_data.get('profile_id')
+    if not profile_id:
+        raise HTTPException(status_code=400, detail='Session has no profile_id; legacy account')
+
+    civ_id = payload.get('civ_id')
+    if civ_id is not None and not isinstance(civ_id, int):
+        raise HTTPException(status_code=400, detail='civ_id must be an integer or null')
+
+    if civ_id is not None:
+        memberships = session_data.get('civ_memberships') or []
+        is_super = session_data.get('user_type') == 'super_admin'
+        if not is_super and not any(m['civ_id'] == civ_id for m in memberships):
+            raise HTTPException(status_code=403, detail='You are not a member of that civilization')
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('UPDATE user_profiles SET home_civ_id = ? WHERE id = ?', (civ_id, profile_id))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+    session_data['home_civ_id'] = civ_id
+    return {'status': 'ok', 'home_civ_id': civ_id}
 
 
 # ============================================================================

@@ -32,7 +32,20 @@ ACTIVITY_LOG_MAX = 500  # Keep only the last N activity logs
 # Session & Auth
 # ============================================================================
 
-SESSION_TIMEOUT_MINUTES = 20
+# Session lifetime. The cookie + server-side store BOTH slide forward on every
+# authenticated request via the SessionCookieRefreshMiddleware in
+# control_room_api.py — so this is effectively an *idle* timeout, not a hard
+# wall-clock cap. An active user is logged in indefinitely; an idle user is
+# kicked out after this many minutes of inactivity.
+#
+# CRITICAL: SESSION_COOKIE_SECONDS must equal SESSION_TIMEOUT_MINUTES * 60.
+# Historically these two drifted apart (cookie was hard-coded to 600s while
+# the server-side window was 20 min), which is why "the backend kicks me off
+# after exactly 10 minutes" was the canonical symptom — the cookie expired
+# before the server-side sliding window had a chance to matter. Derive one
+# from the other so they cannot drift again.
+SESSION_TIMEOUT_MINUTES = 60
+SESSION_COOKIE_SECONDS = SESSION_TIMEOUT_MINUTES * 60
 
 # Super admin credentials
 # NOTE: INTENTIONAL DESIGN - 'Haven' is Parker's personal login, not a generic default

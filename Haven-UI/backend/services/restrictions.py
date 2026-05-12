@@ -120,11 +120,26 @@ def get_restrictions_by_discord_tag(discord_tag: str) -> list:
 
 
 def can_bypass_restriction(session_data: Optional[dict], system_discord_tag: str) -> bool:
-    """Check if current user can bypass restrictions for a system."""
+    """Check if the current user can bypass restrictions for a system.
+
+    Bypass rules (migration 1.80.0+):
+      - Super admin: always.
+      - Any member of the owning civilization (leader / co_leader / sub_admin):
+        always. Was previously partner-only on a single discord_tag; with the
+        civilizations model a sub_admin co-runs the civ and should see its
+        own civ's restricted data the same way a leader does.
+      - Anyone else: never.
+    """
     if not session_data:
         return False
     if session_data.get('user_type') == 'super_admin':
         return True
+    civ_tags = session_data.get('civ_tags') or []
+    if system_discord_tag and system_discord_tag in civ_tags:
+        return True
+    # Back-compat for sessions that haven't been re-issued after the
+    # civilizations migration (no civ_memberships populated yet but they
+    # have the legacy partner discord_tag set).
     if session_data.get('user_type') == 'partner':
         return session_data.get('discord_tag') == system_discord_tag
     return False
@@ -161,9 +176,16 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
     if session_data and session_data.get('user_type') == 'super_admin':
         return systems
 
-    viewer_discord_tag = None
-    if session_data and session_data.get('user_type') == 'partner':
-        viewer_discord_tag = session_data.get('discord_tag')
+    # Any civ the user is a member of bypasses restrictions on its own
+    # systems. Set keeps the per-row lookup O(1).
+    viewer_civ_tags = set()
+    if session_data:
+        viewer_civ_tags.update(session_data.get('civ_tags') or [])
+        # Back-compat for sessions still on the legacy single-tag model.
+        if session_data.get('user_type') == 'partner':
+            legacy = session_data.get('discord_tag')
+            if legacy:
+                viewer_civ_tags.add(legacy)
 
     system_ids = [s.get('id') for s in systems if s.get('id')]
     restrictions_map = get_restrictions_batch(system_ids) if system_ids else {}
@@ -173,7 +195,7 @@ def apply_data_restrictions(systems: list, session_data: Optional[dict], for_map
         system_id = system.get('id')
         system_tag = system.get('discord_tag')
 
-        if viewer_discord_tag and viewer_discord_tag == system_tag:
+        if system_tag and system_tag in viewer_civ_tags:
             result.append(system)
             continue
 

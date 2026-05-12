@@ -18,6 +18,13 @@ export default defineConfig({
       '/war-media': {
         target: 'http://127.0.0.1:8005',
         changeOrigin: true
+      },
+      // User-uploaded photos (and the GlyphPicker icons) are served by the
+      // FastAPI backend. Without this entry, Vite returns the SPA index.html
+      // as a fallback for unknown paths and every <img> shows broken.
+      '/haven-ui-photos': {
+        target: 'http://127.0.0.1:8005',
+        changeOrigin: true
       }
     }
   },

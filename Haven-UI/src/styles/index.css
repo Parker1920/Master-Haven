@@ -6,6 +6,10 @@
 body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
 .logo { font-weight: 700 }
 .container { max-width: 1100px; padding-left: 18px; padding-right: 18px }
+/* Wider container override removed — Systems Tab v2.0 spec section 2.2 keeps
+   the app at 1100px max on every page. If the Wizard rebuild needs more
+   width on big monitors it should set its own max-width on its own root
+   element, not widen .container globally (which leaks to Dashboard etc.). */
 .card { @apply bg-white p-6 rounded-lg shadow-sm border border-gray-100 }
 .muted { @apply text-gray-500 }
 /* Make dark header text readable */
@@ -145,4 +149,282 @@ textarea::placeholder {
 
 .react-datepicker-popper {
 	z-index: 100 !important;
+}
+
+/* ============================================================
+   Systems Tab v2.0 — design tokens + utility classes
+   Mirrors systems-mockup-v6.html. Tokens land in :root via the
+   block below; user theme overrides at runtime continue to work
+   because everything routes through CSS variables.
+   ============================================================ */
+:root {
+	--app-card-hover: #1a2247;
+	--app-primary-dim: rgba(0, 194, 179, 0.15);
+	--app-primary-soft: rgba(0, 194, 179, 0.08);
+	--app-accent-purple: #9d4edd;
+	--app-accent-purple-dim: rgba(157, 78, 221, 0.15);
+	--border-soft: rgba(255, 255, 255, 0.08);
+	--border-card: rgba(255, 255, 255, 0.04);
+}
+
+/* Card shell + hover lift */
+.haven-card {
+	background-color: var(--app-card);
+	border: 1px solid var(--border-card);
+	border-radius: 12px;
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.haven-card-hover {
+	transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+		background-color 200ms,
+		border-color 200ms,
+		box-shadow 200ms;
+}
+.haven-card-hover:hover {
+	transform: translateY(-2px);
+	background-color: var(--app-card-hover);
+	border-color: rgba(0, 194, 179, 0.4);
+	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35), 0 0 24px -8px rgba(0, 194, 179, 0.3);
+}
+
+/* Buttons */
+.haven-btn-primary {
+	background-color: var(--app-primary);
+	color: #042422;
+	font-weight: 600;
+}
+.haven-btn-primary:hover { background-color: #00d8c8; }
+
+.haven-btn-ghost {
+	background-color: transparent;
+	border: 1px solid var(--border-soft);
+	color: var(--app-text);
+}
+.haven-btn-ghost:hover { background-color: rgba(255, 255, 255, 0.04); }
+
+/* Input shell — scoped utility, doesn't override the global input rule above */
+.haven-input {
+	background-color: var(--app-card);
+	color: var(--app-text);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 6px;
+}
+.haven-input:focus {
+	outline: none;
+	border-color: var(--app-primary);
+	box-shadow: 0 0 0 2px rgba(0, 194, 179, 0.2);
+}
+.haven-input::placeholder { color: var(--muted); }
+
+/* Pills */
+.pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.25rem 0.625rem;
+	border-radius: 9999px;
+	font-size: 0.75rem;
+	font-weight: 500;
+	line-height: 1.2;
+}
+
+.pill-teal       { background: var(--app-primary-dim); color: #6effe5; border: 1px solid rgba(0, 194, 179, 0.3); }
+.pill-teal-solid { background: var(--app-primary); color: #042422; }
+.pill-purple     { background: var(--app-accent-purple-dim); color: #d4a3ff; border: 1px solid rgba(157, 78, 221, 0.3); }
+.pill-amber      { background: rgba(255, 180, 76, 0.15); color: var(--app-accent-amber); border: 1px solid rgba(255, 180, 76, 0.3); }
+.pill-red        { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+.pill-blue       { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }
+.pill-emerald    { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+.pill-yellow     { background: rgba(234, 179, 8, 0.15); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.3); }
+.pill-muted      { background: rgba(255, 255, 255, 0.05); color: var(--muted); border: 1px solid var(--border-soft); }
+
+.pill-clickable { cursor: pointer; transition: background-color 150ms; }
+.pill-clickable:hover { filter: brightness(1.15); }
+.pill-clickable.disabled { opacity: 0.35; pointer-events: none; }
+
+/* Star color solid pills (level 4 system cards) */
+.pill-star-yellow { background: #facc15; color: #422006; font-weight: 700; }
+.pill-star-blue   { background: #3b82f6; color: white; font-weight: 700; }
+.pill-star-red    { background: #ef4444; color: white; font-weight: 700; }
+.pill-star-green  { background: #10b981; color: white; font-weight: 700; }
+.pill-star-purple { background: #a855f7; color: white; font-weight: 700; }
+
+/* Stub poster placeholder — used until real region/system poster types ship */
+.stub-poster {
+	background:
+		linear-gradient(135deg, transparent 25%, rgba(0, 194, 179, 0.04) 25%, rgba(0, 194, 179, 0.04) 50%, transparent 50%, transparent 75%, rgba(0, 194, 179, 0.04) 75%, rgba(0, 194, 179, 0.04)),
+		linear-gradient(135deg, #0f1538 0%, #0a0e27 100%);
+	background-size: 12px 12px, 100% 100%;
+	position: relative;
+}
+.stub-poster::before {
+	content: 'POSTER STUB';
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(0, 194, 179, 0.35);
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.15em;
+	pointer-events: none;
+}
+
+/* Filter modal animation */
+.filter-modal-panel {
+	transform: scale(0.96);
+	opacity: 0;
+	transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms;
+}
+.modal-open .filter-modal-panel {
+	transform: scale(1);
+	opacity: 1;
+}
+.backdrop-fade { background: rgba(0, 0, 0, 0); transition: background 200ms; }
+.backdrop-fade.active { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px); }
+
+/* Custom scrollbar — additive over the Tailwind scrollbar plugin */
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(0, 194, 179, 0.3); border-radius: 3px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(0, 194, 179, 0.5); }
+
+.saved-row:hover { background: var(--app-primary-soft); }
+
+/* Collapsible filter sections */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] .chev { transform: rotate(180deg); }
+.chev { transition: transform 200ms; }
+
+/* Completeness grade letter + bar tokens */
+.grade-s { color: var(--app-accent-amber); }
+.grade-a { color: #34d399; }
+.grade-b { color: #60a5fa; }
+.grade-c { color: rgba(255, 255, 255, 0.5); }
+
+.bar-s { background: var(--app-accent-amber); }
+.bar-a { background: #34d399; }
+.bar-b { background: #60a5fa; }
+.bar-c { background: rgba(255, 255, 255, 0.25); }
+
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.dot-grid {
+	background-image: radial-gradient(circle at 2px 2px, rgba(255, 255, 255, 0.04) 1px, transparent 0);
+	background-size: 16px 16px;
+}
+
+.hairline { border-top: 1px solid var(--border-soft); }
+
+/* From-map banner slide-in */
+@keyframes slideDown {
+	from { transform: translateY(-100%); opacity: 0; }
+	to   { transform: translateY(0); opacity: 1; }
+}
+
+/* ===== Card state modifiers — stack as needed (stub + outdated, etc.) ===== */
+
+.state-stub {
+	border-style: dashed !important;
+	border-color: rgba(255, 255, 255, 0.15) !important;
+}
+.state-stub > div:first-child { opacity: 0.6; }
+
+.state-pending {
+	border-color: rgba(255, 180, 76, 0.4) !important;
+	box-shadow: 0 0 0 1px rgba(255, 180, 76, 0.15);
+}
+
+.state-restricted { opacity: 0.85; }
+.state-restricted::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255, 255, 255, 0.02) 8px, rgba(255, 255, 255, 0.02) 16px);
+	pointer-events: none;
+	border-radius: inherit;
+}
+
+.outdated-dot {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--app-accent-amber);
+	box-shadow: 0 0 0 2px var(--app-card), 0 0 8px var(--app-accent-amber);
+	z-index: 5;
+}
+
+.conflict-dot {
+	position: absolute;
+	top: 6px;
+	left: 6px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #ef4444;
+	box-shadow: 0 0 0 2px var(--app-card), 0 0 8px #ef4444;
+	z-index: 5;
+}
+
+@keyframes skeletonPulse {
+	0%, 100% { opacity: 0.6; }
+	50% { opacity: 0.3; }
+}
+.skeleton-card {
+	animation: skeletonPulse 1.4s ease-in-out infinite;
+	background: linear-gradient(135deg, var(--app-card), rgba(255, 255, 255, 0.02));
+	border-radius: 12px;
+	overflow: hidden;
+}
+.skeleton-bar { background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+
+.state-badge {
+	position: absolute;
+	bottom: 8px;
+	right: 8px;
+	z-index: 5;
+	font-size: 9px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	padding: 2px 6px;
+	border-radius: 4px;
+	text-transform: uppercase;
+	backdrop-filter: blur(4px);
+}
+.state-badge.stub       { background: rgba(255, 255, 255, 0.15); color: rgba(255, 255, 255, 0.7); }
+.state-badge.pending    { background: rgba(255, 180, 76, 0.85); color: #422006; }
+.state-badge.restricted { background: rgba(239, 68, 68, 0.7); color: white; }
+
+/* Activity feed entry — used on System Detail */
+.activity-entry {
+	display: flex;
+	gap: 0.625rem;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid var(--border-soft);
+	align-items: flex-start;
+}
+.activity-entry:last-child { border-bottom: none; }
+.activity-avatar {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 10px;
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+/* Mobile breakpoint polish */
+@media (max-width: 640px) {
+	.haven-card,
+	.haven-card-hover { border-radius: 10px; }
 }

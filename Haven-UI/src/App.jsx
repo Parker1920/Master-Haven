@@ -25,6 +25,7 @@ const DBStats = lazy(() => import('./pages/DBStats'))
 const PendingApprovals = lazy(() => import('./pages/PendingApprovals'))
 const ApiKeys = lazy(() => import('./pages/ApiKeys'))
 const PartnerManagement = lazy(() => import('./pages/PartnerManagement'))
+const CivilizationManagement = lazy(() => import('./pages/CivilizationManagement'))
 const SubAdminManagement = lazy(() => import('./pages/SubAdminManagement'))
 const ApprovalAudit = lazy(() => import('./pages/ApprovalAudit'))
 const Analytics = lazy(() => import('./pages/Analytics'))
@@ -145,7 +146,13 @@ function AppShell() {
               {/* Super admin only routes */}
               <Route path="/api-keys" element={<RequireSuperAdmin><ApiKeys /></RequireSuperAdmin>} />
               <Route path="/admin/users" element={<RequireAdmin><UserManagement /></RequireAdmin>} />
-              <Route path="/admin/partners" element={<RequireSuperAdmin><PartnerManagement /></RequireSuperAdmin>} />
+              {/* /admin/civilizations is the new combined page (PR-B, migration 1.80.0).
+                  /admin/partners is kept as a back-compat alias pointing at the same
+                  component so any bookmarks / nav entries still resolve. The legacy
+                  PartnerManagement page is no longer mounted on a route but lives in
+                  src/pages/PartnerManagement.jsx for reference. */}
+              <Route path="/admin/civilizations" element={<RequireSuperAdmin><CivilizationManagement /></RequireSuperAdmin>} />
+              <Route path="/admin/partners" element={<RequireSuperAdmin><CivilizationManagement /></RequireSuperAdmin>} />
               <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
               <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
 

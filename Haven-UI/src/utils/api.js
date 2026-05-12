@@ -40,6 +40,13 @@ export async function apiDelete(path){
   return await res.json()
 }
 
+/** PATCH JSON to an endpoint. */
+export async function apiPatch(path, body){
+  const res = await fetch(path, { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if(!res.ok) throw new Error(await res.text())
+  return await res.json()
+}
+
 // ============================================================================
 // Typed Endpoint Functions
 // Each wraps a specific API call with consistent error handling.
@@ -103,6 +110,30 @@ export const getCommunityRegions = (params = {}) => axios.get('/api/public/commu
 export const getEvents = () => axios.get('/api/events').then(r => r.data)
 export const getEventDetail = (id) => axios.get(`/api/events/${id}`).then(r => r.data)
 export const getEventLeaderboard = (id, params = {}) => axios.get(`/api/events/${id}/leaderboard`, { params }).then(r => r.data)
+
+// --- Systems Tab v2.0: user-scoped state ---
+// Saved searches require tier <= 4 (password-set member or above); the backend
+// returns 403 for tier 5. UI components should fall back to localStorage for
+// anonymous / read-only users.
+export const listSavedSearches = () => apiGet('/api/user/saved_searches')
+export const createSavedSearch = (name, filters) => apiPost('/api/user/saved_searches', { name, filters })
+export const updateSavedSearch = (id, patch) => apiPatch(`/api/user/saved_searches/${id}`, patch)
+export const deleteSavedSearch = (id) => apiDelete(`/api/user/saved_searches/${id}`)
+export const getUserTheme = () => apiGet('/api/user/theme')
+
+// --- Wizard v1 (May 2026 rebuild) ---
+// Records: per-discovery-type best values (S-class starships, max fauna height, etc.).
+// Frontend reads response.records[`${type}.${metric}`] = {value, holder, system_name, system_id, discovery_id}.
+export const getWizardRecords = () => axios.get('/api/wizard/records').then(r => r.data)
+// One-shot dedup + pull-existing helper for the 12-glyphs-entered banner.
+export const checkExistingSystem = (glyph, galaxy = 'Euclid', reality = 'Normal') =>
+  axios.get('/api/wizard/check-existing', { params: { glyph, galaxy, reality } }).then(r => r.data)
+
+// --- Expeditions ---
+export const getExpeditions = (params = {}) => axios.get('/api/expeditions', { params }).then(r => r.data)
+export const getExpeditionDetail = (id) => axios.get(`/api/expeditions/${id}`).then(r => r.data)
+export const createExpedition = (data) => axios.post('/api/expeditions', data).then(r => r.data)
+export const updateExpedition = (id, data) => axios.put(`/api/expeditions/${id}`, data).then(r => r.data)
 
 /** Authenticate with the super admin password. Returns session data. */
 export async function adminLogin(password){

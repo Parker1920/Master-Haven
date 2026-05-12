@@ -21,6 +21,7 @@ from services.auth_service import (
     get_effective_discord_tag,
     get_personal_color,
 )
+from services.civilizations import user_can_act_for_civ
 
 from db import (
     get_db_connection,
@@ -1437,10 +1438,12 @@ async def save_data_restriction(payload: dict, session: Optional[str] = Cookie(N
 
         system_discord_tag = system['discord_tag']
 
-        # Permission check - partner can only modify their own systems
-        if not _is_super_admin:
-            if system_discord_tag != partner_discord_tag:
-                raise HTTPException(status_code=403, detail='You can only modify restrictions for your own systems')
+        # Permission check — any civ member (leader / co_leader / sub_admin)
+        # may modify restrictions on a system that belongs to one of their
+        # civilizations. user_can_act_for_civ() handles super_admin → True
+        # so the explicit branch isn't needed any more.
+        if not user_can_act_for_civ(session_data, system_discord_tag):
+            raise HTTPException(status_code=403, detail='You can only modify restrictions for systems in a civilization you belong to')
 
         now = datetime.now(timezone.utc).isoformat()
 
@@ -1536,8 +1539,8 @@ async def save_bulk_restrictions(payload: dict, session: Optional[str] = Cookie(
 
             system_discord_tag = system['discord_tag']
 
-            # Permission check - partner can only modify their own systems
-            if not _is_super_admin and system_discord_tag != partner_discord_tag:
+            # Permission check — any civ member may bulk-modify their own civ's systems
+            if not user_can_act_for_civ(session_data, system_discord_tag):
                 skipped += 1
                 continue
 
@@ -1612,9 +1615,9 @@ async def delete_data_restriction(system_id: int, session: Optional[str] = Cooki
         if not restriction:
             raise HTTPException(status_code=404, detail='Restriction not found')
 
-        # Permission check
-        if not _is_super_admin and restriction['discord_tag'] != partner_discord_tag:
-            raise HTTPException(status_code=403, detail='You can only remove restrictions for your own systems')
+        # Permission check — any civ member may remove their own civ's restriction
+        if not user_can_act_for_civ(session_data, restriction['discord_tag']):
+            raise HTTPException(status_code=403, detail='You can only remove restrictions for systems in a civilization you belong to')
 
         cursor.execute('DELETE FROM data_restrictions WHERE system_id = ?', (system_id,))
         conn.commit()
@@ -1669,8 +1672,8 @@ async def bulk_remove_restrictions(payload: dict, session: Optional[str] = Cooki
                 skipped += 1
                 continue
 
-            # Permission check
-            if not _is_super_admin and restriction['discord_tag'] != partner_discord_tag:
+            # Permission check — any civ member may bulk-remove their own civ's restrictions
+            if not user_can_act_for_civ(session_data, restriction['discord_tag']):
                 skipped += 1
                 continue
 

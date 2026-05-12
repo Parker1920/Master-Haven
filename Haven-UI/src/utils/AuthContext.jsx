@@ -53,7 +53,13 @@ function buildUserFromData(data) {
     defaultReality: data.default_reality || null,
     defaultGalaxy: data.default_galaxy || null,
     parentDisplayName: data.parent_display_name,
-    isHavenSubAdmin: data.is_haven_sub_admin || false
+    isHavenSubAdmin: data.is_haven_sub_admin || false,
+    // Civilizations (PR-A): the user's membership rows + "acting as" state.
+    // Used by the navbar civ selector and the CivilizationManagement page.
+    civMemberships: data.civ_memberships || [],
+    civTags: data.civ_tags || [],
+    activeCivId: data.active_civ_id || null,
+    homeCivId: data.home_civ_id || null
   }
 }
 
@@ -152,6 +158,38 @@ export function AuthProvider({ children }) {
     await checkAuth()
   }, [])
 
+  /** Switch the "acting as" civilization for the current session.
+   *  Calls the new /api/session/active_civ endpoint and refreshes the user
+   *  object so the navbar + brand resolver pick up the new civ immediately. */
+  const setActiveCiv = useCallback(async (civId) => {
+    const r = await fetch('/api/session/active_civ', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ civ_id: civId })
+    })
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}))
+      throw new Error(data.detail || 'Failed to switch civilization')
+    }
+    await checkAuth()
+  }, [])
+
+  /** Persist the user's home civilization (default at next login). */
+  const setHomeCiv = useCallback(async (civId) => {
+    const r = await fetch('/api/session/home_civ', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ civ_id: civId })
+    })
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}))
+      throw new Error(data.detail || 'Failed to set home civilization')
+    }
+    await checkAuth()
+  }, [])
+
   // Memoize context value to prevent unnecessary re-renders of all consumers
   const contextValue = useMemo(() => ({
     isAdmin,
@@ -168,8 +206,10 @@ export function AuthProvider({ children }) {
     memberLogin,
     logout,
     canAccess,
-    refreshAuth
-  }), [isAdmin, isSuperAdmin, isPartner, isSubAdmin, isHavenSubAdmin, isCorrespondent, isMember, isReadOnly, user, loading, login, memberLogin, logout, canAccess, refreshAuth])
+    refreshAuth,
+    setActiveCiv,
+    setHomeCiv
+  }), [isAdmin, isSuperAdmin, isPartner, isSubAdmin, isHavenSubAdmin, isCorrespondent, isMember, isReadOnly, user, loading, login, memberLogin, logout, canAccess, refreshAuth, setActiveCiv, setHomeCiv])
 
   return (
     <AuthContext.Provider value={contextValue}>

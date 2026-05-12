@@ -29,25 +29,52 @@ PHOTOS_DIR = HAVEN_UI_DIR / 'photos'
 # Photo Upload
 # ============================================================================
 
+_PHOTO_MAX_BYTES = 15 * 1024 * 1024   # 15 MB pre-compression cap
+_PHOTO_OK_SUFFIXES = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
+
+
 @router.post('/api/photos')
 async def upload_photo(file: UploadFile = File(...)):
-    """Upload a photo, auto-compressing to WebP with thumbnail generation. Public."""
+    """Upload a photo, auto-compressing to WebP with thumbnail generation.
+
+    Public (the Wizard's PhotoUploader is anonymous), but guarded by:
+      - 15 MB raw-upload cap (caps anonymous abuse + keeps Pillow's memory
+        footprint reasonable on the Pi)
+      - extension whitelist on the raw-save fallback so a Pillow failure
+        on a non-image upload doesn't drop arbitrary bytes into PHOTOS_DIR
+    """
     filename = file.filename or 'photo'
     raw_bytes = await file.read()
+
+    if len(raw_bytes) > _PHOTO_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f'Image too large ({len(raw_bytes) // (1024*1024)} MB); max is {_PHOTO_MAX_BYTES // (1024*1024)} MB'
+        )
+    if len(raw_bytes) == 0:
+        raise HTTPException(status_code=400, detail='Empty upload')
 
     # Process image: resize + compress to WebP + generate thumbnail
     try:
         result = process_image(raw_bytes, filename)
     except Exception as e:
         logger.warning(f"Image processing failed for {filename}, saving raw: {e}")
-        # Fallback: save raw file if processing fails (e.g. corrupt image)
+        # Fallback: save raw file ONLY if it looks like an image by extension.
+        # Without this gate, anonymous callers could write arbitrary bytes
+        # to the photos dir whenever Pillow rejects the payload.
+        suffix = Path(filename).suffix.lower()
+        if suffix not in _PHOTO_OK_SUFFIXES:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Could not decode image and extension {suffix!r} is not a recognized image format'
+            )
         dest = PHOTOS_DIR / filename
         if dest.exists():
-            base, suffix = dest.stem, dest.suffix
+            base, ext = dest.stem, dest.suffix
             i = 1
-            while (PHOTOS_DIR / f"{base}-{i}{suffix}").exists():
+            while (PHOTOS_DIR / f"{base}-{i}{ext}").exists():
                 i += 1
-            dest = PHOTOS_DIR / f"{base}-{i}{suffix}"
+            dest = PHOTOS_DIR / f"{base}-{i}{ext}"
         with dest.open('wb') as f:
             f.write(raw_bytes)
         path = str(dest.relative_to(HAVEN_UI_DIR))
@@ -339,13 +366,23 @@ def _normalize_economy_type(raw):
 
 
 def _normalize_lifeform(raw):
-    """Normalize dominant lifeform values from CSV."""
+    """Normalize dominant lifeform values from CSV.
+
+    Canonical values: 'Gek', "Vy'keen", 'Korvax', 'None', 'Abandoned'.
+    'None' (string) means "no race, never was".
+    'Abandoned' means "empty buildings, race left" — semantically distinct.
+    Empty input → Python None (no value submitted).
+    """
     if not raw:
         return None
     raw = raw.strip()
     mapping = {
-        'gek': 'Gek', "vy'keen": "Vy'keen", 'vykeen': "Vy'keen",
-        'korvax': 'Korvax', 'uncharted': None, 'none': None,
+        'gek': 'Gek',
+        "vy'keen": "Vy'keen", 'vykeen': "Vy'keen", 'vy keen': "Vy'keen",
+        'korvax': 'Korvax',
+        'none': 'None', 'no race': 'None', 'no lifeform': 'None',
+        'abandoned': 'Abandoned', 'derelict': 'Abandoned', 'empty': 'Abandoned',
+        'uncharted': None,
     }
     return mapping.get(raw.lower(), raw)
 

@@ -22,6 +22,7 @@ from services.auth_service import (
     check_self_submission,
     verify_api_key,
 )
+from services.civilizations import civ_scope_filter
 
 logger = logging.getLogger('control.room')
 
@@ -805,43 +806,28 @@ async def get_pending_discoveries(session: Optional[str] = Cookie(None)):
             submitter_account_id, submitter_account_type
         '''
 
-        if is_super:
-            cursor.execute(f'''
-                SELECT {select_cols} FROM pending_discoveries
-                ORDER BY
-                    CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
-                    submission_date DESC
-            ''')
-        elif is_haven_sub_admin:
-            additional_tags = session_data.get('additional_discord_tags', [])
-            can_approve_personal = session_data.get('can_approve_personal_uploads', False)
-            all_tags = ['Haven'] + additional_tags
-            placeholders = ','.join(['?' for _ in all_tags])
-
-            if can_approve_personal:
-                cursor.execute(f'''
-                    SELECT {select_cols} FROM pending_discoveries
-                    WHERE discord_tag IN ({placeholders}) OR discord_tag = 'personal'
-                    ORDER BY
-                        CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
-                        submission_date DESC
-                ''', all_tags)
-            else:
-                cursor.execute(f'''
-                    SELECT {select_cols} FROM pending_discoveries
-                    WHERE discord_tag IN ({placeholders})
-                    ORDER BY
-                        CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
-                        submission_date DESC
-                ''', all_tags)
+        # Single-query scoping via civ_scope_filter (migration 1.80.0).
+        scope_clause, scope_params = civ_scope_filter(session_data, column='discord_tag')
+        if scope_clause == '1=0':
+            submissions = []
+            cursor_rows = []
         else:
+            can_approve_personal = bool(
+                session_data.get('can_approve_personal_uploads', False)
+                or any(m.get('can_approve_personal_uploads')
+                       for m in (session_data.get('civ_memberships') or []))
+            )
+            tag_clause = (
+                f"(({scope_clause}) OR discord_tag = 'personal')"
+                if can_approve_personal else scope_clause
+            )
             cursor.execute(f'''
                 SELECT {select_cols} FROM pending_discoveries
-                WHERE discord_tag = ?
+                WHERE {tag_clause}
                 ORDER BY
                     CASE status WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 WHEN 'rejected' THEN 3 END,
                     submission_date DESC
-            ''', (partner_tag,))
+            ''', scope_params)
 
         submissions = [dict(row) for row in cursor.fetchall()]
 

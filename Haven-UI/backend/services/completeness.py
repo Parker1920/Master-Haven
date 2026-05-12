@@ -80,6 +80,13 @@ def calculate_completeness_score(cursor, system_id) -> dict:
         if f in ('economy_type', 'economy_level', 'conflict_level') and is_abandoned:
             sys_core_filled += 1
             sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val) if val else 'N/A (Abandoned)', 'status': 'filled'})
+        # dominant_lifeform: "None" and "Abandoned" are BOTH legitimate
+        # answers (a system with no race vs a system whose race left).
+        # Both count as filled — pass allow_none_sentinel=True so the
+        # "None" string isn't treated as missing data.
+        elif f == 'dominant_lifeform' and _is_filled(val, allow_none_sentinel=True):
+            sys_core_filled += 1
+            sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})
         elif _is_filled(val):
             sys_core_filled += 1
             sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})

@@ -1,476 +1,420 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react'
-import axios from 'axios'
-import { Link, useSearchParams } from 'react-router-dom'
-import Card from './Card'
-import { StarIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
-import { usePersonalColor } from '../utils/usePersonalColor'
-import { tagColors } from '../utils/tagColors'
-
 /**
- * Level 4 Hierarchy: Systems List
+ * SystemsList — Level 4 of the Systems v2.0 hierarchy.
  *
- * Shows a paginated list of systems within the selected region.
- * Clicking a system navigates to the system detail page.
+ * Fetches /api/systems with the active filters + region scope, renders either
+ * a 3:2 poster card grid or a virtual-scroll table (react-window, dep already
+ * present in package.json).
+ *
+ * Grade letter overlay in the top-right of each card comes from the
+ * `completeness_grade` field the backend computes on every system. Star
+ * color pill in the top-left uses .pill-star-{color}.
+ *
+ * Per spec section 5.3, the table is virtual-scrolled — useful once a region
+ * has hundreds of systems. We render up to `MAX_TABLE_ROWS` (1000) before
+ * paginating cards-view to avoid drowning the user in cards.
  */
-export default function SystemsList({ reality, galaxy, region, discordTag = 'all', globalMode = false, globalModeTitle = null, filters = {} }) {
-  const [systems, setSystems] = useState([])
+
+import React, { useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
+import { useNavigate } from 'react-router-dom'
+import { FixedSizeList } from 'react-window'
+import { useSystems } from '../contexts/SystemsContext'
+import useFilters from '../hooks/useFilters'
+import LoadingSkeleton from './LoadingSkeleton'
+import EmptyState from './EmptyState'
+import CompareToggleButton from './CompareToggleButton'
+import { cardStateClass, hasOutdatedDot, hasConflictDot, stateBadge } from '../utils/dataStates'
+
+const CARDS_PAGE_SIZE = 24
+const TABLE_ROW_HEIGHT = 44
+
+const SORTS = {
+  'recent-desc': { label: 'Recently added ↓', param: { sort: 'recent', dir: 'desc' } },
+  'grade-desc': { label: 'Grade ↓', param: { sort: 'completeness', dir: 'desc' } },
+  'name-asc': { label: 'Name A-Z', param: { sort: 'name', dir: 'asc' } },
+}
+
+const GRADE_OVERLAY_STYLE = {
+  S: { background: 'var(--app-accent-amber)', color: '#422006' },
+  A: { background: '#34d399', color: '#022c22' },
+  B: { background: '#60a5fa', color: '#082f49' },
+  C: { background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.85)' },
+}
+
+export default function SystemsList() {
+  const { reality, galaxy, region, pushRecentlyViewed, clearFilters, compareMode, pinsByLevel, togglePin } = useSystems()
+  const { apiParams, activeFilterCount } = useFilters()
+  const pinning = compareMode === 'system'
+  const pinnedIds = new Set((pinsByLevel.system || []).map((p) => p.id))
+  const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [view, setView] = useState('cards')
+  const [sort, setSort] = useState('recent-desc')
   const [page, setPage] = useState(1)
-  const [pagination, setPagination] = useState({ total: 0, pages: 0 })
-  const limit = 50 // Systems per page
-  const { personalColor } = usePersonalColor()
+  // Track the backend's pagination.total so the header shows the real region
+  // size even when we hit the fetch cap below.
+  const [serverTotal, setServerTotal] = useState(null)
+  const navigate = useNavigate()
 
-  // Reset to page 1 when filters change
+  // M-S1: bumped from 500 → 2000 since some Euclid regions in production
+  // approach the old cap and silently truncated. 2000 covers the densest
+  // region we've seen with comfortable headroom. If we hit it, we surface
+  // a truncation banner using `serverTotal` so users know there's more.
+  const FETCH_CAP = 2000
+
   useEffect(() => {
-    setPage(1)
-  }, [JSON.stringify(filters)])
-
-  useEffect(() => {
-    // In global mode, we don't need a region - just load all systems for the filter
-    if (globalMode) {
-      loadSystems()
-    } else if (reality && galaxy && region) {
-      loadSystems()
-    }
-  }, [reality, galaxy, region, page, discordTag, globalMode, JSON.stringify(filters)])
-
-  async function loadSystems() {
+    if (!region) return
+    let cancelled = false
     setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: limit.toString(),
-        include_planets: 'false' // Don't load planets in list view
+    setServerTotal(null)
+    axios.get('/api/systems', {
+      params: {
+        reality, galaxy,
+        // Backend wants the full field names — short `rx/ry/rz` are only the
+        // URL query convention for this app.
+        region_x: region.region_x, region_y: region.region_y, region_z: region.region_z,
+        ...apiParams,
+        limit: FETCH_CAP,
+      },
+    })
+      .then((r) => {
+        if (cancelled) return
+        const data = r.data || {}
+        setRows(data.systems || data || [])
+        // pagination.total when present is the canonical count; bare array
+        // responses fall back to the list length.
+        const t = data?.pagination?.total
+        setServerTotal(typeof t === 'number' ? t : null)
       })
+      .catch(() => { if (!cancelled) { setRows([]); setServerTotal(null) } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [reality, galaxy, region?.region_x, region?.region_y, region?.region_z, JSON.stringify(apiParams)])
 
-      // In global mode, region is optional - just filter by discord tag
-      if (!globalMode && region) {
-        params.append('reality', reality)
-        params.append('galaxy', galaxy)
-        params.append('region_x', region.region_x.toString())
-        params.append('region_y', region.region_y.toString())
-        params.append('region_z', region.region_z.toString())
-      } else if (globalMode) {
-        // In global mode, optionally filter by reality/galaxy if provided
-        if (reality) params.append('reality', reality)
-        if (galaxy) params.append('galaxy', galaxy)
-      }
+  useEffect(() => { setPage(1) }, [region, sort, view, JSON.stringify(apiParams)])
 
-      if (discordTag && discordTag !== 'all') {
-        params.append('discord_tag', discordTag)
-      }
+  const sorted = useMemo(() => {
+    const list = [...rows]
+    if (sort === 'name-asc') list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    else if (sort === 'grade-desc') list.sort((a, b) => (b.completeness_score || 0) - (a.completeness_score || 0))
+    else list.sort((a, b) => (new Date(b.created_at || 0)) - (new Date(a.created_at || 0)))
+    return list
+  }, [rows, sort])
 
-      // Append advanced filter params
-      if (filters) {
-        Object.entries(filters).forEach(([key, value]) => {
-          if (value !== '' && value !== null && value !== undefined) {
-            params.append(key, value.toString())
-          }
-        })
-      }
-
-      const res = await axios.get(`/api/systems?${params.toString()}`)
-      setSystems(res.data.systems || [])
-      setPagination(res.data.pagination || { total: 0, pages: 0 })
-    } catch (err) {
-      console.error('Failed to load systems:', err)
-      setError('Failed to load system data')
-      setSystems([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Build planet-level filter query string for system detail links
-  const planetFilterQuery = useMemo(() => {
-    const planetKeys = ['biome', 'weather', 'sentinel_level', 'resource']
-    const params = new URLSearchParams()
-    if (filters) {
-      planetKeys.forEach(key => {
-        if (filters[key]) params.append(key, filters[key])
+  function handleClick(sys) {
+    if (pinning) {
+      togglePin('system', {
+        id: sys.id,
+        key: String(sys.id),
+        label: sys.name,
+        payload: sys,
       })
+      return
     }
-    const qs = params.toString()
-    return qs ? `?${qs}` : ''
-  }, [filters])
-
-  // Star type colors
-  const starColors = {
-    'Yellow': 'text-yellow-400',
-    'Red': 'text-red-400',
-    'Green': 'text-green-400',
-    'Blue': 'text-blue-400',
-    'Purple': 'text-purple-400'
+    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${sys.id}` })
+    navigate(`/systems/${encodeURIComponent(sys.id)}`)
   }
 
-  // Get stellar classification color based on first letter
-  function getStellarClassColor(stellarClass) {
-    if (!stellarClass) return 'text-gray-300';
-    const firstChar = stellarClass[0]?.toUpperCase();
-    switch(firstChar) {
-      case 'O': case 'B': return 'text-blue-300';
-      case 'F': case 'G': return 'text-yellow-300';
-      case 'K': case 'M': return 'text-red-400';
-      case 'E': return 'text-green-400';
-      case 'X': case 'Y': return 'text-purple-400';
-      default: return 'text-gray-300';
-    }
-  }
+  const total = sorted.length
+  const totalPages = Math.max(1, Math.ceil(total / CARDS_PAGE_SIZE))
+  const paged = useMemo(() => {
+    const start = (page - 1) * CARDS_PAGE_SIZE
+    return sorted.slice(start, start + CARDS_PAGE_SIZE)
+  }, [sorted, page])
 
-  // Economy colors
-  const economyColors = {
-    'Trading': 'bg-emerald-600',
-    'Mining': 'bg-amber-600',
-    'Technology': 'bg-blue-600',
-    'Manufacturing': 'bg-orange-600',
-    'Scientific': 'bg-purple-600',
-    'Power Generation': 'bg-yellow-600'
-  }
-
-  // Completeness grade config (NMS-style C-B-A-S)
-  const gradeConfig = {
-    'S': { label: 'S', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', tip: 'Archive Quality' },
-    'A': { label: 'A', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', tip: 'Well Documented' },
-    'B': { label: 'B', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', tip: 'Partial Data' },
-    'C': { label: 'C', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', tip: 'Basic Info' },
-  }
-
-  // Discord tag badge - memoized
-  const getDiscordTagBadge = useCallback((tag) => {
-    if (!tag) return null
-    if (tag === 'personal') {
-      return (
-        <span
-          className="text-xs text-white px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: personalColor }}
-        >
-          Personal
-        </span>
-      )
-    }
-    const colorClass = tagColors[tag] || 'bg-indigo-500 text-white'
-    return <span className={`text-xs px-1.5 py-0.5 rounded ${colorClass}`}>{tag}</span>
-  }, [personalColor])
-
-  // Pagination controls
-  const canPrevPage = page > 1
-  const canNextPage = page < pagination.pages
-  const totalPages = pagination.pages || 0
-
-  // Generate page numbers to display (show up to 7 pages with ellipsis) - memoized
-  const pageNumbers = useMemo(() => {
-    const pages = []
-    const currentPage = page
-
-    if (totalPages <= 7) {
-      // Show all pages if 7 or fewer
-      for (let i = 1; i <= totalPages; i++) pages.push(i)
-    } else {
-      // Always show first page
-      pages.push(1)
-
-      if (currentPage > 3) {
-        pages.push('...')
-      }
-
-      // Show pages around current - use Set for O(1) lookup instead of includes O(n)
-      const start = Math.max(2, currentPage - 1)
-      const end = Math.min(totalPages - 1, currentPage + 1)
-      const pagesSet = new Set(pages)
-
-      for (let i = start; i <= end; i++) {
-        if (!pagesSet.has(i)) {
-          pages.push(i)
-          pagesSet.add(i)
-        }
-      }
-
-      if (currentPage < totalPages - 2) {
-        pages.push('...')
-      }
-
-      // Always show last page
-      if (!pagesSet.has(totalPages)) pages.push(totalPages)
-    }
-
-    return pages
-  }, [page, totalPages])
-
-  if (loading && systems.length === 0) {
-    return (
-      <Card>
-        <div className="text-center py-8 text-gray-400">
-          <ArrowPathIcon className="w-6 h-6 animate-spin mx-auto mb-2" />
-          Loading systems...
-        </div>
-      </Card>
-    )
-  }
-
-  if (error) {
-    return (
-      <Card>
-        <div className="text-center py-8">
-          <p className="text-red-400 mb-4">{error}</p>
-          <button
-            onClick={loadSystems}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white"
-          >
-            Retry
-          </button>
-        </div>
-      </Card>
-    )
-  }
-
-  if (systems.length === 0) {
-    return (
-      <Card>
-        <div className="text-center py-8 text-gray-400">
-          <StarIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>No systems found in this region.</p>
-        </div>
-      </Card>
-    )
-  }
-
-  const regionName = region?.display_name || region?.custom_name ||
-    (region ? `Region (${region.region_x}, ${region.region_y}, ${region.region_z})` : '')
-
-  // Title for global mode or region mode
-  const displayTitle = globalMode
-    ? (globalModeTitle || `All ${discordTag} Systems`)
-    : `Systems in ${regionName}`
+  const regionName = region?.display_name || `(${region?.region_x ?? '?'}, ${region?.region_y ?? '?'}, ${region?.region_z ?? '?'})`
 
   return (
-    <div className="space-y-4">
+    <section className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-white">
-              {displayTitle}
-            </h2>
-            <p className="text-sm text-gray-400">
-              {pagination.total} systems total &bull; Page {page} of {pagination.pages || 1}
-            </p>
+        <div>
+          <h2 className="text-lg font-semibold">Systems in {regionName}</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+            {/* Prefer server-side total — when we truncated, `total` (the
+                local sorted length) is less than the real count.  */}
+            {(serverTotal ?? total).toLocaleString()} systems
+            {serverTotal != null && serverTotal > rows.length && (
+              <span style={{ color: 'var(--app-accent-amber)' }}>
+                {' '}(showing first {rows.length.toLocaleString()}; refine filters to see more)
+              </span>
+            )}
+            {activeFilterCount > 0 && <span style={{ color: 'var(--app-primary)' }}> · filtered</span>}
+            {view === 'cards' && totalPages > 1 && ` · Page ${page} of ${totalPages}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-xs flex-wrap">
+          <CompareToggleButton targetLevel="system" />
+          <span style={{ color: 'var(--muted)' }}>View:</span>
+          <button
+            type="button"
+            onClick={() => setView('cards')}
+            className={view === 'cards' ? 'px-2.5 py-1 rounded text-xs font-medium' : 'px-2.5 py-1 rounded text-xs haven-btn-ghost'}
+            style={view === 'cards' ? { background: 'var(--app-primary-dim)', color: 'var(--app-primary)', border: '1px solid rgba(0, 194, 179, 0.3)' } : undefined}
+          >
+            Cards
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('table')}
+            className={view === 'table' ? 'px-2.5 py-1 rounded text-xs font-medium' : 'px-2.5 py-1 rounded text-xs haven-btn-ghost'}
+            style={view === 'table' ? { background: 'var(--app-primary-dim)', color: 'var(--app-primary)', border: '1px solid rgba(0, 194, 179, 0.3)' } : undefined}
+          >
+            Table
+          </button>
+          <span style={{ color: 'var(--muted)' }} className="ml-2">Sort:</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="haven-input text-xs py-1 px-2">
+            {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <LoadingSkeleton variant="system" count={8} />
+      ) : sorted.length === 0 ? (
+        <EmptyState
+          variant="system"
+          title="No systems match these filters"
+          message="No system in this region matches your criteria. Try widening filters or jump up to galaxy scope."
+          actionLabel={activeFilterCount > 0 ? 'Clear all filters' : undefined}
+          onAction={activeFilterCount > 0 ? clearFilters : undefined}
+        />
+      ) : view === 'cards' ? (
+        <>
+          {/* Grid caps at 3 columns on PC (was xl:grid-cols-4). Parker
+              2026-05-11: at 4-up the system_thumb poster squashed to
+              ~250 px wide which made the 6 stat tiles unreadable.
+              Mobile breakpoints unchanged. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {paged.map((s) => <SystemCard key={s.id} s={s} onClick={() => handleClick(s)} pinned={pinnedIds.has(s.id)} pinning={pinning} />)}
           </div>
-          {/* 3D Region Map button - only show when viewing a specific region */}
-          {!globalMode && region && (
-            <a
-              href={`/map/region?rx=${region.region_x}&ry=${region.region_y}&rz=${region.region_z}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white text-sm font-medium transition-colors flex items-center gap-1.5"
-              title="View region in 3D map"
-            >
-              <GlobeAltIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">3D Map</span>
-            </a>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-1 pt-2">
+              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1.5 rounded haven-btn-ghost text-sm disabled:opacity-40">←</button>
+              <span className="text-xs mono px-3" style={{ color: 'var(--muted)' }}>{page} / {totalPages}</span>
+              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="px-3 py-1.5 rounded haven-btn-ghost text-sm disabled:opacity-40">→</button>
+            </div>
+          )}
+        </>
+      ) : (
+        <SystemTable rows={sorted} onSelect={handleClick} />
+      )}
+    </section>
+  )
+}
+
+function SystemCard({ s, onClick, pinned, pinning }) {
+  const stateCls = cardStateClass(s)
+  const badge = stateBadge(s)
+  const gradeStyle = GRADE_OVERLAY_STYLE[s.completeness_grade] || GRADE_OVERLAY_STYLE.C
+  const starCls = `pill-star-${(s.star_type || 'yellow').toLowerCase()}`
+  const planetCount = s.planet_count ?? 0
+  const moonCount = s.moon_count ?? 0
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`haven-card haven-card-hover overflow-hidden p-0 text-left relative ${stateCls}`.trim()}
+      style={pinned ? { outline: '2px solid var(--app-primary)', outlineOffset: '-2px' } : undefined}
+      aria-pressed={pinning ? pinned : undefined}
+    >
+      {hasOutdatedDot(s) && <span className="outdated-dot" />}
+      {hasConflictDot(s) && <span className="conflict-dot" />}
+      {badge && <span className={`state-badge ${badge.kind}`}>{badge.label}</span>}
+      {pinning && pinned && (
+        <span className="absolute top-2 left-2 z-20 pill-teal-solid text-[10px] mono px-1.5 py-0.5 rounded">PINNED</span>
+      )}
+
+      <div className="aspect-[3/2] relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f1538, var(--app-bg))' }}>
+        {/* Live-rendered system_thumb poster — first view triggers headless
+            render (lazy). New systems get pre-rendered on approval, so the
+            common path is instant. Errors fall back to the stub gradient. */}
+        <img
+          src={`/api/posters/system_thumb/${encodeURIComponent(s.id)}.png`}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = 'none' }}
+        />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(0, 194, 179, 0.06), transparent)' }} />
+        <div className="absolute top-3 left-3 z-10">
+          {s.star_type && (
+            <span className={`pill ${starCls}`}>
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg>
+              {s.star_type}
+            </span>
           )}
         </div>
-
-        {/* Pagination controls */}
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={!canPrevPage}
-              className={`p-2 rounded ${canPrevPage ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'}`}
-            >
-              <ChevronLeftIcon className="w-5 h-5" />
-            </button>
-            {/* Page numbers */}
-            {pageNumbers.map((pageNum, idx) => (
-              pageNum === '...' ? (
-                <span key={`ellipsis-${idx}`} className="px-2 text-gray-500">...</span>
-              ) : (
-                <button
-                  key={pageNum}
-                  onClick={() => setPage(pageNum)}
-                  className={`px-3 py-1 rounded text-sm ${
-                    page === pageNum
-                      ? 'bg-cyan-600 text-white font-medium'
-                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              )
-            ))}
-            <button
-              onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
-              disabled={!canNextPage}
-              className={`p-2 rounded ${canNextPage ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'}`}
-            >
-              <ChevronRightIcon className="w-5 h-5" />
-            </button>
+        {s.completeness_grade && (
+          <div className="absolute top-3 right-3 z-10">
+            <span className="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold mono" style={gradeStyle}>
+              {s.completeness_grade}
+            </span>
+          </div>
+        )}
+        {s.glyph_code && (
+          <div className="absolute bottom-3 left-3 right-3 z-10">
+            <span className="mono text-[10px] px-2 py-1 rounded backdrop-blur" style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.85)' }}>
+              {s.glyph_code}
+            </span>
           </div>
         )}
       </div>
 
-      {loading && (
-        <div className="text-center py-2 text-cyan-400 text-sm">
-          <ArrowPathIcon className="w-4 h-4 animate-spin inline mr-2" />
-          Updating...
+      {/* Card text section — bumped contrast and font sizes per Parker
+          (2026-05-11) since the cards felt cramped under the poster. Labels
+          stay subtly muted; values are bright white for legibility. */}
+      <div className="p-4">
+        <div className="flex items-start justify-between mb-3 gap-2">
+          <h3 className="text-lg font-semibold truncate flex-1 min-w-0" style={{ color: 'var(--app-text)' }}>{s.name}</h3>
+          {s.discord_tag && s.discord_tag !== 'personal' && (
+            <span className="pill pill-purple shrink-0 text-[11px]">{s.discord_tag}</span>
+          )}
         </div>
-      )}
-
-      <div className="space-y-2">
-        {systems.map(system => {
-          const starColor = starColors[system.star_type] || 'text-gray-400'
-          const economyColor = economyColors[system.economy_type] || 'bg-gray-600'
-
-          return (
-            <Link
-              key={system.id}
-              to={`/systems/${system.id}${planetFilterQuery}`}
-              className="block p-4 bg-gray-800 border border-gray-700 rounded-lg hover:border-cyan-500 hover:bg-gray-750 transition-all group"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 min-w-0 flex-1">
-                  {/* Star icon */}
-                  <div className="shrink-0 mt-1">
-                    {system.star_type ? (
-                      <StarIconSolid className={`w-6 h-6 ${starColor}`} />
-                    ) : (
-                      <StarIcon className="w-6 h-6 text-gray-500" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-white group-hover:text-cyan-400 transition-colors truncate">
-                        {system.name || 'Unnamed System'}
-                      </h3>
-                      {getDiscordTagBadge(system.discord_tag)}
-                      {(() => {
-                        const grade = gradeConfig[system.completeness_grade] || gradeConfig['C']
-                        const score = system.completeness_score || 0
-                        return (
-                          <span
-                            className={`text-xs px-1.5 py-0.5 rounded border font-bold ${grade.color}`}
-                            title={`${grade.tip} (${score}%)`}
-                          >
-                            {grade.label}
-                          </span>
-                        )
-                      })()}
-                    </div>
-
-                    {/* Glyph code */}
-                    {system.glyph_code && (
-                      <p className="text-xs font-mono text-gray-500 mt-0.5">
-                        {system.glyph_code}
-                      </p>
-                    )}
-
-                    {/* System properties */}
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      {system.star_type && (
-                        <span className={`text-xs px-2 py-0.5 rounded bg-gray-700 ${starColor}`}>
-                          {system.star_type}
-                        </span>
-                      )}
-                      {system.economy_type && (
-                        <span className={`text-xs px-2 py-0.5 rounded ${economyColor} text-white`}>
-                          {system.economy_type}
-                        </span>
-                      )}
-                      {system.conflict_level && (
-                        <span className={`text-xs px-2 py-0.5 rounded ${
-                          system.conflict_level === 'High' ? 'bg-red-600' :
-                          system.conflict_level === 'Medium' ? 'bg-yellow-600' : 'bg-green-600'
-                        } text-white`}>
-                          {system.conflict_level} Conflict
-                        </span>
-                      )}
-                      {system.dominant_lifeform && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300">
-                          {system.dominant_lifeform}
-                        </span>
-                      )}
-                      {system.stellar_classification && (
-                        <span className={`text-xs px-2 py-0.5 rounded bg-gray-700 font-mono ${getStellarClassColor(system.stellar_classification)}`}>
-                          {system.stellar_classification}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Uploader info */}
-                    {system.discovered_by && (
-                      <p className="text-xs text-gray-500 mt-1.5">
-                        Uploaded by <span className="text-gray-400">{system.discovered_by}</span>
-                        {system.discovered_at && (() => {
-                          try {
-                            const d = new Date(system.discovered_at)
-                            if (!isNaN(d.getTime())) {
-                              return <span> · {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                            }
-                          } catch {}
-                          return null
-                        })()}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3D System Map button */}
-                <a
-                  href={`/map/system/${system.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="shrink-0 px-3 py-2 rounded bg-cyan-600 hover:bg-cyan-500 transition-colors text-white text-xs font-medium"
-                  title="View system in 3D"
-                >
-                  View
-                </a>
-              </div>
-            </Link>
-          )
-        })}
+        <div className="space-y-2 text-sm mb-3">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 8v8m-4-4h8M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span style={{ color: 'rgba(255,255,255,0.92)' }}>
+              {s.economy_type || '—'}{s.economy_level ? ` / ${s.economy_level}` : ''}
+            </span>
+            <span className="ml-auto" style={{ color: 'rgba(255,255,255,0.78)' }}>
+              {s.conflict_level || '—'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+            <span style={{ color: 'rgba(255,255,255,0.92)' }}>
+              {planetCount} planet{planetCount === 1 ? '' : 's'}{moonCount ? ` · ${moonCount} moon${moonCount === 1 ? '' : 's'}` : ''}
+            </span>
+            <span className="ml-auto" style={{ color: 'rgba(255,255,255,0.78)' }}>
+              {s.dominant_lifeform || '—'}
+            </span>
+          </div>
+        </div>
+        <div className="pt-3 flex items-center justify-between text-[11px]" style={{ borderTop: '1px solid var(--border-soft)', color: 'rgba(255,255,255,0.7)' }}>
+          <span className="mono">{s.completeness_score != null ? `${s.completeness_score}% complete` : '—'}</span>
+          <span className="truncate ml-2">{s.discovered_by || s.personal_discord_username || '—'}</span>
+        </div>
       </div>
+    </button>
+  )
+}
 
-      {/* Bottom pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-1 pt-4 flex-wrap">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={!canPrevPage}
-            className={`px-3 py-2 rounded ${canPrevPage ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'}`}
-          >
-            Previous
-          </button>
-          {/* Page numbers */}
-          {pageNumbers.map((pageNum, idx) => (
-            pageNum === '...' ? (
-              <span key={`ellipsis-bottom-${idx}`} className="px-2 text-gray-500">...</span>
-            ) : (
-              <button
-                key={`bottom-${pageNum}`}
-                onClick={() => setPage(pageNum)}
-                className={`px-3 py-2 rounded text-sm ${
-                  page === pageNum
-                    ? 'bg-cyan-600 text-white font-medium'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                }`}
-              >
-                {pageNum}
-              </button>
-            )
-          ))}
-          <button
-            onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
-            disabled={!canNextPage}
-            className={`px-3 py-2 rounded ${canNextPage ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'}`}
-          >
-            Next
-          </button>
+function SystemTable({ rows, onSelect }) {
+  const tooBigForCards = rows.length > 200
+  return (
+    <div className="haven-card overflow-hidden p-0">
+      <div className="px-3 py-1.5 flex items-center justify-between text-[10px] mono" style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--muted)', borderBottom: '1px solid var(--border-soft)' }}>
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--app-primary)' }} />
+          {tooBigForCards ? 'Virtual scroll enabled — only visible rows render' : `Showing ${rows.length} systems`}
+        </span>
+      </div>
+      <div className="overflow-x-auto scrollbar-thin">
+        <table className="w-full text-sm" style={{ minWidth: 720 }}>
+          <thead>
+            <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid var(--border-soft)' }}>
+              <Th>System</Th>
+              <Th>Glyph</Th>
+              <Th>Star</Th>
+              <Th>Economy</Th>
+              <Th>Lifeform</Th>
+              <Th right>Planets</Th>
+              <Th center>Grade</Th>
+              <Th>Discoverer</Th>
+              <Th>Tag</Th>
+              <th className="px-2 py-2.5" />
+            </tr>
+          </thead>
+        </table>
+      </div>
+      {tooBigForCards ? (
+        <FixedSizeList
+          height={Math.min(rows.length * TABLE_ROW_HEIGHT, 600)}
+          width="100%"
+          itemSize={TABLE_ROW_HEIGHT}
+          itemCount={rows.length}
+        >
+          {({ index, style }) => (
+            <div style={style}>
+              <SystemRow s={rows[index]} onSelect={onSelect} />
+            </div>
+          )}
+        </FixedSizeList>
+      ) : (
+        <div className="overflow-x-auto scrollbar-thin">
+          <table className="w-full text-sm" style={{ minWidth: 720 }}>
+            <tbody>
+              {rows.map((s) => (
+                <SystemRow key={s.id} s={s} onSelect={onSelect} asRow />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
+  )
+}
+
+function SystemRow({ s, onSelect, asRow }) {
+  const grade = s.completeness_grade
+  const cells = (
+    <>
+      <td className="px-4 py-2.5 font-medium truncate">{s.name}</td>
+      <td className="px-3 py-2.5 mono text-xs" style={{ color: 'var(--muted)' }}>{s.glyph_code || '—'}</td>
+      <td className="px-3 py-2.5">
+        {s.star_type ? <span className={`pill pill-star-${s.star_type.toLowerCase()} text-[10px] px-2 py-0.5`}>{s.star_type}</span> : '—'}
+      </td>
+      <td className="px-3 py-2.5"><span>{s.economy_type || '—'}</span>{s.economy_level && <span className="mono text-[10px] ml-1" style={{ color: 'var(--muted)' }}>{s.economy_level}</span>}</td>
+      <td className="px-3 py-2.5">{s.dominant_lifeform || '—'}</td>
+      <td className="px-3 py-2.5 text-right mono">{s.planet_count ?? 0}{s.moon_count ? ` / ${s.moon_count}m` : ''}</td>
+      <td className="px-3 py-2.5 text-center">
+        {grade && (
+          <span className="w-6 h-6 rounded-md inline-flex items-center justify-center text-xs font-bold mono" style={GRADE_OVERLAY_STYLE[grade] || GRADE_OVERLAY_STYLE.C}>{grade}</span>
+        )}
+      </td>
+      <td className="px-3 py-2.5 text-xs truncate" style={{ color: 'var(--muted)' }}>{s.discovered_by || s.personal_discord_username || '—'}</td>
+      <td className="px-3 py-2.5">{s.discord_tag && s.discord_tag !== 'personal' ? <span className="pill pill-purple text-[10px]">{s.discord_tag}</span> : '—'}</td>
+      <td className="px-2 py-2.5">
+        <svg className="w-4 h-4" style={{ color: 'var(--muted)' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </td>
+    </>
+  )
+  if (asRow) {
+    return (
+      <tr
+        onClick={() => onSelect(s)}
+        className="cursor-pointer hover:bg-white/5 transition-colors"
+        style={{ borderBottom: '1px solid var(--border-soft)' }}
+      >
+        {cells}
+      </tr>
+    )
+  }
+  // Virtual-scroll path: render as a positioned table row inside an absolutely
+  // sized container. react-window expects a flat div, so we wrap as a table.
+  return (
+    <table className="w-full text-sm" style={{ minWidth: 720, height: TABLE_ROW_HEIGHT }}>
+      <tbody>
+        <tr
+          onClick={() => onSelect(s)}
+          className="cursor-pointer hover:bg-white/5 transition-colors"
+          style={{ borderBottom: '1px solid var(--border-soft)' }}
+        >
+          {cells}
+        </tr>
+      </tbody>
+    </table>
+  )
+}
+
+function Th({ children, right, center }) {
+  const align = right ? 'text-right' : center ? 'text-center' : 'text-left'
+  return (
+    <th className={`${align} px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold`} style={{ color: 'var(--muted)' }}>
+      {children}
+    </th>
   )
 }

@@ -1060,7 +1060,8 @@ export default function SystemApprovalTab({
                         <option value="Gek">Gek</option>
                         <option value="Vy'keen">Vy'keen</option>
                         <option value="Korvax">Korvax</option>
-                        <option value="None">None</option>
+                        <option value="None">None (no race)</option>
+                        <option value="Abandoned">Abandoned (empty buildings)</option>
                       </select>
                     </label>
                     <label className="block"><span className="text-gray-400">Spectral Class:</span>

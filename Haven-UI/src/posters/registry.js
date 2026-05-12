@@ -16,6 +16,8 @@ const OGSiteCard = lazy(() => import('./OGSiteCard'))
 const OGSystemCard = lazy(() => import('./OGSystemCard'))
 const OGCommunityCard = lazy(() => import('./OGCommunityCard'))
 const LandingOG = lazy(() => import('./LandingOG'))
+const RegionThumb = lazy(() => import('./RegionThumb'))
+const SystemThumb = lazy(() => import('./SystemThumb'))
 
 export const POSTER_REGISTRY = {
   voyager: { component: VoyagerPoster, width: 680, height: 1040 },
@@ -26,6 +28,8 @@ export const POSTER_REGISTRY = {
   og_system: { component: OGSystemCard, width: 1200, height: 630 },
   og_community: { component: OGCommunityCard, width: 1200, height: 630 },
   landing_og: { component: LandingOG, width: 1200, height: 630 },
+  region_thumb: { component: RegionThumb, width: 600, height: 300 },
+  system_thumb: { component: SystemThumb, width: 720, height: 480 },
 }
 
 export function getPosterEntry(type) {

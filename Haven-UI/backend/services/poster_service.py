@@ -160,6 +160,39 @@ REGISTRY: dict[str, PosterTemplate] = {
         ttl_hours=24,
         description='Per-community OG card for /community-stats/:tag share embeds',
     ),
+    'region_thumb': PosterTemplate(
+        type='region_thumb',
+        # v3 (Parker 2026-05-11): cube bumped 200→280 px (was leaving a
+        # third of the canvas empty), dot radius 1.5→2, recenter cx 130→165.
+        # v2: star-color dots (was: community-tag dots); community color
+        # moved to outer frame.
+        version=3,
+        width=600,
+        height=300,
+        # Region thumbs are keyed by `rx_ry_rz` and pass `galaxy`+`reality`
+        # via the query string — see RegionThumb.jsx. The SPA route ignores
+        # the query string but Playwright passes the full URL we build, so
+        # the component still receives them through useSearchParams.
+        spa_route='/poster/region_thumb/{key}',
+        ttl_hours=24,
+        description='Region thumbnail — 600x300 isometric voxel view of all systems in a region',
+    ),
+    'system_thumb': PosterTemplate(
+        type='system_thumb',
+        # v4 (Parker 2026-05-11 round 3): the v3 font bump never actually
+        # reached this poster — SystemThumb had its own local Stat() func
+        # that v2/v3 edits to the shared StatTile never touched. Replaced
+        # the local with the shared component so the 19/24/16 fonts
+        # finally land on the L4 cards.
+        version=4,
+        width=720,
+        height=480,
+        # Keyed by system_id. Pulls /api/systems/{id} and renders an orbital
+        # diagram + stat tiles + glyph row.
+        spa_route='/poster/system_thumb/{key}',
+        ttl_hours=24,
+        description='System thumbnail — 600x400 landscape with orbital diagram and stats',
+    ),
 }
 
 
@@ -264,23 +297,45 @@ def _cache_lookup(poster_type: str, cache_key: str) -> Optional[dict]:
 
 def _cache_write(poster_type: str, cache_key: str, template_version: int,
                  data_hash: str, file_path: str, render_ms: int) -> None:
-    """UPSERT a cache row."""
+    """UPSERT a cache row.
+
+    For region_thumb we additionally snapshot the current system_count so the
+    threshold-based invalidation in routes/approvals.py knows when to drop.
+    """
+    system_count_at_render = None
+    if poster_type == 'region_thumb':
+        # cache_key is `rx_ry_rz`; count systems in that region
+        try:
+            parts = cache_key.split('_')
+            if len(parts) == 3:
+                rx, ry, rz = int(parts[0]), int(parts[1]), int(parts[2])
+                with get_db_connection() as conn:
+                    c = conn.cursor()
+                    c.execute(
+                        'SELECT COUNT(*) FROM systems WHERE region_x = ? AND region_y = ? AND region_z = ?',
+                        (rx, ry, rz),
+                    )
+                    system_count_at_render = c.fetchone()[0]
+        except Exception as e:
+            logger.warning(f"Could not snapshot system_count for region_thumb {cache_key}: {e}")
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO poster_cache
-                (poster_type, cache_key, template_version, generated_at, data_hash, file_path, render_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (poster_type, cache_key, template_version, generated_at, data_hash, file_path, render_ms, system_count_at_render)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(poster_type, cache_key) DO UPDATE SET
                 template_version = excluded.template_version,
                 generated_at = excluded.generated_at,
                 data_hash = excluded.data_hash,
                 file_path = excluded.file_path,
-                render_ms = excluded.render_ms
+                render_ms = excluded.render_ms,
+                system_count_at_render = excluded.system_count_at_render
         ''', (
             poster_type, cache_key, template_version,
             datetime.now(timezone.utc).isoformat(),
-            data_hash, file_path, render_ms,
+            data_hash, file_path, render_ms, system_count_at_render,
         ))
         conn.commit()
 
@@ -301,6 +356,97 @@ def _cache_delete(poster_type: str, cache_key: str) -> Optional[str]:
         )
         conn.commit()
         return file_path
+
+
+# ============================================================================
+# Disk size cap — protect the Pi from unbounded poster cache growth.
+#
+# Parker (2026-05-11): 4 GB ceiling, hysteresis to 3.5 GB after eviction to
+# avoid thrash. Eviction order is generated_at-ascending (oldest first),
+# which approximates LRU well — every cache write touches generated_at, so
+# recently-rendered posters survive. Per-row file delete + DB row delete.
+# ============================================================================
+
+POSTER_CACHE_CEILING_BYTES = 4 * 1024 * 1024 * 1024   # 4 GB hard cap
+POSTER_CACHE_FLOOR_BYTES = int(3.5 * 1024 * 1024 * 1024)  # evict down to 3.5 GB
+EVICTION_CHECK_INTERVAL_S = 1800  # 30 minutes
+
+
+def get_cache_disk_usage() -> int:
+    """Sum bytes of every PNG under Haven-UI/data/posters/. Cheap walk."""
+    total = 0
+    posters_dir = get_posters_dir()
+    for p in posters_dir.rglob('*.png'):
+        try:
+            total += p.stat().st_size
+        except (FileNotFoundError, PermissionError):
+            pass
+    return total
+
+
+def evict_oldest_until_under(target_bytes: int) -> dict:
+    """Delete oldest cache entries until cache disk usage drops below target.
+
+    Skips og_site / landing_og (global, cheap to keep) and atlas (the per-
+    galaxy posters get hit often enough). Returns a small report dict.
+    """
+    keep_types = {'og_site', 'landing_og'}
+    initial = get_cache_disk_usage()
+    if initial <= target_bytes:
+        return {'evicted': 0, 'initial_bytes': initial, 'final_bytes': initial}
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT poster_type, cache_key, file_path
+            FROM poster_cache
+            ORDER BY generated_at ASC
+        ''')
+        rows = cursor.fetchall()
+
+    evicted = 0
+    current = initial
+    for row in rows:
+        if current <= target_bytes:
+            break
+        if row['poster_type'] in keep_types:
+            continue
+        try:
+            file_path = row['file_path']
+            if file_path:
+                p = Path(file_path)
+                if p.exists():
+                    size = p.stat().st_size
+                    p.unlink()
+                    current -= size
+            with get_db_connection() as conn2:
+                conn2.cursor().execute(
+                    'DELETE FROM poster_cache WHERE poster_type = ? AND cache_key = ?',
+                    (row['poster_type'], row['cache_key']),
+                )
+                conn2.commit()
+            evicted += 1
+        except Exception as e:
+            logger.warning(f"Eviction failed for {row['poster_type']}/{row['cache_key']}: {e}")
+
+    final = get_cache_disk_usage()
+    logger.info(f"Poster eviction: dropped {evicted} entries, {initial} → {final} bytes")
+    return {'evicted': evicted, 'initial_bytes': initial, 'final_bytes': final}
+
+
+async def periodic_eviction_task(interval_seconds: int = EVICTION_CHECK_INTERVAL_S):
+    """Background loop. Schedule via the app's startup lifespan."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            current = get_cache_disk_usage()
+            if current > POSTER_CACHE_CEILING_BYTES:
+                logger.info(f"Poster cache at {current} bytes (> {POSTER_CACHE_CEILING_BYTES}); evicting…")
+                evict_oldest_until_under(POSTER_CACHE_FLOOR_BYTES)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Eviction task tick failed (continuing): {e}")
 
 
 def invalidate(poster_type: str, cache_key: str) -> bool:
