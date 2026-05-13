@@ -782,6 +782,6 @@ async def setup(bot):
     await bot.add_cog(
         TravelersExchangeAPI(
             bot,
-            api_key=""
+            api_key="tx_live_c7f3247ac8aa28027e83e83e7f907192"
         )
     )
