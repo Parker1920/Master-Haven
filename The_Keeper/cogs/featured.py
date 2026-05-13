@@ -184,7 +184,7 @@ class FeaturedCog(commands.Cog):
             total_reactions = self.count_total_reactions(msg)
             if total_reactions > 0:
                 photo_data.append({
-                    "author": str(msg.author),
+                    "author": msg.author.mention,
                     "reactions": total_reactions,
                     "url": msg.jump_url,
                     "image_url": msg.attachments[0].url
@@ -219,7 +219,11 @@ class FeaturedCog(commands.Cog):
             for rank, photo in enumerate(top_photos, start=1):
                 embed.add_field(
                     name=f"{rank}.",
-                    value=f"[Jump to photo]({photo['url']}) — {photo['reactions']} reactions",
+                    value=(
+                        f"{photo['author']}\n"
+                        f"[Jump to photo]({photo['url']}) — "
+                        f"{photo['reactions']} reactions"
+                    ),
                     inline=False
                 )
                 if rank == 1 and photo["image_url"]:
