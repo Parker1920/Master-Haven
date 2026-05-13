@@ -269,9 +269,9 @@ class FeaturedCog(commands.Cog):
         self.log("LEADERBOARD", f"Leaderboard posted with {len(top_photos)} photos")
     
         @commands.command(name="pictest")
-    @commands.has_permissions(administrator=True)
-    async def pictest(self, ctx, limit: int = None):
-        await     self.post_leaderboard(channel=ctx.channel, limit=limit)
+        @commands.has_permissions(administrator=True)
+        async def pictest(self, ctx, limit: int = None):
+            await         self.post_leaderboard(channel=ctx.channel, limit=limit)
 
 
 # -------------------- SETUP --------------------
