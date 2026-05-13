@@ -345,7 +345,7 @@ async def setup(bot: commands.Bot):
     PHOTO_CHANNEL_ID = int(os.getenv("PHOTO_CHANNEL_ID", "0"))
     FEATURED_CHANNEL_ID = int(os.getenv("FEATURED_CHANNEL_ID", "0"))
     FEATURED_THRESHOLD = int(os.getenv("FEATURED_THRESHOLD", "5"))
-    FEATURED_TIME_LIMIT = int(os.getenv("FEATURED_TIME_LIMIT", str(7*24*60*60)))  
+    FEATURED_TIME_LIMIT = int(os.getenv("FEATURED_TIME_LIMIT", str(7 * 24 * 60 * 60)))
 
     def log(tag, msg):
         print(f"[{tag}] {msg}")
@@ -363,4 +363,4 @@ async def setup(bot: commands.Bot):
         count_total_reactions
     )
 
-    await bot.add_cog(FeaturedCog(bot))
+    await bot.add_cog(cog)
