@@ -375,7 +375,7 @@ class CommunityCog(commands.Cog):
                         value=value,
                         inline=False
                     )
-        return e          
+            return e          
 
             link = next(
                 (
