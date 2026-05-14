@@ -374,7 +374,8 @@ class CommunityCog(commands.Cog):
                         name=label_map.get(k, k),
                         value=value,
                         inline=False
-                    )          
+                    )
+        return e          
 
             link = next(
                 (
