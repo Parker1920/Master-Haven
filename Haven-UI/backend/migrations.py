@@ -6356,3 +6356,23 @@ def migration_1_81_0(conn):
     fixed += cursor.rowcount
     if fixed:
         logger.info(f"Migration 1.81.0: re-scrubbed {fixed} 'RealityMode.Normal' rows")
+
+
+@register_migration("1.82.0", "Add pending_systems.discoveries_draft column for co-submitted discoveries")
+def migration_1_82_0(conn):
+    """Wizard public submit path can now co-submit discoveries with the
+    system. Draft discoveries ride along on the pending_systems row as a JSON
+    array; on approval the helper resolves planet/moon names to IDs against
+    the just-inserted planets/moons and inserts directly into `discoveries`
+    with status='approved' — they inherit the system's review decision.
+
+    Idempotent: column-presence guarded. Nullable, no default, no backfill.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(pending_systems)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'discoveries_draft' not in cols:
+        cursor.execute("ALTER TABLE pending_systems ADD COLUMN discoveries_draft TEXT")
+        logger.info("Migration 1.82.0: added pending_systems.discoveries_draft column")
+    else:
+        logger.info("Migration 1.82.0: discoveries_draft column already present")

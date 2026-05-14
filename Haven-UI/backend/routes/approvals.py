@@ -10,7 +10,15 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Cookie, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from constants import normalize_discord_username, validate_galaxy, validate_reality, normalize_reality, GALAXY_BY_INDEX, resolve_source
+from constants import (
+    normalize_discord_username,
+    validate_galaxy,
+    validate_reality,
+    normalize_reality,
+    GALAXY_BY_INDEX,
+    resolve_source,
+    get_discovery_type_slug,
+)
 from db import (
     get_db_path,
     get_db_connection,
@@ -52,6 +60,278 @@ from services.dispatch import fire_and_forget
 logger = logging.getLogger('control.room')
 
 router = APIRouter(tags=["approvals"])
+
+
+# ============================================================================
+# Co-submitted discovery drafts (Wizard v1.64.0)
+# ============================================================================
+#
+# The wizard public submit path attaches an array of in-progress discoveries
+# to a system submission. Each entry references the target planet/moon by
+# NAME (not DB id) because the planets don't exist as rows yet — they're
+# embedded inside the submission's system_data blob and only get IDs at
+# approval time.
+#
+# Cap is intentionally low (20). The wizard would be unusable past that and
+# the JSON column would bloat pending_systems queries.
+# ============================================================================
+
+MAX_DISCOVERIES_DRAFT = 20
+_DRAFT_LOCATION_TYPES = {'planet', 'moon', 'space'}
+
+
+def _sanitize_discoveries_draft(raw) -> tuple[Optional[list], Optional[str]]:
+    """Validate and normalize the incoming discoveries_draft payload.
+
+    Returns (sanitized_list_or_None, error_string_or_None). When raw is
+    missing or empty, returns (None, None) — no draft is fine. On any shape
+    violation returns (None, error) so the caller can 400.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list):
+        return None, "discoveries_draft must be a list"
+    if len(raw) == 0:
+        return None, None
+    if len(raw) > MAX_DISCOVERIES_DRAFT:
+        return None, f"discoveries_draft cannot exceed {MAX_DISCOVERIES_DRAFT} entries"
+    out = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            return None, f"discoveries_draft[{i}] must be an object"
+        dname = (entry.get('discovery_name') or '').strip()
+        dtype = (entry.get('discovery_type') or '').strip()
+        if not dname:
+            return None, f"discoveries_draft[{i}].discovery_name is required"
+        if not dtype:
+            return None, f"discoveries_draft[{i}].discovery_type is required"
+        loc = (entry.get('location_type') or 'planet').strip().lower()
+        if loc not in _DRAFT_LOCATION_TYPES:
+            return None, f"discoveries_draft[{i}].location_type must be planet/moon/space"
+        # When location_type=space we always null both names regardless of
+        # any stale state that leaked through the frontend.
+        if loc == 'space':
+            planet_name = None
+            moon_name = None
+        else:
+            planet_name = (entry.get('planet_name') or '').strip() or None
+            moon_name = (entry.get('moon_name') or '').strip() or None
+            if loc == 'moon' and not moon_name:
+                # Allow it through with null moon link — backend resolution
+                # logs a warning and inserts NULL moon_id. The reviewer can
+                # see the mismatch in the admin card.
+                pass
+        type_metadata = entry.get('type_metadata')
+        if type_metadata is not None and not isinstance(type_metadata, dict):
+            return None, f"discoveries_draft[{i}].type_metadata must be an object"
+        out.append({
+            'discovery_name': dname[:200],
+            'discovery_type': dtype[:50],
+            'description': (entry.get('description') or '') or None,
+            'planet_name': planet_name,
+            'moon_name': moon_name,
+            'location_type': loc,
+            'location_name': (entry.get('location_name') or '') or None,
+            'photo_url': entry.get('photo_url') or None,
+            'evidence_urls': entry.get('evidence_urls') or None,
+            'type_metadata': type_metadata if type_metadata else None,
+            'game_version': entry.get('game_version') or None,
+            'submit_for_record': bool(entry.get('submit_for_record')),
+        })
+    return out, None
+
+
+def _promote_draft_discoveries(cursor, system_id, submission, current_username):
+    """Promote a pending submission's discoveries_draft into live `discoveries`.
+
+    Called inside the same transaction that just inserted/updated the system
+    and its planets/moons, before the commit. Each draft becomes one row in
+    `discoveries` with status='approved' (analysis_status), inheriting
+    submitter identity from the parent pending row.
+
+    Resolution rules:
+      - location_type='planet' → match planet_name against planets.name for
+        this system_id. NULL planet_id on no match (logged).
+      - location_type='moon'   → match (parent_planet_name, moon_name)
+        against the planets×moons join for this system_id. NULL moon_id on
+        no match (logged).
+      - location_type='space'  → both NULL.
+
+    Returns (promoted, missing_links) counts for caller logging.
+    """
+    raw = submission.get('discoveries_draft')
+    if not raw:
+        return 0, 0
+    try:
+        drafts = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(
+            f"Discoveries_draft promote: malformed JSON on pending row "
+            f"{submission.get('id')}: {e}"
+        )
+        return 0, 0
+    if not drafts:
+        return 0, 0
+
+    # Build name → id maps for this system.
+    cursor.execute(
+        'SELECT id, name FROM planets WHERE system_id = ?',
+        (system_id,)
+    )
+    planet_rows = cursor.fetchall()
+    planet_id_by_name = {}
+    for row in planet_rows:
+        pname = row[1] if not hasattr(row, 'keys') else row['name']
+        pid = row[0] if not hasattr(row, 'keys') else row['id']
+        if pname:
+            planet_id_by_name.setdefault(pname, pid)
+
+    moon_id_by_parent_and_name = {}
+    if planet_rows:
+        # Walk each planet's moons. Cheap because there are typically <30
+        # planet rows per system and a handful of moons each.
+        for row in planet_rows:
+            pname = row[1] if not hasattr(row, 'keys') else row['name']
+            pid = row[0] if not hasattr(row, 'keys') else row['id']
+            if not pname:
+                continue
+            cursor.execute('SELECT id, name FROM moons WHERE planet_id = ?', (pid,))
+            for mrow in cursor.fetchall():
+                mname = mrow[1] if not hasattr(mrow, 'keys') else mrow['name']
+                mid = mrow[0] if not hasattr(mrow, 'keys') else mrow['id']
+                if mname:
+                    moon_id_by_parent_and_name.setdefault((pname, mname), mid)
+
+    discord_tag = submission.get('discord_tag')
+    profile_id = submission.get('submitter_profile_id')
+    discord_username = (
+        submission.get('personal_discord_username')
+        or submission.get('submitted_by')
+        or 'anonymous'
+    )
+    source = submission.get('source') or 'manual'
+    submission_iso = (
+        submission.get('submission_date')
+        or datetime.now(timezone.utc).isoformat()
+    )
+
+    promoted = 0
+    missing_links = 0
+    for entry in drafts:
+        try:
+            loc = entry.get('location_type') or 'space'
+            planet_name = entry.get('planet_name')
+            moon_name = entry.get('moon_name')
+            planet_id_resolved = None
+            moon_id_resolved = None
+            if loc == 'planet' and planet_name:
+                planet_id_resolved = planet_id_by_name.get(planet_name)
+                if not planet_id_resolved:
+                    missing_links += 1
+                    logger.warning(
+                        f"Discoveries_draft promote: pending {submission.get('id')} "
+                        f"discovery '{entry.get('discovery_name')}' references unknown "
+                        f"planet '{planet_name}' — inserting with NULL planet_id"
+                    )
+            elif loc == 'moon' and moon_name:
+                # planet_name in the draft for a moon-targeted discovery
+                # is the parent planet's name (qualifies the moon).
+                key = (planet_name, moon_name)
+                moon_id_resolved = moon_id_by_parent_and_name.get(key)
+                if moon_id_resolved is None:
+                    missing_links += 1
+                    logger.warning(
+                        f"Discoveries_draft promote: pending {submission.get('id')} "
+                        f"discovery '{entry.get('discovery_name')}' references unknown "
+                        f"moon '{planet_name}::{moon_name}' — inserting with NULL moon_id"
+                    )
+                # Also resolve planet_id for the parent (used by display joins
+                # that show 'moon of <planet>' context).
+                if planet_name:
+                    planet_id_resolved = planet_id_by_name.get(planet_name)
+
+            type_metadata = entry.get('type_metadata')
+            type_metadata_json = (
+                json.dumps(type_metadata)
+                if isinstance(type_metadata, dict) and type_metadata
+                else None
+            )
+
+            cursor.execute('''
+                INSERT INTO discoveries (
+                    discovery_type, discovery_name, system_id, planet_id, moon_id,
+                    location_type, location_name, description, significance,
+                    discovered_by, submission_timestamp,
+                    mystery_tier, analysis_status, pattern_matches,
+                    discord_user_id, discord_guild_id,
+                    photo_url, evidence_url, type_slug, discord_tag, type_metadata,
+                    profile_id, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entry.get('discovery_type'),
+                entry.get('discovery_name'),
+                system_id,
+                planet_id_resolved,
+                moon_id_resolved,
+                loc,
+                entry.get('location_name'),
+                entry.get('description'),
+                'Notable',
+                discord_username,
+                submission_iso,
+                1,
+                'approved',
+                0,
+                None,
+                None,
+                entry.get('photo_url'),
+                entry.get('evidence_urls'),
+                get_discovery_type_slug(entry.get('discovery_type') or ''),
+                discord_tag,
+                type_metadata_json,
+                profile_id,
+                source,
+            ))
+            discovery_id = cursor.lastrowid
+            promoted += 1
+
+            # Audit row so the trail shows this discovery rode in with the
+            # system approval rather than going through pending_discoveries.
+            try:
+                cursor.execute('''
+                    INSERT INTO approval_audit_log
+                    (timestamp, action, submission_type, submission_id, submission_name,
+                     approver_username, approver_type, approver_account_id, approver_discord_tag,
+                     submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    datetime.now(timezone.utc).isoformat(),
+                    'discovery_auto_approved_with_system',
+                    'discovery',
+                    discovery_id,
+                    entry.get('discovery_name'),
+                    current_username,
+                    None,
+                    None,
+                    None,
+                    discord_username,
+                    submission.get('submitter_account_id'),
+                    submission.get('submitter_account_type'),
+                    discord_tag,
+                    source,
+                ))
+            except Exception as audit_err:
+                logger.warning(
+                    f"Discoveries_draft promote: audit insert failed for "
+                    f"draft '{entry.get('discovery_name')}': {audit_err}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Discoveries_draft promote: skipped draft "
+                f"'{entry.get('discovery_name')}' on pending {submission.get('id')}: {e}"
+            )
+
+    return promoted, missing_links
 
 
 # ============================================================================
@@ -137,6 +417,18 @@ async def submit_system(
     is_valid, error_msg = validate_system_data(payload)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error_msg)
+
+    # Validate optional co-submitted discoveries draft (Wizard v1.64.0).
+    # If invalid, reject the whole submission — silently dropping the array
+    # is exactly the failure mode this column was added to fix.
+    discoveries_draft_clean, draft_err = _sanitize_discoveries_draft(
+        payload.get('discoveries_draft')
+    )
+    if draft_err:
+        raise HTTPException(status_code=400, detail=draft_err)
+    # Pop the field so it isn't double-stored inside system_data JSON too.
+    if 'discoveries_draft' in payload:
+        payload.pop('discoveries_draft', None)
 
     # Classify system (phantom star and core void detection)
     # Note: We no longer block submissions - just classify and warn
@@ -305,11 +597,12 @@ async def submit_system(
             wizard_expedition_id = None
 
         # Insert submission with source tracking, discord_tag, personal_discord_username,
-        # edit tracking, submitter identity, and wizard v1 fields.
+        # edit tracking, submitter identity, wizard v1 fields, and (v1.64.0)
+        # the co-submitted discoveries draft column.
         cursor.execute('''
             INSERT INTO pending_systems
-            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, galaxy, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id, username_normalized, game_version, submitter_notes, expedition_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (submitted_by, submitted_by_ip, submission_date, system_data, status, system_name, system_region, galaxy, source, api_key_name, discord_tag, personal_discord_username, edit_system_id, submitter_account_id, submitter_account_type, submitter_profile_id, username_normalized, game_version, submitter_notes, expedition_id, discoveries_draft)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
@@ -331,6 +624,7 @@ async def submit_system(
             wizard_game_version,
             wizard_submitter_notes,
             wizard_expedition_id,
+            json.dumps(discoveries_draft_clean) if discoveries_draft_clean else None,
         ))
 
         submission_id = cursor.lastrowid
@@ -1544,6 +1838,24 @@ async def approve_system(
         # Calculate and store completeness score
         update_completeness_score(cursor, system_id)
 
+        # Promote any co-submitted discoveries drafts now that planets/moons
+        # have IDs we can resolve names against. Runs inside the same
+        # transaction so a draft promote failure doesn't leave the system
+        # half-approved. Helper swallows per-draft errors internally.
+        try:
+            promoted_n, missing_n = _promote_draft_discoveries(
+                cursor, system_id, submission, current_username
+            )
+            if promoted_n or missing_n:
+                logger.info(
+                    f"Submission {submission_id}: promoted {promoted_n} draft "
+                    f"discoveries ({missing_n} with unresolved planet/moon link)"
+                )
+        except Exception as draft_err:
+            logger.warning(
+                f"Submission {submission_id}: draft discovery promotion failed: {draft_err}"
+            )
+
         # Mark submission as approved (use actual username instead of generic 'admin')
         cursor.execute('''
             UPDATE pending_systems
@@ -2482,6 +2794,26 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
 
                 # Calculate and store completeness score
                 update_completeness_score(cursor, system_id)
+
+                # Promote any co-submitted discoveries drafts (Wizard v1.64.0).
+                # Same transactional guarantee as the planets/moons inserts —
+                # a draft failure here rolls back the whole submission in the
+                # outer except branch. Helper swallows per-draft errors.
+                try:
+                    _promoted_n, _missing_n = _promote_draft_discoveries(
+                        cursor, system_id, submission, current_username
+                    )
+                    if _promoted_n or _missing_n:
+                        logger.info(
+                            f"Batch job {job_id} submission {submission_id}: "
+                            f"promoted {_promoted_n} draft discoveries "
+                            f"({_missing_n} with unresolved planet/moon link)"
+                        )
+                except Exception as _draft_err:
+                    logger.warning(
+                        f"Batch job {job_id} submission {submission_id}: "
+                        f"draft discovery promotion failed: {_draft_err}"
+                    )
 
                 # Mark submission as approved
                 cursor.execute('''

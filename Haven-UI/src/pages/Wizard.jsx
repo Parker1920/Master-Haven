@@ -652,10 +652,64 @@ export default function Wizard() {
     }
   }
 
+  // v1.64.0 — build a single draft entry suitable for the
+  // pending_systems.discoveries_draft JSON column. Resolves the wizard's
+  // synthetic planet-N / `planet::moon::idx` picker IDs back to real names
+  // by walking the local system.planets state, since those IDs are
+  // meaningless once the submission hits the backend.
+  function buildDiscoveryDraftEntry(d, sysState) {
+    const allPlanets = (sysState?.planets || []).filter((p) => !p.is_moon)
+    const synthPlanetId = (p, i) => p.id ?? `planet-${i}`
+    const synthMoonId = (p, m, mi) =>
+      m.id ?? `${p.name || 'planet'}::${m.name || 'moon'}::${mi}`
+
+    let planet_name = null
+    let moon_name = null
+    if (d.location_type === 'planet' && d.planet_id != null && d.planet_id !== '') {
+      const idx = allPlanets.findIndex((p, i) => String(synthPlanetId(p, i)) === String(d.planet_id))
+      if (idx >= 0) planet_name = allPlanets[idx].name || null
+    } else if (d.location_type === 'moon' && d.moon_id != null && d.moon_id !== '') {
+      outer: for (const p of allPlanets) {
+        const moons = p.moons || []
+        for (let mi = 0; mi < moons.length; mi += 1) {
+          if (String(synthMoonId(p, moons[mi], mi)) === String(d.moon_id)) {
+            planet_name = p.name || null
+            moon_name = moons[mi].name || null
+            break outer
+          }
+        }
+      }
+    }
+
+    // Photo + evidence — same shape submitDiscoveries() builds for the
+    // admin path so the success-screen pipeline stays uniform.
+    const photos = (d.photos || []).filter((p) => p.path)
+    const photoUrl = photos[0]?.path || null
+    const externalUrls = (d.evidence_urls || '')
+      .split('\n').map((s) => s.trim()).filter(Boolean)
+    const allEvidence = [...photos.slice(1).map((p) => p.path), ...externalUrls]
+
+    return {
+      discovery_name: d.discovery_name.trim(),
+      discovery_type: d.discovery_type,
+      description: d.description?.trim() || null,
+      planet_name,
+      moon_name,
+      location_type: d.location_type || 'planet',
+      location_name: d.location_name?.trim() || null,
+      photo_url: photoUrl,
+      evidence_urls: allEvidence.length ? allEvidence.join(',') : null,
+      type_metadata: d.type_metadata && Object.keys(d.type_metadata).length ? d.type_metadata : null,
+      game_version: d.game_version || null,
+      submit_for_record: !!d.submit_for_record,
+    }
+  }
+
   // Submit any inline discoveries one at a time after the system save returns
-  // (admin direct path, where we have a real system_id immediately). For the
-  // public pending path, discoveries are deferred — the post-submit screen
-  // hints that they'll be added once the system is approved.
+  // (admin direct path, where we have a real system_id immediately). The
+  // public pending path takes a different route — discoveries ride along on
+  // the pending_systems row via discoveries_draft and get promoted at
+  // approval time by the backend (see _promote_draft_discoveries).
   async function submitDiscoveries(systemId, defaultDiscordTag) {
     if (!systemId || !discoveries.length) return { ok: 0, failed: 0 }
     let ok = 0
@@ -785,13 +839,27 @@ export default function Wizard() {
         }
         const lookupFailed = payload._profile_lookup_failed === true
         delete payload._profile_lookup_failed
+        // v1.64.0 — co-submit discoveries with the system. The backend
+        // stores them as a JSON draft on the pending_systems row and
+        // promotes each into the live discoveries table at approval time,
+        // resolving planet/moon names → DB ids once the planets exist.
+        // Names are sourced from the wizard's local system.planets state
+        // since the synthetic 'planet-N' picker IDs are useless after submit.
+        const draftReady = discoveries
+          .filter((d) => d.discovery_type && d.discovery_name?.trim())
+          .slice(0, 20)
+          .map((d) => buildDiscoveryDraftEntry(d, system))
+        if (draftReady.length) {
+          payload.discoveries_draft = draftReady
+        }
         const r = await axios.post('/api/submit_system', payload)
         setSubmitResult({
           status: 'pending',
           submission_id: r.data.submission_id,
           system_name: r.data.system_name,
-          // Discoveries deferred — surfaced on the success screen
-          deferred_discoveries: discoveries.filter((d) => d.discovery_type && d.discovery_name?.trim()).length,
+          // v1.64.0: discoveries ride along on the pending row and get
+          // approved with the system, so we report the count we shipped.
+          submitted_discoveries: draftReady.length,
           submitted_system: submittedSnapshot,
           wizard_flow: flow,
           warning: lookupFailed

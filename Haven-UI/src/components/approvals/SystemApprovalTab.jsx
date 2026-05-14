@@ -1525,6 +1525,14 @@ export default function SystemApprovalTab({
               )}
             </div>
 
+            {/* Co-submitted discoveries panel (Wizard v1.64.0).
+                The wizard's public submit path bundles in-progress
+                discoveries with the system; they're stored as a JSON array
+                on pending_systems.discoveries_draft and auto-promoted to
+                live `discoveries` rows on approval. Show them here so the
+                reviewer can see what they're approving. */}
+            <CoSubmittedDiscoveriesPanel raw={selectedSubmission.discoveries_draft} />
+
             {/* Actions */}
             {selectedSubmission.status === 'pending' && (
               <div className="pt-3 border-t">
@@ -2057,5 +2065,77 @@ export default function SystemApprovalTab({
         </Modal>
       )}
     </>
+  )
+}
+
+
+// =====================================================================
+// CoSubmittedDiscoveriesPanel — renders pending_systems.discoveries_draft
+// inside the review modal so the approver sees what's about to be auto-
+// inserted into the live `discoveries` table on approval. Pure display;
+// no edit/remove controls in v1 — that's option-C territory.
+// =====================================================================
+function CoSubmittedDiscoveriesPanel({ raw }) {
+  if (!raw) return null
+  let drafts = []
+  try {
+    drafts = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return (
+      <div className="mt-3 p-2 text-xs text-red-300 bg-red-900/30 border border-red-700 rounded">
+        Discoveries draft on this submission is unparseable JSON — backend
+        will skip promotion on approval.
+      </div>
+    )
+  }
+  if (!Array.isArray(drafts) || drafts.length === 0) return null
+
+  return (
+    <div className="mt-4 p-3 rounded border" style={{ borderColor: 'var(--app-accent-3, #334)', backgroundColor: 'rgba(40, 180, 200, 0.06)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-sm">
+          Co-submitted discoveries ({drafts.length})
+        </h4>
+        <span className="text-xs opacity-70">Auto-approved with the system</span>
+      </div>
+      <div className="space-y-2">
+        {drafts.map((d, i) => {
+          let target = 'Space'
+          if (d.location_type === 'planet' && d.planet_name) {
+            target = `Planet · ${d.planet_name}`
+          } else if (d.location_type === 'moon' && d.moon_name) {
+            target = d.planet_name
+              ? `Moon · ${d.moon_name} (${d.planet_name})`
+              : `Moon · ${d.moon_name}`
+          }
+          return (
+            <div key={i} className="p-2 rounded text-sm" style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base">{d.discovery_type || '🆕'}</span>
+                <span className="font-semibold">{d.discovery_name || 'Untitled'}</span>
+                {d.submit_for_record && (
+                  <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'rgba(255,180,76,0.18)', color: 'var(--app-accent-amber, #ffb44c)' }}>
+                    ★ Record
+                  </span>
+                )}
+              </div>
+              <div className="text-xs opacity-80 mt-0.5">
+                {target}
+                {d.location_name ? ` · ${d.location_name}` : ''}
+                {d.game_version ? ` · ${d.game_version}` : ''}
+              </div>
+              {d.description && (
+                <div className="text-xs opacity-70 mt-1 line-clamp-2">{d.description}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-[11px] opacity-60 mt-2">
+        Planet / moon names are resolved against this system's just-inserted
+        rows at approval time. Unmatched names insert with a NULL link and
+        log a warning.
+      </p>
+    </div>
   )
 }
