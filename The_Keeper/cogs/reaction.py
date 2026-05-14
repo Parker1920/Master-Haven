@@ -16,7 +16,7 @@ def build_main_embed(guild: discord.Guild):
         role = guild.get_role(role_id)
 
         if role:
-            # reliable live count from role cache
+            
             count = sum(1 for _ in role.members)
         else:
             count = 0
