@@ -141,7 +141,8 @@ def _sanitize_discoveries_draft(raw) -> tuple[Optional[list], Optional[str]]:
     return out, None
 
 
-def _promote_draft_discoveries(cursor, system_id, submission, current_username):
+def _promote_draft_discoveries(cursor, system_id, submission, current_username,
+                                 current_user_type=None, current_account_id=None):
     """Promote a pending submission's discoveries_draft into live `discoveries`.
 
     Called inside the same transaction that just inserted/updated the system
@@ -156,6 +157,10 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username):
         against the planets×moons join for this system_id. NULL moon_id on
         no match (logged).
       - location_type='space'  → both NULL.
+
+    `current_user_type` is plumbed through so the audit row's NOT NULL
+    `approver_type` column gets a real value instead of NULL (which used
+    to silently drop the audit insert).
 
     Returns (promoted, missing_links) counts for caller logging.
     """
@@ -257,6 +262,10 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username):
                 else None
             )
 
+            # `discoveries.description` is NOT NULL on the live schema (and a
+            # handful of other columns) — coalesce to empty string here so a
+            # draft with no description doesn't trip the constraint and get
+            # silently swallowed by the outer try/except (Parker 2026-05-13).
             cursor.execute('''
                 INSERT INTO discoveries (
                     discovery_type, discovery_name, system_id, planet_id, moon_id,
@@ -268,14 +277,14 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username):
                     profile_id, source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                entry.get('discovery_type'),
+                entry.get('discovery_type') or 'Unknown',
                 entry.get('discovery_name'),
                 system_id,
                 planet_id_resolved,
                 moon_id_resolved,
                 loc,
                 entry.get('location_name'),
-                entry.get('description'),
+                entry.get('description') or '',
                 'Notable',
                 discord_username,
                 submission_iso,
@@ -297,6 +306,10 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username):
 
             # Audit row so the trail shows this discovery rode in with the
             # system approval rather than going through pending_discoveries.
+            # approver_type / approver_username are NOT NULL on the audit
+            # schema — fall back to 'auto' / 'system' if the caller didn't
+            # plumb the approver context through (keeps the helper safe to
+            # call from scripts).
             try:
                 cursor.execute('''
                     INSERT INTO approval_audit_log
@@ -310,9 +323,9 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username):
                     'discovery',
                     discovery_id,
                     entry.get('discovery_name'),
-                    current_username,
-                    None,
-                    None,
+                    current_username or 'system',
+                    current_user_type or 'auto',
+                    current_account_id,
                     None,
                     discord_username,
                     submission.get('submitter_account_id'),
@@ -1844,7 +1857,9 @@ async def approve_system(
         # half-approved. Helper swallows per-draft errors internally.
         try:
             promoted_n, missing_n = _promote_draft_discoveries(
-                cursor, system_id, submission, current_username
+                cursor, system_id, submission, current_username,
+                current_user_type=current_user_type,
+                current_account_id=current_account_id,
             )
             if promoted_n or missing_n:
                 logger.info(
@@ -2801,7 +2816,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                 # outer except branch. Helper swallows per-draft errors.
                 try:
                     _promoted_n, _missing_n = _promote_draft_discoveries(
-                        cursor, system_id, submission, current_username
+                        cursor, system_id, submission, current_username,
+                        current_user_type=current_user_type,
+                        current_account_id=current_account_id,
                     )
                     if _promoted_n or _missing_n:
                         logger.info(
