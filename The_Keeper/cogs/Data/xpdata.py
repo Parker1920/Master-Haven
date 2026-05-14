@@ -323,7 +323,7 @@ async def get_level(user_id, role):
 
 def get_rank(user_id, role):
     level = await get_level(user_id, role)
-    return get_rank(level)["name"]
+        return get_rank(level)["name"]
 
 
 async def set_level(user_id, role, level):
