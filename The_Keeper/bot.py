@@ -32,8 +32,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is missing from .env")
 
 HAVEN_API = os.getenv("HAVEN_API", "https://havenmap.online")
-API_KEY="tx_live_c7f3247ac8aa28027e83e83e7f907192"
-BASE_URL="https://travelers-exchange.online/"
+
 
 # -------------------- CONFIG --------------------
 ROLES = {
