@@ -144,12 +144,12 @@ class ConnectCog(commands.Cog):
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{BASE_URL}/users/{exchange_username}",
-                    headers={
-                        "Authorization": f"Bearer {API_KEY}"
+                        headers={
+                            "Authorization": f"Bearer {API_KEY}"
                     }
-                ) as resp:
-                print("STATUS:", resp.status)
-                print("TEXT:", await resp.text())
+                    ) as resp:
+                    print("STATUS:", resp.status)
+                    print("TEXT:", await resp.text())
 
                     if resp.status == 404:
                         await interaction.response.send_message(
