@@ -188,7 +188,7 @@ bot.PRIMARY_ROLES = PRIMARY_ROLES
 bot.XP_ENABLED_CHANNELS = XP_ENABLED_CHANNELS
 bot.role_welcome_messages = role_welcome_messages
 from cogs.Data.xpdata import init_db, CONFIG
-from exchange.exchange import TravellersExchangeAPI
+from exchange.exchange import TravelersExchangeAPI
 # -------------------- COGS --------------------
 COGS = [
     "cogs.personality",
