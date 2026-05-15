@@ -10,7 +10,12 @@ def tc(amount: int) -> str: return f"{amount:,} TC"
 class WalletCog(commands.Cog): 
     def __init__(self, bot: commands.Bot):
         self.bot = bot 
-        self.api = bot.exchange_api
+        self.api = TravelersExchangeAPI(
+            bot=bot,
+            base_url=BASE_URL,
+            api_key=API_KEY,
+            timeout=30
+        )
         self.session = aiohttp.ClientSession()
 
     async def cog_unload(self):
