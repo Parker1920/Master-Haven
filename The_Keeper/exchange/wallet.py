@@ -3,7 +3,7 @@ import aiohttp
 import discord 
 from discord import app_commands 
 from discord.ext import commands
-from exchange.exchange import TravelersExchangeAPI 
+from exchange.exchange import TravelersExchangeAPI, BASE_URL, API_KEY
 
 def tc(amount: int) -> str: return f"{amount:,} TC"
 
