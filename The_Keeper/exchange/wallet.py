@@ -8,7 +8,7 @@ from discord.ext import commands
 def tc(amount: int) -> str: return f"{amount:,} TC"
 
 class WalletCog(commands.Cog): 
-    def init(self, bot: commands.Bot:
+    def __init__(self, bot: commands.Bot):
         self.bot = bot 
         self.api = bot.exchange_api
         self.session = aiohttp.ClientSession()
