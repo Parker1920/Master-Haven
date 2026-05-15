@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, Optional
 from discord.ext import commands
 
-BASE_URL="https://travelers-exchange.online/"
+BASE_URL="https://travelers-exchange.online/wallet/"
 API_KEY="tx_live_c7f3247ac8aa28027e83e83e7f907192"
 
 class ExchangeAPIError(Exception):
