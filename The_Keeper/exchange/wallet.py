@@ -4,12 +4,14 @@ import discord
 from discord import app_commands 
 from discord.ext import commands
 
-BASE_URL ="https://travelers-exchange.online"
-API_KEY =
 
 def tc(amount: int) -> str: return f"{amount:,} TC"
 
-class WalletCog(commands.Cog): def init(self, bot: commands.Bot): self.bot = bot self.session = aiohttp.ClientSession()
+class WalletCog(commands.Cog): 
+    def init(self, bot: commands.Bot:
+    self.bot = bot 
+    self.api = bot.exchange_api
+    self.session = aiohttp.ClientSession()
 
 async def cog_unload(self):
     await self.session.close()
