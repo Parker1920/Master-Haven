@@ -1,4 +1,5 @@
 import aiohttp 
+from aiohttp import ClientTimeout
 import asyncio
 from typing import Any, Optional
 from discord.ext import commands
@@ -13,13 +14,16 @@ class TravelersExchangeAPI:
         self.api_key = API_KEY
         self.timeout = timeout
 
-        self.session: Optional[aiohttp.ClientSession] = None
+        
+        self.session = aiohttp.ClientSession(timeout=ClientTimeout(total=self.timeout))
 
 # ---------------- Session ----------------
     
     async def start(self):
         if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession(timeout=self.timeout)
+            self.session = aiohttp.ClientSession(
+            
+        )
     
     async def close(self):
         if self.session and not self.session.closed:
