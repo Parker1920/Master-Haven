@@ -2,6 +2,10 @@ import aiohttp
 import asyncio
 from typing import Any, Optional
 from discord.ext import commands
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from exchange.exchange import TravelersExchangeAPI
 
 
 class ExchangeService:
