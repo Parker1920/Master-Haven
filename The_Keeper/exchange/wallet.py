@@ -128,6 +128,6 @@ class WalletCog(commands.Cog):
     
         await interaction.followup.send(embed=embed)
     
-    async def setup(bot: commands.Bot): 
-        await bot.add_cog(WalletCog(bot)) 
+async def setup(bot: commands.Bot): 
+    await bot.add_cog(WalletCog(bot)) 
 
