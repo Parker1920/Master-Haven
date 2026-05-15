@@ -290,15 +290,26 @@ async def on_command_error(ctx, error):
 
 # -------------------- RUN --------------------
 async def main():
-    async def setup_hook():        
+    api = TravelersExchangeAPI(
+        bot=bot,
+        base_url=BASE_URL,
+        api_key=API_KEY,
+        timeout=30
+    )
+
+    bot.exchange_api = api
+    bot.exchange_service = ExchangeService(api)
+
+    async def setup_hook():
         await init_db()
+
+        for cog in COGS:
+            await bot.load_extension(cog)
 
     bot.setup_hook = setup_hook
 
-    for cog in COGS:
-        await bot.load_extension(cog)
-    
     await bot.start(TOKEN)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
