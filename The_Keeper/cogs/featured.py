@@ -334,44 +334,44 @@ class FeaturedCog(commands.Cog):
     
         await ctx.send(embed=embed)
         
-        @commands.command(name="sync")
-        @commands.has_permissions(administrator=True)
-        async def sync_featured_db(self, ctx):
+    @commands.command(name="sync")
+    @commands.has_permissions(administrator=True)
+    async def sync_featured_db(self, ctx):
         
-            await self.init_db()
+        await self.init_db()
         
-            featured_channel = self.bot.get_channel(self.FEATURED_CHANNEL_ID)
+        featured_channel = self.bot.get_channel(self.FEATURED_CHANNEL_ID)
         
-            if not featured_channel:
-                await ctx.send("Featured channel not found.")
-                return
+        if not featured_channel:
+            await ctx.send("Featured channel not found.")
+            return
         
-            count = 0
+        count = 0
         
-            async for message in featured_channel.history(limit=None):
+        async for message in featured_channel.history(limit=None):
         
-                if await self.is_featured(message.id):
-                    continue
+            if await self.is_featured(message.id):
+                continue
         
-                if not message.embeds:
-                    continue
+            if not message.embeds:
+                continue
         
-                embed = message.embeds[0]
+            embed = message.embeds[0]
         
-                if not embed.image:
-                    continue
+            if not embed.image:
+                continue
         
-                reactions = 0
+            reactions = 0
         
-                await self.save_featured(
-                    message,
-                    [type("Img", (), {"url": embed.image.url})()],
-                    reactions
-                )
+            await self.save_featured(
+                message,
+                [type("Img", (), {"url": embed.image.url})()],
+                reactions
+            )
         
-                count += 1
+            count += 1
         
-            await ctx.send(f"Synced {count} featured photos into database.")
+        await ctx.send(f"Synced {count} featured photos into database.")
             
 
 
