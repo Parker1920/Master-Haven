@@ -419,7 +419,7 @@ class FeaturedCog(commands.Cog):
             )
     
            
-            already_in_db = await self.is_featured(message.id)
+            already_in_db = await self.featured_messages(message.id)
     
             if not (already_featured or already_in_db):
                 continue
