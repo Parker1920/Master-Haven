@@ -402,7 +402,8 @@ class FeaturedCog(commands.Cog):
         
         await self.init_db()
 
-        target_path = DB_PATH os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        target_path = DB_PATH
+ os.makedirs(os.path.dirname(target_path), exist_ok=True)
         
         if os.path.exists(target_path):
             db_path = target_path
