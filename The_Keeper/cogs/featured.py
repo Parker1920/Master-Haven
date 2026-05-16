@@ -444,56 +444,52 @@ class FeaturedCog(commands.Cog):
     @commands.command(name="sync")
     @commands.has_permissions(administrator=True)
     async def sync_featured_db(self, ctx):
-        
+    
         await self.init_db()
-
-        target_path = DB_PATH
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        
-        if os.path.exists(target_path):
-            db_path = target_path
-        else:
-          
-            old_db = find_featured_db(".")
-        
-            if old_db and old_db != target_path:
-                shutil.move(old_db, target_path)
-                self.log("DB_MIGRATE", f"Moved DB from {old_db} → {target_path}")
-        
-        db_path = target_path
-                
-        featured_channel = self.bot.get_channel(self.FEATURED_CHANNEL_ID)
-        
-        if not featured_channel:
-            await ctx.send("Featured channel not found.")
+    
+        photo_channel = self.bot.get_channel(self.PHOTO_CHANNEL_ID)
+        if not photo_channel:
+            await ctx.send("Photo channel not found.")
             return
-        
+    
         count = 0
-        
-        async for message in featured_channel.history(limit=None):
-
-            if not message.embeds:
+    
+        async for message in photo_channel.history(limit=None):
+    
+     
+            if not message.attachments:
                 continue
-        
-            embed = message.embeds[0]
-        
-            if not embed.image:
+    
+            images = [a for a in message.attachments if is_valid_image(a.filename)]
+            if not images:
                 continue
-        
-            if await self.is_featured(message.id):
+    
+            already_featured = any(
+                reaction.emoji == "🌟" and reaction.me
+                for reaction in message.reactions
+            )
+    
+           
+            already_in_db = await self.is_featured(message.id)
+    
+            if not (already_featured or already_in_db):
                 continue
-        
+    
+            
             reactions = self.count_total_reactions(message)
-        
+    
+            
             await self.save_featured(
                 message,
-                [type("Img", (), {"url": embed.image.url})()],
+                images,
                 reactions
             )
-        
+    
             count += 1
-            
-            await ctx.send(f"Synced {count} featured photos into database.")
+    
+            await asyncio.sleep(0.05)
+    
+        await ctx.send(f"Sync complete. Updated {count} featured photos.")
             
 
 
