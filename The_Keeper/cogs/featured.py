@@ -11,6 +11,12 @@ import shutil
 def is_valid_image(filename: str):
     return filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
 
+def find_featured_db(root="."):
+    for dirpath, _, files in os.walk(root):
+        if "featured.db" in files:
+            return os.path.join(dirpath, "featured.db")
+    return None
+
 BASE_DIR = os.path.join(os.path.dirname(__file__), "Data")
 os.makedirs(BASE_DIR, exist_ok=True)
 
