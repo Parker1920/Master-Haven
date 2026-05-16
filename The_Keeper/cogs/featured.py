@@ -291,58 +291,71 @@ class FeaturedCog(commands.Cog):
         @tasks.loop(hours=1)
         async def weekly_leaderboard():
             nonlocal LAST_LEADERBOARD_RUN
+        
             now = datetime.now(timezone.utc)
-            if LAST_LEADERBOARD_RUN == now.date() or now.weekday() != LEADERBOARD_DAY or now.hour != 12:
+            if (
+                LAST_LEADERBOARD_RUN == now.date()
+                or now.weekday() != LEADERBOARD_DAY
+                or now.hour != 12
+            ):
                 return
+        
             LAST_LEADERBOARD_RUN = now.date()
-
+        
             leaderboard_channel = self.bot.get_channel(self.FEATURED_CHANNEL_ID)
-            
+        
             async with aiosqlite.connect(DB_PATH) as db:
                 async with db.execute("""
                     SELECT author_id, image_url, reactions, jump_url
                     FROM featured_messages
                 """) as cursor:
                     rows = await cursor.fetchall()
-                    if not leaderboard_channel or not photo_data:
-                        self.log("LEADERBOARD", "Cannot post weekly leaderboard")
+        
+            if not leaderboard_channel or not rows:
+                self.log("LEADERBOARD", "Cannot post weekly leaderboard")
                 return
-                
-        photo_data = [
-    {
-        "author_id": r[0],
-        "image_url": r[1],
-        "reactions": r[2],
-        "url": r[3]
-    }
-      for r in rows
-]
-
-        top_photos = sorted(photo_data, key=lambda x: x["reactions"], reverse=True)[:LEADERBOARD_TOP]
-
+        
+            photo_data = [
+                {
+                    "author_id": r[0],
+                    "image_url": r[1],
+                    "reactions": r[2],
+                    "url": r[3]
+                }
+                for r in rows
+            ]
+        
+            top_photos = sorted(
+                photo_data,
+                key=lambda x: x["reactions"],
+                reverse=True
+            )[:LEADERBOARD_TOP]
+        
             embed = discord.Embed(
                 title="🏆 Weekly Featured Photo Leaderboard",
                 description="Top photos by reactions this week",
                 color=0xFFD700
             )
+        
             for rank, photo in enumerate(top_photos, start=1):
                 embed.add_field(
                     name=f"{rank}.",
                     value=(
-                        f"{photo['author']}\n"
+                        f"<@{photo['author_id']}>\n"
                         f"[Jump to photo]({photo['url']}) — "
                         f"{photo['reactions']} reactions"
                     ),
                     inline=False
                 )
+        
                 if rank == 1 and photo["image_url"]:
                     embed.set_thumbnail(url=photo["image_url"])
-
+        
             await leaderboard_channel.send(embed=embed)
-            self.log("LEADERBOARD", f"Weekly leaderboard posted with {len(top_photos)} photos")
-
-        return weekly_leaderboard
-
+            self.log(
+                "LEADERBOARD",
+                f"Weekly leaderboard posted with {len(top_photos)} photos"
+            )
     # -------------------- IMMEDIATE LEADERBOARD --------------------
     async def post_leaderboard(self, channel=None, limit=None):
 
