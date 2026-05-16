@@ -427,8 +427,13 @@ class FeaturedCog(commands.Cog):
         
         async for message in featured_channel.history(limit=None):
         
-            if await self.is_featured(message.id):
-                continue
+            original_message_id = None
+
+        if embed.footer and embed.footer.text.startswith("MSG_ID:"):
+            original_message_id = int(embed.footer.text.replace("MSG_ID:", "").strip())
+        
+        if original_message_id and await self.is_featured(original_message_id):
+            continue
         
             if not message.embeds:
                 continue
