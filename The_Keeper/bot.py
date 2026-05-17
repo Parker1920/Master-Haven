@@ -265,11 +265,7 @@ async def on_ready():
 
     featured_cog = bot.get_cog("FeaturedCog")
     
-    if featured_cog:
-        leaderboard_task = featured_cog.create_weekly_leaderboard_task(
-            LEADERBOARD_DAY, LEADERBOARD_TOP
-        )
-        leaderboard_task.start()
+    
 
 @bot.event
 async def on_message(message):
