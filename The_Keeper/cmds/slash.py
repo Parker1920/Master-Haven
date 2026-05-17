@@ -61,16 +61,22 @@ class CommandsCog(commands.Cog):
 #-------------send--------------------
     @app_commands.command(name="send", description="Send an embed message")
     @app_commands.describe(
-        channel="Channel to send to",
-        message="Message to send"
-    )
+    channel="Channel to send to",
+    message="Message to send",
+    color="Hex color like #ff0000"
+)
     async def send(
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel,
-        message: str
+        message: str,
+        color: str = "#5865F2"
     ):
-        embed = discord.Embed(description=message, color=discord.Color.blurple())
+        embed = discord.Embed(
+            description=message,
+            color=discord.Color.from_str(color)
+        )
+    
         await channel.send(embed=embed)
         await interaction.response.send_message("Sent.", ephemeral=True)
     # ---------------- COMMUNITY ----------------
