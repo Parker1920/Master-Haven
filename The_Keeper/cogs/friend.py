@@ -8,8 +8,8 @@ from discord import app_commands
 DB_FILE = "friendcodes.db"
 FRIENDCODE_CHANNEL_ID = 1424091032185868398
 
-
-
+# SET TRUE ONLY ONCE IF YOU WANT TO RESET DB
+RESET_DATABASE = False
 
 FRIEND_CODE_REGEX = re.compile(
     r"\b([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{5})\b",
@@ -18,18 +18,22 @@ FRIEND_CODE_REGEX = re.compile(
 
 
 class FriendCodes(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
-        self.bot.loop.create_task(self.setup_db())
+
+    async def cog_load(self):
+        await self.setup_db()
 
     async def setup_db(self):
 
-        # ONE-TIME RESET
+        # OPTIONAL ONE-TIME RESET
         if RESET_DATABASE and os.path.exists(DB_FILE):
             os.remove(DB_FILE)
             print("friendcodes.db reset")
 
         async with aiosqlite.connect(DB_FILE) as db:
+
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS friendcodes (
@@ -47,11 +51,12 @@ class FriendCodes(commands.Cog):
         user: discord.User,
         friend_code: str
     ):
+
         friend_code = friend_code.upper()
 
         async with aiosqlite.connect(DB_FILE) as db:
 
-            # DUPLICATE CHECK
+            # CHECK FOR DUPLICATE CODE
             async with db.execute(
                 """
                 SELECT user_id
@@ -97,6 +102,7 @@ class FriendCodes(commands.Cog):
         self,
         user: discord.User
     ):
+
         async with aiosqlite.connect(DB_FILE) as db:
 
             async with db.execute(
@@ -117,6 +123,7 @@ class FriendCodes(commands.Cog):
         self,
         message: discord.Message
     ):
+
         if message.author.bot:
             return
 
@@ -187,6 +194,7 @@ class FriendCodes(commands.Cog):
 
 
 async def setup(bot):
+
     await bot.add_cog(
         FriendCodes(bot)
     )
