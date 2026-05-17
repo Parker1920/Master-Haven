@@ -58,6 +58,21 @@ class CommandsCog(commands.Cog):
         await channel.send(message)
         await     interaction.response.send_message("Sent.", ephemeral=True)
 
+#-------------send--------------------
+    @app_commands.command(name="send", description="Send an embed message")
+    @app_commands.describe(
+        channel="Channel to send to",
+        message="Message to send"
+    )
+    async def send(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        message: str
+    ):
+        embed = discord.Embed(description=message, color=discord.Color.blurple())
+        await channel.send(embed=embed)
+        await interaction.response.send_message("Sent.", ephemeral=True)
     # ---------------- COMMUNITY ----------------
     @app_commands.command(name="community", description="Look up a civ/community")
     async def community(
