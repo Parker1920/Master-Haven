@@ -271,6 +271,8 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
+    user_id = message.author.id
+    await process_message_xp(user_id, message)
     await bot.process_commands(message)
 
 @bot.event
