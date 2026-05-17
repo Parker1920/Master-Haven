@@ -240,23 +240,17 @@ class FeaturedCog(commands.Cog):
 
     # -------------------- EVENT LISTENERS --------------------
     @commands.Cog.listener()
-    async def on_reaction_add(self, reaction, user):
-        if user.bot:
+    async def on_raw_reaction_add(self, payload):
+        if payload.member and payload.member.bot:
             return
-
-        message = reaction.message
-        if isinstance(message, discord.PartialMessage):
-            try:
-                message = await message.fetch()
-            except Exception as e:
-                print(f"Failed to fetch partial message: {e}")
-                return
-
-        if message.channel.id != self.PHOTO_CHANNEL_ID:
+    
+        if payload.channel_id != self.PHOTO_CHANNEL_ID:
             return
-
+    
+        channel = self.bot.get_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
+    
         await self.try_feature_message(message)
-
     # -------------------- LEADERBOARD HELPERS --------------------
     async def gather_featured_photos(self):
         photo_channel = self.bot.get_channel(self.PHOTO_CHANNEL_ID)
