@@ -533,8 +533,7 @@ class DiscoveryConfirmView(discord.ui.View):
 
             await interaction.response.defer(ephemeral=True)
 
-            system_result, system_id = await self. 
-            get_system()
+            system_result, system_id = await self.get_system()
 
         except Exception as e:
             await interaction.followup.send(
