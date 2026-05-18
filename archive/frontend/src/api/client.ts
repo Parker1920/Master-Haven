@@ -273,6 +273,11 @@ export interface MeUser {
   base_role: string;
   is_editor: boolean;
   is_admin: boolean;
+  /** True if the row has password_hash set. */
+  has_password?: boolean;
+  /** True if the user is admin or editor BUT no password is set yet.
+   *  The server will 403 their privileged actions until they set one. */
+  needs_password?: boolean;
 }
 
 export interface DevUser {

@@ -27,10 +27,16 @@ mkdir -p "${MEDIA_PATH:-/data/media}"
 echo "[entrypoint] running alembic upgrade head"
 alembic upgrade head
 
-# Seed mock data (idempotent — each insert is guarded by an existence
-# check, so running on every boot is safe). Phase 2 adds this.
-echo "[entrypoint] running seed"
-python -m app.seed
+# Optional: seed demo content (the Phase 2 mockup data — 10 civs,
+# 8 personas, 9 stories, 3 inquisitions). Gated behind ARCHIVE_SEED=demo
+# so production boots don't re-insert demo content the v0.6 migration
+# explicitly wiped. To repopulate: docker exec archive python -m app.seed --demo
+if [ "${ARCHIVE_SEED:-}" = "demo" ]; then
+    echo "[entrypoint] ARCHIVE_SEED=demo — running demo seed"
+    python -m app.seed
+else
+    echo "[entrypoint] ARCHIVE_SEED not 'demo' — skipping seed (production behavior)"
+fi
 
 # Start the ASGI server.
 echo "[entrypoint] starting uvicorn on 0.0.0.0:8020"

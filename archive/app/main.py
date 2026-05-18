@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, auth_dev
+from . import __version__, auth_claim, auth_dev
 from .config import get_settings
 from .routes import (
     admin,
@@ -104,6 +104,9 @@ def create_app() -> FastAPI:
     # returns 404. We still mount the router in prod so the OpenAPI
     # doc is consistent across environments.
     app.include_router(auth_dev.router)
+
+    # Claim-based login (v0.6+). Works in both dev and production.
+    app.include_router(auth_claim.router)
 
     # ---- frontend SPA (Phase 5) -------------------------------------
     # The built Vite frontend lives at /app/frontend_dist (per the

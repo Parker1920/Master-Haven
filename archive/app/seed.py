@@ -432,8 +432,22 @@ INQUISITIONS: list[dict[str, Any]] = [
 # SEED RUNNER
 # =====================================================================
 
-def seed() -> None:
-    """Run all idempotent inserts. Safe to call repeatedly."""
+def seed(force_demo: bool = False) -> None:
+    """
+    Run all idempotent demo inserts. Gated behind ARCHIVE_SEED=demo
+    OR force_demo=True (so it doesn't accidentally re-seed the demo
+    content that the v0.6 migration explicitly wiped).
+
+    Use this for setting up a fresh dev environment with sample data:
+        ARCHIVE_SEED=demo python -m app.seed
+    Or pass --demo on the command line (see __main__ below).
+    """
+    import os
+    if not force_demo and os.environ.get("ARCHIVE_SEED", "").lower() != "demo":
+        log.info("seed: ARCHIVE_SEED!=demo — skipping demo content. "
+                 "Set ARCHIVE_SEED=demo to insert the v0.9 mockup data.")
+        return
+    log.info("seed: inserting demo content (ARCHIVE_SEED=demo)")
     with session_scope() as s:
         _seed_people(s)
         _seed_civs(s)
@@ -620,9 +634,11 @@ def _seed_inquisitions(s) -> None:
 
 
 if __name__ == "__main__":
+    import sys
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
     )
-    seed()
+    # --demo flag forces seeding even if ARCHIVE_SEED env var is unset
+    seed(force_demo="--demo" in sys.argv)
