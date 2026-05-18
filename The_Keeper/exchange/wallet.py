@@ -46,62 +46,62 @@ class WalletCog(commands.Cog):
     wallet_group = app_commands.Group(name="wallet", description="Travelers Exchange wallet commands")
     
     @wallet_group.command(name="me", description="View your wallet")
-async def wallet_me(self, interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-
-    username = await get_exchange_username(str(interaction.user.id))
-
-    if not username:
-        return await interaction.followup.send(
-            "❌ Set your exchange username first with `/connect <username>`"
+    async def wallet_me(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+    
+        username = await get_exchange_username(str(interaction.user.id))
+    
+        if not username:
+            return await interaction.followup.send(
+                "❌ Set your exchange username first with `/connect <username>`"
+            )
+    
+        # search closest username match from site
+        users, status = await self._get("/api/users", interaction.user.id)
+    
+        if status != 200:
+            return await interaction.followup.send("❌ Failed to fetch users.")
+    
+        from difflib import get_close_matches
+    
+        names = [u["username"] for u in users]
+    
+        match = get_close_matches(username, names, n=1, cutoff=0.6)
+    
+        if not match:
+            return await interaction.followup.send("❌ No matching exchange user found.")
+    
+        username = match[0]
+    
+        # fetch wallet using matched username
+        data, status = await self._get(
+            f"/api/wallet/{username}",
+            interaction.user.id
         )
-
-    # search closest username match from site
-    users, status = await self._get("/api/users", interaction.user.id)
-
-    if status != 200:
-        return await interaction.followup.send("❌ Failed to fetch users.")
-
-    from difflib import get_close_matches
-
-    names = [u["username"] for u in users]
-
-    match = get_close_matches(username, names, n=1, cutoff=0.6)
-
-    if not match:
-        return await interaction.followup.send("❌ No matching exchange user found.")
-
-    username = match[0]
-
-    # fetch wallet using matched username
-    data, status = await self._get(
-        f"/api/wallet/{username}",
-        interaction.user.id
-    )
-
-    if status != 200:
-        return await interaction.followup.send(
-            data.get("detail", "Error fetching wallet")
+    
+        if status != 200:
+            return await interaction.followup.send(
+                data.get("detail", "Error fetching wallet")
+            )
+    
+        embed = discord.Embed(
+            title=f"Your Wallet ({username})",
+            color=discord.Color.green()
         )
-
-    embed = discord.Embed(
-        title=f"Your Wallet ({username})",
-        color=discord.Color.green()
-    )
-
-    embed.add_field(
-        name="Balance",
-        value=tc(data.get("balance", 0)),
-        inline=False
-    )
-
-    embed.add_field(
-        name="Nation",
-        value=data.get("nation", "None"),
-        inline=False
-    )
-
-    await interaction.followup.send(embed=embed)
+    
+        embed.add_field(
+            name="Balance",
+            value=tc(data.get("balance", 0)),
+            inline=False
+        )
+    
+        embed.add_field(
+            name="Nation",
+            value=data.get("nation", "None"),
+            inline=False
+        )
+    
+        await interaction.followup.send(embed=embed)
     
     @wallet_group.command(name="send", description="Send TC to a wallet")
     async def wallet_send(self, interaction: discord.Interaction, to_address: str, amount: int, memo: str = ""):
