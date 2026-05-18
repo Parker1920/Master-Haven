@@ -46,62 +46,62 @@ class WalletCog(commands.Cog):
     wallet_group = app_commands.Group(name="wallet", description="Travelers Exchange wallet commands")
     
     @wallet_group.command(name="me", description="View your wallet")
-    async def wallet_me(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+async def wallet_me(self, interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
 
-        username = await get_exchange_username(str(interaction.user.id))
-        if not username:
-            return await interaction.followup.send("❌ You are not connected.")
-    
-        
-        data, status = await self.api.get_my_wallet(
-            discord_user_id=str(interaction.user.id))
+    username = await get_exchange_username(str(interaction.user.id))
 
-            
-        if status != 200:
-            return await interaction.followup.send(data.get("detail", "Error fetching wallet"))
-    
-        embed = discord.Embed(title=f"Your Wallet ({username})", color=discord.Color.green())
-        embed.add_field(name="Balance", value=tc(data.get("balance", 0)), inline=False)
-        embed.add_field(name="Nation", value=data.get("nation", "None"), inline=False)
-    
-        await interaction.followup.send(embed=embed)
-    
-    @wallet_group.command(name="view", description="View another wallet")
-    async def wallet_view(self, interaction: discord.Interaction, address: str):
-        await interaction.response.defer(ephemeral=True)
-    
-        data, status = await self._get(f"/api/wallet/{address}", interaction.user.id)
-    
-        if status != 200:
-            return await interaction.followup.send(data.get("detail", "Error fetching wallet"))
-    
-        embed = discord.Embed(title=f"Wallet {address[:6]}...", color=discord.Color.blue())
-        embed.add_field(name="Balance", value=tc(data.get("balance", 0)), inline=False)
-    
-        await interaction.followup.send(embed=embed)
-    
-    @wallet_group.command(name="history", description="View wallet transactions")
-    async def wallet_history(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+    if not username:
+        return await interaction.followup.send(
+            "❌ Set your exchange username first with `/connect <username>`"
+        )
 
-        username = get_exchange_username(str(interaction.user.id))
-    
-        data, status = await self._get("/api/wallet/me/transactions", interaction.user.id)
-    
-        if status != 200:
-            return await interaction.followup.send(data.get("detail", "Error fetching history"))
-    
-        embed = discord.Embed(title=f"Recent Transactions ({username})", color=discord.Color.purple())
-    
-        for tx in data.get("items", [])[:10]:
-            embed.add_field(
-                name=tx.get("tx_hash", "unknown")[:10],
-                value=f"{tx.get('from')} → {tx.get('to')} | {tc(tx.get('amount',0))}",
-                inline=False
-            )
-    
-        await interaction.followup.send(embed=embed)
+    # search closest username match from site
+    users, status = await self._get("/api/users", interaction.user.id)
+
+    if status != 200:
+        return await interaction.followup.send("❌ Failed to fetch users.")
+
+    from difflib import get_close_matches
+
+    names = [u["username"] for u in users]
+
+    match = get_close_matches(username, names, n=1, cutoff=0.6)
+
+    if not match:
+        return await interaction.followup.send("❌ No matching exchange user found.")
+
+    username = match[0]
+
+    # fetch wallet using matched username
+    data, status = await self._get(
+        f"/api/wallet/{username}",
+        interaction.user.id
+    )
+
+    if status != 200:
+        return await interaction.followup.send(
+            data.get("detail", "Error fetching wallet")
+        )
+
+    embed = discord.Embed(
+        title=f"Your Wallet ({username})",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="Balance",
+        value=tc(data.get("balance", 0)),
+        inline=False
+    )
+
+    embed.add_field(
+        name="Nation",
+        value=data.get("nation", "None"),
+        inline=False
+    )
+
+    await interaction.followup.send(embed=embed)
     
     @wallet_group.command(name="send", description="Send TC to a wallet")
     async def wallet_send(self, interaction: discord.Interaction, to_address: str, amount: int, memo: str = ""):
