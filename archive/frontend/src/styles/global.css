@@ -980,3 +980,194 @@ button { font-family: inherit; cursor: pointer; }
 .ta-form-input:focus,
 .ta-form-select:focus,
 .ta-form-textarea:focus { outline: 2px solid var(--ta-accent-blue); outline-offset: 1px; }
+
+/* ===== TIMELINE (Phase 5b) ========================================== */
+.ta-timeline-header {
+  padding: 22px 16px 14px;
+  border-bottom: 1px solid var(--ta-border);
+}
+.ta-timeline-title {
+  font-family: Georgia, serif;
+  font-size: 28px; font-weight: 500;
+  margin-bottom: 6px;
+}
+.ta-timeline-sub {
+  font-size: 13px; color: var(--ta-text-dim);
+  line-height: 1.5;
+}
+@media (min-width: 769px) {
+  .ta-timeline-header { padding: 28px 24px 16px; }
+  .ta-timeline-title { font-size: 32px; }
+}
+
+.ta-timeline-canvas {
+  background: var(--ta-surface);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  height: 520px;
+  border-bottom: 1px solid var(--ta-border);
+}
+.ta-timeline-track {
+  position: relative;
+  /* width set inline from JS */
+}
+
+/* Sticky left label gutter. position:sticky on the column means it
+   stays put as the canvas scrolls horizontally — the lane labels
+   stay visible. Individual labels are absolute-positioned children. */
+.ta-timeline-label-col {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  background: var(--ta-surface);
+  border-right: 1px solid var(--ta-border);
+  flex-shrink: 0;
+}
+.ta-timeline-label {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 72px;
+  padding: 6px 8px 6px 10px;
+  font-size: 10px;
+  color: var(--ta-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 500;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  border-left: 3px solid;
+  background: var(--ta-surface);
+}
+
+.ta-timeline-lane-band {
+  position: absolute;
+  pointer-events: none;
+}
+
+.ta-timeline-axis {
+  position: absolute;
+  height: 2px;
+  background: var(--ta-border-strong);
+}
+.ta-timeline-year {
+  position: absolute;
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 10px;
+  color: var(--ta-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 500;
+  padding-bottom: 4px;
+}
+.ta-timeline-year::before {
+  content: "";
+  position: absolute;
+  top: -10px; left: 50%; transform: translateX(-50%);
+  width: 1px; height: 8px;
+  background: var(--ta-text-faint);
+  opacity: 0.6;
+}
+
+.ta-timeline-event {
+  position: absolute;
+  transform: translateX(-50%);
+  background: var(--ta-bg);
+  border: 1px solid var(--ta-border);
+  border-left: 3px solid;
+  border-radius: 0 6px 6px 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--ta-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  text-decoration: none;
+  display: block;
+  z-index: 2;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.ta-timeline-event:hover {
+  z-index: 10;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  transform: translateX(-50%) translateY(-1px);
+}
+.ta-timeline-event-marker {
+  /* civ-founded / civ-ended markers — visually quieter so they don't
+     dominate the lane */
+  opacity: 0.85;
+  border-style: dashed;
+}
+.ta-timeline-event-kind {
+  font-size: 7px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  display: inline-block;
+  margin-bottom: 3px;
+  color: #fff;
+}
+.ta-timeline-event-title {
+  font-family: Georgia, serif;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.25;
+  margin-bottom: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ta-timeline-event-meta {
+  color: var(--ta-text-faint);
+  font-size: 9px;
+}
+
+.ta-timeline-helper {
+  padding: 14px 16px;
+  background: var(--ta-bg);
+  font-size: 11px;
+  color: var(--ta-text-dim);
+  text-align: center;
+}
+
+/* ===== INLINE COMMENT QUOTING (Phase 5b) ============================ */
+.ta-quote-hint {
+  font-size: 11px;
+  color: var(--ta-text-dim);
+  background: rgba(250, 199, 117, 0.12);
+  border-left: 2px solid var(--ta-accent-gold);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ta-quote-hint b { color: var(--ta-text); }
+.ta-quote-hint-clear {
+  cursor: pointer;
+  color: var(--ta-text-faint);
+  background: none;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.ta-quote-hint-clear:hover { color: var(--ta-text); }
+
+/* Highlight ranges inside the rendered draft body where existing
+   comments are anchored — clicking jumps to the comment (Phase 5b
+   ships the visual only; click-jump is a nice-to-have for later). */
+.ta-quoted-span {
+  background: rgba(250, 199, 117, 0.25);
+  border-bottom: 1px dotted var(--ta-accent-gold);
+  padding: 1px 0;
+}

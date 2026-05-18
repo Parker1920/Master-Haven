@@ -7,9 +7,13 @@
  * - Editors see Return / Mark Ready buttons when status=in_review
  * - Authors see Submit (draft/returned) and Publish (ready) buttons
  *
- * Phase 5a defers: inline comment quote attachment via DOM Selection.
- * Comments here are document-level (no quoted_text). The backend
- * supports both — Phase 5b wires the selection UI.
+ * Phase 5b: inline comment quoting.
+ *   - Select text in the body (works in both edit textarea and
+ *     read-only rendered body)
+ *   - A hint banner above the comment composer shows the attached quote
+ *   - Post comment with the quote → server stores it as quoted_text
+ *   - Existing comments with quoted_text get their span highlighted
+ *     in the rendered body
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -37,7 +41,10 @@ export function Draft({ id }: Props) {
   const [notFound, setNotFound] = useState(false);
   const [savedAt, setSavedAt] = useState<string>("");
   const [commentBody, setCommentBody] = useState("");
+  const [pendingQuote, setPendingQuote] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const readonlyBodyRef = useRef<HTMLDivElement | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -53,6 +60,48 @@ export function Draft({ id }: Props) {
   }, [id]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Selection capture — works in both the textarea (edit mode) and
+  // the read-only rendered body. Captured only when the selection is
+  // non-empty and inside one of those two regions.
+  const captureSelection = useCallback(() => {
+    // Edit-mode textarea selection
+    const ta = bodyRef.current;
+    if (ta && document.activeElement === ta) {
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      if (end > start) {
+        const text = ta.value.substring(start, end).trim();
+        if (text && text.length >= 3) {
+          setPendingQuote(text);
+        }
+        return;
+      }
+    }
+    // Read-only body selection
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const text = sel.toString().trim();
+      if (
+        text &&
+        text.length >= 3 &&
+        readonlyBodyRef.current &&
+        readonlyBodyRef.current.contains(range.commonAncestorContainer)
+      ) {
+        setPendingQuote(text);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("mouseup", captureSelection);
+    document.addEventListener("keyup", captureSelection);
+    return () => {
+      document.removeEventListener("mouseup", captureSelection);
+      document.removeEventListener("keyup", captureSelection);
+    };
+  }, [captureSelection]);
 
   if (notFound) return <div className="ta-empty">Draft not found, or you don't have access.</div>;
   if (!user) return <div className="ta-empty">Log in to view drafts.</div>;
@@ -84,7 +133,6 @@ export function Draft({ id }: Props) {
       const updated = await apiRaw<DraftDetail>(`/drafts/${id}/${path}`, { method: "POST" });
       if (updated?.data) setDraft(updated.data);
       showToast(label);
-      // On publish, send the user to the new story/inquisition
       if (path === "publish" && updated?.data) {
         if (updated.data.published_as_story_id) {
           navigate(`/story/${updated.data.published_as_story_id}`);
@@ -104,10 +152,16 @@ export function Draft({ id }: Props) {
     try {
       const env = await apiRaw<CommentDetail>(
         `/drafts/${id}/comments`,
-        { method: "POST", body: { body } },
+        {
+          method: "POST",
+          body: pendingQuote
+            ? { body, quoted_text: pendingQuote }
+            : { body },
+        },
       );
       if (env?.data) setComments((prev) => [...prev, env.data]);
       setCommentBody("");
+      setPendingQuote(null);
       showToast("Comment posted");
     } catch {
       showToast("Comment failed");
@@ -188,6 +242,7 @@ export function Draft({ id }: Props) {
             onChange={(e) => scheduleSave({ deck: e.target.value })}
           />
           <textarea
+            ref={bodyRef}
             className="ta-draft-editor-body"
             placeholder="Body…"
             defaultValue={draft.body ?? ""}
@@ -208,11 +263,14 @@ export function Draft({ id }: Props) {
               color: "var(--ta-text-dim)", marginBottom: 12,
             }}>{draft.deck}</p>
           )}
-          <div style={{
-            fontFamily: "Georgia, serif", fontSize: 16, lineHeight: 1.65,
-            color: "var(--ta-text)", whiteSpace: "pre-wrap", padding: "8px 0",
-          }}>
-            {draft.body}
+          <div
+            ref={readonlyBodyRef}
+            style={{
+              fontFamily: "Georgia, serif", fontSize: 16, lineHeight: 1.65,
+              color: "var(--ta-text)", padding: "8px 0",
+            }}
+          >
+            {renderBodyWithQuoteHighlights(draft.body, comments)}
           </div>
         </>
       )}
@@ -263,13 +321,37 @@ export function Draft({ id }: Props) {
           }}>
             Leave a comment
           </div>
+
+          {pendingQuote && (
+            <div className="ta-quote-hint">
+              <span>
+                <b>Attaching to:</b> "{
+                  pendingQuote.length > 80
+                    ? pendingQuote.slice(0, 77) + "…"
+                    : pendingQuote
+                }"
+              </span>
+              <button
+                className="ta-quote-hint-clear"
+                onClick={() => setPendingQuote(null)}
+                title="Clear attached quote"
+              >×</button>
+            </div>
+          )}
+
           <textarea
             value={commentBody}
             onChange={(e) => setCommentBody(e.target.value)}
-            placeholder="Add a note. Use @username to ping someone. Inline quoting ships in 5b."
+            placeholder={
+              pendingQuote
+                ? "Comment on the highlighted text… use @username to ping someone."
+                : "Add a note. Select text in the body to attach a quote, or use @username to ping someone."
+            }
           />
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-            <button className="ta-btn ta-btn-primary" onClick={postComment}>Post comment</button>
+            <button className="ta-btn ta-btn-primary" onClick={postComment}>
+              Post comment
+            </button>
             <span style={{ fontSize: 11, color: "var(--ta-text-faint)" }}>
               Visible to all team members
             </span>
@@ -278,4 +360,50 @@ export function Draft({ id }: Props) {
       </div>
     </div>
   );
+}
+
+/**
+ * Render the draft body, wrapping any text that matches an existing
+ * comment's quoted_text in a highlighted span. Simple literal-match;
+ * cheap and good enough for the typical 1-3 quotes per draft we see.
+ *
+ * Returns an array of React nodes (text + <span> elements). Preserves
+ * paragraph breaks via splitting on \n\n.
+ */
+function renderBodyWithQuoteHighlights(body: string, comments: CommentDetail[]): React.ReactNode {
+  const quotes = comments
+    .map((c) => c.quoted_text)
+    .filter((q): q is string => typeof q === "string" && q.length > 0)
+    // Sort longest first so a longer quote doesn't get pre-empted by
+    // a shorter substring of itself
+    .sort((a, b) => b.length - a.length);
+
+  const paragraphs = body.split(/\n\n+/);
+  return paragraphs.map((p, i) => (
+    <p key={i} style={{ marginBottom: 14 }}>
+      {wrapQuotes(p, quotes)}
+    </p>
+  ));
+}
+
+function wrapQuotes(text: string, quotes: string[]): React.ReactNode {
+  if (quotes.length === 0) return text;
+  // Walk the text and split on the first matching quote. Recurse on
+  // the leading + trailing slices so multiple quotes in one paragraph
+  // each get wrapped.
+  for (const q of quotes) {
+    const idx = text.indexOf(q);
+    if (idx >= 0) {
+      const before = text.slice(0, idx);
+      const after = text.slice(idx + q.length);
+      return (
+        <>
+          {wrapQuotes(before, quotes)}
+          <span className="ta-quoted-span" title="A comment is attached to this text">{q}</span>
+          {wrapQuotes(after, quotes)}
+        </>
+      );
+    }
+  }
+  return text;
 }
