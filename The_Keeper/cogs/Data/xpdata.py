@@ -317,8 +317,8 @@ async def get_level(user_id, role):
     return row[0] if row else 1
 
 async def get_rank(level, role):
-    level = await get_level(user_id, role)
-    rank = next(
+    
+    return next(
         r for r in CONFIG["ranks"]
         if r["min_level"] <= level <= r["max_level"]
     )
