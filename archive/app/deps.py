@@ -79,7 +79,7 @@ def _fetch_user(db: Session, user_id: int) -> Optional[dict]:
         text(
             "SELECT id, discord_id, discord_username, display_name, "
             "avatar_letter, avatar_color, civ_slug, beat, "
-            "base_role, is_editor, is_admin "
+            "base_role, is_editor, is_admin, password_hash "
             "FROM archive_user "
             "WHERE id = :id AND deleted_at IS NULL"
         ),
@@ -87,6 +87,9 @@ def _fetch_user(db: Session, user_id: int) -> Optional[dict]:
     ).first()
     if not row:
         return None
+    is_editor = bool(row.is_editor)
+    is_admin = bool(row.is_admin)
+    has_password = bool(row.password_hash)
     return {
         "id": row.id,
         "discord_id": row.discord_id,
@@ -97,8 +100,12 @@ def _fetch_user(db: Session, user_id: int) -> Optional[dict]:
         "civ_slug": row.civ_slug,
         "beat": row.beat,
         "base_role": row.base_role,
-        "is_editor": bool(row.is_editor),
-        "is_admin": bool(row.is_admin),
+        "is_editor": is_editor,
+        "is_admin": is_admin,
+        "has_password": has_password,
+        # Privileged accounts MUST have a password before doing privileged
+        # things. Plain readers/diplomats/historians never need one.
+        "needs_password": (is_admin or is_editor) and not has_password,
     }
 
 
@@ -153,21 +160,31 @@ def require_historian_or_higher(user: dict = Depends(require_login)) -> dict:
 
 
 def require_editor(user: dict = Depends(require_login)) -> dict:
-    """403 if not editor (admin counts as editor)."""
+    """403 if not editor (admin counts as editor). Also 403 if no password set."""
     if not user["is_editor"] and not user["is_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="editor elevation required",
         )
+    if user["needs_password"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="password required for editor actions — set one in your profile",
+        )
     return user
 
 
 def require_admin(user: dict = Depends(require_login)) -> dict:
-    """403 if not admin."""
+    """403 if not admin. Also 403 if no password set."""
     if not user["is_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="admin required",
+        )
+    if user["needs_password"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="password required for admin actions — set one in your profile",
         )
     return user
 

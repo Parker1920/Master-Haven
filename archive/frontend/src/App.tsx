@@ -21,6 +21,7 @@ import { Draft } from "./pages/Draft";
 import { Drafts } from "./pages/Drafts";
 import { Inquisitions } from "./pages/Inquisitions";
 import { InquisitionPage } from "./pages/InquisitionPage";
+import { Login } from "./pages/Login";
 import { Newsroom } from "./pages/Newsroom";
 import { Profile } from "./pages/Profile";
 import { Story } from "./pages/Story";
@@ -70,7 +71,9 @@ export function App() {
             <span>{user.display_name}</span>
           </a>
         ) : (
-          <span style={{ fontSize: 12, color: "var(--ta-text-faint)" }}>not logged in</span>
+          <a href="#/login" className="ta-btn ta-btn-primary" style={{ padding: "5px 14px" }}>
+            Sign in
+          </a>
         )}
       </nav>
 
@@ -82,9 +85,13 @@ export function App() {
           <span className="ta-mobile-page-title">{PAGE_TITLES[route.name] || "Travelers Archive"}</span>
         </div>
         <div className="ta-mobile-bar-right">
-          {user && (
+          {user ? (
             <a href={`#/profile/${user.discord_username}`}>
               <Avatar author={user} />
+            </a>
+          ) : (
+            <a href="#/login" style={{ fontSize: 12, color: "var(--ta-accent-blue)", padding: "0 6px" }}>
+              Sign in
             </a>
           )}
         </div>
@@ -138,6 +145,7 @@ function PageFor({ route }: { route: ReturnType<typeof useRoute> }) {
     case "drafts": return <Drafts />;
     case "draft": return <Draft id={route.id} />;
     case "compose": return <Compose doctype={route.doctype} />;
+    case "login": return <Login />;
     case "notfound":
     default:
       return (

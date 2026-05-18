@@ -1,7 +1,10 @@
-/** Dashboard — greeting + impact strip + quick actions + notifications inbox. */
+/** Dashboard — greeting + impact strip + quick actions + notifications inbox + password prompt. */
 import { useEffect, useState } from "react";
-import { api, NotificationDetail } from "../api/client";
-import { useAuth } from "../hooks/useAuth";
+import { api, apiRaw, NotificationDetail } from "../api/client";
+import { PasswordPrompt } from "../components/PasswordPrompt";
+import { refreshAuth, useAuth } from "../hooks/useAuth";
+import { showToast } from "../hooks/useToast";
+import { navigate } from "../router";
 
 export function Dashboard() {
   const { user } = useAuth();
@@ -15,10 +18,21 @@ export function Dashboard() {
     api<NotificationDetail[]>("/notifications").then(setNotifications).catch(() => setNotifications([]));
   }, [user]);
 
+  const logout = async () => {
+    try {
+      await apiRaw("/auth/logout", { method: "POST" });
+      await refreshAuth();
+      showToast("Logged out");
+      navigate("/");
+    } catch {
+      showToast("Logout failed");
+    }
+  };
+
   if (!user) {
     return (
       <div className="ta-empty">
-        Log in via the dev panel (bottom-right) to see your dashboard.
+        Not signed in. <a href="#/login" style={{ color: "var(--ta-accent-blue)" }}>Sign in</a> to see your dashboard.
       </div>
     );
   }
@@ -28,10 +42,19 @@ export function Dashboard() {
   return (
     <>
       <div className="ta-dash-greeting">
-        <div className="ta-dash-greet-text">Welcome back, {user.display_name}.</div>
-        <div className="ta-dash-greet-sub">
-          Role: {user.base_role}{user.is_editor ? " · editor" : ""}{user.is_admin ? " · admin" : ""}
-          {user.civ_slug ? ` · ${user.civ_slug}` : ""}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <div className="ta-dash-greet-text">Welcome back, {user.display_name}.</div>
+            <div className="ta-dash-greet-sub">
+              Role: {user.base_role}{user.is_editor ? " · editor" : ""}{user.is_admin ? " · admin" : ""}
+              {user.civ_slug ? ` · ${user.civ_slug}` : ""}
+            </div>
+          </div>
+          <button
+            className="ta-btn"
+            onClick={logout}
+            style={{ padding: "5px 12px", fontSize: 11 }}
+          >Log out</button>
         </div>
       </div>
 
@@ -40,6 +63,10 @@ export function Dashboard() {
         <ImpactCell n={notifications?.length ?? 0} label="all notif." />
         <ImpactCell n={user.is_editor || user.is_admin ? "✎" : "—"} label="editor" />
         <ImpactCell n={user.is_admin ? "★" : "—"} label="admin" />
+      </div>
+
+      <div style={{ padding: "0 16px" }}>
+        <PasswordPrompt />
       </div>
 
       <div className="ta-dash-content">

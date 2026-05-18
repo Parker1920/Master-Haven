@@ -33,6 +33,7 @@ export type Route =
   | { name: "drafts" }
   | { name: "draft"; id: string }
   | { name: "compose"; doctype: string }
+  | { name: "login" }
   | { name: "notfound" };
 
 export function parseHash(): Route {
@@ -55,6 +56,7 @@ export function parseHash(): Route {
     case "timeline": return { name: "timeline" };
     case "dashboard": return { name: "dashboard" };
     case "drafts": return { name: "drafts" };
+    case "login": return { name: "login" };
     case "draft":
       return parts[1] ? { name: "draft", id: parts[1] } : { name: "notfound" };
     case "compose":
