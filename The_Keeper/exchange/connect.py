@@ -84,7 +84,7 @@ class PasswordModal(discord.ui.Modal, title="Connect Exchange Account"):
                     f"{BASE_URL}/login",
                     json={
                         "username": self.exchange_username,
-                        "password": str(self.password)
+                        "password": self.password.value
                     },
                     headers={"Authorization": f"Bearer {API_KEY}"}
                 ) as resp:
