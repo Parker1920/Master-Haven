@@ -542,28 +542,28 @@ class DiscoveryConfirmView(discord.ui.View):
             )
 # ---------------- SYSTEM CREATION -----------
             if not self.system_exists:
-            system_payload = {
-                "glyph_code": self.glyph,
-                "system_name": self.system_name,
-                "community_tag": self.community_tag,
-                "galaxy_name": self.galaxy_name,
-                "reality": getattr(self, "reality", "Normal"),
-                "user_id": self.user_id
-            }
-        
-            system_result = await self.api.submit_system(system_payload)
-        
-            system_id = (
-                system_result.get("system_id")
-                or system_result.get("submission_id")
-                or system_result.get("id")
-                or (system_result.get("system") or {}).get("id")
-            )
-        
-        else:
-            system_result = self.system_exists
-            system_id = self.system_exists.get("id")
-        
+                system_payload = {
+                    "glyph_code": self.glyph,
+                    "system_name": self.system_name,
+                    "community_tag": self.community_tag,
+                    "galaxy_name": self.galaxy_name,
+                    "reality": getattr(self, "reality", "Normal"),
+                    "user_id": self.user_id
+                }
+            
+                system_result = await self.api.submit_system(system_payload)
+            
+                system_id = (
+                    system_result.get("system_id")
+                    or system_result.get("submission_id")
+                    or system_result.get("id")
+                    or (system_result.get("system") or {}).get("id")
+                )
+            
+            else:
+                system_result = self.system_exists
+                system_id = self.system_exists.get("id")
+            
 
 # ---------------- DISCOVERY SUBMISSION -----
             payload = {
