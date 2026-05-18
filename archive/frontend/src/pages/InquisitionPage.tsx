@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, InquisitionDetail } from "../api/client";
 import { Avatar } from "../components/Avatar";
+import { Loading } from "../components/Loading";
 
 export function InquisitionPage({ id }: { id: string }) {
   const [inq, setInq] = useState<InquisitionDetail | null>(null);
@@ -16,7 +17,7 @@ export function InquisitionPage({ id }: { id: string }) {
   }, [id]);
 
   if (notFound) return <div className="ta-empty">Inquisition not found.</div>;
-  if (!inq) return <div className="ta-loading">Loading inquisition…</div>;
+  if (!inq) return <Loading label="Loading inquisition…" />;
 
   return (
     <>

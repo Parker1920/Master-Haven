@@ -78,7 +78,7 @@ def _fetch_user(db: Session, user_id: int) -> Optional[dict]:
     row = db.execute(
         text(
             "SELECT id, discord_id, discord_username, display_name, "
-            "avatar_letter, avatar_color, civ_slug, beat, "
+            "avatar_letter, avatar_color, civ_slug, beat, bio, "
             "base_role, is_editor, is_admin, password_hash "
             "FROM archive_user "
             "WHERE id = :id AND deleted_at IS NULL"
@@ -99,6 +99,7 @@ def _fetch_user(db: Session, user_id: int) -> Optional[dict]:
         "avatar_color": row.avatar_color,
         "civ_slug": row.civ_slug,
         "beat": row.beat,
+        "bio": row.bio,
         "base_role": row.base_role,
         "is_editor": is_editor,
         "is_admin": is_admin,

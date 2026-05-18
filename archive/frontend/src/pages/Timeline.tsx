@@ -21,6 +21,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, CivilizationSummary, TimelineEntry } from "../api/client";
+import { Loading } from "../components/Loading";
 
 const LABEL_W = 100;       // px reserved for the lane-label gutter
 const YEAR_WIDTH = 240;    // px per year
@@ -91,7 +92,7 @@ export function Timeline() {
     return { lanes, startYear, endYear, totalWidth };
   }, [entries, civs]);
 
-  if (!entries || !civs) return <div className="ta-loading">Loading timeline…</div>;
+  if (!entries || !civs) return <Loading label="Loading timeline…" />;
   if (entries.length === 0) {
     return (
       <div className="ta-empty">

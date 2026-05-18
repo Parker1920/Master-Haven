@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, StoryDetail } from "../api/client";
 import { Avatar } from "../components/Avatar";
+import { Loading } from "../components/Loading";
 import { BeatTag, CivTag, DocTypeTag } from "../components/Tag";
 import { Prose } from "./InquisitionPage";
 
@@ -18,7 +19,7 @@ export function Story({ id }: { id: string }) {
   }, [id]);
 
   if (notFound) return <div className="ta-empty">Story not found.</div>;
-  if (!story) return <div className="ta-loading">Loading story…</div>;
+  if (!story) return <Loading label="Loading story…" />;
 
   const niceDate = new Date(story.published_at).toLocaleDateString("en-US", { dateStyle: "long" });
 

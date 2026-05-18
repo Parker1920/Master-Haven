@@ -34,10 +34,15 @@ export type Route =
   | { name: "draft"; id: string }
   | { name: "compose"; doctype: string }
   | { name: "login" }
+  | { name: "admin" }
   | { name: "notfound" };
 
 export function parseHash(): Route {
-  const hash = window.location.hash.replace(/^#/, "") || "/";
+  // Strip leading # and any query-string suffix so `#/compose/brief?civ=x`
+  // parses as `compose/brief` rather than putting `brief?civ=x` into a segment.
+  let hash = window.location.hash.replace(/^#/, "") || "/";
+  const qIdx = hash.indexOf("?");
+  if (qIdx >= 0) hash = hash.slice(0, qIdx);
   const parts = hash.split("/").filter(Boolean);
   if (parts.length === 0) return { name: "home" };
   switch (parts[0]) {
@@ -57,6 +62,7 @@ export function parseHash(): Route {
     case "dashboard": return { name: "dashboard" };
     case "drafts": return { name: "drafts" };
     case "login": return { name: "login" };
+    case "admin": return { name: "admin" };
     case "draft":
       return parts[1] ? { name: "draft", id: parts[1] } : { name: "notfound" };
     case "compose":

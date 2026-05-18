@@ -7,16 +7,20 @@ import {
   StorySummary,
 } from "../api/client";
 import { InquisitionCard } from "../components/InquisitionCard";
+import { Loading } from "../components/Loading";
 import { StoryCard } from "../components/StoryCard";
+import { useAuth } from "../hooks/useAuth";
 
 interface Props {
   beat?: string;
 }
 
 export function Newsroom({ beat }: Props) {
+  const { user } = useAuth();
   const [stories, setStories] = useState<StorySummary[] | null>(null);
   const [inquisitions, setInquisitions] = useState<InquisitionSummary[] | null>(null);
   const [civs, setCivs] = useState<CivilizationSummary[] | null>(null);
+  const canCompose = !!user && (user.base_role === "diplomat" || user.base_role === "historian" || user.is_admin);
 
   useEffect(() => {
     Promise.all([
@@ -56,9 +60,19 @@ export function Newsroom({ beat }: Props) {
       <BeatNav active={beat ?? null} />
 
       {stories === null ? (
-        <div className="ta-loading">Loading newsroom…</div>
+        <Loading label="Loading newsroom…" />
       ) : stories.length === 0 ? (
-        <div className="ta-empty">No stories yet{beat ? ` in beat "${beat}"` : ""}.</div>
+        <div className="ta-empty">
+          {beat
+            ? <>No stories yet on the <b>{beat}</b> beat. Be the first to file one.</>
+            : "No stories yet. The archive is waiting."}
+          {canCompose && (
+            <div className="ta-empty-cta-row">
+              <a href="#/compose/brief" className="ta-btn ta-btn-primary">+ Start a brief</a>
+              <a href="#/compose/feature" className="ta-btn">+ Start a feature</a>
+            </div>
+          )}
+        </div>
       ) : (
         <>
           {hero && <StoryCard story={hero} hero />}

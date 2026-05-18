@@ -1,6 +1,8 @@
 /** Dashboard — greeting + impact strip + quick actions + notifications inbox + password prompt. */
 import { useEffect, useState } from "react";
 import { api, apiRaw, NotificationDetail } from "../api/client";
+import { Loading } from "../components/Loading";
+import { broadcastUnread } from "../components/NotificationBell";
 import { PasswordPrompt } from "../components/PasswordPrompt";
 import { refreshAuth, useAuth } from "../hooks/useAuth";
 import { showToast } from "../hooks/useToast";
@@ -9,13 +11,19 @@ import { navigate } from "../router";
 export function Dashboard() {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationDetail[] | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!user) {
       setNotifications([]);
       return;
     }
-    api<NotificationDetail[]>("/notifications").then(setNotifications).catch(() => setNotifications([]));
+    api<NotificationDetail[]>("/notifications")
+      .then((rows) => {
+        setNotifications(rows);
+        broadcastUnread(rows.filter((n) => !n.is_read).length);
+      })
+      .catch(() => setNotifications([]));
   }, [user]);
 
   const logout = async () => {
@@ -26,6 +34,33 @@ export function Dashboard() {
       navigate("/");
     } catch {
       showToast("Logout failed");
+    }
+  };
+
+  const markRead = async (id: number) => {
+    setNotifications((prev) =>
+      prev ? prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)) : prev,
+    );
+    broadcastUnread((notifications ?? []).filter((n) => !n.is_read && n.id !== id).length);
+    try {
+      await apiRaw(`/notifications/${id}/read`, { method: "PATCH" });
+    } catch {
+      // ignore — UI already optimistically updated; next reload reconciles
+    }
+  };
+
+  const markAllRead = async () => {
+    if (!notifications || notifications.every((n) => n.is_read)) return;
+    setBusy(true);
+    try {
+      await apiRaw("/notifications/read_all", { method: "PATCH" });
+      setNotifications((prev) => (prev ? prev.map((n) => ({ ...n, is_read: true })) : prev));
+      broadcastUnread(0);
+      showToast("All notifications marked read");
+    } catch {
+      showToast("Mark all read failed");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -75,9 +110,18 @@ export function Dashboard() {
             <div className="ta-dash-section-title">
               Notifications
               <span className="ta-dash-section-count">{unread.length} unread</span>
+              {unread.length > 0 && (
+                <span className="ta-dash-section-actions">
+                  <button
+                    className="ta-link-btn"
+                    onClick={markAllRead}
+                    disabled={busy}
+                  >Mark all read</button>
+                </span>
+              )}
             </div>
             {notifications === null ? (
-              <div className="ta-loading">Loading…</div>
+              <Loading />
             ) : notifications.length === 0 ? (
               <p style={{ fontSize: 13, color: "var(--ta-text-faint)" }}>
                 Nothing here yet. Notifications appear when you're added as a
@@ -87,7 +131,12 @@ export function Dashboard() {
             ) : (
               <>
                 {notifications.slice(0, 10).map((n) => (
-                  <a key={n.id} href={n.link || "#"} className="ta-dash-item">
+                  <a
+                    key={n.id}
+                    href={n.link || "#"}
+                    className={`ta-dash-item${n.is_read ? "" : " unread"}`}
+                    onClick={() => { if (!n.is_read) markRead(n.id); }}
+                  >
                     <div className="ta-dash-item-title">
                       {n.is_read ? n.title : <b>{n.title}</b>}
                     </div>

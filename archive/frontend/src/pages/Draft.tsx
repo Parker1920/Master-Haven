@@ -25,7 +25,9 @@ import {
   DraftDetail,
 } from "../api/client";
 import { Avatar } from "../components/Avatar";
+import { CivPicker } from "../components/CivPicker";
 import { StatusPill } from "../components/StatusPill";
+import { KNOWN_BEATS, UserSearch } from "../components/UserSearch";
 import { useAuth } from "../hooks/useAuth";
 import { showToast } from "../hooks/useToast";
 import { navigate } from "../router";
@@ -146,6 +148,46 @@ export function Draft({ id }: Props) {
     }
   };
 
+  const addCoauthor = async (userId: number, name: string) => {
+    try {
+      await apiRaw(`/drafts/${id}/coauthors`, {
+        method: "POST",
+        body: { user_id: userId },
+      });
+      showToast(`Added ${name} as co-author`);
+      await reload();
+    } catch (e) {
+      if (e instanceof ApiError) showToast(`Add failed: ${e.detail}`);
+      else showToast("Add failed");
+    }
+  };
+
+  const removeCoauthor = async (userId: number, name: string) => {
+    if (!window.confirm(`Remove ${name} as a co-author?`)) return;
+    try {
+      await apiRaw(`/drafts/${id}/coauthors/${userId}`, { method: "DELETE" });
+      showToast(`Removed ${name}`);
+      await reload();
+    } catch (e) {
+      if (e instanceof ApiError) showToast(`Remove failed: ${e.detail}`);
+      else showToast("Remove failed");
+    }
+  };
+
+  const deleteDraft = async () => {
+    if (!window.confirm(
+      "Delete this draft? Drafts that have been submitted, marked ready, or published cannot be deleted."
+    )) return;
+    try {
+      await apiRaw(`/drafts/${id}`, { method: "DELETE" });
+      showToast("Draft deleted");
+      navigate("/drafts");
+    } catch (e) {
+      if (e instanceof ApiError) showToast(`Delete failed: ${e.detail}`);
+      else showToast("Delete failed");
+    }
+  };
+
   const postComment = async () => {
     const body = commentBody.trim();
     if (!body) return;
@@ -215,6 +257,15 @@ export function Draft({ id }: Props) {
               Publish now
             </button>
           )}
+          {isAuthor && (draft.status === "draft" || draft.status === "returned") && (
+            <button
+              className="ta-btn ta-btn-warn"
+              onClick={deleteDraft}
+              title="Delete this draft"
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -229,6 +280,50 @@ export function Draft({ id }: Props) {
 
       {canEdit ? (
         <>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 220px",
+            gap: 12,
+            marginBottom: 12,
+          }}>
+            <CivPicker
+              label="Tagged civilizations"
+              selected={draft.civs}
+              onChange={(civs) => {
+                setDraft({ ...draft, civs });
+                scheduleSave({ civs });
+              }}
+              disabled={isPublished}
+            />
+            <div>
+              <div style={{
+                fontSize: 11, color: "var(--ta-text-faint)",
+                textTransform: "uppercase", letterSpacing: 0.6,
+                marginBottom: 6, fontWeight: 500,
+              }}>
+                Beat
+              </div>
+              <select
+                defaultValue={draft.beat ?? ""}
+                onChange={(e) => scheduleSave({ beat: e.target.value || null })}
+                disabled={isPublished}
+                style={{
+                  width: "100%", height: 38,
+                  padding: "8px 10px",
+                  background: "var(--ta-surface)",
+                  border: "1px solid var(--ta-border)",
+                  borderRadius: 6,
+                  color: "var(--ta-text)", fontSize: 13,
+                  outline: "none",
+                }}
+              >
+                <option value="">— no beat —</option>
+                {KNOWN_BEATS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <input
             className="ta-draft-editor-headline"
             placeholder="Headline"
@@ -283,12 +378,49 @@ export function Draft({ id }: Props) {
             <span>{draft.author.name}</span>
           </a>
           {draft.coauthors.map((c) => (
-            <a key={c.user_id} href={`#/profile/${c.slug}`} className="ta-draft-author-chip">
-              <Avatar author={c} />
-              <span>{c.name}</span>
-            </a>
+            <span
+              key={c.user_id}
+              className="ta-draft-author-chip"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <a
+                href={`#/profile/${c.slug}`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  color: "inherit", textDecoration: "none",
+                }}
+              >
+                <Avatar author={c} />
+                <span>{c.name}</span>
+              </a>
+              {canEdit && !isPublished && (
+                <button
+                  type="button"
+                  onClick={() => removeCoauthor(c.user_id, c.name)}
+                  title={`Remove ${c.name}`}
+                  style={{
+                    background: "transparent", border: "none",
+                    color: "var(--ta-text-dim)", cursor: "pointer",
+                    fontSize: 14, lineHeight: 1, padding: "0 2px",
+                    marginLeft: 2,
+                  }}
+                >×</button>
+              )}
+            </span>
           ))}
         </div>
+        {canEdit && !isPublished && (
+          <div style={{ marginTop: 10, maxWidth: 360 }}>
+            <UserSearch
+              placeholder="Add co-author by name or @username…"
+              excludeUserIds={[
+                draft.author.id,
+                ...draft.coauthors.map((c) => c.user_id),
+              ]}
+              onSelect={addCoauthor}
+            />
+          </div>
+        )}
       </div>
 
       <div className="ta-draft-comments">

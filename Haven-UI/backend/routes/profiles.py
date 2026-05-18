@@ -866,8 +866,8 @@ async def admin_set_profile_tier(profile_id: int, request: Request, session: Opt
 
     body = await request.json()
     new_tier = body.get('tier')
-    if new_tier not in (TIER_PARTNER, TIER_SUB_ADMIN, TIER_MEMBER, TIER_MEMBER_READONLY):
-        raise HTTPException(status_code=400, detail="Invalid tier. Must be 2-5.")
+    if new_tier not in (TIER_SUPER_ADMIN, TIER_PARTNER, TIER_SUB_ADMIN, TIER_MEMBER, TIER_MEMBER_READONLY):
+        raise HTTPException(status_code=400, detail="Invalid tier. Must be 1-5.")
 
     conn = None
     try:

@@ -14,14 +14,14 @@ render civ cards / civ pages without any client-side reshaping.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import json
 
 from ..audit import log_audit
-from ..deps import get_db, require_historian_or_higher
+from ..deps import get_db, require_admin, require_historian_or_higher
 from ..models.schemas import (
     Author,
     CivStats,
@@ -411,6 +411,30 @@ def patch_civilization(
         description=new_row.description, color_primary=new_row.color_primary,
         color_secondary=new_row.color_secondary, stats=stats,
     ))
+
+
+@router.delete("/{slug}", status_code=204)
+def delete_civilization(
+    slug: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    """Soft-delete a civilization. Admin only."""
+    row = db.execute(
+        text("SELECT id FROM civilization WHERE slug = :s AND deleted_at IS NULL"),
+        {"s": slug},
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="civilization not found")
+    db.execute(
+        text("UPDATE civilization SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id"),
+        {"id": row.id},
+    )
+    record_revision(db, "civilization", row.id, user["id"], "deleted", {"slug": slug})
+    log_audit(db, user["id"], "civilization.delete", "civilization", row.id,
+              metadata={"slug": slug})
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/{slug}/revisions", response_model=Envelope[list[RevisionEntry]])

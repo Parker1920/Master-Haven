@@ -398,3 +398,43 @@ class RevisionEntry(BaseModel):
     change_summary: Optional[str] = None
     snapshot: dict[str, Any]
     created_at: str
+
+
+# =====================================================================
+# Admin: user management
+# =====================================================================
+
+class AdminUserRow(BaseModel):
+    id: int
+    discord_username: str
+    display_name: str
+    avatar_letter: Optional[str] = None
+    avatar_color: Optional[str] = None
+    base_role: str                         # reader / diplomat / historian
+    is_editor: bool
+    is_admin: bool
+    civ_slug: Optional[str] = None
+    beat: Optional[str] = None
+    created_at: str
+
+
+class AdminUserPatch(BaseModel):
+    base_role: Optional[str] = Field(None, pattern="^(reader|diplomat|historian)$")
+    is_editor: Optional[bool] = None
+    is_admin: Optional[bool] = None
+    civ_slug: Optional[str] = None
+    beat: Optional[str] = None
+    display_name: Optional[str] = None
+
+
+# =====================================================================
+# Self-edit profile (PATCH /auth/me)
+# =====================================================================
+
+class SelfProfilePatch(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    bio: Optional[str] = None
+    civ_slug: Optional[str] = None
+    beat: Optional[str] = None
+    avatar_letter: Optional[str] = Field(None, max_length=2)
+    avatar_color: Optional[str] = None

@@ -270,6 +270,7 @@ export interface MeUser {
   avatar_color?: string | null;
   civ_slug?: string | null;
   beat?: string | null;
+  bio?: string | null;
   base_role: string;
   is_editor: boolean;
   is_admin: boolean;
@@ -291,4 +292,235 @@ export interface DevUser {
   base_role: string;
   is_editor: boolean;
   is_admin: boolean;
+}
+
+// ---------------------------------------------------------------------
+// Revisions, Beats, User search — added with M-01/M-03/M-08
+// ---------------------------------------------------------------------
+export interface RevisionEntry {
+  id: number;
+  changed_by: Author;
+  change_summary?: string | null;
+  snapshot: Record<string, unknown>;
+  created_at: string;
+}
+
+export type RevisionTarget =
+  | "civilization"
+  | "person"
+  | "event"
+  | "place"
+  | "story"
+  | "inquisition";
+
+export interface BeatSummary {
+  slug: string;
+  name: string;
+  count: number;
+  last_published?: string | null;
+}
+
+export interface UserSearchHit {
+  id: number;
+  slug: string;
+  discord_username: string;
+  name: string;
+  display_name: string;
+  avatar_letter?: string | null;
+  avatar_color?: string | null;
+  base_role: string;
+  civ_slug?: string | null;
+  beat?: string | null;
+}
+
+// ---------------------------------------------------------------------
+// Watchlist / Events / Places / Admin audit (filling out batch 1+3 types)
+// ---------------------------------------------------------------------
+export type WatchlistTarget =
+  | "civilization"
+  | "person"
+  | "event"
+  | "place"
+  | "inquisition"
+  | "user";
+
+export interface WatchlistItem {
+  id: number;
+  target_type: WatchlistTarget;
+  target_id: number;
+  created_at: string;
+}
+
+export interface EventDetail {
+  slug: string;
+  title: string;
+  event_date?: string | null;
+  event_year?: number | null;
+  description?: string | null;
+}
+
+export interface PlaceDetail {
+  slug: string;
+  name: string;
+  galaxy?: string | null;
+  region?: string | null;
+  coordinates?: string | null;
+  description?: string | null;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  user_id: number | null;
+  user_name: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: number | null;
+  metadata: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------
+// Index summaries used by /events, /people, /places list pages
+// ---------------------------------------------------------------------
+export interface EventSummary {
+  slug: string;
+  title: string;
+  event_year?: number | null;
+  event_date?: string | null;
+}
+
+export interface PersonSummary {
+  slug: string;
+  name: string;
+  role_in_civ?: string | null;
+  civ_slug?: string | null;
+}
+
+export interface PlaceSummary {
+  slug: string;
+  name: string;
+  galaxy?: string | null;
+  region?: string | null;
+}
+
+// ---------------------------------------------------------------------
+// Admin tab row types (re-exported flat shapes; AuditLogEntry is the
+// envelope variant, AuditLogRow is the flat row the table renders)
+// ---------------------------------------------------------------------
+export interface AdminUserRow {
+  id: number;
+  display_name: string;
+  discord_username: string;
+  avatar_letter?: string | null;
+  avatar_color?: string | null;
+  base_role: "reader" | "diplomat" | "historian";
+  is_editor: boolean;
+  is_admin: boolean;
+  is_suspended?: boolean;
+  civ_slug?: string | null;
+  beat?: string | null;
+  created_at?: string;
+}
+
+export type AuditLogRow = AuditLogEntry;
+
+// ---------------------------------------------------------------------
+// Media uploads
+// ---------------------------------------------------------------------
+export interface MediaAsset {
+  id: number;
+  url: string;
+  filename: string;
+  size_bytes: number;
+  alt_text?: string | null;
+  uploaded_by_name?: string | null;
+}
+
+/**
+ * Multipart upload helper. Mirrors api<T>() but sends FormData
+ * instead of JSON. The browser sets the boundary header automatically
+ * — we must NOT set Content-Type ourselves.
+ */
+export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
+  const url = `/api/v1${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  let json: unknown = null;
+  try { json = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      json,
+      (json && typeof json === "object" && "detail" in json)
+        ? String((json as Record<string, unknown>).detail)
+        : `HTTP ${res.status}`,
+    );
+  }
+  if (json && typeof json === "object" && "data" in json) {
+    return (json as { data: T }).data;
+  }
+  return json as T;
+}
+
+// ---------------------------------------------------------------------
+// Sources / citations
+// ---------------------------------------------------------------------
+export type SourceType =
+  | "discord"
+  | "reddit"
+  | "forum"
+  | "wiki"
+  | "video"
+  | "screenshot"
+  | "interview"
+  | "other";
+
+export type SourceQuality = "primary" | "secondary" | "community" | "rotted";
+
+export interface SourceRecord {
+  id: number;
+  title: string;
+  url?: string | null;
+  source_type: SourceType;
+  quality: SourceQuality;
+  notes?: string | null;
+}
+
+export interface SourceCitation {
+  id: number;
+  note?: string | null;
+  source: SourceRecord;
+}
+
+export interface CivilizationPatch {
+  name?: string;
+  status?: "active" | "dormant" | "archived";
+  galaxy?: string | null;
+  founded?: string | null;
+  founded_year?: number | null;
+  ended?: string | null;
+  ended_year?: number | null;
+  tagline?: string | null;
+  description?: string | null;
+  color_primary?: string;
+  color_secondary?: string;
+}
+
+export interface CivilizationWrite {
+  slug: string;
+  name: string;
+  status?: "active" | "dormant" | "archived";
+  galaxy?: string | null;
+  founded?: string | null;
+  founded_year?: number | null;
+  ended?: string | null;
+  ended_year?: number | null;
+  tagline?: string | null;
+  description?: string | null;
+  color_primary?: string;
+  color_secondary?: string;
 }

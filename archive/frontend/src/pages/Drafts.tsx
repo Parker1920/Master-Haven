@@ -32,10 +32,26 @@ export function Drafts() {
     );
   }
 
+  const canStartInquisition = user.is_admin || user.base_role === "historian";
+
   return (
     <div className="ta-drafts-page">
-      <h1 className="ta-drafts-title">Drafts</h1>
-      <p className="ta-drafts-sub">Work in progress. Visible to the team. Not yet published.</p>
+      <div style={{
+        display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+        gap: 12, flexWrap: "wrap",
+      }}>
+        <div>
+          <h1 className="ta-drafts-title">Drafts</h1>
+          <p className="ta-drafts-sub">Work in progress. Visible to the team. Not yet published.</p>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <a href="#/compose/brief" className="ta-btn ta-btn-primary">+ New Brief</a>
+          <a href="#/compose/feature" className="ta-btn">+ New Feature</a>
+          {canStartInquisition && (
+            <a href="#/compose/inquisition" className="ta-btn">+ Begin Inquisition</a>
+          )}
+        </div>
+      </div>
 
       <div className="ta-drafts-toggle">
         <button
