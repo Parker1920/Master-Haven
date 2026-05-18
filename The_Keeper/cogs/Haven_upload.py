@@ -840,13 +840,13 @@ glyph_emojis = {
 }
 
 # -------------------- COG ----------------
-    class HavenSubmission(commands.Cog):
-        def __init__(self, bot):
-            self.bot = bot
-            self.api = HavenAPI()
-            self.HexKeypad = HexKeypad
-            self.glyph_emojis = glyph_emojis
-            self.DiscoveryTypeSelect = DiscoveryTypeSelect
+class HavenSubmission(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.api = HavenAPI()
+        self.HexKeypad = HexKeypad
+        self.glyph_emojis = glyph_emojis
+        self.DiscoveryTypeSelect = DiscoveryTypeSelect
 
 # -------------------- SETUP ----------------
 async def setup(bot):
