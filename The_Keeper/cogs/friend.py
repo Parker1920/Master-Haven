@@ -4,8 +4,7 @@ import aiosqlite
 import discord
 from discord.ext import commands
 from discord import app_commands
-DB = os.path.join(os.path.dirname(__file__), "..", "friendcodes.db")
-DB_FILE = "friendcodes.db"
+DB_FILE = "../friendcodes.db"
 FRIENDCODE_CHANNEL_ID = 1424091032185868398
 
 
