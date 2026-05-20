@@ -678,7 +678,7 @@ class HexKeypad(discord.ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("This isn't your glyph session.", ephemeral=True)
             return False
-            return True
+        return True
     
     def build_embed(self, title="Glyph Input"):
         embed = discord.Embed(title=title, color=0x00FFFF)
@@ -691,7 +691,7 @@ class HexKeypad(discord.ui.View):
         async def callback(interaction):
             self.input_string += key
             if emoji:
-                    self.emoji_sequence.append(f"<:{emoji.name}:{emoji.id}>")
+                self.emoji_sequence.append(f"<:{emoji.name}:{emoji.id}>")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             try:
@@ -706,14 +706,12 @@ class HexKeypad(discord.ui.View):
             except:
                 await interaction.message.edit(embed=self.build_embed(), view=self)
     
-            
             if len(self.input_string) != 12:
                 return
-                   
     
             glyph = self.input_string
-            self.emoji_sequence = self.emoji_sequence[:12]                   
-     # ------------------ VALIDATION ------------------
+            self.emoji_sequence = self.emoji_sequence[:12]
+    
             valid = await self.api.validate_glyph(glyph)
             if not valid.get("valid"):
                 self.reset_state()
@@ -724,7 +722,6 @@ class HexKeypad(discord.ui.View):
     
             dup = await self.api.check_duplicate(glyph)
     
-            # ------------------ DISCOVERY FLOW ------------------
             if self.mode == "discovery":
                 system_exists = dup.get("exists")
                 system_name = dup.get("system_name")
@@ -738,8 +735,8 @@ class HexKeypad(discord.ui.View):
     
                 class ContinueView(discord.ui.View):
                     def __init__(self, outer):
-                            super().__init__(timeout=60)
-                            self.outer = outer
+                        super().__init__(timeout=60)
+                        self.outer = outer
     
                     @discord.ui.button(label="Continue", style=discord.ButtonStyle.green)
                     async def continue_btn(self, interaction2: discord.Interaction, button: discord.ui.Button):
@@ -768,10 +765,9 @@ class HexKeypad(discord.ui.View):
                 else:
                     await interaction.response.send_message(msg, view=view, ephemeral=True)
     
-                self.stop()                                      
+                self.stop()
                 return
     
-# ------------------ SYSTEM FLOW ---------------
             else:
                 if dup.get("exists"):
                     await interaction.followup.send(
@@ -784,7 +780,7 @@ class HexKeypad(discord.ui.View):
                 await interaction.followup.send(
                     f"**Glyph:** `{glyph}`\nSelect Reality:",
                     view=RealitySelectView(glyph, interaction.user.id, self.api),
-                     ephemeral=True
+                    ephemeral=True
                 )
     
                 self.stop()
@@ -817,7 +813,6 @@ class HexKeypad(discord.ui.View):
         except:
             await interaction.message.edit(embed=self.build_embed(), view=self)
                 
-    # ---------------- Hex Glyph Emojis ----------------
     glyph_emojis = {
         "0": discord.PartialEmoji(name="0", id=1487546589269463211),
         "1": discord.PartialEmoji(name="1", id=1487546881692405843),
@@ -827,14 +822,14 @@ class HexKeypad(discord.ui.View):
         "5": discord.PartialEmoji(name="5", id=1487547115688169754),
         "6": discord.PartialEmoji(name="6", id=1487547173934596226),
         "7": discord.PartialEmoji(name="7", id=1487547239361544403),
-        "8": discord.PartialEmoji(name="8", id=1487547303932854353),
+        "8;": discord.PartialEmoji(name="8", id=1487547303932854353),
         "9": discord.PartialEmoji(name="9", id=1487547364553265152),
         "A": discord.PartialEmoji(name="A", id=1487547426406404126),
         "B": discord.PartialEmoji(name="B", id=1487547508065435728),
         "C": discord.PartialEmoji(name="C", id=1487547606140981379),
-         "D": discord.PartialEmoji(name="D", id=1487547687229198369),
+        "D": discord.PartialEmoji(name="D", id=1487547687229198369),
         "E": discord.PartialEmoji(name="E", id=1487547811003105300),
-        "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
+        "F": discord.PartialEmoji(name="F", id=1487547868922249479)
     }
     
     # -------------------- COG ----------------
