@@ -308,12 +308,12 @@ class GoogleDocParser:
             color=0x00FFCC
         )
 
-    embed.add_field(
-        name="Current Total",
-        value=f"{current_planets:,}"
-    )
+        embed.add_field(
+            name="Current Total",
+            value=f"{current_planets:,}"
+        )
 
-    await channel.send(embed=embed)
+        await channel.send(embed=embed)
 
     await ctx.send("Announcements sent.")
 
