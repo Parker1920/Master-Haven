@@ -316,7 +316,7 @@ async def get_level(user_id, role):
 
     return row[0] if row else 1
 
-async def get_rank(level, role):
+ def get_rank(level, role):
     
     return next(
         r for r in CONFIG["ranks"]
