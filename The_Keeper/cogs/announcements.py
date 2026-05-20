@@ -68,7 +68,7 @@ class AnnouncementCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        channel_id = os.getenv("GENERAL_CHANNEL_ID")
+        channel_id = 1423941006142996523
 
         try:
             self.channel_id = int(channel_id)
