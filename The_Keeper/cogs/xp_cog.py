@@ -27,15 +27,16 @@ class DepartmentButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
+        user_id = message.author.id
 
+     
         if user_id in _role_locks:
             return await interaction.response.send_message(
                 "You already selected a department.",
                 ephemeral=True
             )
 
-        _role_locks.add(user_id)
+        _role_locks.add(user_id) 
 
         try:
             member = await interaction.guild.fetch_member(user_id)
@@ -46,11 +47,7 @@ class DepartmentButton(discord.ui.Button):
                 ephemeral=True
             )
 
-        from cogs.xp_system import set_primary_role as _xp_set_primary_role
-        await _xp_set_primary_role(member, self.role_name, self.bot)
-
-        user_cache = get_user(user_id)
-        user_cache["primary_role"] = self.role_name.lower()
+        await set_primary_role(member, self.role_name, self.bot)
 
         for item in self.view.children:
             item.disabled = True
@@ -82,7 +79,9 @@ class XpCog(commands.Cog):
         if len(_message_cache) > 5000:
             _message_cache.clear()
 
-        await process_message_xp(message)  # FIX: ensure coroutine is properly awaited
+            gained = await process_message_xp(message)
+
+        return gained
 
 
 # ---------------- USER CACHE ----------------
@@ -90,12 +89,49 @@ users = {}
 
 def get_user(user_id):
     if user_id not in users:
-        from cogs.xp_system import get_primary_role
         users[user_id] = {
-            "primary_role": get_primary_role(user_id),
+            "primary_role": None,
             "last": {}
         }
     return users[user_id]
+
+
+# ---------------- PRIMARY ROLE ----------------
+async def set_primary_role(member, role_name, bot):
+    if not member:
+        return
+
+    role_name = role_name.lower()
+    user = get_user(member.id)
+
+    user["primary_role"] = role_name
+    guild = member.guild
+
+    roles_to_remove = []
+
+    for rid in PRIMARY_ROLE_MAP.values():
+        role = guild.get_role(rid)
+        if role and role in member.roles:
+            roles_to_remove.append(role)
+
+    if roles_to_remove:
+        try:
+            await member.remove_roles(*roles_to_remove)
+        except Exception as e:
+            print(f"[ROLE REMOVE ERROR] {e}")
+
+    role_id = PRIMARY_ROLE_MAP.get(role_name)
+    if not role_id:
+        return
+
+    new_role = guild.get_role(role_id)
+    if not new_role:
+        return
+
+    try:
+        await member.add_roles(new_role)
+    except Exception as e:
+        print(f"[ROLE ADD ERROR] {e}")
 
 
 # ---------------- LEVEL CURVE ----------------
@@ -103,8 +139,8 @@ def xp_needed(level):
     return 100 + (level * 50)
 
 
-async def add_global_xp(user_id, amount):
-    xp, level, dm = await get_global(user_id)
+def add_global_xp(user_id, amount):
+    xp, level, dm = get_global(user_id)
 
     xp += amount
     leveled_up = False
@@ -117,7 +153,7 @@ async def add_global_xp(user_id, amount):
         if level == 7:
             dm = 1
 
-    await save_global(user_id, xp, level, dm)
+    save_global(user_id, xp, level, dm)
     return level, leveled_up, bool(dm)
 
 
@@ -135,24 +171,14 @@ async def process_message_xp(message):
 
     cooldown = get_cfg("xp.primary_cooldown", 5)
 
-    # FIX: handle possible async cooldown check
-    if callable(getattr(check_cooldown, "__await__", None)):
-        ok = await check_cooldown(user_id, role, cooldown)
-    else:
-        ok = check_cooldown(user_id, role, cooldown)
-
-    if not ok:
+    if not check_cooldown(user_id, role, cooldown):
         return 0
 
     xp = get_cfg("xp.primary_per_message", 1)
 
-    # FIX: handle possible sync/async mismatch safely
-    if callable(getattr(add_xp, "__await__", None)):
-        await add_xp(user_id, role, xp)
-    else:
-        await add_xp(user_id, role, xp)
+    add_xp(user_id, role, xp)
 
-        await add_global_xp(user_id, xp)
+    level, leveled_up, dm = add_global_xp(user_id, xp)
 
     return xp
 
