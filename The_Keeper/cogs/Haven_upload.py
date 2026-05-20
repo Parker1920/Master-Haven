@@ -818,24 +818,24 @@ class HexKeypad(discord.ui.View):
             await interaction.message.edit(embed=self.build_embed(), view=self)
                 
     # ---------------- Hex Glyph Emojis ----------------
-glyph_emojis = {
-    "0": discord.PartialEmoji(name="0", id=1487546589269463211),
-    "1": discord.PartialEmoji(name="1", id=1487546881692405843),
-    "2": discord.PartialEmoji(name="2", id=1487546943319048222),
-    "3": discord.PartialEmoji(name="3", id=1487546987858366615),
-    "4": discord.PartialEmoji(name="4", id=1487547055651033129),
-    "5": discord.PartialEmoji(name="5", id=1487547115688169754),
-    "6": discord.PartialEmoji(name="6", id=1487547173934596226),
-    "7": discord.PartialEmoji(name="7", id=1487547239361544403),
-    "8": discord.PartialEmoji(name="8", id=1487547303932854353),
-    "9": discord.PartialEmoji(name="9", id=1487547364553265152),
-    "A": discord.PartialEmoji(name="A", id=1487547426406404126),
-    "B": discord.PartialEmoji(name="B", id=1487547508065435728),
-    "C": discord.PartialEmoji(name="C", id=1487547606140981379),
-     "D": discord.PartialEmoji(name="D", id=1487547687229198369),
-    "E": discord.PartialEmoji(name="E", id=1487547811003105300),
-    "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
-}
+    glyph_emojis = {
+        "0": discord.PartialEmoji(name="0", id=1487546589269463211),
+        "1": discord.PartialEmoji(name="1", id=1487546881692405843),
+        "2": discord.PartialEmoji(name="2", id=1487546943319048222),
+        "3": discord.PartialEmoji(name="3", id=1487546987858366615),
+        "4": discord.PartialEmoji(name="4", id=1487547055651033129),
+        "5": discord.PartialEmoji(name="5", id=1487547115688169754),
+        "6": discord.PartialEmoji(name="6", id=1487547173934596226),
+        "7": discord.PartialEmoji(name="7", id=1487547239361544403),
+        "8": discord.PartialEmoji(name="8", id=1487547303932854353),
+        "9": discord.PartialEmoji(name="9", id=1487547364553265152),
+        "A": discord.PartialEmoji(name="A", id=1487547426406404126),
+        "B": discord.PartialEmoji(name="B", id=1487547508065435728),
+        "C": discord.PartialEmoji(name="C", id=1487547606140981379),
+         "D": discord.PartialEmoji(name="D", id=1487547687229198369),
+        "E": discord.PartialEmoji(name="E", id=1487547811003105300),
+        "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
+    }
     
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
