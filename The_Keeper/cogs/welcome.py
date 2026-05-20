@@ -63,7 +63,7 @@ class WelcomeCog(commands.Cog):
         avatar = member.display_avatar.url
 
         embed = discord.Embed(
-            title=f"Welcome to The Haven, {member.mention}!",
+            title=f"Welcome, Voyager",
             description=(
                 "Welcome to The Voyager's Haven — a community dedicated to exploration, research, archiving and stellar cartography. We are invested in several projects to chart and connect the universe of No Mans Sky! Stay and watch, or connect with us!\n"
                 "Check out some of our projects here!"
@@ -100,7 +100,11 @@ class WelcomeCog(commands.Cog):
         position = next((i for i, m in         enumerate(members, 1) if m.id == member.id), None)
         embed.set_footer(text=f"You are #{position} in the server")
 
-        await channel.send(embed=embed, view=DeptView(member.guild.id))
+        await channel.send(
+            content=f"Welcome {member.mention}!",
+            embed=embed,
+            view=DeptView(member.guild.id)
+        )
 
 class DeptView(discord.ui.View):
     def __init__(self, guild_id: int):
