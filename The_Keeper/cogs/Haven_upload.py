@@ -627,8 +627,11 @@ class DiscoveryConfirmView(discord.ui.View):
 # ---------------- SYSTEM CREATION -----------
         async def get_system(self):
                     if self.system_exists:
+
                         if not self.system_id:
+
                             raise Exception("Existing system missing ID")
+
                         return {"id": self.system_id}, self.system_id                      
                     system_payload = {
                         "glyph_code": self.glyph,
@@ -728,6 +731,8 @@ class HexKeypad(discord.ui.View):
     # ---------------- CALLBACK FACTORY ----------------
     def make_callback(self, key, emoji):
         async def callback(interaction):
+            if len(self.input_string) >= 12:
+                return
             self.input_string += key
 
             if emoji:
