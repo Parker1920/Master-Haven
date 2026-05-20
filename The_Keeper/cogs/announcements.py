@@ -276,7 +276,46 @@ class GoogleDocParser:
             chunks.append("\n".join(buffer).strip())
 
         return [c for c in chunks if c]
+    @commands.command(name="announce")
+    @commands.has_permissions(administrator=True)
+    async def announce(self, ctx):
+    
+        channel = self.bot.get_channel(self.channel_id)
+    
+        if not channel:
+            await ctx.send("Channel not found.")
+            return
+    
+        current_systems = await fetch_system_count()
+        current_planets = await fetch_planet_count()
+    
+        embed = discord.Embed(
+            title="🚀 Milestone Achieved!",
+            description=f"{self.last_milestone:,} systems tracked!",
+            color=0x8A00C4
+        )
+    
+        embed.add_field(
+            name="Current Total",
+            value=f"{current_systems:,}"
+        )
+    
+        await channel.send(embed=embed)
+    
+        embed = discord.Embed(
+            title="🪐 Planet Milestone Achieved!",
+            description=f"{self.last_planet_milestone:,} planets tracked!",
+            color=0x00FFCC
+        )
 
+    embed.add_field(
+        name="Current Total",
+        value=f"{current_planets:,}"
+    )
+
+    await channel.send(embed=embed)
+
+    await ctx.send("Announcements sent.")
 
 async def setup(bot):
     await bot.add_cog(AnnouncementCog(bot))
