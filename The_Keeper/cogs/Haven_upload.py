@@ -112,7 +112,7 @@ class RealitySelectView(discord.ui.View):
             return
         await interaction.response.send_modal(GalaxyModal(self.glyph_code, self.user_id, self.api, self.selected_reality))
     
-    # -------------------- GALAXY MODAL ----------------
+#-------------------- GALAXY MODAL ----------------
 class GalaxyModal(discord.ui.Modal):
     def __init__(self, glyph_code, user_id, api, reality):
         super().__init__(title="Galaxy Submission")
@@ -134,7 +134,7 @@ class GalaxyModal(discord.ui.Modal):
         view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality)
         await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
     
-    # -------------------- LEVEL MODAL --------------
+#-------------------- LEVEL MODAL --------------
 class LevelSelectView(discord.ui.View):
      def __init__(self, glyph_code, user_id, api, galaxy, reality):
         super().__init__(timeout=180)
