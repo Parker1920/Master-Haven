@@ -838,7 +838,7 @@ class HavenSubmission(commands.Cog):
         self.bot = bot
         self.api = HavenAPI()
         self.HexKeypad = HexKeypad
-        self.glyph_emojis = glyph_emojis
+        self.glyph_emojis = HexKeypad.glyph_emojis
         self.DiscoveryTypeSelect = DiscoveryTypeSelect
     
     # -------------------- SETUP ----------------
