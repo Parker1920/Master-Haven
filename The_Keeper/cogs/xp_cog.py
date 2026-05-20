@@ -150,9 +150,9 @@ async def process_message_xp(message):
     if callable(getattr(add_xp, "__await__", None)):
         await add_xp(user_id, role, xp)
     else:
-    await add_xp(user_id, role, xp)
+        await add_xp(user_id, role, xp)
 
-    await add_global_xp(user_id, xp)
+        await add_global_xp(user_id, xp)
 
     return xp
 
