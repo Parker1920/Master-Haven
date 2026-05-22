@@ -365,14 +365,51 @@ class RoleSelectView(discord.ui.View):
             )
         )
 
+
+
+
+async def is_command_allowed(guild_id: int, command_name: str, channel_id: int, member: discord.Member):
+    config = await get_command_config(guild_id, command_name)
+
+    if not config:
+        return True  # no restrictions set
+
+    # Channel restriction
+    if channel_id not in config["channels"]:
+        return False
+
+    # Role restriction
+    role_id = config["role_id"]
+    if role_id:
+        role = member.get_role(role_id)
+        if not role:
+            return False
+
+    return True
+
 # ---------------- MAIN COG ----------------
 
 class SetupCog(commands.Cog):
-    def __init__(
-        self,
-        bot: commands.Bot
-    ):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_before_invoke(self, ctx: commands.Context):
+        if not ctx.guild or not ctx.channel or not ctx.author:
+            return
+
+        command_name = f"!{ctx.command.name}"
+
+        allowed = await is_command_allowed(
+            guild_id=ctx.guild.id,
+            command_name=command_name,
+            channel_id=ctx.channel.id,
+            member=ctx.author
+        )
+
+        if not allowed:
+            raise commands.CheckFailure(
+                "Command restricted for this channel or role."
+            )
 
     @app_commands.command(
         name="setup",
@@ -398,6 +435,13 @@ class SetupCog(commands.Cog):
             ),
             view=CommandSelectView(self.bot),
             ephemeral=True
+        )
+    @SetupCog.listener()
+async def on_command_error(self, ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send(
+            "⛔ You are not allowed to use this command here.",
+            delete_after=5
         )
 
 # ---------------- EXTENSION ENTRYPOINT ----------------
