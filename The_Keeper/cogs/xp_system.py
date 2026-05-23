@@ -41,8 +41,9 @@ def get_level_from_xp(xp: int):
 
     return level
         
-async def add_global_xp(user_id, amount):
-    xp, level, dm = await get_global(user_id)
+def add_global_xp(user_id, amount):
+    xp, level, dm = get_global(user_id)
+
     xp += amount
     leveled_up = False
 
@@ -121,32 +122,25 @@ def get_rank(level):
     """
 
     ranks = CONFIG.get("ranks", [])
-    if not ranks:
-        return {"name": "Nope"}
 
-    if level < 1:
-       level = 1
-    
     for rank in ranks:
         min_level = rank.get("min_level")
         max_level = rank.get("max_level")
-        exact_level = rank.get("level")
 
-        if exact_level is not None:
-            if level == exact_level:
+        if min_level is None and max_level is None:
+            if rank.get("level") == level:
                 return rank
-            if level >= exact_level:
-                fallback = rank
-                continue
+            continue
 
+        if min_level <= level <= max_level:
+            return rank
 
-        if min_level is not None and max_level is not None:
-             if min_level <= level <= max_level:
-                 return rank
-             if level >= min_level:
-                 fallback = rank
+    fallback = None
+    for rank in ranks:
+        if rank.get("min_level", 0) <= level:
+            fallback = rank
 
-    return fallback or ranks[1]
+    return fallback
 
 # ---------------- ROLE ASSIGN ----------------
 async def set_primary_role(member, role_name, bot):
@@ -226,7 +220,7 @@ async def process_message_xp(message):
 
     await add_xp(user_id, role, xp_gain)
 
-    level, leveled_up, dm = await add_global_xp(user_id, xp_gain)
+    level, leveled_up, dm = add_global_xp(user_id, xp_gain)
 
     return xp_gain
 
@@ -234,8 +228,8 @@ async def process_message_xp(message):
 # ---------------- DISCOVERY XP ----------------
 async def process_discovery_xp(user_id, discovery_type, channel_id):
     user = get_user(user_id)
-    upload_channels = get_cfg("channels.upload_channel",[])
-    office_channels = get_cfg("channels.office_channel",[])                     
+    upload_channels = get_cfg("channels.upload_channels", [])
+    office_channels = get_cfg("channels.office_channels", [])
 
     primary_role = user.get("primary_role")
     if not primary_role:
@@ -256,16 +250,16 @@ async def process_discovery_xp(user_id, discovery_type, channel_id):
         xp += get_cfg("xp_bonus.role_match", 5)
     else:
         xp += get_cfg("xp_bonus.cross_role_penalty", -1)
-    
+
     if channel_id in upload_channels:
         xp += get_cfg("xp_bonus.channel_match", 5)
 
     if office_channels and channel_id == office_channels[0]:
-        xp += get_cfg("xp_bonus.channel_match", 5)
+        xp += get_cfg("xp_bonus.channel_match", 5)    
 
     await add_xp(user_id, primary_role, xp)
 
-    level, leveled_up, dm = await add_global_xp(user_id, xp)
+    level, leveled_up, dm = add_global_xp(user_id, xp)
 
     if leveled_up:
         member = bot.get_guild(member.guild.id).get_member(user_id) if 'member' in globals() else None
