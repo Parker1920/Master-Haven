@@ -51,13 +51,27 @@ class CommandsRouter(commands.Cog):
             return
     
         member = member or ctx.author
-        user = get_user(member.id)
     
-        primary = user.get("primary_role")
-        if not primary:
+        
+        await ensure_user(member.id)
+    
+        async with aiosqlite.connect(DB_PATH) as db:
+    
+            
+            cur = await db.execute(
+                "SELECT primary_role FROM users WHERE user_id=?",
+                (member.id,)
+            )
+            row = await cur.fetchone()
+            await cur.close()
+    
+        if not row or not row[0]:
             await ctx.send(f"{member.display_name} has no primary role assigned.")
             return
     
+        primary = row[0].lower()
+    
+        # embed colors
         ROLE_COLORS = {
             "architect": discord.Color.blue(),
             "cartographer": discord.Color.purple(),
@@ -68,22 +82,28 @@ class CommandsRouter(commands.Cog):
         }
     
         color = ROLE_COLORS.get(primary, discord.Color.green())
-
-    # ---------------- XP SYSTEM ------------------
     
-        role_xp = get_xp(member.id, primary)
+        # ---------------- ROLE XP ----------------
+        role_xp = await get_xp(member.id, primary)
+        level = await get_level(member.id, primary)
     
-        global_xp, level, _ = await get_global(member.id)
-        level = int(level)
-        
-        rank = get_rank(level)
+        # find rank + xp requirement safely
+        rank = next(
+            (r for r in CONFIG["ranks"]
+             if r["min_level"] <= level <= r["max_level"]),
+            None
+        )
     
-        xp_for_level = xp_needed(level)
-        role_xp = await role_xp
+        if not rank:
+            rank = {"name": "Unknown", "xp_per_level": 100}
+    
+        xp_for_level = rank.get("xp_per_level", 100)
+    
         xp_into_level = role_xp % xp_for_level if xp_for_level else role_xp
     
         bar = make_progress_bar(xp_into_level, xp_for_level, role=primary)
     
+        # ---------------- EMBED ----------------
         embed = discord.Embed(
             title=f"{member.display_name}'s XP",
             color=color
