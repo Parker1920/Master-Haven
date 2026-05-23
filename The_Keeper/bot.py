@@ -245,7 +245,8 @@ async def check_channel_allowed(interaction: discord.Interaction) -> bool:
 @bot.event
 async def on_ready():
     guild_folder = "Data/guilds"
-
+    await init_db()
+    print("DB initialized")
     try:
         if os.path.exists(guild_folder):
             for file in os.listdir(guild_folder):
