@@ -267,17 +267,17 @@ class SystemSubmissionModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
     
-        payload = {
-            "glyph_code": self.glyph_code,
-            "system_name": self.system_name.value,
-            "community_tag": self.community_tag.value,  
-            "galaxy_name": self.galaxy,
-            "reality": self.reality,
-            "user_id": self.user_id,
-            "star_type": self.levels["star_type"],
-            "economy_type": self.levels["economy_lvl"],
-            "race": self.levels["race"],
-            "conflict_lvl": self.levels["conflict_lvl"]
+        system_payload = {
+            "glyph_code": self.glyph,
+            "system_name": self.system_name,
+            "discord_tag": self.community_tag,
+            "galaxy_name": self.galaxy_name,
+            "reality": getattr(self, "reality", "Normal"),
+            "dominant_lifeform": getattr(self, "race", "Unknown"),
+            "conflict_level": getattr(self, "conflict_lvl", "Unknown"),
+            "economy_type": getattr(self, "economy_type", "Unknown"),
+            "economy_strength": getattr(self, "economy_strength", "1"),
+            "user_id": self.user_id
         }
     
         try:
