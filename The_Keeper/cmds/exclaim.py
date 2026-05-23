@@ -79,7 +79,7 @@ class CommandsRouter(commands.Cog):
         rank = get_rank(level)
     
         xp_for_level = xp_needed(level)
-    
+        role_xp = await role_xp
         xp_into_level = role_xp % xp_for_level if xp_for_level else role_xp
     
         bar = make_progress_bar(xp_into_level, xp_for_level, role=primary)
