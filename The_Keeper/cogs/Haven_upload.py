@@ -45,7 +45,7 @@ class HavenAPI:
     
                 return data
     
-    async def check_duplicate(self, glyph: str, galaxy: str, reality: str):
+    async def check_duplicate(self, glyph, galaxy="Euclid", reality="Normal"):
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base}/api/check_duplicate",
@@ -213,33 +213,33 @@ class LevelSelectView(discord.ui.View):
         submit_btn.callback = self.submit_callback
         self.add_item(submit_btn)
     
-async def star_callback(self, interaction: discord.Interaction):
-    self.values["star_type"] = self.star_dropdown.values[0]
-    await interaction.response.defer()
-        
-async def race_callback(self, interaction: discord.Interaction):
-    self.values["race"] = self.race_dropdown.values[0]
-    await interaction.response.defer()
-        
-async def econ_callback(self, interaction: discord.Interaction):
-    self.values["economy_lvl"] = self.econ_dropdown.values[0]
-    await interaction.response.defer()
-        
-async def conflict_callback(self, interaction: discord.Interaction):
-    self.values["conflict_lvl"] = self.conflict_dropdown.values[0]
-    await interaction.response.defer()
-        
-async def submit_callback(self, interaction: discord.Interaction):
-        missing = [k for k in ["star_type","race","economy_lvl","conflict_lvl"] if k not in self.values]
-        if missing:
-            await interaction.response.send_message(f"Please select all fields: {', '.join(missing)}", ephemeral=True)
-            return
-        await interaction.response.send_modal(
-            SystemSubmissionModal(
-                self.glyph_code, self.user_id, self.api,
-                self.galaxy, self.reality, self.values
-            )
-        )
+        async def star_callback(self, interaction: discord.Interaction):
+            self.values["star_type"] = self.star_dropdown.values[0]
+            await interaction.response.defer()
+                
+        async def race_callback(self, interaction: discord.Interaction):
+            self.values["race"] = self.race_dropdown.values[0]
+            await interaction.response.defer()
+                
+        async def econ_callback(self, interaction: discord.Interaction):
+            self.values["economy_lvl"] = self.econ_dropdown.values[0]
+            await interaction.response.defer()
+                
+        async def conflict_callback(self, interaction: discord.Interaction):
+            self.values["conflict_lvl"] = self.conflict_dropdown.values[0]
+            await interaction.response.defer()
+                
+        async def submit_callback(self, interaction: discord.Interaction):
+                missing = [k for k in ["star_type","race","economy_lvl","conflict_lvl"] if k not in self.values]
+                if missing:
+                    await interaction.response.send_message(f"Please select all fields: {', '.join(missing)}", ephemeral=True)
+                    return
+                await interaction.response.send_modal(
+                    SystemSubmissionModal(
+                        self.glyph_code, self.user_id, self.api,
+                        self.galaxy, self.reality, self.values
+                    )
+                )
   
     
     # -------------------- SYSTEM MODAL -----------
@@ -625,39 +625,39 @@ class DiscoveryConfirmView(discord.ui.View):
             )                             
                      
 # ---------------- SYSTEM CREATION -----------
-        async def get_system(self):
-                    if self.system_exists:
+    async def get_system(self):
+        if self.system_exists:
 
-                        if not self.system_id:
+            if not self.system_id:
 
-                            raise Exception("Existing system missing ID")
+                raise Exception("Existing system missing ID")
 
-                        return {"id": self.system_id}, self.system_id                      
-                    system_payload = {
-                        "glyph_code": self.glyph,
-                        "system_name": self.system_name,
-                        "community_tag": self.community_tag,
-                        "galaxy_name": self.galaxy_name,
-                        "reality": getattr(self, "reality", "Normal"),
-                        "user_id": self.user_id
-                    }
+            return {"id": self.system_id}, self.system_id                      
+        system_payload = {
+            "glyph_code": self.glyph,
+            "system_name": self.system_name,
+            "community_tag": self.community_tag,
+            "galaxy_name": self.galaxy_name,
+            "reality": getattr(self, "reality", "Normal"),
+            "user_id": self.user_id
+        }
                     
-                    system_result = await self.api.submit_system(system_payload)
+        system_result = await self.api.submit_system(system_payload)
                     
-                    if not system_result:
-                        raise Exception("System API returned empty response")
+        if not system_result:
+            raise Exception("System API returned empty response")
                     
-                    system_id = (
-                        system_result.get("system_id")
-                        or system_result.get("submission_id")
-                        or system_result.get("id")
-                        or (system_result.get("system") or {}).get("id")
-                    )
+        system_id = (
+            system_result.get("system_id")
+            or system_result.get("submission_id")
+            or system_result.get("id")
+            or (system_result.get("system") or {}).get("id")
+        )
                     
-                    if not system_id:
-                        raise Exception(f"System creation failed: {system_result}")
+        if not system_id:
+            raise Exception(f"System creation failed: {system_result}")
                     
-                    return system_result, system_id
+        return system_result, system_id
     
     
 # -------------------- HEX KEYBOARD VIEW ---
