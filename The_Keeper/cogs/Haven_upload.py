@@ -6,7 +6,8 @@ from discord.ui import Select, Button, TextInput
 import traceback
 import sys, os
 import json
-    
+import logging
+logger = logging.getLogger(__name__)    
     
     
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
