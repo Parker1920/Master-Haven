@@ -73,7 +73,7 @@ class CommandsRouter(commands.Cog):
     
         role_xp = get_xp(member.id, primary)
     
-        global_xp, level, _ = get_global(member.id)
+        global_xp, level, _ = await get_global(member.id)
         level = int(level)
         
         rank = get_rank(level)
