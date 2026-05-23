@@ -588,7 +588,7 @@ class DiscoveryConfirmView(discord.ui.View):
                 f"Discovery: `{discovery_name}`"
             )
             
-            xp_gained = await process_discovery_xp(
+            xp_gained = process_discovery_xp(
                 user_id=self.user_id,
                 discovery_type=self.discovery_type,
                 channel_id=interaction.channel.id,
@@ -598,7 +598,7 @@ class DiscoveryConfirmView(discord.ui.View):
                 msg += f"\n✨ +{xp_gained} XP earned"
             
             try:
-                bonus_tip = await get_bonus_tip(system_result)
+                bonus_tip = get_bonus_tip(system_result)
             
                 if bonus_tip:
                     msg += f"\n\n💡 {bonus_tip}"
