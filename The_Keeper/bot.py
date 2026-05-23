@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import asyncio, os, sys
 import json
 import logging
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
