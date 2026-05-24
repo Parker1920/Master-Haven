@@ -6,6 +6,7 @@ import logging
 
 
 
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "Data", "xp.db")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -231,6 +232,33 @@ def get_cfg(key, default=0):
     return CONFIG.get(section, {}).get(sub, default)
 
 # ---------------- DB HELPERS ----------------
+def get_rank(level):
+    """
+    Returns the rank dict that matches the user's level.
+    Falls back to highest valid rank if level exceeds defined ranges.
+    """
+
+    ranks = CONFIG.get("ranks", [])
+
+    for rank in ranks:
+        min_level = rank.get("min_level")
+        max_level = rank.get("max_level")
+
+        if min_level is None and max_level is None:
+            if rank.get("level") == level:
+                return rank
+            continue
+
+        if min_level <= level <= max_level:
+            return rank
+
+    fallback = None
+    for rank in ranks:
+        if rank.get("min_level", 0) <= level:
+            fallback = rank
+
+    return fallback
+
 def get_rank_name(level: int, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
     role = role.lower().replace("primary", "").strip()
@@ -291,7 +319,7 @@ async def add_xp(user_id, role, amount):
             xp += amount
     
             while level < CONFIG["leveling"]["max_level"]:
-                needed = get_rank_name(level, role)["xp_per_level"]
+                needed = get_rank(level, role)["xp_per_level"]
     
                 if xp < needed:
                     break
