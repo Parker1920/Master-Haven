@@ -15,8 +15,11 @@ Monitored:
     + latest title — fires loud when it finally goes live)
   - Bluesky @skyscraper-prj.bsky.social latest post (clean public API)
 
-Config: reads WEBHOOK_URL from ./config.env (KEY=VALUE lines) or the
-SKYSCRAPER_WEBHOOK_URL env var. If unset, changes are logged but not pushed.
+Config: reads webhook URLs from ./config.env (KEY=VALUE lines) or the
+SKYSCRAPER_WEBHOOK_URL env var. Multiple webhooks are supported — repeat
+the WEBHOOK_URL line, use suffixed keys (WEBHOOK_URL_2, WEBHOOK_URL_DEV…),
+and/or comma-separate URLs on one line. Each is alerted independently, so
+one dead webhook won't stop the rest. If none set, changes are logged only.
 
 Run: python3 skyscraper_watch.py            (normal poll)
      python3 skyscraper_watch.py --seed     (snapshot now, never alert)
@@ -48,16 +51,33 @@ def log(msg):
 
 
 def load_config():
-    cfg = {}
+    """Return the list of Discord webhook URLs to notify.
+
+    Collects every config.env line whose key starts with WEBHOOK_URL — so
+    WEBHOOK_URL, WEBHOOK_URL_2, WEBHOOK_URL_DEV, … all count, and simply
+    repeating the WEBHOOK_URL line on multiple lines works too. Values may
+    also be comma- or whitespace-separated to list several URLs on one line.
+    The SKYSCRAPER_WEBHOOK_URL env var is appended (same multi-value rules).
+    Blanks and duplicates are dropped; original order is preserved.
+    """
+    raw = []
     p = os.path.join(HERE, "config.env")
     if os.path.exists(p):
         for ln in open(p, encoding="utf-8"):
             ln = ln.strip()
             if ln and not ln.startswith("#") and "=" in ln:
                 k, v = ln.split("=", 1)
-                cfg[k.strip()] = v.strip().strip('"').strip("'")
-    url = os.environ.get("SKYSCRAPER_WEBHOOK_URL") or cfg.get("WEBHOOK_URL", "")
-    return url
+                if k.strip().upper().startswith("WEBHOOK_URL"):
+                    raw.append(v.strip().strip('"').strip("'"))
+    env = os.environ.get("SKYSCRAPER_WEBHOOK_URL", "")
+    if env:
+        raw.append(env)
+    webhooks = []
+    for item in raw:
+        for url in item.replace(",", " ").split():
+            if url and url not in webhooks:
+                webhooks.append(url)
+    return webhooks
 
 
 def fetch(url, as_json=True, timeout=25):
@@ -213,12 +233,18 @@ def send_discord(webhook, changes):
 
 
 def main():
-    webhook = load_config()
+    webhooks = load_config()
     if "--test" in sys.argv:
-        if not webhook:
+        if not webhooks:
             log("--test: no WEBHOOK_URL configured"); sys.exit(1)
-        send_discord(webhook, ["✅ Test alert — skyscraper_watch is wired up and can reach this channel."])
-        log("--test: sent"); return
+        msg = ["✅ Test alert — skyscraper_watch is wired up and can reach this channel."]
+        for i, w in enumerate(webhooks, 1):
+            try:
+                st = send_discord(w, msg)
+                log(f"--test: webhook {i}/{len(webhooks)} -> HTTP {st}")
+            except Exception as e:
+                log(f"--test: webhook {i}/{len(webhooks)} ERROR: {e}")
+        return
 
     new = snapshot()
     if not new.get("posts"):
@@ -246,12 +272,13 @@ def main():
     log(f"{len(changes)} change(s) detected:")
     for c in changes:
         log("  • " + c.replace("\n", " | "))
-    if webhook:
-        try:
-            st = send_discord(webhook, changes)
-            log(f"Discord webhook POST -> HTTP {st}")
-        except Exception as e:
-            log(f"ERROR sending webhook: {e}")
+    if webhooks:
+        for i, w in enumerate(webhooks, 1):
+            try:
+                st = send_discord(w, changes)
+                log(f"Discord webhook {i}/{len(webhooks)} POST -> HTTP {st}")
+            except Exception as e:
+                log(f"ERROR sending webhook {i}/{len(webhooks)}: {e}")
     else:
         log("No WEBHOOK_URL set — changes logged only. Add it to config.env to enable Discord alerts.")
 
