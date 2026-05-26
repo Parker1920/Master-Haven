@@ -1,0 +1,656 @@
+/* ============================================================
+   Grand Festival — app-specific styles (beyond the mockup contract).
+   Covers the new Submit form, Admin dashboard, civ logos, link buttons,
+   and loading/error states. Reuses the design tokens from styles.css.
+   ============================================================ */
+
+/* ============================================================
+   Soft sky backdrop. The mockup's light content sections are flat
+   `--paper` (#f4faff ≈ white), so long pages read as a blank white
+   takeover on scroll. Give the whole light area one gentle, page-tall
+   sky→grass wash and let the content sections show it through, so the
+   frosted cards float on soft color instead of stark white.
+   (Dark hero/footer/lore sections keep their own backgrounds.)
+   ============================================================ */
+html { background: #e7f2ff; }
+body {
+  background:
+    radial-gradient(ellipse at 12% 6%, rgba(98, 184, 255, 0.22), transparent 42%),
+    radial-gradient(ellipse at 88% 96%, rgba(155, 214, 106, 0.20), transparent 45%),
+    linear-gradient(180deg, #e7f2ff 0%, #eef7ff 42%, #edf8ee 100%) !important;
+}
+.highlights,
+.about-body,
+.wg-body,
+.signup-body { background: transparent !important; }
+
+/* Festival mark in the nav logo line */
+.nav-logo-mark {
+  height: 1.6em;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 0.5rem;
+  margin-top: -0.15em;
+  filter: drop-shadow(0 0 8px rgba(255, 200, 61, 0.55));
+}
+
+/* ---- Civ logo on roster cards ---- */
+.civ-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 14px;
+  margin-bottom: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 12px rgba(43, 184, 196, 0.2);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+/* ---- Open-slot CTA card on Who's Going ---- */
+.civ-card-cta {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border: 2px dashed var(--aqua-2) !important;
+  box-shadow: none !important;
+}
+.civ-card-cta:hover {
+  border-color: var(--aqua-3) !important;
+  transform: translateY(-3px);
+}
+
+/* ---- Text-style link button (inherits aero accent) ---- */
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--aqua-3);
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.01em;
+}
+.link-btn:hover {
+  color: var(--aqua-4);
+  text-decoration: underline;
+}
+
+.faq-heading {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  background: linear-gradient(180deg, var(--sky-4), var(--grass-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 1.8rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.01em;
+}
+
+.signup-civ-cta {
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px dashed rgba(43, 184, 196, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+
+/* ---- Loading / error / empty states ---- */
+.state-msg {
+  font-family: var(--soft-display);
+  font-weight: 600;
+  color: var(--aqua-4);
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  text-align: center;
+}
+.state-msg.error {
+  color: #b3245b;
+  background: rgba(255, 138, 168, 0.15);
+  border-color: rgba(255, 138, 168, 0.5);
+}
+.state-msg.muted {
+  color: var(--ink-2);
+  opacity: 0.8;
+  background: transparent;
+  border: 1px dashed rgba(43, 184, 196, 0.25);
+}
+
+/* ============================================================
+   Forms (Submit Civ + Admin login share .civ-form)
+   ============================================================ */
+.civ-form {
+  display: grid;
+  gap: 1.1rem;
+}
+.civ-form h2 {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1.5rem;
+}
+.field {
+  display: grid;
+  gap: 0.4rem;
+}
+.field > span {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--aqua-4);
+  letter-spacing: 0.02em;
+}
+.field > span em {
+  color: var(--coral);
+  font-style: normal;
+}
+.field > span small {
+  font-weight: 500;
+  color: var(--ink-2);
+  opacity: 0.75;
+  letter-spacing: 0;
+}
+.field input[type='text'],
+.field input[type='password'],
+.field input[type='number'],
+.field textarea,
+.field select {
+  font-family: var(--body);
+  font-size: 0.95rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(43, 184, 196, 0.35);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  width: 100%;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field textarea {
+  resize: vertical;
+}
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--aqua-2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 3px rgba(98, 184, 255, 0.25);
+}
+.field input[type='file'] {
+  font-family: var(--body);
+  font-size: 0.88rem;
+  color: var(--ink-2);
+}
+.field-error {
+  color: #b3245b;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.submit-btn {
+  justify-self: start;
+  border: none;
+}
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.submit-fineprint {
+  font-size: 0.78rem;
+  color: var(--ink-2);
+  opacity: 0.7;
+  margin: 0;
+}
+
+/* ---- Submit success panel ---- */
+.submit-success {
+  text-align: center;
+  display: grid;
+  gap: 0.8rem;
+  justify-items: center;
+  padding: 1rem 0;
+}
+.submit-success-mark {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 2rem;
+  color: white;
+  background: linear-gradient(180deg, var(--grass-2), var(--grass-3));
+  box-shadow: 0 8px 24px rgba(95, 178, 74, 0.45);
+}
+.submit-success h2 {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1.6rem;
+}
+.submit-success p {
+  color: var(--ink);
+  line-height: 1.6;
+  max-width: 460px;
+}
+.submit-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+/* ============================================================
+   Admin dashboard
+   ============================================================ */
+.admin-shell {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+  display: grid;
+  gap: 2rem;
+}
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.admin-title {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  background: linear-gradient(180deg, var(--sky-4), var(--grass-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.admin-sub {
+  color: var(--ink-2);
+  font-family: var(--soft-display);
+  font-weight: 600;
+  margin-top: 0.3rem;
+}
+.admin-header-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.admin-section {
+  display: grid;
+  gap: 1rem;
+}
+.admin-section-title {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.85rem;
+  color: var(--aqua-4);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(43, 184, 196, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.admin-count {
+  background: linear-gradient(180deg, var(--aqua-2), var(--aqua-3));
+  color: white;
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem;
+  font-size: 0.75rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.admin-card {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(212, 244, 255, 0.6));
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-lg);
+  padding: 1.3rem 1.5rem;
+  display: grid;
+  gap: 0.8rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 6px 18px rgba(43, 184, 196, 0.12);
+}
+.admin-card-pending {
+  border-left: 4px solid var(--sunshine);
+}
+.admin-card-rejected {
+  opacity: 0.7;
+  border-left: 4px solid var(--coral);
+}
+.admin-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.admin-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+.admin-card-titles {
+  flex: 1;
+  display: grid;
+  gap: 0.2rem;
+}
+.admin-card-titles h4 {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1.1rem;
+}
+.admin-role {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--aqua-3);
+  font-size: 0.9rem;
+}
+.admin-desc {
+  color: var(--ink);
+  line-height: 1.55;
+  font-size: 0.93rem;
+}
+.admin-submitter {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  display: grid;
+  gap: 0.3rem;
+}
+.admin-label {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--aqua-4);
+  margin-right: 0.4rem;
+}
+.admin-inline {
+  font-family: var(--body);
+  font-size: 0.95rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(43, 184, 196, 0.4);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  width: 100%;
+}
+.admin-edit-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.admin-edit-row label {
+  display: grid;
+  gap: 0.3rem;
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--aqua-4);
+}
+.admin-edit-row select,
+.admin-edit-row input {
+  font-family: var(--body);
+  font-weight: 400;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(43, 184, 196, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.admin-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px dashed rgba(43, 184, 196, 0.3);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+}
+.admin-logo-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 2px 8px rgba(43, 184, 196, 0.2);
+}
+.admin-logo-none {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  opacity: 0.7;
+  font-style: italic;
+}
+.btn-file {
+  display: inline-flex;
+  align-items: center;
+}
+.btn-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.btn {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.btn-approve {
+  background: linear-gradient(180deg, var(--grass-2), var(--grass-3));
+  color: white;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.btn-reject {
+  background: linear-gradient(180deg, var(--coral), #ff5a9d);
+  color: white;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.btn-danger {
+  background: rgba(255, 255, 255, 0.7);
+  color: #b3245b;
+  border-color: rgba(255, 138, 168, 0.6);
+}
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--aqua-4);
+  border-color: rgba(43, 184, 196, 0.4);
+}
+
+/* ---- Audit log ---- */
+.admin-log {
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+.admin-log li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+}
+.log-action {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  color: white;
+  background: var(--aqua-3);
+}
+.log-approved { background: var(--grass-3); }
+.log-rejected { background: var(--coral); }
+.log-deleted { background: #b3245b; }
+.log-edited { background: var(--sky-3); }
+.log-target { font-family: var(--mono); font-weight: 700; color: var(--aqua-4); }
+.log-notes { flex: 1; min-width: 120px; }
+.log-time { font-family: var(--mono); font-size: 0.72rem; opacity: 0.7; }
+
+/* ============================================================
+   Mobile nav polish (overrides — app.css loads after styles.css).
+   The mockup's base `.nav-logo .summer-tag { display:inline-block }`
+   is declared AFTER its own @media(max-width:800px){...display:none},
+   so the intended hide never wins. Re-assert it here, and keep nav
+   labels from breaking mid-word ("Who's Going") on narrow screens.
+   ============================================================ */
+/* Hero meta pills sit low in the hero where the gradient turns pale, so the
+   frosted-white pills (white text on translucent white) washed out. Darken to
+   a navy frosted chip with gold labels — legible on both light and dark hero. */
+.hero-meta-pill {
+  background: rgba(8, 40, 78, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 14px rgba(0, 0, 0, 0.22);
+}
+.hero-meta-pill strong {
+  color: var(--sunshine);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+@media (max-width: 800px) {
+  .nav-logo .summer-tag { display: none; }
+  /* .nav-links has no flex-wrap in the contract, so 5 items shrink and break
+     mid-word. Let whole buttons wrap to a second centered row instead. */
+  .nav-links { flex-wrap: wrap; }
+  .nav-links button { white-space: nowrap; }
+}
+
+/* ============================================================
+   Live festival schedule (Who's Going → Schedule), from the Sheet
+   ============================================================ */
+/* Attractions reuse .attr-item but only have content (+ optional location pill),
+   so override the base 3-column grid to 2 columns with the pill hugging right. */
+.attr-list.attractions .attr-item { grid-template-columns: 1fr auto; }
+@media (max-width: 600px) {
+  /* stack content above the location pill on phones */
+  .attr-list.attractions .attr-item { grid-template-columns: 1fr; }
+  .attr-list.attractions .attr-host { justify-self: start; }
+}
+
+.sched-day { margin-bottom: 2.2rem; }
+.sched-day-label {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1.15rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid rgba(43, 184, 196, 0.25);
+}
+.sched-items { display: grid; gap: 0.8rem; }
+.sched-item {
+  display: grid;
+  grid-template-columns: 116px 1fr;
+  gap: 1rem;
+  align-items: center;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.88), rgba(212, 244, 255, 0.5));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 4px solid var(--aqua-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 1rem 1.2rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 6px 18px rgba(43, 184, 196, 0.12);
+}
+.sched-time {
+  text-align: center;
+  border-right: 1px dashed rgba(43, 184, 196, 0.3);
+  padding-right: 0.8rem;
+}
+.sched-gmt {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1.05rem;
+  line-height: 1.1;
+}
+.sched-gmt-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--aqua-3);
+  opacity: 0.85;
+  margin-top: 0.15rem;
+  font-weight: 700;
+  font-family: var(--soft-display);
+}
+.sched-title {
+  font-family: var(--soft-display);
+  font-weight: 700;
+  color: var(--aqua-4);
+  font-size: 1rem;
+}
+.sched-sub {
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin-top: 0.15rem;
+}
+.sched-meta {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.sched-zones { font-size: 0.78rem; color: var(--ink-2); opacity: 0.85; }
+.sched-loc {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--aqua-4);
+  background: rgba(125, 208, 255, 0.18);
+  border: 1px solid rgba(43, 184, 196, 0.3);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+@media (max-width: 600px) {
+  .sched-item { grid-template-columns: 1fr; gap: 0.5rem; }
+  .sched-time {
+    text-align: left;
+    border-right: none;
+    border-bottom: 1px dashed rgba(43, 184, 196, 0.3);
+    padding: 0 0 0.5rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .sched-gmt-label { margin-top: 0; }
+}

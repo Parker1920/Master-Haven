@@ -1,0 +1,17 @@
+# Python
+backend/.venv/
+**/__pycache__/
+*.pyc
+
+# Local dev data (the real DB + uploads live OUTSIDE the repo on the host)
+data-local/
+backend/data-local/
+
+# Node / Vite build output (rebuilt by the Docker image / `npm run build`)
+frontend/node_modules/
+frontend/dist/
+
+# Secrets — only the example is committed
+.env
+*.env
+!.env.example

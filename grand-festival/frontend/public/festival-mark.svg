@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Summer Grand Festival marker">
+  <defs>
+    <radialGradient id="gfGlow" cx="50%" cy="46%" r="55%">
+      <stop offset="0%" stop-color="#ffd76a" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#ffc23d" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffc23d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gfDot" cx="40%" cy="34%" r="72%">
+      <stop offset="0%" stop-color="#fff0c2"/>
+      <stop offset="55%" stop-color="#ffc83d"/>
+      <stop offset="100%" stop-color="#f3a01c"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="31" r="31" fill="url(#gfGlow)"/>
+  <path d="M32 6 L51 27 Q52.6 29 51 31 L32 58 L13 31 Q11.4 29 13 27 Z"
+        fill="#fffdf7" stroke="#ffce5e" stroke-width="1.6" stroke-linejoin="round"/>
+  <circle cx="32" cy="27" r="9" fill="url(#gfDot)"/>
+</svg>

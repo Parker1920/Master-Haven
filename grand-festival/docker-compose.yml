@@ -1,0 +1,26 @@
+# Standalone compose for the Grand Festival service.
+#
+# Run from this folder:
+#   GF_DATA_DIR=~/docker/grand-festival-data GF_ADMIN_PASSWORD=... docker compose up -d --build
+#
+# The data dir is mounted from the HOST (outside the repo) so `git pull` and
+# container rebuilds never touch the SQLite DB or uploaded logos.
+#
+# Alternatively, merge the `grand-festival` service block into the root
+# ~/docker/docker-compose.yml alongside Haven (see README — "Deploy").
+
+services:
+  grand-festival:
+    build: .
+    container_name: grand-festival
+    restart: unless-stopped
+    ports:
+      - "8082:8000"
+    volumes:
+      - "${GF_DATA_DIR:-./data-local}:/data"
+    environment:
+      - ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-changeme}
+      - DATA_DIR=/data
+      - DB_PATH=/data/grand_festival.db
+      - UPLOAD_DIR=/data/uploads
+      - GF_COOKIE_SECURE=1
