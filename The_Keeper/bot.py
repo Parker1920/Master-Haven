@@ -217,8 +217,8 @@ from setup import is_command_allowed
 # ---------------- PREFIX COMMANDS (!)
 @bot.check
 async def global_command_check(ctx):
-    if ctx.guild is None or ctx.channel is None:
-        return False
+    if ctx.guild is None or ctx.channel is None or ctx.command is None:
+    return False
 
     return await is_command_allowed(
         guild_id=ctx.guild.id,
