@@ -212,32 +212,24 @@ COGS = [
     "setup",
 ]
 @bot.tree.interaction_check
-async def check_channel_allowed(interaction: discord.Interaction) -> bool:
+async def global_app_command_check(interaction: discord.Interaction):
     if not interaction.guild:
         return True
 
-    import os, json
-
-    path = f"Data/guilds/{interaction.guild.id}.json"
-
-    if not os.path.exists(path):
-        return False
-
-    with open(path, "r") as f:
-        config = json.load(f)
+    from setup import is_command_allowed
 
     command = interaction.command
     if command is None:
         return True
 
-    command_name = command.qualified_name  
+    return await is_command_allowed(
+        guild_id=interaction.guild.id,
+        command_name=command.qualified_name,
+        channel_id=interaction.channel.id,
+        member=interaction.user
+    )
 
-    allowed_channels = config.get(command_name)
-
-    if not allowed_channels:
-        return False
-
-    return interaction.channel.id in allowed_channels
+bot.tree.interaction_check = global_app_command_check
 
 
 @bot.check
