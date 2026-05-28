@@ -443,7 +443,7 @@ class SetupCog(commands.Cog):
         )
 
 async def setup(bot: commands.Bot):
-    RESET_DB = True
+    RESET_DB = False
 
     if RESET_DB:
         async with aiosqlite.connect(DB_PATH) as db:
