@@ -24,7 +24,9 @@ def get_env_int(key, default=None):
     except Exception:
         print(f"[ENV WARNING] Invalid int for {key}: {value}")
         return default
-
+        
+def normalize(name: str):
+    return name.split(" ")[-1].split(":")[-1]
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
@@ -221,7 +223,7 @@ async def global_command_check(ctx):
 
     return await is_command_allowed(
         guild_id=ctx.guild.id,
-        command_name=ctx.command.name,
+        command_name=normalize(ctx.command.name),
         channel_id=ctx.channel.id,
         member=ctx.author
     )
@@ -238,7 +240,7 @@ async def global_app_command_check(interaction: discord.Interaction):
 
     return await is_command_allowed(
         guild_id=interaction.guild.id,
-        command_name=command.qualified_name,
+        command_name=normalize(command.qualified_name),
         channel_id=interaction.channel.id,
         member=interaction.user
     )
