@@ -260,9 +260,6 @@ class CommandSelectView(discord.ui.View):
             item.disabled = True
 
 
-# ---------------- UI: CHANNEL SELECT ----------------
-
-# ---------------- UI: COMBINED CHANNEL + ROLE FLOW ----------------
 
 class SetupFlowView(discord.ui.View):
     def __init__(self, command_name: str):
@@ -274,11 +271,9 @@ class SetupFlowView(discord.ui.View):
         self.channel_select = ChannelSelect(command_name)
         self.role_select = RoleSelect(command_name, [])
 
-        self.role_select.disabled = True
-
         self.add_item(self.channel_select)
         self.add_item(self.role_select)
-        self.add_item(SubmitSkipRoleButton(self))
+        self.add_item(SubmitSkipRoleButton())
 
     async def on_timeout(self):
         for item in self.children:
@@ -302,34 +297,32 @@ class ChannelSelect(discord.ui.ChannelSelect):
 
         view.channels = self.values
 
+        # update channels inside role select
         view.role_select.channels = self.values
-        view.role_select.disabled = False
 
         await interaction.response.edit_message(
             content=(
                 f"✅ Channels selected for **{self.command_name}**.\n"
-                f"Now select an optional role restriction "
-                f"or click skip."
+                f"You may now optionally select a role,\n"
+                f"or press **Skip role & Save**."
             ),
             view=view
         )
 
 
 class SubmitSkipRoleButton(discord.ui.Button):
-    def __init__(self, view):
+    def __init__(self):
         super().__init__(
             label="Skip role & Save",
             style=discord.ButtonStyle.success
         )
-
-        self.v = view
 
     async def callback(self, interaction: discord.Interaction):
         view: SetupFlowView = self.view
 
         if not view.channels:
             return await interaction.response.send_message(
-                "Select channels first.",
+                "❌ Select channels first.",
                 ephemeral=True
             )
 
@@ -340,8 +333,15 @@ class SubmitSkipRoleButton(discord.ui.Button):
             None
         )
 
+        mentions = ", ".join(c.mention for c in view.channels)
+
         await interaction.response.edit_message(
-            content="✅ Saved (no role restriction).",
+            content=(
+                f"✅ Configuration saved!\n\n"
+                f"**Command:** {view.command_name}\n"
+                f"**Channels:** {mentions}\n"
+                f"**Role Restriction:** None"
+            ),
             view=None
         )
 
