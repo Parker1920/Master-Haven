@@ -279,7 +279,7 @@ class SetupFlowView(discord.ui.View):
         
         self.add_item(self.channel_select)
         self.add_item(self.role_select)
-        self.add_item(SubmitSkipRoleButton())
+        
 
     async def on_timeout(self):
         for item in self.children:
