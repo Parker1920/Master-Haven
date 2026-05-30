@@ -168,10 +168,9 @@ class CommandSelect(discord.ui.Select):
     
         await interaction.response.edit_message(
             content=f"🔧 Configuring `{selected_command}`",
-            view=SetupFlowView(selected_command)
-        )
-    
-
+            view=ChannelSetupView(selected_command)
+)
+            
 class NextPageButton(discord.ui.Button):
     def __init__(
         self,
@@ -261,76 +260,43 @@ class CommandSelectView(discord.ui.View):
 
 
 
-class SetupFlowView(discord.ui.View):
-    def __init__(self, command_name: str):
+class ChannelSetupView(discord.ui.View):
+    def __init__(self, command_name):
         super().__init__(timeout=180)
 
         self.command_name = command_name
         self.channels = []
 
-        self.channel_select = ChannelSelect(command_name)
-        self.role_select = RoleSelect(command_name, [])
-        self.channel_select.row = 0
-        self.role_select.row = 1
-        
-        button = SubmitSkipRoleButton()
-        button.row = 2
-        self.add_item(button)
-        
-        self.add_item(self.channel_select)
-        self.add_item(self.role_select)
-        
+        self.add_item(ChannelSelect())
 
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
+        self.add_item(SaveButton())
+        self.add_item(RoleSetupButton())
 
 
 class ChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, command_name: str):
-        self.command_name = command_name
-
-        super().__init__(
-            placeholder="Select allowed channels...",
-            min_values=1,
-            max_values=10,
-            channel_types=[discord.ChannelType.text],
-            custom_id=f"channel_select:{command_name}"
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        view: SetupFlowView = self.view
-
-        view.channels = self.values
-
-        # update channels inside role select
-        view.role_select.channels = self.values
-
-        await interaction.response.edit_message(
-            content=(
-                f"✅ Channels selected for **{self.command_name}**.\n"
-                f"You may now optionally select a role,\n"
-                f"or press **Skip role & Save**."
-            ),
-            view=view
-        )
-
-
-class SubmitSkipRoleButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
-            label="Skip role & Save",
+            placeholder="Select channels...",
+            min_values=1,
+            max_values=10,
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction):
+        self.view.channels = self.values
+
+        await interaction.response.defer()
+
+
+class SaveButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="Save",
             style=discord.ButtonStyle.success
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        view: SetupFlowView = self.view
-
-        if not view.channels:
-            return await interaction.response.send_message(
-                "❌ Select channels first.",
-                ephemeral=True
-            )
+    async def callback(self, interaction):
+        view = self.view
 
         await save_command_config(
             interaction.guild.id,
@@ -339,69 +305,63 @@ class SubmitSkipRoleButton(discord.ui.Button):
             None
         )
 
-        mentions = ", ".join(c.mention for c in view.channels)
-
         await interaction.response.edit_message(
-            content=(
-                f"✅ Configuration saved!\n\n"
-                f"**Command:** {view.command_name}\n"
-                f"**Channels:** {mentions}\n"
-                f"**Role Restriction:** None"
-            ),
+            content="✅ Saved without role.",
             view=None
         )
 
 
+class RoleSetupButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="Select Role",
+            style=discord.ButtonStyle.primary
+        )
+
+    async def callback(self, interaction):
+        view = self.view
+
+        await interaction.response.edit_message(
+            content="Select optional role.",
+            view=RoleSetupView(
+                view.command_name,
+                view.channels
+            )
+        )
+
 class RoleSelect(discord.ui.RoleSelect):
-    def __init__(
-        self,
-        command_name: str,
-        channels: list[discord.abc.GuildChannel]
-    ):
+    def __init__(self, command_name, channels):
         self.command_name = command_name
         self.channels = channels
 
         super().__init__(
             placeholder="Optional role restriction...",
-            max_values=1,
-            custom_id=f"role_select:{command_name}"
+            max_values=1
         )
 
-    async def callback(
-        self,
-        interaction: discord.Interaction
-    ):
-        if not interaction.guild:
-            return
-
-        role_id = None
-        role_mention = "None"
-
-        if self.values:
-            role = self.values[0]
-            role_id = role.id
-            role_mention = role.mention
+    async def callback(self, interaction):
+        role = self.values[0]
 
         await save_command_config(
-            guild_id=interaction.guild.id,
-            command_name=self.command_name,
-            channel_ids=[c.id for c in self.channels],
-            role_id=role_id
-        )
-
-        mentions = ", ".join(
-            c.mention for c in self.channels
+            interaction.guild.id,
+            self.command_name,
+            [c.id for c in self.channels],
+            role.id
         )
 
         await interaction.response.edit_message(
-            content=(
-                f"✅ Configuration saved!\n\n"
-                f"**Command:** {self.command_name}\n"
-                f"**Channels:** {mentions}\n"
-                f"**Role Restriction:** {role_mention}"
-            ),
+            content="✅ Saved with role restriction.",
             view=None
         )
+        
+class RoleSetupView(discord.ui.View):
+    def __init__(self, command_name, channels):
+        super().__init__(timeout=180)
+
+        self.command_name = command_name
+        self.channels = channels
+
+        self.add_item(RoleSelect(command_name, channels))
 
 
 async def is_command_allowed(
