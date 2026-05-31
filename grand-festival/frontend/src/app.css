@@ -46,6 +46,40 @@ body {
   background: rgba(255, 255, 255, 0.6);
 }
 
+/* ---- Uniform roster cards with expand/collapse bios ----
+   Cards in a CSS-grid row stretch to the tallest in that row, so a single long
+   bio used to balloon its whole row. We clamp the description to a fixed number
+   of lines (reserving that height so collapsed cards are uniform) and let the
+   card grow only when the user expands it. CivCard.jsx toggles `.clamped`.
+   NOTE: deliberately NOT making .civ-card a flexbox — that stretches the inline
+   `★ HOST` badge full-width. Plain block flow preserves the original look. */
+.civ-card p.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* Reserve 4 lines (0.9rem × 1.5 line-height) so short bios match tall ones. */
+  min-height: calc(4 * 1.5 * 0.9rem);
+}
+/* Read more / Show less — subtle aero text button on its own line under the bio. */
+.civ-readmore {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 0.4rem;
+  color: var(--aqua-3);
+  font-family: var(--soft-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.civ-readmore:hover {
+  color: var(--aqua-4);
+  text-decoration: underline;
+}
+
 /* ---- Open-slot CTA card on Who's Going ---- */
 .civ-card-cta {
   background: rgba(255, 255, 255, 0.4) !important;
@@ -728,6 +762,10 @@ body {
 /* ============================================================
    Portal glyphs (GlyphStrip) — transparent mint glyphs on navy chips
    ============================================================ */
+/* Temporarily hide all portal glyph displays sitewide.
+   Remove the rule below to re-enable. */
+.glyph-strip,
+.glyph-label { display: none !important; }
 .glyph-strip {
   display: inline-flex;
   align-items: center;
