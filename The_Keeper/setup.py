@@ -267,10 +267,7 @@ class ChannelSetupView(discord.ui.View):
         self.channels = []
 
        
-        self.add_item(ChannelSelect(row=0))
-        self.add_item(SaveButton(row=1))
-        self.add_item(RoleSetupButton(row=1))
-
+        
 
 class ChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, row: int = 0):
@@ -285,7 +282,7 @@ class ChannelSelect(discord.ui.ChannelSelect):
 
     async def callback(self, interaction):
         self.view.channels = list(self.values)
-        await interaction.response.defer()
+        await interaction.response.edit_message(view=self.view)
             
     
 
