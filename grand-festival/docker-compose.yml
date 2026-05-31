@@ -24,3 +24,13 @@ services:
       - DB_PATH=/data/grand_festival.db
       - UPLOAD_DIR=/data/uploads
       - GF_COOKIE_SECURE=1
+    # Nginx Proxy Manager (the `npm` container) proxies grandfestival.online to
+    # this service BY CONTAINER NAME, so both must share a docker network. NPM
+    # lives on `docker_default`. Without this, a `docker compose up --build`
+    # recreate drops the container onto an isolated network and NPM 502s.
+    networks:
+      - docker_default
+
+networks:
+  docker_default:
+    external: true
