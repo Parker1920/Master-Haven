@@ -283,15 +283,13 @@ class ChannelSelect(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction):
-    channels = list(self.values)
-
-        await interaction.response.edit_message(
-            view=ChannelSetupView(
-                self.view.command_name
-            )
-        )
+        self.view.channels = list(self.values)
     
-    interaction.message.components
+        await interaction.response.edit_message(
+            view=self.view
+        )
+        
+    
 
 
 class SaveButton(discord.ui.Button):
@@ -367,7 +365,7 @@ class RoleSetupView(discord.ui.View):
         self.channels = channels
         
         self.add_item(RoleSelect(command_name, channels))
-        self.add_item(SaveButton())
+        
 
 async def is_command_allowed(
     guild_id: int,
