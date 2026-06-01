@@ -265,6 +265,10 @@ class ChannelSetupView(discord.ui.View):
 
         self.command_name = command_name
         self.channels = []
+        
+        self.add_item(ChannelSelect())
+        self.add_item(SaveButton())
+        self.add_item(RoleSetupButton())
 
        
         
@@ -416,7 +420,7 @@ class SetupCog(commands.Cog):
         )
 
 async def setup(bot: commands.Bot):
-    RESET_DB = True
+    RESET_DB = False 
 
     if RESET_DB:
         async with aiosqlite.connect(DB_PATH) as db:
