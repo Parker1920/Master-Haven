@@ -299,12 +299,7 @@ class PostChannelView(discord.ui.View):
 
         self.add_item(SaveButton())
         self.add_item(RoleSetupButton())
-
-
-    async def callback(self, interaction):
-        self.view.channels = list(self.values)
-        await interaction.response.edit_message(view=self.view)
-            
+    
     
 
 
