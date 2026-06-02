@@ -2163,27 +2163,27 @@ _ATLAS_HARDCODED_DISPLAY_NAMES = {
 
 
 def _load_tag_display_names(cursor) -> dict:
-    """Return {lowercase_tag: display_name} from super_admin_settings.discord_tag_colors.
+    """Return {lowercase_tag: display_name} from the canonical civilizations table.
 
-    The settings JSON is the source of truth for tag → display name. Falls back
-    to an empty dict if the setting doesn't exist; callers should default to
-    the raw tag name.
+    The civilizations table is the source of truth for tag → display name since
+    the v1.61.0 dropdown/color consolidation (same source as
+    /api/discord_tag_colors). The previous implementation queried
+    super_admin_settings for `setting_key`/`setting_value` columns that don't
+    exist (the table uses `key`/`value`), so this raised "no such column:
+    setting_value" on every analytics/community-overview request and silently
+    fell back to raw tag names. Falls back to an empty dict on error; callers
+    default to the raw tag name.
     """
     try:
         cursor.execute(
-            "SELECT setting_value FROM super_admin_settings WHERE setting_key = 'discord_tag_colors' LIMIT 1"
+            "SELECT tag, display_name FROM civilizations WHERE is_active = 1"
         )
-        row = cursor.fetchone()
-        if not row or not row['setting_value']:
-            return {}
-        import json as _json
-        data = _json.loads(row['setting_value'])
-        if not isinstance(data, dict):
-            return {}
         out = {}
-        for tag, info in data.items():
-            if isinstance(info, dict) and info.get('name'):
-                out[str(tag).lower()] = info['name']
+        for row in cursor.fetchall():
+            tag = row['tag']
+            name = row['display_name']
+            if tag and name:
+                out[str(tag).lower()] = name
         return out
     except Exception as e:
         logger.warning(f"_load_tag_display_names failed: {e}")
