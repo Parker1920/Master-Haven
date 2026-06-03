@@ -279,25 +279,26 @@ class ChannelPicker(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction):
-        self.view.channels = list(self.values)
-
-        await interaction.response.defer()
-        
-        await interaction.message.edit(
-        content="Channels selected.",
-        view=PostChannelView(
-            self.view.command_name,
-            self.view.channels
+        key = (
+            interaction.guild.id,
+            interaction.user.id,
+            self.view.command_name
         )
-    )
+    
+        SESSIONS[key] = {
+            "channels": list(self.values)
+        }
+    
+        await interaction.response.edit_message(
+            content="Channels selected.",
+            view=PostChannelView(self.view.command_name)
+        )
             
 
 class PostChannelView(discord.ui.View):
-    def __init__(self, command_name, channels):
+    def __init__(self, command_name):
         super().__init__(timeout=180)
-
         self.command_name = command_name
-        self.channels = channels
 
         self.add_item(SaveButton())
         self.add_item(RoleSetupButton())
@@ -306,20 +307,30 @@ class PostChannelView(discord.ui.View):
 
 class SaveButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(
-            label="Save",
-            style=discord.ButtonStyle.success,
-            row=1
-        )
+        super().__init__(label="Save", style=discord.ButtonStyle.success)
+
     async def callback(self, interaction):
-        view = self.view
+        key = (
+            interaction.guild.id,
+            interaction.user.id,
+            self.view.command_name
+        )
+
+        session = SESSIONS.get(key)
+        if not session:
+            return await interaction.response.edit_message(
+                content="Session expired. Restart setup.",
+                view=None
+            )
 
         await save_command_config(
             interaction.guild.id,
-            view.command_name,
-            [c.id for c in view.channels],
+            self.view.command_name,
+            [c.id for c in session["channels"]],
             None
         )
+
+        SESSIONS.pop(key, None)
 
         await interaction.response.edit_message(
             content="✅ Saved without role.",
@@ -329,42 +340,56 @@ class SaveButton(discord.ui.Button):
 
 class RoleSetupButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(
-            label="Select Role",
-            style=discord.ButtonStyle.primary,
-            row=1
-        )
+        super().__init__(label="Select Role", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction):
-        view = self.view
+        key = (
+            interaction.guild.id,
+            interaction.user.id,
+            self.view.command_name
+        )
+
+        session = SESSIONS.get(key)
+        if not session:
+            return await interaction.response.edit_message(
+                content="Session expired. Restart setup.",
+                view=None
+            )
 
         await interaction.response.edit_message(
             content="Select optional role.",
-            view=RoleSetupView(
-                view.command_name,
-                view.channels
-            )
+            view=RoleSetupView(self.view.command_name)
         )
 
 class RoleSelect(discord.ui.RoleSelect):
-    def __init__(self, command_name, channels):
+    def __init__(self, command_name):
         self.command_name = command_name
-        self.channels = channels
-
-        super().__init__(
-            placeholder="Optional role restriction...",
-            max_values=1
-        )
+        super().__init__(placeholder="Optional role restriction...", max_values=1)
 
     async def callback(self, interaction):
+        key = (
+            interaction.guild.id,
+            interaction.user.id,
+            self.command_name
+        )
+
+        session = SESSIONS.get(key)
+        if not session:
+            return await interaction.response.edit_message(
+                content="Session expired.",
+                view=None
+            )
+
         role = self.values[0]
 
         await save_command_config(
             interaction.guild.id,
             self.command_name,
-            [c.id for c in self.channels],
+            [c.id for c in session["channels"]],
             role.id
         )
+
+        SESSIONS.pop(key, None)
 
         await interaction.response.edit_message(
             content="✅ Saved with role restriction.",
