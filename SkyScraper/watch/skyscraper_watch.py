@@ -224,6 +224,18 @@ def html_to_text(s):
     return s.strip()[:MAX_TEXT_CHARS]
 
 
+def strip_text_noise(s):
+    s = s or ""
+    s = re.sub(r"[?&]_wpnonce=[a-f0-9]+", "", s, flags=re.I)
+    s = re.sub(r"[?&]nonce=[a-f0-9]+", "", s, flags=re.I)
+    s = re.sub(r"[?&]_cb=\d+", "", s)
+    s = re.sub(r"[?&]ver=[a-f0-9.]+", "", s, flags=re.I)
+    s = s.replace("\ufffd", "")
+    s = s.replace("\u2026", "...")
+    s = re.sub(r" +", " ", s)
+    return s.strip()
+
+
 def item_record(kind, p):
     """Normalize a raw WP REST object into the compact shape we store."""
     if kind == "media":
@@ -232,7 +244,7 @@ def item_record(kind, p):
                 "title": clean_inline((p.get("title") or {}).get("rendered", ""))}
     rec = {"mod": p["modified_gmt"], "date": p["date_gmt"], "slug": p["slug"],
            "link": p["link"], "title": clean_inline(p["title"]["rendered"])}
-    rec["text"] = html_to_text((p.get("content") or {}).get("rendered", ""))
+    rec["text"] = strip_text_noise(html_to_text((p.get("content") or {}).get("rendered", "")))
     return rec
 
 
@@ -269,7 +281,7 @@ def render_text_diff(old, new, max_lines=40, max_chars=1500):
     return out
 
 
-def _scan_phrases(text, where, into):
+def _scan_phrases(text, where, into, item_id=None, item_ids_map=None):
     if not text:
         return
     low = text.lower()
@@ -278,6 +290,8 @@ def _scan_phrases(text, where, into):
             into.setdefault(ph, [])
             if where not in into[ph]:
                 into[ph].append(where)
+            if item_id is not None and item_ids_map is not None:
+                item_ids_map.setdefault(ph, set()).add(item_id)
 
 
 def snapshot():
@@ -285,15 +299,17 @@ def snapshot():
     one source leaves that key absent so we never false-alert on an outage."""
     s = {}
     phrase_locations = {}
+    phrase_item_ids = {}
     # --- WP posts (new + edited + removed) — full pagination ---
     try:
         posts, complete = fetch_all(f"{SITE}/wp-json/wp/v2/posts?orderby=modified&order=desc")
         if posts or complete:
             s["posts"] = {str(p["id"]): item_record("posts", p) for p in posts}
             s["posts_complete"] = complete
-            for rec in s["posts"].values():
+            for pid, rec in s["posts"].items():
                 _scan_phrases(rec.get("title", "") + "\n" + rec.get("text", ""),
-                              f"post: {rec.get('title','?')}", phrase_locations)
+                              f"post: {rec.get('title','?')}", phrase_locations,
+                              item_id=f"post:{pid}", item_ids_map=phrase_item_ids)
     except Exception as e:
         log(f"WARN posts fetch failed: {e}")
     # --- WP pages (new + edited + removed) — full pagination ---
@@ -302,9 +318,10 @@ def snapshot():
         if pages or complete:
             s["pages"] = {str(p["id"]): item_record("pages", p) for p in pages}
             s["pages_complete"] = complete
-            for rec in s["pages"].values():
+            for pid, rec in s["pages"].items():
                 _scan_phrases(rec.get("title", "") + "\n" + rec.get("text", ""),
-                              f"page: {rec.get('title','?')}", phrase_locations)
+                              f"page: {rec.get('title','?')}", phrase_locations,
+                              item_id=f"page:{pid}", item_ids_map=phrase_item_ids)
     except Exception as e:
         log(f"WARN pages fetch failed: {e}")
     # --- WP media (new + removed) — full pagination ---
@@ -352,11 +369,13 @@ def snapshot():
         # digits so the live visitor counter doesn't either.
         text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
         text = re.sub(r"<[^>]+>", " ", text)
+        text = strip_text_noise(text)
         text = re.sub(r"\d+", "#", text)
         text = re.sub(r"\s+", " ", text).strip()
         s["home_hash"] = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
         s["home_phrases"] = sorted({ph for ph in KEY_PHRASES if ph.lower() in home.lower()})
-        _scan_phrases(home, "homepage", phrase_locations)
+        _scan_phrases(home, "homepage", phrase_locations,
+                      item_id="homepage", item_ids_map=phrase_item_ids)
     except Exception as e:
         log(f"WARN homepage fetch failed: {e}")
     # --- reserved 2nd site ---
@@ -381,6 +400,7 @@ def snapshot():
     # finalize cross-content phrase index
     s["phrase_locations"] = {k: v for k, v in phrase_locations.items()}
     s["phrases_present"] = sorted(phrase_locations)
+    s["phrase_item_ids"] = {k: sorted(v) for k, v in phrase_item_ids.items()}
     return s
 
 
@@ -490,11 +510,25 @@ def diff(old, new):
     if "phrases_present" in old:
         op_set, np_set = set(old.get("phrases_present", [])), set(new.get("phrases_present", []))
         loc = new.get("phrase_locations", {})
+        old_item_ids = old.get("phrase_item_ids", {})
+        new_posts = new.get("posts", {})
+        new_pages = new.get("pages", {})
         for ph in sorted(np_set - op_set):
             where = ", ".join(loc.get(ph, [])) or "somewhere"
             ch.append(f"🔔 **Key phrase appeared** — “{ph}” now present in: {where}")
         for ph in sorted(op_set - np_set):
-            ch.append(f"🔕 **Key phrase gone** — “{ph}” no longer present anywhere")
+            vanished_ids = old_item_ids.get(ph, set())
+            items_still_present = any(
+                (kind == "post" and id_part in new_posts) or
+                (kind == "page" and id_part in new_pages) or
+                kind == "homepage"
+                for item_id in vanished_ids
+                for kind, _, id_part in [item_id.partition(":")]
+            )
+            if items_still_present:
+                ch.append(f"🔕 **Key phrase gone** — “{ph}” no longer present anywhere")
+            else:
+                log(f"SKIP 'gone' alert for '{ph}': source items {vanished_ids} no longer in feed (likely transient fetch gap)")
 
     # homepage structure
     if old.get("home_hash") and new.get("home_hash") and old["home_hash"] != new["home_hash"]:
