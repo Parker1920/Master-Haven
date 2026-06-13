@@ -312,7 +312,8 @@ class SimpleHexKeypad(discord.ui.View):
                     ) as session:
 
                         async with session.get(
-                            f"{BASE}/api/communities"
+                            f"{BASE}/api/communities",
+                            timeout=aiohttp.ClientTimeout(total=10) 
                         ) as resp:
 
                             communities = (
