@@ -175,6 +175,7 @@ class SimpleHexKeypad(discord.ui.View):
                         f"{BASE}/api/communities",
                         timeout=10
                     ).json().get("communities", [])
+                    print(response)
 
                     found = False
                   
