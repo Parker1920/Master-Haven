@@ -322,6 +322,7 @@ class SimpleHexKeypad(discord.ui.View):
                             ) as resp:
 
                                 data = await resp.json()
+                                print(data)
 
                             for region in data.get("regions", []):
 
