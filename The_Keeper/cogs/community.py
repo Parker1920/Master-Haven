@@ -397,12 +397,7 @@ class CommunityCog(commands.Cog):
                             e.set_thumbnail(
                                 url=invite.guild.icon.url
                             )
-
-                        if invite.guild.banner:
-                            e.set_image(
-                                url=invite.guild.banner.url
-                            )
-
+                        
                 except Exception:
                     pass
 
