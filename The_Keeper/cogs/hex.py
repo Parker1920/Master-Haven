@@ -165,20 +165,40 @@ class SimpleHexKeypad(discord.ui.View):
                 system_id = self.input_string.upper()
 
                 try:
-                    data = requests.get(
-                        f"{BASE}/api/public/community-regions",
+                    # FIX: fetch all communities first
+                    communities = requests.get(
+                        f"{BASE}/api/communities",
                         timeout=10
-                    ).json()
+                    ).json().get("communities", [])
+
+                    found = False
 
                     self.system_owner_type = "unknown"
                     self.system_owner_tag = None
 
-                    for region in data.get("regions", []):
-                        for s in region.get("systems", []):
-                            if s.get("id") == system_id:
-                                self.system_owner_type = "community"
-                                self.system_owner_tag = region.get("community")
+                    for c in communities:
+                        tag = c.get("discord_tag")
+
+                        if not tag:
+                            continue
+
+                        data = requests.get(
+                            f"{BASE}/api/public/community-regions",
+                            params={"community": tag},
+                            timeout=10
+                        ).json()
+
+                        for region in data.get("regions", []):
+                            for s in region.get("systems", []):
+                                if s.get("id") == system_id:
+                                    self.system_owner_type = "community"
+                                    self.system_owner_tag = tag
+                                    found = True
+                                    break
+                            if found:
                                 break
+                        if found:
+                            break
 
                 except Exception:
                     self.system_owner_type = "unknown"
