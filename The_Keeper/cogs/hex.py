@@ -167,17 +167,27 @@ class SimpleHexKeypad(discord.ui.View):
 
             print(f"CHECKING COMMUNITY: {tag}")
 
-            async with session.get(
-                f"{BASE}/api/public/community-regions",
-                params={"community": tag}
-            ) as resp:
-
-                return tag, await resp.json()
-
+            try:
+                async with session.get(
+                    f"{BASE}/api/public/community-regions",
+                    params={"community": tag},
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    data = await resp.json()
+                    return tag, data
+            
+            except asyncio.TimeoutError:
+                print(f"TIMEOUT: community-regions for {tag}")
+                return tag, None
+            
+            except Exception as e:
+                print(f"ERROR: community-regions for {tag} -> {e}")
+                return tag, None
+            
         except Exception as e:
-
+            
             print(f"FAILED COMMUNITY: {tag} -> {e}")
-
+            
             return tag, None
 
     def make_callback(self, key):
