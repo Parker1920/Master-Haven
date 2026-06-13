@@ -19,12 +19,12 @@ active_sessions = {}
 
 keeper_responses = [
     "Hello, Voyager!",
-    "Greetings, voyager of the stars!",
+    "Greetings, {member.mention}, voyager of the stars!",
     "The Keeper witnesses you.",
     "Hullo, Voyager! Fair voyage!",
     "Hello! May your Voyage be bright.",
     "I like map.",
-    "We witness your voyage"
+    "We witness your voyage, {member.mention}"
 ]
 
 fail_responses = ["huh?", "one more time?", "Gather your thoughts and resummon me"]
@@ -193,7 +193,7 @@ class PersonalityCog(commands.Cog):
             return
 
         # ---- Greetings outside session ----
-        greetings = ["hello, keeper", "hello keeper", "hi keeper"]
+        greetings = ["hello, keeper", "hello keeper", "hi keeper, hey keeper"]
         if any(content.startswith(g) for g in greetings):
             await message.add_reaction("👋")
             await message.channel.send(random.choice(keeper_responses))
