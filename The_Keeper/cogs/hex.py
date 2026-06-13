@@ -27,6 +27,7 @@ glyph_emojis = {
 
 
 class SimpleHexKeypad(discord.ui.View):
+
     def __init__(self, owner_id: int):
         super().__init__(timeout=180)
 
@@ -47,12 +48,15 @@ class SimpleHexKeypad(discord.ui.View):
         ]
 
         for r, row in enumerate(hex_keys):
+
             for key in row:
+
                 btn = discord.ui.Button(
                     style=discord.ButtonStyle.secondary,
                     emoji=glyph_emojis[key],
                     row=r
                 )
+
                 btn.callback = self.make_callback(key)
                 self.add_item(btn)
 
@@ -61,6 +65,7 @@ class SimpleHexKeypad(discord.ui.View):
             style=discord.ButtonStyle.danger,
             row=4
         )
+
         back.callback = self.backspace
         self.add_item(back)
 
@@ -69,10 +74,12 @@ class SimpleHexKeypad(discord.ui.View):
             style=discord.ButtonStyle.primary,
             row=4
         )
+
         reset.callback = self.reset
         self.add_item(reset)
 
     def build_embed(self):
+
         embed = discord.Embed(
             title="🔷 Hex Glyph Keypad",
             color=0x00FFFF
@@ -85,6 +92,7 @@ class SimpleHexKeypad(discord.ui.View):
         )
 
         if self.emoji_sequence:
+
             embed.add_field(
                 name="Preview",
                 value=" ".join(self.emoji_sequence),
@@ -92,6 +100,7 @@ class SimpleHexKeypad(discord.ui.View):
             )
 
         if self.class_type:
+
             embed.add_field(
                 name="Class",
                 value=self.class_type,
@@ -99,9 +108,11 @@ class SimpleHexKeypad(discord.ui.View):
             )
 
         if self.system_owner_tag:
+
             ownership_value = (
                 f"{self.system_owner_type}:{self.system_owner_tag}"
             )
+
         else:
             ownership_value = self.system_owner_type
 
@@ -112,6 +123,7 @@ class SimpleHexKeypad(discord.ui.View):
         )
 
         if self.system_owner_tag:
+
             embed.add_field(
                 name="Haven API",
                 value=(
@@ -124,6 +136,7 @@ class SimpleHexKeypad(discord.ui.View):
         return embed
 
     async def temp_error(self, interaction, text):
+
         msg = await interaction.followup.send(
             text,
             ephemeral=True
@@ -137,17 +150,23 @@ class SimpleHexKeypad(discord.ui.View):
             pass
 
     async def safe_edit(self, interaction):
+
         try:
+
             if interaction.response.is_done():
+
                 await interaction.edit_original_response(
                     embed=self.build_embed(),
                     view=self
                 )
+
             else:
+
                 await interaction.response.edit_message(
                     embed=self.build_embed(),
                     view=self
                 )
+
         except discord.NotFound:
             pass
 
@@ -156,6 +175,7 @@ class SimpleHexKeypad(discord.ui.View):
         async def callback(interaction: discord.Interaction):
 
             if interaction.user.id != self.owner_id:
+
                 return await interaction.response.send_message(
                     "Not your keypad.",
                     ephemeral=True
@@ -178,12 +198,14 @@ class SimpleHexKeypad(discord.ui.View):
                 val = int(self.input_string, 16)
 
                 if val == 0:
+
                     await self.temp_error(
                         interaction,
                         "⚠️ Address will take you to Glyph 1"
                     )
 
                 elif val > 6:
+
                     self.input_string = ""
                     self.emoji_sequence = []
 
@@ -198,6 +220,7 @@ class SimpleHexKeypad(discord.ui.View):
                 ssi_val = int(self.input_string[1:4], 16)
 
                 if ssi_val == 0:
+
                     self.input_string = self.input_string[:1]
                     self.emoji_sequence = self.emoji_sequence[:1]
 
@@ -265,6 +288,8 @@ class SimpleHexKeypad(discord.ui.View):
 
                 system_id = self.input_string.upper()
 
+                print(f"INPUT SYSTEM ID: {system_id}")
+
                 self.system_owner_type = "uncharted"
                 self.system_owner_tag = None
 
@@ -302,10 +327,24 @@ class SimpleHexKeypad(discord.ui.View):
 
                                 for s in region.get("systems", []):
 
-                                    if s.get("id") == system_id:
+                                    api_id = str(
+                                        s.get("id") or
+                                        s.get("system_id") or
+                                        ""
+                                    ).upper()
+
+                                    print(f"API SYSTEM ID: {api_id}")
+
+                                    if api_id == system_id:
+
+                                        print(
+                                            f"MATCH FOUND: "
+                                            f"{system_id} -> {tag}"
+                                        )
 
                                         self.system_owner_type = "community"
                                         self.system_owner_tag = tag
+
                                         found = True
                                         break
 
@@ -316,7 +355,8 @@ class SimpleHexKeypad(discord.ui.View):
                                 break
 
                 except Exception as e:
-                    print(e)
+
+                    print(f"HAVEN LOOKUP ERROR: {e}")
 
                     self.system_owner_type = "uncharted"
                     self.system_owner_tag = None
@@ -352,6 +392,7 @@ class SimpleHexKeypad(discord.ui.View):
 
         self.input_string = ""
         self.emoji_sequence = []
+
         self.class_type = None
 
         self.system_owner_type = "uncharted"
