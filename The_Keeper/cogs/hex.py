@@ -30,11 +30,12 @@ class SimpleHexKeypad(discord.ui.View):
     def __init__(self, owner_id: int):
         super().__init__(timeout=180)
         self.owner_id = owner_id
+
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
 
-        self.system_owner_type = None
+        self.system_owner_type = "unknown"
         self.system_owner_tag = None
 
         hex_keys = [
@@ -72,7 +73,7 @@ class SimpleHexKeypad(discord.ui.View):
         if self.class_type:
             embed.add_field(name="Class", value=self.class_type, inline=False)
 
-        if self.system_owner_type:
+        if self.system_owner_tag:
             embed.add_field(
                 name="System Ownership",
                 value=f"{self.system_owner_type}:{self.system_owner_tag}",
@@ -161,17 +162,16 @@ class SimpleHexKeypad(discord.ui.View):
                     self.emoji_sequence = self.emoji_sequence[:9]
                     await self.temp_error(interaction, "❌ Invalid XXX")
 
-                # Resolve system ownership HERE
                 system_id = self.input_string.upper()
 
                 try:
                     data = requests.get(
                         f"{BASE}/api/public/community-regions",
-                        params={"community": self.system_owner_tag},
                         timeout=10
                     ).json()
 
-                    self.system_owner_type, self.system_owner_tag = "unknown", None
+                    self.system_owner_type = "unknown"
+                    self.system_owner_tag = None
 
                     for region in data.get("regions", []):
                         for s in region.get("systems", []):
@@ -181,7 +181,8 @@ class SimpleHexKeypad(discord.ui.View):
                                 break
 
                 except Exception:
-                    self.system_owner_type, self.system_owner_tag = "unknown", None
+                    self.system_owner_type = "unknown"
+                    self.system_owner_tag = None
 
                 for item in self.children:
                     if isinstance(item, discord.ui.Button):
@@ -215,7 +216,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
-        self.system_owner_type = None
+        self.system_owner_type = "unknown"
         self.system_owner_tag = None
 
         for item in self.children:
