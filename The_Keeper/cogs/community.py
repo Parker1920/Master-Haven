@@ -8,7 +8,7 @@ import asyncio
 import gspread
 
 
-# -------------------- PAGINATOR --------------------
+# -------------------- PAGINATOR -----------------
 class SearchPaginator(discord.ui.View):
     def __init__(self, cog, results, embed_builder):
         super().__init__(timeout=120)
@@ -17,9 +17,9 @@ class SearchPaginator(discord.ui.View):
         self.embed_builder = embed_builder
         self.index = 0
 
-    def build_page(self):
+    async def build_page(self):
         row = self.results[self.index]
-        embed = self.embed_builder(row, self.index + 1)
+        embed = await self.embed_builder(row, self.index + 1)
 
         link = next((v for k, v in row.items() if "link" in k.lower()), None)
 
@@ -42,7 +42,7 @@ class SearchPaginator(discord.ui.View):
             if self.index > 0:
                 self.index -= 1
 
-            embed, content = self.build_page()
+            embed, content = await self.build_page()
 
             await interaction.edit_original_response(
                 embed=embed,
@@ -62,7 +62,7 @@ class SearchPaginator(discord.ui.View):
             if self.index < len(self.results) - 1:
                 self.index += 1
 
-            embed, content = self.build_page()
+            embed, content = await self.build_page()
 
             await interaction.edit_original_response(
                 embed=embed,
@@ -72,7 +72,6 @@ class SearchPaginator(discord.ui.View):
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
-
 
 # -------------------- SEARCH MODAL --------------------
 class SearchModal(discord.ui.Modal, title="Community Search"):
@@ -351,7 +350,7 @@ class CommunityCog(commands.Cog):
             )
             return
 
-        def build_embed(row, i):
+        async def build_embed(row, i):
 
             e = discord.Embed(title=f"Result {i}")
 
@@ -375,7 +374,6 @@ class CommunityCog(commands.Cog):
                         value=value,
                         inline=False
                     )
-            return e          
 
             link = next(
                 (
@@ -390,10 +388,29 @@ class CommunityCog(commands.Cog):
                 if not link.startswith("http"):
                     link = "https://" + link
 
+                try:
+                    invite = await self.bot.fetch_invite(link)
+
+                    if invite.guild:
+
+                        if invite.guild.icon:
+                            e.set_thumbnail(
+                                url=invite.guild.icon.url
+                            )
+
+                        if invite.guild.banner:
+                            e.set_image(
+                                url=invite.guild.banner.url
+                            )
+
+                except Exception:
+                    pass
+
+            return e
 
         view = SearchPaginator(self, matches, build_embed)
 
-        embed, content = view.build_page()
+        embed, content = await view.build_page()
 
         await interaction.edit_original_response(
             embed=embed,
