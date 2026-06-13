@@ -295,7 +295,11 @@ class SimpleHexKeypad(discord.ui.View):
 
                 try:
 
-                    async with aiohttp.ClientSession() as session:
+                    timeout = aiohttp.ClientTimeout(total=60)
+
+                    async with aiohttp.ClientSession(
+                        timeout=timeout
+                    ) as session:
 
                         async with session.get(
                             f"{BASE}/api/communities",
