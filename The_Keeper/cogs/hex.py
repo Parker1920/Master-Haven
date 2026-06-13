@@ -2,6 +2,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
+import requests
+
+BASE = "https://havenmap.online"
 
 glyph_emojis = {
     "0": discord.PartialEmoji(name="0", id=1487546589269463211),
@@ -27,15 +30,19 @@ class SimpleHexKeypad(discord.ui.View):
     def __init__(self, owner_id: int):
         super().__init__(timeout=180)
         self.owner_id = owner_id
+
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
 
+        self.system_owner = None
+        self.system_name = None
+
         hex_keys = [
-            ["0","1","2","3"],
-            ["4","5","6","7"],
-            ["8","9","A","B"],
-            ["C","D","E","F"]
+            ["0", "1", "2", "3"],
+            ["4", "5", "6", "7"],
+            ["8", "9", "A", "B"],
+            ["C", "D", "E", "F"]
         ]
 
         for r, row in enumerate(hex_keys):
@@ -56,26 +63,89 @@ class SimpleHexKeypad(discord.ui.View):
         reset.callback = self.reset
         self.add_item(reset)
 
+    # ---------------- API ----------------
+    def resolve_system(self, system_id: str, community_tag: str):
+        try:
+            r = requests.get(
+                f"{BASE}/api/public/community-regions",
+                params={"community": community_tag},
+                timeout=10
+            )
+            data = r.json()
+
+            for region in data.get("regions", []):
+                for s in region.get("systems", []):
+                    if s.get("id") == system_id:
+                        return {
+                            "owner": community_tag,
+                            "system_name": s.get("name"),
+                            "star_type": s.get("star_type"),
+                            "grade": s.get("grade"),
+                            "region": region.get("region_name"),
+                            "coords": (
+                                region.get("region_x"),
+                                region.get("region_y"),
+                                region.get("region_z")
+                            )
+                        }
+
+            return None
+
+        except Exception:
+            return None
+
+    # ---------------- UI ----------------
     def build_embed(self):
-        embed = discord.Embed(title="🔷 Hex Glyph Keypad", color=0x00FFFF)
-        embed.add_field(name="Input", value=f"`{self.input_string or ' '}`", inline=False)
+        embed = discord.Embed(
+            title="🔷 Hex Glyph Keypad",
+            color=0x00FFFF
+        )
+
+        embed.add_field(
+            name="Input",
+            value=f"`{self.input_string or ' '}`",
+            inline=False
+        )
 
         if self.emoji_sequence:
-            embed.add_field(name="Preview", value=" ".join(self.emoji_sequence), inline=False)
+            embed.add_field(
+                name="Preview",
+                value=" ".join(self.emoji_sequence),
+                inline=False
+            )
 
         if self.class_type:
-            embed.add_field(name="Class", value=self.class_type, inline=False)
+            embed.add_field(
+                name="Class",
+                value=self.class_type,
+                inline=False
+            )
+
+        if self.system_owner:
+            embed.add_field(
+                name="System Owner",
+                value=(
+                    f"**Community:** {self.system_owner['owner']}\n"
+                    f"**System:** {self.system_owner['system_name']}\n"
+                    f"**Star Type:** {self.system_owner['star_type']}\n"
+                    f"**Grade:** {self.system_owner['grade']}\n"
+                    f"**Region:** {self.system_owner['region']}\n"
+                    f"**Coords:** {self.system_owner['coords']}"
+                ),
+                inline=False
+            )
 
         return embed
 
     async def temp_error(self, interaction, text):
         msg = await interaction.followup.send(text, ephemeral=True)
-        await asyncio.sleep(10)
+        await asyncio.sleep(8)
         try:
             await msg.delete()
         except:
             pass
 
+    # ---------------- CALLBACK ----------------
     def make_callback(self, key):
         async def callback(interaction: discord.Interaction):
 
@@ -87,77 +157,12 @@ class SimpleHexKeypad(discord.ui.View):
                 f"<:{glyph_emojis[key].name}:{glyph_emojis[key].id}>"
             )
 
-            # -------- GLYPH 1 --------
-            if len(self.input_string) == 1:
-                val = int(self.input_string, 16)
-
-                if val == 0:
-                    await self.temp_error(interaction, "⚠️ Address will take you to Glyph 1")
-
-                elif val > 6:
-                    self.input_string = ""
-                    self.emoji_sequence = []
-                    await self.temp_error(interaction, "❌ Invalid Glyph input: planet index")
-
-            # -------- GLYPHS 2–4 --------
-            if len(self.input_string) == 4:
-                ssi_hex = self.input_string[1:4]
-                ssi_val = int(ssi_hex, 16)
-
-                if ssi_val == 0:
-                    self.input_string = self.input_string[:1]
-                    self.emoji_sequence = self.emoji_sequence[:1]
-                    await self.temp_error(interaction, "❌ Error in SSI")
-
-                elif 1 <= ssi_val <= 0x123:
-                    self.class_type = "🟡 Yellow"
-
-                elif 0x124 <= ssi_val < 0x3E8:
-                    self.class_type = "RGB"
-
-                elif 0x3E9 <= ssi_val <= 0x429:
-                    self.class_type = "🟣 Purple"
-                    
-                elif 0x258 <= ssi_val <= 0x3E7:
-                    self.class_type = "!phantom"
-
-                elif ssi_val == 0x3E8:
-                    self.class_type = "!Glass"
-                
-                elif ssi_val >= 0x430:
-                    self.class_type = "!phantom"
-
-                elif ssi_val > 0x429:
-                    self.input_string = self.input_string[:1]
-                    self.emoji_sequence = self.emoji_sequence[:1]
-                    await self.temp_error(interaction, "❌ Invalid SSI: too high")
-
-            # -------- GLYPHS 5–6 --------
-            if len(self.input_string) == 6:
-                yy_hex = self.input_string[4:6]
-
-                if yy_hex.upper() == "81":
-                    self.input_string = self.input_string[:4]
-                    self.emoji_sequence = self.emoji_sequence[:4]
-                    await self.temp_error(interaction, "❌ Invalid YY")
-
-            # -------- GLYPHS 7–9 --------
-            if len(self.input_string) == 9:
-                zzz_hex = self.input_string[6:9]
-
-                if zzz_hex.upper() == "801":
-                    self.input_string = self.input_string[:6]
-                    self.emoji_sequence = self.emoji_sequence[:6]
-                    await self.temp_error(interaction, "❌ Invalid ZZZ")
-
-            # -------- GLYPHS 10–12 --------
+            # ---------------- FINAL SYSTEM PARSE ----------------
             if len(self.input_string) == 12:
-                xxx_hex = self.input_string[9:12]
+                system_id = self.input_string[4:12]
+                community_tag = "HAVEN"  # default or replace with dynamic mapping
 
-                if xxx_hex.upper() == "801":
-                    self.input_string = self.input_string[:9]
-                    self.emoji_sequence = self.emoji_sequence[:9]
-                    await self.temp_error(interaction, "❌ Invalid XXX")
+                self.system_owner = self.resolve_system(system_id, community_tag)
 
                 for item in self.children:
                     if isinstance(item, discord.ui.Button):
@@ -167,16 +172,7 @@ class SimpleHexKeypad(discord.ui.View):
                     embed=self.build_embed(),
                     view=self
                 )
-                return 
-
-            # -------- GALACTIC CORE --------
-            if len(self.input_string) >= 12:
-                core = self.input_string[4:12]
-
-                if core == "00000000":
-                    self.input_string = self.input_string[:4]
-                    self.emoji_sequence = self.emoji_sequence[:4]
-                    await self.temp_error(interaction, "🌌 Galactic Core Detected")
+                return
 
             await interaction.response.edit_message(
                 embed=self.build_embed(),
@@ -185,6 +181,7 @@ class SimpleHexKeypad(discord.ui.View):
 
         return callback
 
+    # ---------------- CONTROLS ----------------
     async def backspace(self, interaction: discord.Interaction):
         if self.input_string:
             self.input_string = self.input_string[:-1]
@@ -200,6 +197,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
+        self.system_owner = None
 
         for item in self.children:
             if isinstance(item, discord.ui.Button):
@@ -221,7 +219,7 @@ class HexKey(commands.Cog):
     )
     async def hexkey(self, interaction: discord.Interaction):
         view = SimpleHexKeypad(owner_id=interaction.user.id)
-    
+
         await interaction.response.send_message(
             embed=view.build_embed(),
             view=view
