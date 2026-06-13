@@ -153,22 +153,32 @@ class SimpleHexKeypad(discord.ui.View):
 
         try:
 
-            if interaction.response.is_done():
-
-                await interaction.edit_original_response(
-                    embed=self.build_embed(),
-                    view=self
-                )
-
-            else:
-
-                await interaction.response.edit_message(
-                    embed=self.build_embed(),
-                    view=self
-                )
+            await interaction.edit_original_response(
+                embed=self.build_embed(),
+                view=self
+            )
 
         except discord.NotFound:
             pass
+
+    async def fetch_community_regions(self, session, tag):
+
+        try:
+
+            print(f"CHECKING COMMUNITY: {tag}")
+
+            async with session.get(
+                f"{BASE}/api/public/community-regions",
+                params={"community": tag}
+            ) as resp:
+
+                return tag, await resp.json()
+
+        except Exception as e:
+
+            print(f"FAILED COMMUNITY: {tag} -> {e}")
+
+            return tag, None
 
     def make_callback(self, key):
 
@@ -183,7 +193,7 @@ class SimpleHexKeypad(discord.ui.View):
 
             await interaction.response.defer()
 
-            if len(self.input_string) > 12:
+            if len(self.input_string) >= 12:
                 return
 
             self.input_string += key
@@ -302,31 +312,43 @@ class SimpleHexKeypad(discord.ui.View):
                     ) as session:
 
                         async with session.get(
-                            f"{BASE}/api/communities",
-                            timeout=10
+                            f"{BASE}/api/communities"
                         ) as resp:
 
                             communities = (
                                 await resp.json()
                             ).get("communities", [])
 
-                        found = False
+                        tasks = []
 
                         for c in communities:
 
                             tag = c.get("discord_tag")
 
-                            if not tag:
+                            if tag:
+                                tasks.append(
+                                    self.fetch_community_regions(
+                                        session,
+                                        tag
+                                    )
+                                )
+
+                        results = await asyncio.gather(
+                            *tasks,
+                            return_exceptions=True
+                        )
+
+                        found = False
+
+                        for result in results:
+
+                            if isinstance(result, Exception):
                                 continue
 
-                            async with session.get(
-                                f"{BASE}/api/public/community-regions",
-                                params={"community": tag},
-                                timeout=10
-                            ) as resp:
+                            tag, data = result
 
-                                data = await resp.json()
-                                print(data)
+                            if not data:
+                                continue
 
                             for region in data.get("regions", []):
 
@@ -338,7 +360,9 @@ class SimpleHexKeypad(discord.ui.View):
                                         ""
                                     ).upper()
 
-                                    print(f"API SYSTEM ID: {api_id}")
+                                    print(
+                                        f"{tag} -> API SYSTEM ID: {api_id}"
+                                    )
 
                                     if api_id == system_id:
 
@@ -359,7 +383,7 @@ class SimpleHexKeypad(discord.ui.View):
                             if found:
                                 break
 
-                except Exception as e:
+                except Exception:
 
                     import traceback
                     traceback.print_exc()
