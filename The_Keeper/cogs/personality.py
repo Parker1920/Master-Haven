@@ -196,7 +196,7 @@ class PersonalityCog(commands.Cog):
         greetings = ["hello, keeper", "hello keeper", "hi keeper", "hey keeper"]
         if any(content.startswith(g) for g in greetings):
             await message.add_reaction("👋")
-            await message.channel.send(random.choice(keeper_responses))
+            await message.channel.send(random.choice(keeper_responses).format(member=message.author))
             return
 # -------------------- Setup --------------------
 async def setup(bot: commands.Bot):
