@@ -35,7 +35,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.emoji_sequence = []
         self.class_type = None
 
-        self.system_owner_type = "unknown"
+        self.system_owner_type = "uncharted"
         self.system_owner_tag = None
 
         hex_keys = [
@@ -74,12 +74,17 @@ class SimpleHexKeypad(discord.ui.View):
             embed.add_field(name="Class", value=self.class_type, inline=False)
 
         if self.system_owner_tag:
-            embed.add_field(
-                name="System Ownership",
-                value=f"{self.system_owner_type}:{self.system_owner_tag}",
-                inline=False
-            )
+            ownership_value = f"{self.system_owner_type}:{self.system_owner_tag}"
+        else:
+            ownership_value = self.system_owner_type
 
+        embed.add_field(
+            name="System Ownership",
+            value=ownership_value,
+            inline=False
+        )
+
+        if self.system_owner_tag:
             embed.add_field(
                 name="Haven API",
                 value=f"{BASE}/api/public/community-regions?community={self.system_owner_tag}",
@@ -165,7 +170,6 @@ class SimpleHexKeypad(discord.ui.View):
                 system_id = self.input_string.upper()
 
                 try:
-                    # FIX: fetch all communities first
                     communities = requests.get(
                         f"{BASE}/api/communities",
                         timeout=10
@@ -173,7 +177,7 @@ class SimpleHexKeypad(discord.ui.View):
 
                     found = False
 
-                    self.system_owner_type = "unknown"
+                    self.system_owner_type = "uncharted"
                     self.system_owner_tag = None
 
                     for c in communities:
@@ -201,7 +205,7 @@ class SimpleHexKeypad(discord.ui.View):
                             break
 
                 except Exception:
-                    self.system_owner_type = "unknown"
+                    self.system_owner_type = "uncharted"
                     self.system_owner_tag = None
 
                 for item in self.children:
@@ -236,7 +240,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
-        self.system_owner_type = "unknown"
+        self.system_owner_type = "uncharted"
         self.system_owner_tag = None
 
         for item in self.children:
