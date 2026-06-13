@@ -104,7 +104,7 @@ class SimpleHexKeypad(discord.ui.View):
     def make_callback(self, key):
         async def callback(interaction: discord.Interaction):
 
-            if len(self.input_string) >= 12:
+            if len(self.input_string) > 12:
                 return await interaction.response.defer()
 
             self.input_string += key
