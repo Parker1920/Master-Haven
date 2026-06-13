@@ -63,9 +63,9 @@ class WelcomeCog(commands.Cog):
         avatar = member.display_avatar.url
 
         embed = discord.Embed(
-            title=f"Welcome, Voyager,",
+            title=f"Welcome, Voyager",
             description=(
-                "to The Voyager's Haven — a community dedicated to exploration, research, archiving and stellar cartography. We are invested in several projects to chart and connect the universe of No Mans Sky! Stay and watch, or connect with us!\n"
+                "Welcome to The Voyager's Haven — a community dedicated to exploration, research, archiving and stellar cartography. We are invested in several projects to chart and connect the universe of No Mans Sky! Stay and watch, or connect with us!\n"
                 "Check out some of our projects here!"
             ),
             color=0x8A00C4
@@ -74,9 +74,9 @@ class WelcomeCog(commands.Cog):
         embed.add_field(
             name="Learn More",
             value=(
-                "🌐 https://havenmap.online/\n"
-                "📖 https://docs.google.com/document/d/1T0xEMTddToEbG5HAgmwE9BAPAlxlosvwxC9f74wonxU/edit?usp=drivesdk\n"
-                "💫 https://travelers-exchange.online/"
+                "🌐 The Haven Map: https://havenmap.online/\n"
+                "📖 Voyager's guide: https://docs.google.com/document/d/1T0xEMTddToEbG5HAgmwE9BAPAlxlosvwxC9f74wonxU/edit?usp=drivesdk\n"
+                "💫Travelers Exchange: https://travelers-exchange.online/"
             ),
             inline=False
         )
@@ -101,7 +101,7 @@ class WelcomeCog(commands.Cog):
         embed.set_footer(text=f"You are #{position} in the server")
 
         await channel.send(
-            content=f"Welcome to the Haven, {member.mention}!",
+            content=f"Welcome {member.mention}!",
             embed=embed,
             view=DeptView(member.guild.id)
         )
