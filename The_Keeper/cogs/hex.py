@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
-import requests
+import aiohttp
 
 BASE = "https://havenmap.online"
 
@@ -29,6 +29,7 @@ glyph_emojis = {
 class SimpleHexKeypad(discord.ui.View):
     def __init__(self, owner_id: int):
         super().__init__(timeout=180)
+
         self.owner_id = owner_id
 
         self.input_string = ""
@@ -55,26 +56,52 @@ class SimpleHexKeypad(discord.ui.View):
                 btn.callback = self.make_callback(key)
                 self.add_item(btn)
 
-        back = discord.ui.Button(label="←", style=discord.ButtonStyle.danger, row=4)
+        back = discord.ui.Button(
+            label="←",
+            style=discord.ButtonStyle.danger,
+            row=4
+        )
         back.callback = self.backspace
         self.add_item(back)
 
-        reset = discord.ui.Button(label="Reset", style=discord.ButtonStyle.primary, row=4)
+        reset = discord.ui.Button(
+            label="Reset",
+            style=discord.ButtonStyle.primary,
+            row=4
+        )
         reset.callback = self.reset
         self.add_item(reset)
 
     def build_embed(self):
-        embed = discord.Embed(title="🔷 Hex Glyph Keypad", color=0x00FFFF)
-        embed.add_field(name="Input", value=f"`{self.input_string or ' '}`", inline=False)
+        embed = discord.Embed(
+            title="🔷 Hex Glyph Keypad",
+            color=0x00FFFF
+        )
+
+        embed.add_field(
+            name="Input",
+            value=f"`{self.input_string or ' '}`",
+            inline=False
+        )
 
         if self.emoji_sequence:
-            embed.add_field(name="Preview", value=" ".join(self.emoji_sequence), inline=False)
+            embed.add_field(
+                name="Preview",
+                value=" ".join(self.emoji_sequence),
+                inline=False
+            )
 
         if self.class_type:
-            embed.add_field(name="Class", value=self.class_type, inline=False)
+            embed.add_field(
+                name="Class",
+                value=self.class_type,
+                inline=False
+            )
 
         if self.system_owner_tag:
-            ownership_value = f"{self.system_owner_type}:{self.system_owner_tag}"
+            ownership_value = (
+                f"{self.system_owner_type}:{self.system_owner_tag}"
+            )
         else:
             ownership_value = self.system_owner_type
 
@@ -87,173 +114,259 @@ class SimpleHexKeypad(discord.ui.View):
         if self.system_owner_tag:
             embed.add_field(
                 name="Haven API",
-                value=f"{BASE}/api/public/community-regions?community={self.system_owner_tag}",
+                value=(
+                    f"{BASE}/api/public/community-regions"
+                    f"?community={self.system_owner_tag}"
+                ),
                 inline=False
             )
 
         return embed
 
     async def temp_error(self, interaction, text):
-        msg = await interaction.followup.send(text, ephemeral=True)
+        msg = await interaction.followup.send(
+            text,
+            ephemeral=True
+        )
+
         await asyncio.sleep(10)
+
         try:
             await msg.delete()
         except:
             pass
 
+    async def safe_edit(self, interaction):
+        try:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(
+                    embed=self.build_embed(),
+                    view=self
+                )
+            else:
+                await interaction.response.edit_message(
+                    embed=self.build_embed(),
+                    view=self
+                )
+        except discord.NotFound:
+            pass
+
     def make_callback(self, key):
+
         async def callback(interaction: discord.Interaction):
 
+            if interaction.user.id != self.owner_id:
+                return await interaction.response.send_message(
+                    "Not your keypad.",
+                    ephemeral=True
+                )
+
+            await interaction.response.defer()
+
             if len(self.input_string) > 12:
-                return await interaction.response.defer()
+                return
 
             self.input_string += key
+
             self.emoji_sequence.append(
                 f"<:{glyph_emojis[key].name}:{glyph_emojis[key].id}>"
             )
 
             # GLYPH 1
             if len(self.input_string) == 1:
+
                 val = int(self.input_string, 16)
 
                 if val == 0:
-                    await self.temp_error(interaction, "⚠️ Address will take you to Glyph 1")
+                    await self.temp_error(
+                        interaction,
+                        "⚠️ Address will take you to Glyph 1"
+                    )
 
                 elif val > 6:
                     self.input_string = ""
                     self.emoji_sequence = []
-                    await self.temp_error(interaction, "❌ Invalid Glyph input: planet index")
+
+                    await self.temp_error(
+                        interaction,
+                        "❌ Invalid Glyph input: planet index"
+                    )
 
             # GLYPHS 2–4
             if len(self.input_string) == 4:
+
                 ssi_val = int(self.input_string[1:4], 16)
 
                 if ssi_val == 0:
                     self.input_string = self.input_string[:1]
                     self.emoji_sequence = self.emoji_sequence[:1]
-                    await self.temp_error(interaction, "❌ Error in SSI")
+
+                    await self.temp_error(
+                        interaction,
+                        "❌ Error in SSI"
+                    )
 
                 elif 1 <= ssi_val <= 0x123:
                     self.class_type = "🟡 Yellow"
+
                 elif 0x124 <= ssi_val < 0x3E8:
                     self.class_type = "RGB"
+
                 elif 0x3E9 <= ssi_val <= 0x429:
                     self.class_type = "🟣 Purple"
+
                 elif 0x258 <= ssi_val <= 0x3E7:
                     self.class_type = "!phantom"
+
                 elif ssi_val == 0x3E8:
                     self.class_type = "!Glass"
+
                 elif ssi_val >= 0x430:
                     self.class_type = "!phantom"
 
             # GLYPHS 5–6
             if len(self.input_string) == 6:
+
                 if self.input_string[4:6].upper() == "81":
+
                     self.input_string = self.input_string[:4]
                     self.emoji_sequence = self.emoji_sequence[:4]
-                    await self.temp_error(interaction, "❌ Invalid YY")
+
+                    await self.temp_error(
+                        interaction,
+                        "❌ Invalid YY"
+                    )
 
             # GLYPHS 7–9
             if len(self.input_string) == 9:
+
                 if self.input_string[6:9].upper() == "801":
+
                     self.input_string = self.input_string[:6]
                     self.emoji_sequence = self.emoji_sequence[:6]
-                    await self.temp_error(interaction, "❌ Invalid ZZZ")
+
+                    await self.temp_error(
+                        interaction,
+                        "❌ Invalid ZZZ"
+                    )
 
             # GLYPHS 10–12
             if len(self.input_string) == 12:
+
                 if self.input_string[9:12].upper() == "801":
+
                     self.input_string = self.input_string[:9]
                     self.emoji_sequence = self.emoji_sequence[:9]
-                    await self.temp_error(interaction, "❌ Invalid XXX")
+
+                    await self.temp_error(
+                        interaction,
+                        "❌ Invalid XXX"
+                    )
 
                 system_id = self.input_string.upper()
+
                 self.system_owner_type = "uncharted"
                 self.system_owner_tag = None
+
                 try:
-                    communities = requests.get(
-                        f"{BASE}/api/communities",
-                        timeout=10
-                    ).json().get("communities", [])
-                    print(response)
 
-                    found = False
-                  
+                    async with aiohttp.ClientSession() as session:
 
-                    for c in communities:
-                        tag = c.get("discord_tag")
-
-                        if not tag:
-                            continue
-
-                        data = requests.get(
-                            f"{BASE}/api/public/community-regions",
-                            params={"community": tag},
+                        async with session.get(
+                            f"{BASE}/api/communities",
                             timeout=10
-                        ).json()
+                        ) as resp:
 
-                        for region in data.get("regions", []):
-                            for s in region.get("systems", []):
-                                if s.get("id") == system_id:
-                                    self.system_owner_type = "community"
-                                    self.system_owner_tag = tag
-                                    found = True
+                            communities = (
+                                await resp.json()
+                            ).get("communities", [])
+
+                        found = False
+
+                        for c in communities:
+
+                            tag = c.get("discord_tag")
+
+                            if not tag:
+                                continue
+
+                            async with session.get(
+                                f"{BASE}/api/public/community-regions",
+                                params={"community": tag},
+                                timeout=10
+                            ) as resp:
+
+                                data = await resp.json()
+
+                            for region in data.get("regions", []):
+
+                                for s in region.get("systems", []):
+
+                                    if s.get("id") == system_id:
+
+                                        self.system_owner_type = "community"
+                                        self.system_owner_tag = tag
+                                        found = True
+                                        break
+
+                                if found:
                                     break
+
                             if found:
                                 break
-                        if found:
-                            break
 
-                except Exception:
+                except Exception as e:
+                    print(e)
+
                     self.system_owner_type = "uncharted"
                     self.system_owner_tag = None
 
                 for item in self.children:
+
                     if isinstance(item, discord.ui.Button):
                         item.disabled = True
 
-                await interaction.response.edit_message(
-                    embed=self.build_embed(),
-                    view=self
-                )
+                await self.safe_edit(interaction)
                 return
 
-            await interaction.response.edit_message(
-                embed=self.build_embed(),
-                view=self
-            )
+            await self.safe_edit(interaction)
 
         return callback
 
     async def backspace(self, interaction: discord.Interaction):
+
+        await interaction.response.defer()
+
         if self.input_string:
+
             self.input_string = self.input_string[:-1]
+
             if self.emoji_sequence:
                 self.emoji_sequence.pop()
 
-        await interaction.response.edit_message(
-            embed=self.build_embed(),
-            view=self
-        )
+        await self.safe_edit(interaction)
 
     async def reset(self, interaction: discord.Interaction):
+
+        await interaction.response.defer()
+
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
+
         self.system_owner_type = "uncharted"
         self.system_owner_tag = None
 
         for item in self.children:
+
             if isinstance(item, discord.ui.Button):
                 item.disabled = False
 
-        await interaction.response.edit_message(
-            embed=self.build_embed(),
-            view=self
-        )
+        await self.safe_edit(interaction)
 
 
 class HexKey(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -262,7 +375,10 @@ class HexKey(commands.Cog):
         description="A glyph keyboard for stellar information"
     )
     async def hexkey(self, interaction: discord.Interaction):
-        view = SimpleHexKeypad(owner_id=interaction.user.id)
+
+        view = SimpleHexKeypad(
+            owner_id=interaction.user.id
+        )
 
         await interaction.response.send_message(
             embed=view.build_embed(),
