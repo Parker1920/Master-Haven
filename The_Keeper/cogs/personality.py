@@ -189,11 +189,11 @@ class PersonalityCog(commands.Cog):
                 "count": 0,
                 "fails": 0
             }
-            await message.channel.send(random.choice(keeper_responses))
+            await message.channel.send(random.choice(keeper_responses).format(member=message.author))
             return
 
         # ---- Greetings outside session ----
-        greetings = ["hello, keeper", "hello keeper", "hi keeper, hey keeper"]
+        greetings = ["hello, keeper", "hello keeper", "hi keeper", "hey keeper"]
         if any(content.startswith(g) for g in greetings):
             await message.add_reaction("👋")
             await message.channel.send(random.choice(keeper_responses))
