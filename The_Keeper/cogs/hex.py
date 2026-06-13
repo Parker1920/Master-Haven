@@ -168,7 +168,8 @@ class SimpleHexKeypad(discord.ui.View):
                     await self.temp_error(interaction, "❌ Invalid XXX")
 
                 system_id = self.input_string.upper()
-
+                self.system_owner_type = "uncharted"
+                self.system_owner_tag = None
                 try:
                     communities = requests.get(
                         f"{BASE}/api/communities",
@@ -176,9 +177,7 @@ class SimpleHexKeypad(discord.ui.View):
                     ).json().get("communities", [])
 
                     found = False
-
-                    self.system_owner_type = "uncharted"
-                    self.system_owner_tag = None
+                  
 
                     for c in communities:
                         tag = c.get("discord_tag")
