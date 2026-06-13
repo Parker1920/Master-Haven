@@ -34,6 +34,9 @@ class SimpleHexKeypad(discord.ui.View):
         self.emoji_sequence = []
         self.class_type = None
 
+        self.system_owner_type = None
+        self.system_owner_tag = None
+
         hex_keys = [
             ["0", "1", "2", "3"],
             ["4", "5", "6", "7"],
@@ -69,6 +72,19 @@ class SimpleHexKeypad(discord.ui.View):
         if self.class_type:
             embed.add_field(name="Class", value=self.class_type, inline=False)
 
+        if self.system_owner_type:
+            embed.add_field(
+                name="System Ownership",
+                value=f"{self.system_owner_type}:{self.system_owner_tag}",
+                inline=False
+            )
+
+            embed.add_field(
+                name="Haven API",
+                value=f"{BASE}/api/public/community-regions?community={self.system_owner_tag}",
+                inline=False
+            )
+
         return embed
 
     async def temp_error(self, interaction, text):
@@ -90,7 +106,7 @@ class SimpleHexKeypad(discord.ui.View):
                 f"<:{glyph_emojis[key].name}:{glyph_emojis[key].id}>"
             )
 
-            # -------- GLYPH 1 --------
+            # GLYPH 1
             if len(self.input_string) == 1:
                 val = int(self.input_string, 16)
 
@@ -102,10 +118,9 @@ class SimpleHexKeypad(discord.ui.View):
                     self.emoji_sequence = []
                     await self.temp_error(interaction, "❌ Invalid Glyph input: planet index")
 
-            # -------- GLYPHS 2–4 --------
+            # GLYPHS 2–4
             if len(self.input_string) == 4:
-                ssi_hex = self.input_string[1:4]
-                ssi_val = int(ssi_hex, 16)
+                ssi_val = int(self.input_string[1:4], 16)
 
                 if ssi_val == 0:
                     self.input_string = self.input_string[:1]
@@ -114,53 +129,59 @@ class SimpleHexKeypad(discord.ui.View):
 
                 elif 1 <= ssi_val <= 0x123:
                     self.class_type = "🟡 Yellow"
-
                 elif 0x124 <= ssi_val < 0x3E8:
                     self.class_type = "RGB"
-
                 elif 0x3E9 <= ssi_val <= 0x429:
                     self.class_type = "🟣 Purple"
-
                 elif 0x258 <= ssi_val <= 0x3E7:
                     self.class_type = "!phantom"
-
                 elif ssi_val == 0x3E8:
                     self.class_type = "!Glass"
-
                 elif ssi_val >= 0x430:
                     self.class_type = "!phantom"
 
-                elif ssi_val > 0x429:
-                    self.input_string = self.input_string[:1]
-                    self.emoji_sequence = self.emoji_sequence[:1]
-                    await self.temp_error(interaction, "❌ Invalid SSI: too high")
-
-            # -------- GLYPHS 5–6 --------
+            # GLYPHS 5–6
             if len(self.input_string) == 6:
-                yy_hex = self.input_string[4:6]
-
-                if yy_hex.upper() == "81":
+                if self.input_string[4:6].upper() == "81":
                     self.input_string = self.input_string[:4]
                     self.emoji_sequence = self.emoji_sequence[:4]
                     await self.temp_error(interaction, "❌ Invalid YY")
 
-            # -------- GLYPHS 7–9 --------
+            # GLYPHS 7–9
             if len(self.input_string) == 9:
-                zzz_hex = self.input_string[6:9]
-
-                if zzz_hex.upper() == "801":
+                if self.input_string[6:9].upper() == "801":
                     self.input_string = self.input_string[:6]
                     self.emoji_sequence = self.emoji_sequence[:6]
                     await self.temp_error(interaction, "❌ Invalid ZZZ")
 
-            # -------- GLYPHS 10–12 --------
+            # GLYPHS 10–12
             if len(self.input_string) == 12:
-                xxx_hex = self.input_string[9:12]
-
-                if xxx_hex.upper() == "801":
+                if self.input_string[9:12].upper() == "801":
                     self.input_string = self.input_string[:9]
                     self.emoji_sequence = self.emoji_sequence[:9]
                     await self.temp_error(interaction, "❌ Invalid XXX")
+
+                # Resolve system ownership HERE
+                system_id = self.input_string.upper()
+
+                try:
+                    data = requests.get(
+                        f"{BASE}/api/public/community-regions",
+                        params={"community": self.system_owner_tag},
+                        timeout=10
+                    ).json()
+
+                    self.system_owner_type, self.system_owner_tag = "unknown", None
+
+                    for region in data.get("regions", []):
+                        for s in region.get("systems", []):
+                            if s.get("id") == system_id:
+                                self.system_owner_type = "community"
+                                self.system_owner_tag = region.get("community")
+                                break
+
+                except Exception:
+                    self.system_owner_type, self.system_owner_tag = "unknown", None
 
                 for item in self.children:
                     if isinstance(item, discord.ui.Button):
@@ -171,15 +192,6 @@ class SimpleHexKeypad(discord.ui.View):
                     view=self
                 )
                 return
-
-            # -------- GALACTIC CORE --------
-            if len(self.input_string) >= 12:
-                core = self.input_string[4:12]
-
-                if core == "00000000":
-                    self.input_string = self.input_string[:4]
-                    self.emoji_sequence = self.emoji_sequence[:4]
-                    await self.temp_error(interaction, "🌌 Galactic Core Detected")
 
             await interaction.response.edit_message(
                 embed=self.build_embed(),
@@ -203,6 +215,8 @@ class SimpleHexKeypad(discord.ui.View):
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
+        self.system_owner_type = None
+        self.system_owner_tag = None
 
         for item in self.children:
             if isinstance(item, discord.ui.Button):
@@ -217,26 +231,6 @@ class SimpleHexKeypad(discord.ui.View):
 class HexKey(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    def resolve_system_owner(self, system_id: str, community_tag: str = None):
-        if not community_tag:
-            return "unknown", None
-
-        try:
-            data = requests.get(
-                f"{BASE}/api/public/community-regions",
-                params={"community": community_tag},
-                timeout=10
-            ).json()
-        except Exception:
-            return "unknown", None
-
-        for region in data.get("regions", []):
-            for s in region.get("systems", []):
-                if s.get("id") == system_id:
-                    return "community", community_tag
-
-        return "unknown", None
 
     @app_commands.command(
         name="hexkey",
