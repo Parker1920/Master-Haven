@@ -357,7 +357,8 @@ class SimpleHexKeypad(discord.ui.View):
 
                 except Exception as e:
 
-                    print(f"HAVEN LOOKUP ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
 
                     self.system_owner_type = "uncharted"
                     self.system_owner_tag = None
