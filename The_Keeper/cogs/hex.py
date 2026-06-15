@@ -161,32 +161,29 @@ class SimpleHexKeypad(discord.ui.View):
         except discord.NotFound:
             pass
 
-    async def fetch_community_regions(self, session, tag):
+    async def fetch_system_owner(self, session, glyph):
 
         try:
-
-            print(f"CHECKING COMMUNITY: {tag}")
-
-            try:
-                async with session.get(
-                    f"{BASE}/api/public/community-regions",
-                    params={"community": tag},
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    data = await resp.json()
-                    return tag, data
-            
-            except asyncio.TimeoutError:
-                print(f"TIMEOUT: community-regions for {tag}")
-                return tag, None
-            
-            except Exception as e:
-                print(f"ERROR: community-regions for {tag} -> {e}")
-                return tag, None
-            
+    
+            async with session.get(
+                f"{BASE}/api/system/by-glyph/{glyph}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+    
+                if resp.status != 200:
+                    return None
+    
+                return await resp.json()
+    
+        except asyncio.TimeoutError:
+    
+            print(f"TIMEOUT: glyph lookup for {glyph}")
+            return None
+    
         except Exception as e:
-            
-            print(f"FAILED COMMUNITY: {tag} -> {e}")
+    
+            print(f"ERROR: glyph lookup for {glyph} -> {e}")
+            return None
             
             return tag, None
 
@@ -321,78 +318,17 @@ class SimpleHexKeypad(discord.ui.View):
                         timeout=timeout
                     ) as session:
 
-                        async with session.get(
-                            f"{BASE}/api/communities",
-                            timeout=aiohttp.ClientTimeout(total=10) 
-                        ) as resp:
-
-                            communities = (
-                                await resp.json()
-                            ).get("communities", [])
-
-                        tasks = []
-
-                        for c in communities:
-
-                            tag = c.get("discord_tag")
-
-                            if tag:
-                                tasks.append(
-                                    self.fetch_community_regions(
-                                        session,
-                                        tag
-                                    )
-                                )
-
-                        results = await asyncio.gather(
-                            *tasks,
-                            return_exceptions=True
+                        data = await self.fetch_system_owner(
+                            session,
+                            system_id
                         )
-
-                        found = False
-
-                        for result in results:
-
-                            if isinstance(result, Exception):
-                                continue
-
-                            tag, data = result
-
-                            if not data:
-                                continue
-
-                            for region in data.get("regions", []):
-
-                                for s in region.get("systems", []):
-
-                                    api_id = str(
-                                        s.get("id") or
-                                        s.get("system_id") or
-                                        ""
-                                    ).upper()
-
-                                    print(
-                                        f"{tag} -> API SYSTEM ID: {api_id}"
-                                    )
-
-                                    if api_id == system_id:
-
-                                        print(
-                                            f"MATCH FOUND: "
-                                            f"{system_id} -> {tag}"
-                                        )
-
-                                        self.system_owner_type = "community"
-                                        self.system_owner_tag = tag
-
-                                        found = True
-                                        break
-
-                                if found:
-                                    break
-
-                            if found:
-                                break
+                        
+                        if data:
+                        
+                            self.system_owner_type = "community"
+                            self.system_owner_tag = data.get(
+                                "discord_tag"
+                            )
 
                 except Exception:
 
