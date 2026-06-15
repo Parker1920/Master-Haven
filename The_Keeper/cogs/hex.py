@@ -166,7 +166,7 @@ class SimpleHexKeypad(discord.ui.View):
             
             async with session.get(
                 f"{BASE}/api/systems/search?q={glyph}&limit=1",
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=60)
             ) as resp:
                 if resp.status != 200:
                     return None
