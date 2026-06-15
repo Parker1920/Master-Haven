@@ -3,6 +3,40 @@ from discord.ext import commands
 from discord import app_commands
 import asyncio
 import aiohttp
+import time
+import asyncio
+
+class SystemOwnerCache:
+    def __init__(self, ttl_seconds=300):
+        self.ttl = ttl_seconds
+        self.cache = {}  # system_id -> (timestamp, result)
+        self.in_flight = {}  # system_id -> asyncio.Task
+
+    def get(self, key):
+        entry = self.cache.get(key)
+        if not entry:
+            return None
+
+        ts, value = entry
+        if time.time() - ts > self.ttl:
+            self.cache.pop(key, None)
+            return None
+
+        return value
+
+    def set(self, key, value):
+        self.cache[key] = (time.time(), value)
+
+    def get_in_flight(self, key):
+        return self.in_flight.get(key)
+
+    def set_in_flight(self, key, task):
+        self.in_flight[key] = task
+
+    def clear_in_flight(self, key):
+        self.in_flight.pop(key, None)
+        
+system_owner_cache = SystemOwnerCache(ttl_seconds=300)
 
 BASE = "https://havenmap.online"
 
@@ -162,29 +196,46 @@ class SimpleHexKeypad(discord.ui.View):
             pass
 
     async def fetch_system_owner(self, session, glyph):
-        try:
-            
-            async with session.get(
-                f"{BASE}/api/systems/search?q={glyph}&limit=1",
-                timeout=aiohttp.ClientTimeout(total=60)
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                
-                data = await resp.json()
-                results = data.get("results", [])
-                
-                if results:
-                    return results[0]  
+        key = glyph.upper()
+    
+        # 1. fast path: cached
+        cached = system_owner_cache.get(key)
+        if cached is not None:
+            return cached
+    
+        # 2. dedupe in-flight requests
+        existing_task = system_owner_cache.get_in_flight(key)
+        if existing_task:
+            return await existing_task
+    
+        async def _do_request():
+            try:
+                async with session.get(
+                    f"{BASE}/api/systems/search?q={key}&limit=1",
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+    
+                    if resp.status != 200:
+                        return None
+    
+                    data = await resp.json()
+                    results = data.get("results", [])
+    
+                    result = results[0] if results else None
+    
+                    system_owner_cache.set(key, result)
+    
+                    return result
+    
+            except Exception:
                 return None
+            finally:
+                system_owner_cache.clear_in_flight(key)
     
-        except asyncio.TimeoutError:
-            print(f"TIMEOUT: glyph lookup for {glyph}")
-            return None
+        task = asyncio.create_task(_do_request())
+        system_owner_cache.set_in_flight(key, task)
     
-        except Exception as e:
-            print(f"ERROR: glyph lookup for {glyph} -> {e}")
-            return None
+        return await task
             
 
     def make_callback(self, key):
