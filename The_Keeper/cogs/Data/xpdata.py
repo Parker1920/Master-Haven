@@ -7,7 +7,7 @@ import logging
 
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "Data", "xp.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "xp.db")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
