@@ -10,7 +10,7 @@ import aiohttp
 import traceback
 DB_PATH = os.path.join(os.path.dirname(__file__), "Data", "xp.db")
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, "cogs", "Data"))
 
 sys.path.append(os.path.join(BASE_DIR, "cogs"))
 
