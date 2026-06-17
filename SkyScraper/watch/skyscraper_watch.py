@@ -47,6 +47,10 @@ fire a burst of "newly appeared" phrase alerts against an old-format state).
 """
 import json, os, sys, time, hashlib, re, urllib.request, urllib.error, datetime, difflib
 from html import unescape
+try:
+    import fcntl as _fcntl
+except ImportError:
+    _fcntl = None  # Windows (dev); locking skipped
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "state.json")
@@ -695,6 +699,19 @@ def main():
                     log(f"--test: ETARC forum post ERROR: {e}")
         return
 
+    # Prevent concurrent cron runs from racing on state.json.
+    # SSL timeouts can push a single run past 2 minutes, so the next cron
+    # instance starts while the previous one is still sending webhooks.
+    _lock_fh = None
+    if _fcntl is not None:
+        lock_path = os.path.join(HERE, "watch.lock")
+        try:
+            _lock_fh = open(lock_path, "w")
+            _fcntl.flock(_lock_fh, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        except OSError:
+            log("WARN another instance is already running — exiting to avoid duplicate alerts.")
+            sys.exit(0)
+
     new = snapshot()
     if not new.get("posts"):
         log("ERROR: core posts feed unreachable; skipping this cycle (no state write).")
@@ -716,6 +733,17 @@ def main():
     # carry forward items that looked deleted but verified as still-present
     for kind, items in preserve.items():
         new.setdefault(kind, {}).update(items)
+
+    # Carry forward any section that failed to fetch this cycle.
+    # An SSL/timeout exception in snapshot() leaves those keys absent from `new`.
+    # Without this, the NEXT successful cycle sees an empty old-state for that
+    # section and reports every item as brand-new — flooding Discord and the
+    # ETARC forum with duplicate alerts on every intermittent network blip.
+    for _k in ("pages", "pages_complete", "media", "media_complete",
+               "image_hashes", "image_lastmods", "home_hash", "home_phrases",
+               "site2", "bsky"):
+        if _k not in new and _k in old:
+            new[_k] = old[_k]
 
     json.dump(new, open(STATE_FILE, "w", encoding="utf-8"), indent=1)
 
