@@ -1,5 +1,5 @@
 # -------------------- bot.py --------
-
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -7,10 +7,8 @@ sys.path.insert(0, str(ROOT))
 
 import discord
 from discord.ext import commands
-import discord
-from discord.ext import commands
 from dotenv import load_dotenv
-import asyncio, os, sys
+import asyncio, os
 import json
 import logging
 
