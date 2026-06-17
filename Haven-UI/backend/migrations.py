@@ -6540,3 +6540,190 @@ def migration_1_85_0(conn):
                 logger.info(f"Migration 1.85.0: added {table}.{col} column")
             else:
                 logger.info(f"Migration 1.85.0: {table}.{col} already present")
+
+
+# Data fix: the pre-1.10 Haven Extractor "always Euclid" bug. MidGenXGamer's extractor
+# uploads were all stamped Euclid (galaxy + procedural system/region names) when he was
+# actually galaxy-hopping. He confirmed the galaxy for THREE upload sessions (times in
+# EDT, which is how the UTC submission_date maps to "his" day):
+#   * 2026-05-18 session  -> Hyades       (idx 4)   [128 systems]
+#   * 2026-05-19 session  -> Ickjamatew   (idx 5)   [44 systems]  EXCEPT the last system
+#                            of that session, where he crossed the Ickjamatew core into
+#                            Budullangr (idx 6) [1 system]
+#   * 2026-05-24 session  -> Budullangr   (idx 6)   [36 systems]
+# Two further sessions (2026-05-23 = 10 systems, 2026-05-25 = 53 systems) have NO
+# confirmed galaxy and are intentionally LEFT as Euclid for a follow-up migration.
+@register_migration("1.86.0", "Backfill MidGenX extractor 'always Euclid' systems (3 confirmed sessions) + region names")
+def migration_1_86_0(conn):
+    """Fix galaxy + galaxy-dependent procedural names for MidGenXGamer's three
+    galaxy-confirmed extractor upload sessions (209 pending systems + their regions).
+
+    Per-row safe and idempotent:
+      * System galaxy is rewritten in BOTH the `galaxy` column and the system_data
+        JSON blob's `galaxy` key (approval reads the blob; the column drives the UI).
+      * The system NAME is regenerated for the correct galaxy ONLY when the stored
+        name exactly equals the Euclid procgen name for that glyph — proof it was the
+        buggy Euclid fallback, not a real/custom name the player set. (At authoring
+        time all 209 matched; the guard keeps re-runs and any edge row safe.)
+      * For each affected voxel, the live `regions` row and the already-approved
+        `pending_region_names` record are moved to the correct galaxy with a
+        regenerated region name. A phantom Euclid region (no other live system at that
+        voxel) is moved in place; a voxel still shared by another live Euclid system
+        gets a NEW correct-galaxy row while the Euclid row is left intact. A custom
+        (non-procgen) region name is preserved across the move.
+      * Scoped to source='haven_extractor', galaxy='Euclid', submitter LIKE 'MidGenX%',
+        and the three confirmed session days — so manual rows, other contributors, and
+        the two unconfirmed sessions are never touched. Once a row leaves galaxy='Euclid'
+        it no longer matches, so a second run is a no-op.
+
+    Requires nms_namegen (vendored under backend/nms_namegen/, deployed with this code).
+    """
+    import json as _json
+    from nms_namegen.system import systemName
+    from nms_namegen.region import regionName
+
+    cur = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    DAY_GAL = {'2026-05-18': 4, '2026-05-19': 5, '2026-05-24': 6}
+    GAL_NAME = {4: 'Hyades', 5: 'Ickjamatew', 6: 'Budullangr'}
+    CONFIRMED_DAYS = tuple(DAY_GAL.keys())
+
+    rows = cur.execute(
+        """SELECT id, submission_date, system_data, glyph_code,
+                  region_x, region_y, region_z, COALESCE(reality,'Normal')
+           FROM pending_systems
+           WHERE status='pending' AND source='haven_extractor' AND galaxy='Euclid'
+             AND COALESCE(personal_discord_username, submitted_by) LIKE 'MidGenX%'
+             AND substr(submission_date,1,10) IN (?,?,?)""",
+        CONFIRMED_DAYS,
+    ).fetchall()
+
+    if not rows:
+        logger.info("Migration 1.86.0: no matching Euclid MidGenX pending systems — nothing to do")
+        return
+
+    # The single last system of the 2026-05-19 session crossed the core into Budullangr.
+    s19 = [r for r in rows if r[1][:10] == '2026-05-19']
+    s19_last_id = max(s19, key=lambda r: r[1])[0] if s19 else None
+
+    voxel_gal = {}  # (reality, rx, ry, rz) -> galaxy_idx  (unambiguous: verified at authoring)
+    sys_fixed = name_regen = 0
+    for rid, sdate, sdata, glyph, rx, ry, rz, reality in rows:
+        gidx = DAY_GAL[sdate[:10]]
+        if rid == s19_last_id:
+            gidx = 6  # Budullangr
+        gname = GAL_NAME[gidx]
+        try:
+            blob = _json.loads(sdata)
+        except Exception:
+            logger.warning(f"Migration 1.86.0: pending system {rid} has unparseable system_data — skipped")
+            continue
+        blob['galaxy'] = gname
+        new_name = None
+        try:
+            pc = int(glyph, 16)
+            if blob.get('name') == systemName(pc, 0):
+                new_name = systemName(pc, gidx)
+                blob['name'] = new_name
+        except Exception as e:
+            logger.warning(f"Migration 1.86.0: name regen skipped for system {rid} (glyph={glyph}): {e}")
+        cur.execute(
+            "UPDATE pending_systems SET galaxy=?, system_data=?, "
+            "system_name=COALESCE(?, system_name) WHERE id=?",
+            (gname, _json.dumps(blob), new_name, rid),
+        )
+        sys_fixed += 1
+        if new_name:
+            name_regen += 1
+        voxel_gal[(reality, rx, ry, rz)] = gidx
+
+    logger.info(
+        f"Migration 1.86.0: fixed {sys_fixed} pending systems "
+        f"({name_regen} names regenerated) across {len(voxel_gal)} voxels"
+    )
+
+    reg_moved = reg_inserted = reg_skipped = prn_fixed = name_collisions = 0
+    for (reality, rx, ry, rz), gidx in voxel_gal.items():
+        gname = GAL_NAME[gidx]
+        coords_pc = (ry << 24) | (rz << 12) | rx
+        euc_region_name = regionName(coords_pc, 0)
+        new_region_name = regionName(coords_pc, gidx)
+
+        # Correct-galaxy region already exists at this voxel — don't duplicate it.
+        if cur.execute(
+            "SELECT 1 FROM regions WHERE reality=? AND galaxy=? "
+            "AND region_x=? AND region_y=? AND region_z=?",
+            (reality, gname, rx, ry, rz),
+        ).fetchone():
+            reg_skipped += 1
+            continue
+
+        euc = cur.execute(
+            "SELECT id, custom_name, discord_tag, source FROM regions "
+            "WHERE reality=? AND galaxy='Euclid' AND region_x=? AND region_y=? AND region_z=?",
+            (reality, rx, ry, rz),
+        ).fetchone()
+        euc_id = euc[0] if euc else None
+        euc_custom = euc[1] if euc else None
+        # A player-set custom region name (not the Euclid procgen) is preserved verbatim;
+        # otherwise the name is regenerated for the correct galaxy.
+        keep_custom = bool(euc_custom) and euc_custom != euc_region_name
+        desired = euc_custom if keep_custom else new_region_name
+
+        # regions enforces UNIQUE(custom_name). If the regenerated name is already taken
+        # by a DIFFERENT region (NMS region names repeat across the universe), leave this
+        # voxel untouched and flag it — the system itself is still correctly re-galaxied.
+        if not keep_custom:
+            taken = cur.execute("SELECT id FROM regions WHERE custom_name=?", (desired,)).fetchone()
+            if taken and (euc_id is None or taken[0] != euc_id):
+                name_collisions += 1
+                logger.warning(
+                    f"Migration 1.86.0: region-name collision at ({reality},{gname},{rx},{ry},{rz}) "
+                    f"-> '{desired}' already used by region id {taken[0]}; region left as-is for manual fix"
+                )
+                continue
+
+        other_live = cur.execute(
+            "SELECT COUNT(*) FROM systems WHERE COALESCE(reality,'Normal')=? "
+            "AND COALESCE(galaxy,'Euclid')='Euclid' AND region_x=? AND region_y=? AND region_z=?",
+            (reality, rx, ry, rz),
+        ).fetchone()[0]
+
+        if euc and other_live == 0:
+            # Phantom Euclid region (only this batch referenced it) — move it in place.
+            cur.execute(
+                "UPDATE regions SET galaxy=?, custom_name=?, updated_at=? WHERE id=?",
+                (gname, desired, now, euc_id),
+            )
+            reg_moved += 1
+        else:
+            # Voxel still shared by another live Euclid system (or no Euclid row): add a
+            # fresh correct-galaxy row and leave any Euclid row intact.
+            cur.execute(
+                "INSERT INTO regions (region_x,region_y,region_z,custom_name,created_at,"
+                "updated_at,discord_tag,reality,galaxy,source) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (rx, ry, rz, desired, now, now,
+                 (euc[2] if euc else None), reality, gname, (euc[3] if euc else None) or 'haven_extractor'),
+            )
+            reg_inserted += 1
+
+        for pid, pname in cur.execute(
+            "SELECT id, proposed_name FROM pending_region_names "
+            "WHERE status='approved' AND galaxy='Euclid' AND COALESCE(reality,'Normal')=? "
+            "AND region_x=? AND region_y=? AND region_z=? "
+            "AND COALESCE(personal_discord_username, submitted_by) LIKE 'MidGenX%'",
+            (reality, rx, ry, rz),
+        ).fetchall():
+            pnew = pname if (pname and pname != euc_region_name) else desired
+            cur.execute(
+                "UPDATE pending_region_names SET galaxy=?, proposed_name=? WHERE id=?",
+                (gname, pnew, pid),
+            )
+            prn_fixed += 1
+
+    logger.info(
+        f"Migration 1.86.0: regions moved={reg_moved} inserted={reg_inserted} "
+        f"skipped_existing={reg_skipped} name_collisions_deferred={name_collisions}; "
+        f"region-name records fixed={prn_fixed}"
+    )
