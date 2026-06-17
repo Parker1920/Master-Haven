@@ -199,7 +199,7 @@ class PersonalityCog(commands.Cog):
             await message.channel.send(random.choice(keeper_responses).format(member=message.author))
             return
         if "keeper" in content:
-    await message.add_reaction("👀")
+            await message.add_reaction("👀")
 # -------------------- Setup --------------------
 async def setup(bot: commands.Bot):
     await bot.add_cog(PersonalityCog(bot))
