@@ -72,6 +72,37 @@ IMAGE_HASH_MATCH = ("tr4ce",)
 MAX_TEXT_CHARS = 8000
 
 
+def cfg_get(key, default=""):
+    """Read a single KEY=VALUE from config.env, falling back to env then default."""
+    import os
+    path=os.path.join(HERE,"config.env")
+    if os.path.exists(path):
+        for ln in open(path, encoding="utf-8"):
+            ln=ln.strip()
+            if ln and not ln.startswith("#") and "=" in ln:
+                k,v=ln.split("=",1)
+                if k.strip()==key:
+                    return v.strip().strip('"').strip("'")
+    return os.environ.get(key, default)
+
+
+def trigger_archive_crawl():
+    """Ask the GoodGuysFree archive to re-crawl after we post a real change. Fire-and-forget."""
+    import hmac, hashlib, time, os, requests
+    secret=cfg_get("ARCHIVE_TRIGGER_SECRET").strip()
+    url=cfg_get("ARCHIVE_TRIGGER_URL").strip()
+    if not secret or not url:
+        return
+    ts=str(int(time.time()))
+    body="{}"
+    sig=hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+    try:
+        r=requests.post(url, headers={"Content-Type":"application/json","X-Timestamp":ts,"X-Signature":f"sha256={sig}"}, data=body, timeout=10)
+        log(f"[archive] trigger -> {r.status_code}")
+    except Exception as e:
+        log(f"[archive] trigger failed: {e}")
+
+
 def log(msg):
     line = f"{datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(timespec='seconds')}Z  {msg}"
     try:
@@ -235,18 +266,24 @@ def item_record(kind, p):
     rec["text"] = html_to_text((p.get("content") or {}).get("rendered", ""))
     return rec
 
+# sentinel: item almost certainly still exists, but the REST API refuses to
+# confirm it (auth lockdown). Caller should KEEP it and stay quiet — not alert,
+# not spam the inconclusive WARN every cycle.
+API_LOCKED = "api_locked"
 
 def verify_item(kind, item_id, timeout=20):
     """Direct existence check for a disappeared item.
-
     Returns the live REST object if it still exists, None on 404/410 (truly
-    removed), or False if the check itself was inconclusive (network error)."""
+    removed), API_LOCKED on 401/403 (REST locked — presume live, can't confirm),
+    or False if the check itself was inconclusive (network error)."""
     url = f"{SITE}/wp-json/wp/v2/{kind}/{item_id}"
     try:
         return fetch(url, timeout=timeout, nocache=True)
     except urllib.error.HTTPError as e:
         if e.code in (404, 410):
             return None
+        if e.code in (401, 403):
+            return API_LOCKED
         return False
     except Exception:
         return False
@@ -463,6 +500,8 @@ def diff(old, new):
             if live is None:                       # confirmed gone
                 ch.append(f"🗑️ **{label.capitalize()} removed** — “{name}” "
                           f"({rec.get('slug','')}) returned HTTP 404\n{rec.get('link','')}")
+            elif live is API_LOCKED:               # REST locked — presume live, keep quietly
+                preserve.setdefault(kind, {})[did] = rec
             elif live is False:                    # inconclusive — keep, don't alert
                 log(f"WARN deletion verify inconclusive for {kind} {did}; carrying forward")
                 preserve.setdefault(kind, {})[did] = rec
@@ -647,16 +686,13 @@ def main():
                 log(f"--test: webhook {i}/{len(webhooks)} -> HTTP {st}")
             except Exception as e:
                 log(f"--test: webhook {i}/{len(webhooks)} ERROR: {e}")
-        if d_key:
-            # non-destructive: verify the forum credential WITHOUT a public post
-            try:
-                req = urllib.request.Request(d_base.rstrip("/") + "/session/current.json",
-                                             headers={"User-Api-Key": d_key, "User-Agent": UA})
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    who = json.loads(r.read().decode("utf-8", "replace")).get("current_user", {}).get("username", "?")
-                log(f"--test: ETARC forum key OK — authenticated as '{who}' (topic {d_topic or 'UNSET'})")
-            except Exception as e:
-                log(f"--test: ETARC forum key ERROR: {e}")
+        if d_topic:
+                try:
+                    st = send_discourse(d_base, d_key, d_topic,
+                        ["🛰️ **skyscraper_watch test** — integration check; automated updates will drop here. (safe to delete)"])
+                    log(f"--test: ETARC forum post (topic {d_topic}) -> HTTP {st}")
+                except Exception as e:
+                    log(f"--test: ETARC forum post ERROR: {e}")
         return
 
     new = snapshot()
@@ -716,6 +752,13 @@ def main():
             log(f"ERROR posting to ETARC forum: {e}")
     elif d_key and not d_topic:
         log("DISCOURSE_USER_API_KEY set but DISCOURSE_TOPIC_ID missing — forum mirror skipped.")
+
+    # --- ping the GoodGuysFree archive to re-crawl now that a real change posted ---
+    try:
+        trigger_archive_crawl()
+    except Exception as e:
+        log(f"ERROR triggering archive re-crawl: {e}")
+
 
 
 if __name__ == "__main__":
