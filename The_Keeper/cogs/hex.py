@@ -449,8 +449,7 @@ class SimpleHexKeypad(discord.ui.View):
                 try:
 
                     timeout = aiohttp.ClientTimeout(total=120)
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
-
+                    
                     async with aiohttp.ClientSession(
                         timeout=timeout
                     ) as session:
