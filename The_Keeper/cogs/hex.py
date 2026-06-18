@@ -9,8 +9,8 @@ import asyncio
 class SystemOwnerCache:
     def __init__(self, ttl_seconds=300):
         self.ttl = ttl_seconds
-        self.cache = {}  # system_id -> (timestamp, result)
-        self.in_flight = {}  # system_id -> asyncio.Task
+        self.cache = {}  
+        self.in_flight = {}  
 
     def get(self, key):
         entry = self.cache.get(key)
@@ -64,9 +64,10 @@ class SimpleHexKeypad(discord.ui.View):
 
     def __init__(self, owner_id: int):
         super().__init__(timeout=180)
-
+        
+      
         self.owner_id = owner_id
-
+        self.api = api
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
@@ -354,7 +355,7 @@ class SimpleHexKeypad(discord.ui.View):
                         "❌ Invalid XXX"
                     )
 
-                dup = await self.api.check_duplicate(self.input_string.upper())
+                dup = await     self.api.check_duplicate(self.input_string.upper())
 
                 system_id = str(
                     dup.get("system_id")
@@ -451,7 +452,8 @@ class HexKey(commands.Cog):
     async def hexkey(self, interaction: discord.Interaction):
 
         view = SimpleHexKeypad(
-            owner_id=interaction.user.id
+            owner_id=interaction.user.id,
+            api=self.bot.get_cog("HavenSubmission").api
         )
 
         await interaction.response.send_message(
