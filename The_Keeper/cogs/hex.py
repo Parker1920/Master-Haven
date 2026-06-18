@@ -453,7 +453,7 @@ class HexKey(commands.Cog):
 
         view = SimpleHexKeypad(
             owner_id=interaction.user.id,
-            api=self.bot.get_cog("HavenSubmission").api
+            api=HavenAPI()
         )
 
         await interaction.response.send_message(
