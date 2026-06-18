@@ -6,6 +6,8 @@ import aiohttp
 import time
 import asyncio
 
+from Haven_upload import HavenAPI
+
 class SystemOwnerCache:
     def __init__(self, ttl_seconds=300):
         self.ttl = ttl_seconds
