@@ -533,7 +533,7 @@ class HexKey(commands.Cog):
 
         view = SimpleHexKeypad(
             owner_id=interaction.user.id,
-            api=HexAPI()
+            api=HexAPI(BASE_URL, API_KEY)
         )
 
         await interaction.response.send_message(
