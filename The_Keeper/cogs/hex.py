@@ -6,7 +6,84 @@ import aiohttp
 import time
 import asyncio
 
-from Haven_upload import HavenAPI
+
+
+class HexAPI:
+    def __init__(self, base_url, api_key):
+        self.base = base_url
+        self.headers = {
+            "X-API-Key": api_key
+        }
+
+        self._session = None
+
+    async def _get_session(self):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    async def validate_glyph(self, glyph: str):
+        session = await self._get_session()
+
+        try:
+            async with session.post(
+                f"{self.base}/api/validate_glyph",
+                json={"glyph": glyph}
+            ) as resp:
+
+                data = await resp.json(content_type=None)
+
+                if resp.status != 200 or not isinstance(data, dict):
+                    return {
+                        "valid": False,
+                        "error": f"HTTP {resp.status}",
+                        "raw": data
+                    }
+
+                return data
+
+        except Exception as e:
+            return {
+                "valid": False,
+                "error": str(e)
+            }
+
+    async def check_duplicate(self, glyph, galaxy="Euclid", reality="Normal"):
+        session = await self._get_session()
+
+        try:
+            async with session.get(
+                f"{self.base}/api/check_duplicate",
+                params={
+                    "glyph_code": glyph,
+                    "galaxy": galaxy,
+                    "reality": reality
+                },
+                headers=self.headers
+            ) as resp:
+
+                data = await resp.json(content_type=None)
+
+                if resp.status != 200 or not isinstance(data, dict):
+                    return {
+                        "duplicate": False,
+                        "error": f"HTTP {resp.status}",
+                        "raw": data
+                    }
+
+                return data
+
+        except Exception as e:
+            return {
+                "duplicate": False,
+                "error": str(e)
+            }
 
 class SystemOwnerCache:
     def __init__(self, ttl_seconds=300):
@@ -453,7 +530,7 @@ class HexKey(commands.Cog):
 
         view = SimpleHexKeypad(
             owner_id=interaction.user.id,
-            api=HavenAPI()
+            api=HexAPI()
         )
 
         await interaction.response.send_message(
