@@ -62,7 +62,7 @@ glyph_emojis = {
 
 class SimpleHexKeypad(discord.ui.View):
 
-    def __init__(self, owner_id: int):
+    def __init__(self, owner_id: int, api):
         super().__init__(timeout=180)
         
       
