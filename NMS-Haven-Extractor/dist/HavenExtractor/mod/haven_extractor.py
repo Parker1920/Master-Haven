@@ -116,7 +116,7 @@ try:
 except ImportError:
     from extraction_core import (
         decide_galaxy, build_planet_entry, build_planet_list,
-        build_system_payload, galaxy_is_known,
+        build_system_payload, galaxy_is_known, select_captures,
     )
 
 # =============================================================================
@@ -902,7 +902,7 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.10.1"
+    __version__ = "1.10.5"
     __description__ = "Fixes a long-standing config bug where pymhf's DearPyGUI sometimes round-tripped the RealityMode / CommunityTag enum gui_variables back as their Python repr string (\"RealityMode.Normal\") instead of as enum instances. The old setter fallback `str(value)` persisted that bad string verbatim into config.json and into every submission's `reality` field, which produced a phantom \"RealityMode.Normal\" reality on the Haven dashboard (50 prod rows as of 2026-05-12). Adds `_normalize_reality()` / `_normalize_community_tag()` helpers, applies them in both setters, and scrubs the values at module-init when loading config.json so any pre-existing bad config self-heals."
 
     # ==========================================================================
@@ -1595,6 +1595,79 @@ class HavenExtractorMod(Mod):
             import traceback
             logger.error(traceback.format_exc())
 
+    # v1.10.5: Option C REMOVED — the `cGcSolarSystem.Generate.before` hook fails to register
+    # on some pyMHF/nmspy builds ("cGcSolarSystem ... not found" at mod load), which breaks the
+    # ENTIRE mod after an update. This codebase has only ever used `.after`; `.before` was
+    # unverified. The method below is left UNHOOKED (no decorator = never called = harmless dead
+    # code) for reference. Batch display-adjectives will be redone via the proven creature-roles
+    # hook (`.after`) in a follow-up, not a `.before` hook.
+    def _disabled_on_system_generate_before(self, this, lbUseSettingsFile, lSeed):
+        """v1.10.4 (Option C — batch display-adjective fix): freeze the OUTGOING system at
+        warp-OUT, while its live PlanetInfo is still readable, BEFORE NMS recycles the
+        solar-system object to generate the incoming system.
+
+        Why this is the right moment: the exact Weather/Sentinel/Flora/Fauna adjectives only
+        populate in the live PlanetInfo array after entry, and the Generate.after save freezes
+        purely from cache (no re-read) — so every batched (non-last) system shipped the generic
+        enum tier. The only window a system's adjectives are readable is while it is the live
+        one; the last such instant is warp-out, here at Generate.before (the overwrite that
+        recycles the object happens DURING Generate, i.e. between .before and .after).
+
+        BLEED-PROOF: read the live planet names FIRST and only refresh+freeze if they still
+        overlap the OUTGOING system's captured names (procgen names never collide across
+        systems). If the names don't overlap, the object was already recycled, so we do
+        NOTHING and let the existing Generate.after path save from cache exactly as before —
+        this can never stamp the incoming system's adjectives/props onto the outgoing one.
+        Verbose [GEN-BEFORE] logging makes the chosen path visible in the log.
+        """
+        if not self._batch_mode_enabled or not self._capture_enabled:
+            return
+        if self._system_saved_to_batch or not self._captured_planets or self._cached_solar_system is None:
+            return
+        try:
+            captured_names = {str(k) for k in self._captured_planets if not str(k).startswith('_unnamed_')}
+            live_names = []
+            try:
+                planets = self._cached_solar_system.maPlanets
+                for i in range(min(6, len(planets) if planets is not None else 0)):
+                    try:
+                        planet = planets[i]
+                        pd = planet.mPlanetData if (planet is not None and hasattr(planet, 'mPlanetData')) else None
+                        if pd is None or not hasattr(pd, 'Name'):
+                            continue
+                        n = str(pd.Name).strip()
+                        if n and n != "None":
+                            live_names.append(n)
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.info(f"[GEN-BEFORE] could not read live planet names: {e}")
+
+            overlap = captured_names & set(live_names)
+            logger.info(
+                f"[GEN-BEFORE] outgoing captures={sorted(captured_names)} | "
+                f"live slots now={live_names} | overlap={len(overlap)}/{len(captured_names)}"
+            )
+
+            if captured_names and len(overlap) >= 1:
+                # Confirmed: the live array is STILL the outgoing system (names match), so its
+                # PlanetInfo + sysdata are intact -> safe to refresh adjectives and freeze here.
+                self._auto_refresh_for_export()
+                self._save_current_system_to_batch()
+                self._system_saved_to_batch = True
+                logger.info(
+                    "[GEN-BEFORE] OPTION-C ACTIVE: froze outgoing system WITH refreshed "
+                    "adjectives (memory still intact at Generate.before)."
+                )
+            else:
+                logger.info(
+                    "[GEN-BEFORE] live array no longer matches outgoing captures (object already "
+                    "recycled) — NOT acting here; Generate.after saves from cache as before. "
+                    "Option C not viable on this build."
+                )
+        except Exception as e:
+            logger.info(f"[GEN-BEFORE] non-fatal error: {e}")
+
     @nms.cGcSolarSystem.Generate.after
     def on_system_generate(self, this, lbUseSettingsFile, lSeed):
         """Fires AFTER solar system generation - data is now ready."""
@@ -2036,13 +2109,33 @@ class HavenExtractorMod(Mod):
 
             # v1.6.11: Key captures by planet name (handles duplicate hook fires, fixes
             # planet/moon swap). Unnamed planets fall back to a slot key.
-            planet_key = planet_name.strip() if planet_name and planet_name.strip() else f"_unnamed_{len(self._captured_planets)}"
+            is_named = bool(planet_name and planet_name.strip())
+            planet_key = planet_name.strip() if is_named else f"_unnamed_{len(self._captured_planets)}"
             is_update = planet_key in self._captured_planets
 
-            # Enforce 6-planet limit only for NEW unique planets (updates are always allowed)
-            if not is_update and len(self._captured_planets) >= 6:
-                logger.debug(f"    [CAPTURE] At 6-planet limit — skipping new planet '{planet_key}'")
-                return
+            # v1.10.2: Count only NAMED captures toward the 6-body cap. The hook fires many
+            # times/sec and occasionally with an unreadable name; those nameless fires are
+            # stored as '_unnamed_N' phantoms (default Lush/Small). Part A filters them at
+            # build time, but if a phantom fire arrives BEFORE the real planets it must not
+            # consume the slot that a real planet needs. So: a real (named) planet is never
+            # blocked while < 6 named are held — it evicts a phantom if the dict is full;
+            # a nameless fire is only kept when there's physical room and never displaces a real.
+            if not is_update:
+                named_count = sum(1 for c in self._captured_planets.values()
+                                  if c.get('planet_name') and str(c.get('planet_name')).strip())
+                if is_named:
+                    if named_count >= 6:
+                        logger.debug(f"    [CAPTURE] At 6 named-planet limit — skipping '{planet_key}'")
+                        return
+                    if len(self._captured_planets) >= 6:
+                        for k, v in list(self._captured_planets.items()):
+                            if not (v.get('planet_name') and str(v.get('planet_name')).strip()):
+                                del self._captured_planets[k]
+                                logger.debug(f"    [CAPTURE] Evicted phantom '{k}' for real planet '{planet_key}'")
+                                break
+                elif len(self._captured_planets) >= 6:
+                    logger.debug(f"    [CAPTURE] At capacity — skipping nameless capture")
+                    return
 
             if is_update:
                 logger.debug(f"    [CAPTURE] Updating existing capture for '{planet_key}' (hook fired again)")
@@ -3236,16 +3329,28 @@ class HavenExtractorMod(Mod):
             biome_subtype_plant_override=BIOME_SUBTYPE_PLANT_OVERRIDE,
             hidden_substance_names=HIDDEN_SUBSTANCE_NAMES,
             hidden_substance_ids=HIDDEN_SUBSTANCE_IDS,
+            clean_weather=clean_weather_string,
         )
 
     def _planets_from_captured(self) -> list:
         """Build the full planet list from _captured_planets, preserving insertion order
         (= slot order at capture time). Used by _save_current_system_to_batch.
         """
-        planets = build_planet_list(self._captured_planets, planet_builder=self._planet_from_captured)
+        # Authoritative live body count (planets+moons, 1..6) snapshotted while the system
+        # was fresh; used only as an UPPER cap by build_planet_list (never to pad). None
+        # when the read was unavailable/untrustworthy.
+        snap = self._current_system_snapshot or {}
+        count_hint = snap.get('_planets_count')
+        planets = build_planet_list(
+            self._captured_planets,
+            planet_builder=self._planet_from_captured,
+            count_hint=count_hint,
+        )
         moon_count = sum(1 for p in planets if p.get('is_moon', False))
         planet_count = len(planets) - moon_count
-        logger.info(f"  [CAPTURED-ONLY] {planet_count} planets + {moon_count} moons from {len(self._captured_planets)} captures")
+        dropped = len(self._captured_planets) - len(planets)
+        drop_note = f" (dropped {dropped} phantom capture(s))" if dropped > 0 else ""
+        logger.info(f"  [CAPTURED-ONLY] {planet_count} planets + {moon_count} moons from {len(self._captured_planets)} captures{drop_note}")
         return planets
 
     def _extract_planets(self, solar_system) -> list:

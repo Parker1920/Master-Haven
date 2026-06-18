@@ -1,4 +1,5 @@
 import React from 'react'
+import { TIER_COLORS } from '../../utils/gradeColors'
 
 // Wizard v1 live preview panel (mockup aside#preview-panel 6005-6110).
 // Sticky right column on desktop. Shows the system as a "system disk":
@@ -14,8 +15,6 @@ const STAR_COLORS = {
   Blue: '#3b82f6',
   Purple: '#a855f7',
 }
-
-const GRADE_COLOR = { S: 'var(--app-accent-amber)', A: '#22c55e', B: '#3b82f6', C: '#94a3b8' }
 
 export default function WizardPreviewPanel({ system, gradeInfo }) {
   const planets = system?.planets || []
@@ -66,7 +65,7 @@ export default function WizardPreviewPanel({ system, gradeInfo }) {
           <Stat
             label="Grade"
             value={grade}
-            valueColor={GRADE_COLOR[grade]}
+            valueColor={TIER_COLORS[grade]}
             sub={percent != null ? `${percent}%` : null}
           />
         </div>

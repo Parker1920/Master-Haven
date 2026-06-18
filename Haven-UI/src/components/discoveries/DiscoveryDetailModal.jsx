@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import { XMarkIcon, StarIcon, MapPinIcon, CalendarIcon, UserIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, StarIcon, MapPinIcon, CalendarIcon, UserIcon, PencilIcon } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import { AuthContext } from '../../utils/AuthContext'
 import { getPhotoUrl, getThumbnailUrl } from '../../utils/api'
 import { formatCoords } from '../LatLngInput'
+import { metaEntries } from '../../utils/discoveryMeta'
 
 /**
  * Renders a full-screen modal with hero image, photo gallery, location links,
@@ -26,7 +27,8 @@ export default function DiscoveryDetailModal({
   discovery,
   isOpen,
   onClose,
-  onFeatureToggle
+  onFeatureToggle,
+  onEdit
 }) {
   const auth = useContext(AuthContext)
   const session = auth.user
@@ -78,6 +80,7 @@ export default function DiscoveryDetailModal({
     view_count,
   } = discovery
   const coordText = formatCoords(latitude, longitude)
+  const metaItems = metaEntries(type_metadata)
 
   const mainPhoto = getPhotoUrl(photo_url)
   const evidencePhotos = parseEvidenceUrls(evidence_url)
@@ -178,33 +181,46 @@ export default function DiscoveryDetailModal({
               </h2>
             </div>
 
-            {/* Feature toggle button for admins */}
-            {canFeature && (
-              <button
-                onClick={handleFeatureToggle}
-                disabled={isFeatureLoading}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-lg transition-colors
-                  ${is_featured
-                    ? 'bg-yellow-500 text-yellow-900 hover:bg-yellow-400'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }
-                  ${isFeatureLoading ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-              >
-                {is_featured ? (
-                  <>
-                    <StarIconSolid className="w-4 h-4" />
-                    Unfeature
-                  </>
-                ) : (
-                  <>
-                    <StarIcon className="w-4 h-4" />
-                    Feature
-                  </>
-                )}
-              </button>
-            )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Edit — open the submit form prefilled; changes go to the approval queue */}
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(discovery)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors"
+                >
+                  <PencilIcon className="w-4 h-4" />
+                  Edit
+                </button>
+              )}
+
+              {/* Feature toggle button for admins */}
+              {canFeature && (
+                <button
+                  onClick={handleFeatureToggle}
+                  disabled={isFeatureLoading}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-lg transition-colors
+                    ${is_featured
+                      ? 'bg-yellow-500 text-yellow-900 hover:bg-yellow-400'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }
+                    ${isFeatureLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                >
+                  {is_featured ? (
+                    <>
+                      <StarIconSolid className="w-4 h-4" />
+                      Unfeature
+                    </>
+                  ) : (
+                    <>
+                      <StarIcon className="w-4 h-4" />
+                      Feature
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Description */}
@@ -269,17 +285,15 @@ export default function DiscoveryDetailModal({
           </div>
 
           {/* Type Details (metadata) */}
-          {type_metadata && typeof type_metadata === 'object' && Object.keys(type_metadata).length > 0 && (
+          {metaItems.length > 0 && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Details</h3>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                {Object.entries(type_metadata).map(([key, value]) => (
-                  value && (
-                    <div key={key} className="text-sm">
-                      <span className="text-gray-500">{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}:</span>{' '}
-                      <span className="text-gray-300">{value}</span>
-                    </div>
-                  )
+                {metaItems.map(({ key, label, value, color }) => (
+                  <div key={key} className="text-sm">
+                    <span className="text-gray-500">{label}:</span>{' '}
+                    <span className="text-gray-300" style={color ? { color, fontWeight: 700 } : undefined}>{value}</span>
+                  </div>
                 ))}
               </div>
             </div>

@@ -1,6 +1,7 @@
 """Region endpoints - grouped regions, region CRUD, pending region names, planet/POI endpoints."""
 
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -1110,18 +1111,10 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT region_x, region_y, region_z FROM regions
-            WHERE custom_name = ? AND NOT (region_x = ? AND region_y = ? AND region_z = ?
-              AND reality = ? AND galaxy = ?)
-        ''', (custom_name, rx, ry, rz, reality, galaxy))
-        existing = cursor.fetchone()
-        if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f'Region name "{custom_name}" is already used by region [{existing["region_x"]}, {existing["region_y"]}, {existing["region_z"]}]'
-            )
-
+        # Region names are NOT globally unique — NMS names repeat across
+        # galaxies (the UNIQUE(custom_name) blocker was dropped in migration
+        # 1.88.0). The only uniqueness is one row per voxel, enforced by the
+        # ON CONFLICT(composite) UPSERT below.
         cursor.execute('''
             INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, 'manual', CURRENT_TIMESTAMP)
@@ -1138,6 +1131,13 @@ async def api_update_region(rx: int, ry: int, rz: int, payload: dict, session: O
     except HTTPException:
         raise
     except Exception as e:
+        # Roll back deterministically so a failed write never lingers holding
+        # the SQLite write lock (the busy-timeout/"database is locked" risk).
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Error updating region: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1237,19 +1237,12 @@ async def api_submit_region_name(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Scoped by (reality, galaxy) — same name can legitimately be used
-        # in different galaxies/realities per the 5-key UNIQUE on regions.
-        cursor.execute('''
-            SELECT region_x, region_y, region_z FROM regions
-            WHERE custom_name = ? AND reality = ? AND galaxy = ?
-        ''', (proposed_name, reality, galaxy))
-        existing = cursor.fetchone()
-        if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f'Region name "{proposed_name}" is already used by region [{existing["region_x"]}, {existing["region_y"]}, {existing["region_z"]}] in {galaxy}/{reality}'
-            )
-
+        # Region names are NOT unique — NMS names repeat across galaxies and
+        # even at the same voxel in different galaxies (the global
+        # UNIQUE(custom_name) was dropped in migration 1.88.0). So we no longer
+        # reject a proposal just because the name is used by, or pending for,
+        # another region. We DO still keep one pending submission per voxel as
+        # queue hygiene (below).
         cursor.execute('''
             SELECT id FROM pending_region_names
             WHERE region_x = ? AND region_y = ? AND region_z = ?
@@ -1261,17 +1254,6 @@ async def api_submit_region_name(
             raise HTTPException(
                 status_code=409,
                 detail='There is already a pending name submission for this region. Please wait for it to be reviewed.'
-            )
-
-        cursor.execute('''
-            SELECT region_x, region_y, region_z FROM pending_region_names
-            WHERE proposed_name = ? AND reality = ? AND galaxy = ? AND status = 'pending'
-        ''', (proposed_name, reality, galaxy))
-        pending_same_name = cursor.fetchone()
-        if pending_same_name:
-            raise HTTPException(
-                status_code=409,
-                detail=f'Region name "{proposed_name}" is already pending approval for another region in {galaxy}/{reality}'
             )
 
         cursor.execute('''
@@ -1300,6 +1282,11 @@ async def api_submit_region_name(
     except HTTPException:
         raise
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Error submitting region name: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1427,27 +1414,27 @@ async def api_approve_region_name(
         reality = submission.get('reality') or 'Normal'
         galaxy = submission.get('galaxy') or 'Euclid'
 
-        # Scoped duplicate check — same name in different galaxy/reality is fine
-        cursor.execute(
-            'SELECT id FROM regions WHERE custom_name = ? AND reality = ? AND galaxy = ?',
-            (proposed_name, reality, galaxy),
-        )
-        if cursor.fetchone():
+        # Region names are NOT globally unique — NMS names repeat across
+        # galaxies (the UNIQUE(custom_name) blocker was dropped in migration
+        # 1.88.0; approving "Muxali Terminus" for Euclid while it already exists
+        # in Odyalutai used to 500 here). The only uniqueness is one row per
+        # voxel, handled by the ON CONFLICT(composite) UPSERT.
+        try:
             cursor.execute('''
-                UPDATE pending_region_names
-                SET status = 'rejected', review_date = ?, review_notes = ?
-                WHERE id = ?
-            ''', (datetime.now(timezone.utc).isoformat(),
-                  f'Name already taken by another region in {galaxy}/{reality}', submission_id))
-            conn.commit()
-            raise HTTPException(status_code=409,
-                                detail=f'Region name was already taken by another region in {galaxy}/{reality}')
-        cursor.execute('''
-            INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
-            DO UPDATE SET custom_name = excluded.custom_name, source = excluded.source, updated_at = CURRENT_TIMESTAMP
-        ''', (rx, ry, rz, proposed_name, reality, galaxy, submission.get('source') or 'manual'))
+                INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(reality, galaxy, region_x, region_y, region_z)
+                DO UPDATE SET custom_name = excluded.custom_name, source = excluded.source, updated_at = CURRENT_TIMESTAMP
+            ''', (rx, ry, rz, proposed_name, reality, galaxy, submission.get('source') or 'manual'))
+        except sqlite3.IntegrityError as ie:
+            # Defensive: any residual constraint surfaces as a clean 409, never a
+            # 500 with a leaked open transaction.
+            conn.rollback()
+            logger.warning(f"Region approve INTEGRITY clash for '{proposed_name}': {ie}")
+            raise HTTPException(
+                status_code=409,
+                detail=(f'Region name "{proposed_name}" conflicts with an existing region. '
+                        f'Approve under a different name.'))
 
         cursor.execute('''
             UPDATE pending_region_names
@@ -1502,6 +1489,11 @@ async def api_approve_region_name(
     except HTTPException:
         raise
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Error approving region name: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1656,14 +1648,10 @@ async def api_batch_approve_region_names(payload: dict, session: Optional[str] =
                         results['skipped'].append({'id': submission_id, 'name': proposed_name, 'reason': 'Self-submission'})
                         continue
 
-                cursor.execute('SELECT id FROM regions WHERE custom_name = ?', (proposed_name,))
-                if cursor.fetchone():
-                    results['failed'].append({'id': submission_id, 'name': proposed_name, 'error': 'Name already taken'})
-                    cursor.execute('''
-                        UPDATE pending_region_names SET status = 'rejected', review_date = ?, review_notes = ? WHERE id = ?
-                    ''', (datetime.now(timezone.utc).isoformat(), 'Name already taken by another region', submission_id))
-                    continue
-
+                # Region names are NOT globally unique (UNIQUE(custom_name)
+                # dropped in migration 1.88.0) — names repeat across galaxies,
+                # so no longer reject a batch item just because the name exists
+                # elsewhere. One row per voxel is handled by the UPSERT below.
                 cursor.execute('''
                     INSERT INTO regions (region_x, region_y, region_z, custom_name, reality, galaxy, source, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)

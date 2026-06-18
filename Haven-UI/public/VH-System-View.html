@@ -518,14 +518,21 @@
             return '#ffb44c';
         }
 
+        // In-game C/B/A/S scale: S=Gold, A=Purple, B=Blue, C=Green
+        // (mirror of TIER_COLORS in src/utils/gradeColors.js).
+        const TIER_COLORS = { S: '#ffd700', A: '#c084fc', B: '#60a5fa', C: '#4ade80' };
+        const RICHNESS_COLORS = { extraordinary: '#ffd700', rare: '#c084fc', common: '#4ade80' };
+        // Metadata keys that carry a C/B/A/S class or a richness rank.
+        const CLASS_META_KEYS = new Set(['ship_class', 'tool_class']);
+        const RICHNESS_META_KEYS = new Set(['deposit_richness']);
+        function metaValueColor(key, value) {
+            if (CLASS_META_KEYS.has(key)) return TIER_COLORS[String(value).trim().toUpperCase()] || null;
+            if (RICHNESS_META_KEYS.has(key)) return RICHNESS_COLORS[String(value).trim().toLowerCase()] || null;
+            return null;
+        }
         function getGradeStyle(grade) {
-            const m = {
-                S: 'border-color:#ffd700;color:#ffd700',
-                A: 'border-color:#8bc44a;color:#8bc44a',
-                B: 'border-color:#6aade8;color:#6aade8',
-                C: 'border-color:#778;color:#778',
-            };
-            return m[grade] || m.C;
+            const c = TIER_COLORS[grade] || TIER_COLORS.C;
+            return `border-color:${c};color:${c}`;
         }
 
         // ===== BOTTOM SHEET =====
@@ -1592,6 +1599,23 @@
             const e = disc.discovery_type || '';
             const displayType = DISC_CATEGORIES[e] ? `${e} ${DISC_CATEGORIES[e].name}` : (e || 'Unknown');
             let html = `<div class="discovery-card"><div class="discovery-card-header"><span class="discovery-type">${escapeHtml(displayType)}</span><span class="discovery-card-name">${escapeHtml(disc.discovery_name || disc.name || 'Unnamed')}</span></div><div class="discovery-card-details">`;
+            // Type-specific metadata (species, behavior, class, etc.). Stored
+            // as a JSON blob on type_metadata; render every populated field.
+            let tm = disc.type_metadata;
+            if (tm) {
+                try { tm = typeof tm === 'string' ? JSON.parse(tm) : tm; } catch { tm = null; }
+                if (tm && typeof tm === 'object') {
+                    for (const [k, v] of Object.entries(tm)) {
+                        if (v === null || v === undefined || String(v).trim() === '') continue;
+                        const label = String(k).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                        const col = metaValueColor(k, v);
+                        const valHtml = col
+                            ? `<span style="color:${col};font-weight:700">${escapeHtml(String(v))}</span>`
+                            : escapeHtml(String(v));
+                        html += `<p><span class="detail-label">${escapeHtml(label)}:</span> ${valHtml}</p>`;
+                    }
+                }
+            }
             if (disc.description)      html += `<p>${escapeHtml(disc.description)}</p>`;
             if (disc.discovered_by)    html += `<p><span class="detail-label">Discovered by:</span> ${escapeHtml(disc.discovered_by)}</p>`;
             if (disc.submission_timestamp) {

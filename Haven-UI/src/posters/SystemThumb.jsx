@@ -64,11 +64,13 @@ const BIOME_TINTS = {
   'Gas Giant': '#fbbf24',
 }
 
+// In-game C/B/A/S scale: S=Gold, A=Purple, B=Blue, C=Green
+// (mirror of TIER_COLORS in src/utils/gradeColors.js).
 const GRADE_BG = {
-  S: { bg: POSTER_COLORS.amber, fg: '#422006' },
-  A: { bg: '#34d399', fg: '#022c22' },
+  S: { bg: '#ffd700', fg: '#422006' },
+  A: { bg: '#c084fc', fg: '#2e1065' },
   B: { bg: '#60a5fa', fg: '#082f49' },
-  C: { bg: 'rgba(255,255,255,0.20)', fg: 'rgba(255,255,255,0.95)' },
+  C: { bg: '#4ade80', fg: '#052e16' },
 }
 
 export default function SystemThumb({ routeKey }) {

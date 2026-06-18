@@ -82,24 +82,43 @@ def build_planet_entry(
     biome_subtype_plant_override: Dict[str, str],
     hidden_substance_names: Any,
     hidden_substance_ids: Any,
+    clean_weather: Optional[Callable[[str], str]] = None,
 ) -> Dict[str, Any]:
     """Build one planet payload entry from a captured-planet dict.
 
-    Faithful reproduction of the previous ``_planet_from_captured`` so the uploaded
-    shape is byte-for-byte unchanged - resource translation, hidden-substance fix and
-    plant-resource derivation are all carried over verbatim. The only difference is
-    that this is a pure function (game-memory reads are done by the caller), so the
-    same builder serves the live system AND every already-frozen batched system.
+    Resource translation, hidden-substance fix and plant-resource derivation are carried
+    over verbatim from the prior ``_planet_from_captured``. This is a pure function
+    (game-memory reads are done by the caller), so the same builder serves the live
+    system AND every already-frozen batched system.
+
+    Adjective display strings (the Odusto 2026-06-17 bug): NMS exposes the EXACT
+    weather/sentinel/flora/fauna adjectives ("Superheated Drizzle", "Observant",
+    "Abundant"...) only in the live ``PlanetInfo`` array, which the capture path reads
+    via _auto_refresh_for_export and stashes already-resolved into the ``*_display``
+    keys. The plain ``flora``/``fauna``/``sentinel``/``weather`` keys hold only the
+    generic enum tier ("Bountiful"/"Copious"/"Limited"...). We therefore PREFER the
+    collected ``*_display`` value and fall back to the enum tier only when the display
+    string wasn't captured (e.g. you left the system before NMS populated PlanetInfo).
+    This is what was missing - the refresh collected the real adjectives and the builder
+    was discarding them. ``clean_weather`` (passed by the caller) normalises the weather
+    string exactly as the legacy ``_extract_single_planet`` did; identity if omitted.
     """
+    flora = captured.get('flora_display') or captured.get('flora') or 'Unknown'
+    fauna = captured.get('fauna_display') or captured.get('fauna') or 'Unknown'
+    sentinel = captured.get('sentinel_display') or captured.get('sentinel') or 'Unknown'
+    weather_val = captured.get('weather_display') or captured.get('weather') or 'Unknown'
+    if clean_weather is not None and weather_val and weather_val != 'Unknown':
+        weather_val = clean_weather(weather_val)
+
     result = {
         "planet_index": index,
         "planet_name": captured.get('planet_name') or f"Planet_{index + 1}",
         "biome": captured.get('biome', 'Unknown'),
         "biome_subtype": captured.get('biome_subtype', 'Unknown'),
-        "weather": captured.get('weather', 'Unknown'),
-        "sentinel_level": captured.get('sentinel', 'Unknown'),
-        "flora_level": captured.get('flora', 'Unknown'),
-        "fauna_level": captured.get('fauna', 'Unknown'),
+        "weather": weather_val,
+        "sentinel_level": sentinel,
+        "flora_level": flora,
+        "fauna_level": fauna,
         "common_resource": captured.get('common_resource', '') or 'Unknown',
         "uncommon_resource": captured.get('uncommon_resource', '') or 'Unknown',
         "rare_resource": captured.get('rare_resource', '') or 'Unknown',
@@ -133,13 +152,59 @@ def build_planet_entry(
     return result
 
 
-def build_planet_list(captured_planets: Dict[str, Any], *, planet_builder: Callable) -> List[Dict[str, Any]]:
+def _capture_has_name(captured: Dict[str, Any]) -> bool:
+    """True when a captured-planet dict carries a real (non-empty) planet name."""
+    name = captured.get('planet_name')
+    return bool(name) and bool(str(name).strip())
+
+
+def select_captures(
+    captured_planets: Dict[str, Any],
+    *,
+    count_hint: Optional[int] = None,
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """Pick the real bodies out of the captured-planets dict, dropping phantom captures.
+
+    Why this exists (the Odusto 2026-06-17 bug):
+    The GenerateCreatureRoles hook fires many times per second while a system is live.
+    Most fires resolve a real planet name and dedupe by name, but a fire whose planet
+    name can't be read yet is stored under a synthetic ``_unnamed_N`` key with no name
+    and default (Lush/Small) data. A real NMS body ALWAYS has a name, so those nameless
+    captures are phantoms that would otherwise upload as ``Planet_N`` placeholders that
+    inflate the planet count (Odusto: 3 real planets + 3 phantom ``Planet_4/5/6``).
+
+    Rules (insertion / slot order preserved):
+      1. Partition into NAMED (``planet_name`` present) and UNNAMED captures.
+      2. If ANY named entry exists, it is a real body - drop ALL unnamed phantoms.
+      3. If NOTHING got a name (a fully degraded read), fall back to the unnamed entries
+         so the system isn't uploaded planetless.
+      4. ``count_hint`` (the live PLANETS_COUNT = planets+moons, 1..6) is an UPPER cap
+         only: it can trim an over-long list, but it is NEVER a reason to KEEP a phantom.
+         The post-Voyagers count read is unreliable, so we must not pad up to it with
+         placeholders - we only ever shrink.
+    """
+    named = [(k, v) for k, v in captured_planets.items() if _capture_has_name(v)]
+    chosen = named if named else list(captured_planets.items())
+    if isinstance(count_hint, int) and not isinstance(count_hint, bool) and 0 < count_hint < len(chosen):
+        chosen = chosen[:count_hint]
+    return chosen
+
+
+def build_planet_list(
+    captured_planets: Dict[str, Any],
+    *,
+    planet_builder: Callable,
+    count_hint: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """Build the ordered planet list from the captured-planets dict.
 
-    Insertion order == capture (slot) order, matching the prior behaviour. Each value
-    is built by ``planet_builder(captured, index)``.
+    Insertion order == capture (slot) order, matching the prior behaviour. Phantom
+    (nameless) captures are filtered out by ``select_captures`` before building, so a
+    spurious hook fire can no longer become a ``Planet_N`` placeholder. Each surviving
+    value is built by ``planet_builder(captured, index)``.
     """
-    return [planet_builder(captured, i) for i, (_name, captured) in enumerate(captured_planets.items())]
+    chosen = select_captures(captured_planets, count_hint=count_hint)
+    return [planet_builder(captured, i) for i, (_name, captured) in enumerate(chosen)]
 
 
 def build_system_payload(

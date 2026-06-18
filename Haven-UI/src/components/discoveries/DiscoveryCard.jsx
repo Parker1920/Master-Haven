@@ -2,6 +2,7 @@ import React from 'react'
 import { StarIcon } from '@heroicons/react/24/solid'
 import { getThumbnailUrl } from '../../utils/api'
 import { formatCoords } from '../LatLngInput'
+import { metaEntries } from '../../utils/discoveryMeta'
 
 /** Renders a discovery card with thumbnail, type badge, location breadcrumb, and featured star. Props: discovery, onClick. */
 
@@ -42,10 +43,12 @@ export default function DiscoveryCard({
     location_type,
     latitude,
     longitude,
+    type_metadata,
     is_featured,
   } = discovery
 
   const coordText = formatCoords(latitude, longitude)
+  const metaItems = metaEntries(type_metadata)
   const slug = type_slug || 'other'
   const photoSrc = getThumbnailUrl(photo_url)
   const placeholderBg = TYPE_PLACEHOLDERS[slug] || TYPE_PLACEHOLDERS.other
@@ -100,6 +103,18 @@ export default function DiscoveryCard({
         <h3 className="text-white font-semibold text-lg truncate group-hover:text-cyan-400 transition-colors">
           {discovery_name || `Discovery #${id}`}
         </h3>
+
+        {/* Type metadata (species, behavior, class, etc.) */}
+        {metaItems.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-sm">
+            {metaItems.map((m) => (
+              <span key={m.key} className="text-gray-300">
+                <span className="text-gray-500">{m.label}:</span>{' '}
+                <span style={m.color ? { color: m.color, fontWeight: 700 } : undefined}>{m.value}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Location */}
         {(system_name || system_galaxy || planet_name || moon_name) && (

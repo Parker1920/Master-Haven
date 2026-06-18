@@ -1,14 +1,10 @@
 import React from 'react'
+import { TIER_COLORS } from '../../utils/gradeColors'
 
 // Wizard v1 top progress bar (mockup .v11-progress-bar at 6130).
 // Width = completeness percent. Color shifts toward gold as you climb to S.
 export default function WizardProgressBar({ percent = 0, grade = 'C' }) {
-  const color = {
-    S: 'var(--app-accent-amber)',
-    A: '#22c55e',
-    B: '#3b82f6',
-    C: '#94a3b8',
-  }[grade] || '#94a3b8'
+  const color = TIER_COLORS[grade] || TIER_COLORS.C
 
   return (
     <div

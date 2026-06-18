@@ -30,6 +30,7 @@ export default function DiscoveryType() {
   const [loading, setLoading] = useState(true)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [selectedDiscovery, setSelectedDiscovery] = useState(null)
+  const [editDiscovery, setEditDiscovery] = useState(null)
 
   // Filter state from URL params
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '')
@@ -95,9 +96,17 @@ export default function DiscoveryType() {
     }
   }
 
+  // Open the submit modal in edit mode for an existing discovery
+  function handleEditDiscovery(d) {
+    setSelectedDiscovery(null)
+    setEditDiscovery(d)
+    setShowSubmitModal(true)
+  }
+
   // Refresh data after submission
   function handleSubmitSuccess() {
     setShowSubmitModal(false)
+    setEditDiscovery(null)
     // Re-fetch with current filters
     setPage(0)
   }
@@ -249,10 +258,11 @@ export default function DiscoveryType() {
         </>
       )}
 
-      {/* Submit Modal */}
+      {/* Submit / Edit Modal */}
       <DiscoverySubmitModal
         isOpen={showSubmitModal}
-        onClose={() => setShowSubmitModal(false)}
+        editDiscovery={editDiscovery}
+        onClose={() => { setShowSubmitModal(false); setEditDiscovery(null) }}
         onSuccess={handleSubmitSuccess}
       />
 
@@ -262,6 +272,7 @@ export default function DiscoveryType() {
         isOpen={!!selectedDiscovery}
         onClose={() => setSelectedDiscovery(null)}
         onFeatureToggle={handleFeatureToggle}
+        onEdit={handleEditDiscovery}
       />
     </div>
   )

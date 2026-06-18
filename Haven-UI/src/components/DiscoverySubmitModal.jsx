@@ -73,9 +73,13 @@ const GALAXIES = [
  * inline stub creation, photo upload, and type-specific metadata fields.
  * Props: isOpen, onClose, onSuccess.
  */
-export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
+export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editDiscovery = null }) {
   const auth = useContext(AuthContext)
   const { user } = auth || {}
+  // When editDiscovery is provided the modal runs in EDIT mode: prefill from the
+  // existing discovery, lock the system, and submit as an edit (edit_discovery_id)
+  // which lands in the approval queue exactly like a system edit.
+  const isEdit = !!editDiscovery
   const [form, setForm] = useState({
     discovery_name: '',
     discovery_type: '',
@@ -103,6 +107,11 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
+  // Edit mode: the discovery's existing primary photo, kept unless a new one is uploaded.
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState('')
+  // Guards the "clear type metadata when type changes" effect during prefill so
+  // we don't wipe the metadata we just loaded for an edit.
+  const skipTypeClearRef = useRef(false)
 
   // Stub system creation state
   const [showCreateSystem, setShowCreateSystem] = useState(false)
@@ -121,34 +130,68 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       .catch(() => setCommunities([{ tag: 'Personal', name: 'Personal (Not affiliated)' }]))
   }, [])
 
-  // Reset form when modal opens, auto-fill from profile if logged in
+  // Reset form when modal opens, auto-fill from profile if logged in.
+  // In edit mode, prefill from the existing discovery instead.
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return
+    setPhotos([])
+    setError('')
+    setSuccessMessage('')
+    setShowCreateSystem(false)
+    setStubForm({ name: '', galaxy: 'Euclid', glyph_code: '' })
+
+    if (isEdit) {
+      const d = editDiscovery
+      // type_metadata may arrive as an object (browse/detail) or a JSON string.
+      let meta = d.type_metadata
+      if (typeof meta === 'string') { try { meta = JSON.parse(meta) } catch { meta = {} } }
+      const evidence = typeof d.evidence_url === 'string'
+        ? d.evidence_url.split(',').map(s => s.trim()).filter(Boolean).join('\n')
+        : ''
+      skipTypeClearRef.current = true  // don't let the type-change effect wipe meta
       setForm({
-        discovery_name: '',
-        discovery_type: '',
-        description: '',
-        system_id: '',
-        planet_id: '',
-        moon_id: '',
-        location_type: 'planet',
-        location_name: '',
-        latitude: '',
-        longitude: '',
+        discovery_name: d.discovery_name || '',
+        discovery_type: d.discovery_type || '',
+        description: d.description || '',
+        system_id: d.system_id || '',
+        planet_id: d.planet_id || '',
+        moon_id: d.moon_id || '',
+        location_type: d.location_type || 'planet',
+        location_name: d.location_name || '',
+        latitude: d.latitude != null ? String(d.latitude) : '',
+        longitude: d.longitude != null ? String(d.longitude) : '',
         discord_username: user?.username || '',
-        discord_tag: user?.defaultCivTag || '',
-        evidence_urls: ''
+        discord_tag: d.discord_tag || user?.defaultCivTag || '',
+        evidence_urls: evidence,
       })
-      setTypeMetadata({})
-      setPhotos([])
-      setSelectedSystem(null)
-      setSystemSearch('')
-      setError('')
-      setSuccessMessage('')
-      setShowCreateSystem(false)
-      setStubForm({ name: '', galaxy: 'Euclid', glyph_code: '' })
+      setTypeMetadata(meta && typeof meta === 'object' ? meta : {})
+      setExistingPhotoUrl(d.photo_url || '')
+      setSystemSearch(d.system_name || '')
+      setSelectedSystem(null)  // loaded by the system_id effect
       setIsStubSystem(false)
+      return
     }
+
+    setForm({
+      discovery_name: '',
+      discovery_type: '',
+      description: '',
+      system_id: '',
+      planet_id: '',
+      moon_id: '',
+      location_type: 'planet',
+      location_name: '',
+      latitude: '',
+      longitude: '',
+      discord_username: user?.username || '',
+      discord_tag: user?.defaultCivTag || '',
+      evidence_urls: ''
+    })
+    setTypeMetadata({})
+    setExistingPhotoUrl('')
+    setSelectedSystem(null)
+    setSystemSearch('')
+    setIsStubSystem(false)
   }, [isOpen])
 
   // Debounced system search - waits 300ms after typing stops before calling API
@@ -185,8 +228,13 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
       .catch(() => setSelectedSystem(null))
   }, [form.system_id])
 
-  // Clear type metadata when discovery type changes
+  // Clear type metadata when discovery type changes — but not during an edit
+  // prefill (which sets the type and the metadata together).
   useEffect(() => {
+    if (skipTypeClearRef.current) {
+      skipTypeClearRef.current = false
+      return
+    }
     setTypeMetadata({})
   }, [form.discovery_type])
 
@@ -343,10 +391,11 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
     setIsSubmitting(true)
 
     try {
-      // Build payload
+      // Build payload. In edit mode, keep the existing primary photo unless the
+      // user uploaded a new one.
       const uploadedPhotos = photos.filter(p => p.uploaded && p.path)
-      const primaryPhoto = uploadedPhotos[0]?.path || ''
-      const evidencePhotos = uploadedPhotos.slice(1).map(p => p.path)
+      const primaryPhoto = uploadedPhotos.length ? uploadedPhotos[0].path : (existingPhotoUrl || '')
+      const evidencePhotos = uploadedPhotos.length ? uploadedPhotos.slice(1).map(p => p.path) : []
 
       const externalUrls = form.evidence_urls.split('\n').map(s => s.trim()).filter(Boolean)
       const allEvidence = [...evidencePhotos, ...externalUrls]
@@ -376,7 +425,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         photo_url: primaryPhoto || null,
         evidence_urls: allEvidence.length > 0 ? allEvidence.join(',') : null,
         type_metadata: Object.keys(metadata).length > 0 ? metadata : null,
-        profile_id: user?.profileId || null
+        profile_id: user?.profileId || null,
+        edit_discovery_id: isEdit ? editDiscovery.id : null,
       }
 
       const res = await fetch('/api/submit_discovery', {
@@ -391,7 +441,11 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
         throw new Error(errData.detail || errData.message || 'Failed to submit discovery')
       }
 
-      setSuccessMessage('Discovery submitted for approval! A community leader will review it shortly.')
+      setSuccessMessage(
+        isEdit
+          ? 'Edit submitted for approval! A community leader will review your changes shortly.'
+          : 'Discovery submitted for approval! A community leader will review it shortly.'
+      )
       setTimeout(() => {
         onSuccess?.()
       }, 2000)
@@ -411,8 +465,13 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
   const typeFields = TYPE_FIELDS[form.discovery_type] || []
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Submit Discovery">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Discovery' : 'Submit Discovery'}>
       <form onSubmit={handleSubmit}>
+        {isEdit && (
+          <div className="mb-4 p-3 rounded text-sm" style={{ backgroundColor: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)', color: '#fde68a' }}>
+            ✎ Editing an existing discovery. Your changes go to the approval queue and a community leader must approve them before they go live. The system can't be changed.
+          </div>
+        )}
         {error && (
           <div className="mb-4 p-3 rounded text-sm" style={{ backgroundColor: 'rgba(239,68,68,0.2)', color: '#fca5a5' }}>
             {error}
@@ -429,6 +488,14 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
           <h4 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--app-primary)' }}>
             Location <span className="text-red-400">*</span>
           </h4>
+          {isEdit ? (
+          <FormField label="System" hint="A discovery's system can't be changed in an edit">
+            <div className="p-2 rounded flex items-center gap-2" style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)', opacity: 0.9 }}>
+              <span className="font-medium">{systemSearch || 'System'}</span>
+              <span className="text-xs muted">(locked)</span>
+            </div>
+          </FormField>
+          ) : (
           <FormField label={<>System <span className="text-red-400">*</span></>} hint="Search for the system where you made this discovery">
             <div className="relative">
               <div className="flex gap-2">
@@ -511,6 +578,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
               )}
             </div>
           </FormField>
+          )}
 
           {/* Selected system badge */}
           {form.system_id && isStubSystem && (
@@ -870,7 +938,7 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess }) {
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting || uploadingPhotos || !!successMessage}>
-              {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
+              {isSubmitting ? 'Submitting...' : (isEdit ? 'Submit Edit' : 'Submit for Approval')}
             </Button>
           </div>
         </div>

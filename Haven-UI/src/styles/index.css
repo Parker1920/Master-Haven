@@ -314,16 +314,18 @@ details > summary::-webkit-details-marker { display: none; }
 details[open] .chev { transform: rotate(180deg); }
 .chev { transition: transform 200ms; }
 
-/* Completeness grade letter + bar tokens */
-.grade-s { color: var(--app-accent-amber); }
-.grade-a { color: #34d399; }
+/* Completeness grade letter + bar tokens.
+   In-game C/B/A/S scale: S=Gold, A=Purple, B=Blue, C=Green.
+   Mirror of TIER_COLORS in src/utils/gradeColors.js. */
+.grade-s { color: #ffd700; }
+.grade-a { color: #c084fc; }
 .grade-b { color: #60a5fa; }
-.grade-c { color: rgba(255, 255, 255, 0.5); }
+.grade-c { color: #4ade80; }
 
-.bar-s { background: var(--app-accent-amber); }
-.bar-a { background: #34d399; }
+.bar-s { background: #ffd700; }
+.bar-a { background: #c084fc; }
 .bar-b { background: #60a5fa; }
-.bar-c { background: rgba(255, 255, 255, 0.25); }
+.bar-c { background: #4ade80; }
 
 .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 

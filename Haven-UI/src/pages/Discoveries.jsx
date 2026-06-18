@@ -32,6 +32,7 @@ export default function Discoveries() {
   const [loading, setLoading] = useState(true)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [selectedDiscovery, setSelectedDiscovery] = useState(null)
+  const [editDiscovery, setEditDiscovery] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   // Fetch stats and recent discoveries
@@ -84,9 +85,17 @@ export default function Discoveries() {
     }
   }
 
+  // Open the submit modal in edit mode for an existing discovery
+  function handleEditDiscovery(d) {
+    setSelectedDiscovery(null)
+    setEditDiscovery(d)
+    setShowSubmitModal(true)
+  }
+
   // Refresh data after submission
   function handleSubmitSuccess() {
     setShowSubmitModal(false)
+    setEditDiscovery(null)
     // Refresh stats and recent
     fetch('/api/discoveries/stats')
       .then(r => r.json())
@@ -192,10 +201,11 @@ export default function Discoveries() {
         </div>
       )}
 
-      {/* Submit Modal */}
+      {/* Submit / Edit Modal */}
       <DiscoverySubmitModal
         isOpen={showSubmitModal}
-        onClose={() => setShowSubmitModal(false)}
+        editDiscovery={editDiscovery}
+        onClose={() => { setShowSubmitModal(false); setEditDiscovery(null) }}
         onSuccess={handleSubmitSuccess}
       />
 
@@ -205,6 +215,7 @@ export default function Discoveries() {
         isOpen={!!selectedDiscovery}
         onClose={() => setSelectedDiscovery(null)}
         onFeatureToggle={handleFeatureToggle}
+        onEdit={handleEditDiscovery}
       />
     </div>
   )

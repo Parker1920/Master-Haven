@@ -324,9 +324,15 @@ async def browse_discoveries(
         where_clauses = []
         params = []
 
-        # Filter by type slug
+        # Filter by type slug.
+        # NOTE: every where-clause column is qualified with the `d.` alias.
+        # The fetch query LEFT JOINs systems/planets/moons, and `description`
+        # (and `discovered_by`) also exist on `systems` — an unqualified
+        # reference raised `ambiguous column name: description`, 500ing every
+        # text search. The count query also aliases the table as `d`, so the
+        # qualification is valid in both.
         if type and type in DISCOVERY_TYPE_SLUGS:
-            where_clauses.append("type_slug = ?")
+            where_clauses.append("d.type_slug = ?")
             params.append(type)
 
         # Search query — 2-char minimum mirrors the v1.51 Stage 2 hardening
@@ -336,12 +342,12 @@ async def browse_discoveries(
         q_clean = (q or '').strip()
         if q_clean and len(q_clean) >= 2:
             q_pattern = f"%{q_clean}%"
-            where_clauses.append("(discovery_name LIKE ? OR description LIKE ? OR location_name LIKE ?)")
+            where_clauses.append("(d.discovery_name LIKE ? OR d.description LIKE ? OR d.location_name LIKE ?)")
             params.extend([q_pattern, q_pattern, q_pattern])
 
         # Filter by discoverer
         if discoverer:
-            where_clauses.append("discovered_by LIKE ?")
+            where_clauses.append("d.discovered_by LIKE ?")
             params.append(f"%{discoverer}%")
 
         # Hide discoveries from archived civilizations (public endpoint)
@@ -386,10 +392,18 @@ async def browse_discoveries(
         cursor.execute(query, params + [limit, offset])
         discoveries = [dict(row) for row in cursor.fetchall()]
 
-        # Add type info to each discovery
+        # Add type info + parse the type_metadata JSON blob so the client gets
+        # an object. browse/recent historically returned the raw JSON string,
+        # so detail panels that key off `typeof === 'object'` silently dropped
+        # every field (species, behavior, class, …).
         for d in discoveries:
             slug = d.get('type_slug') or get_discovery_type_slug(d.get('discovery_type', ''))
             d['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
+            if d.get('type_metadata'):
+                try:
+                    d['type_metadata'] = json.loads(d['type_metadata'])
+                except (TypeError, ValueError):
+                    pass
 
         return {
             'discoveries': discoveries,
@@ -507,10 +521,15 @@ async def get_recent_discoveries(limit: int = 8):
 
         discoveries = [dict(row) for row in cursor.fetchall()]
 
-        # Add type info to each discovery
+        # Add type info + parse the type_metadata JSON blob (see browse()).
         for d in discoveries:
             slug = d.get('type_slug') or get_discovery_type_slug(d.get('discovery_type', ''))
             d['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
+            if d.get('type_metadata'):
+                try:
+                    d['type_metadata'] = json.loads(d['type_metadata'])
+                except (TypeError, ValueError):
+                    pass
 
         return {'discoveries': discoveries}
 
@@ -688,6 +707,17 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
     if not discord_tag:
         raise HTTPException(status_code=400, detail='Community (discord tag) is required')
 
+    # Optional: this submission is an EDIT of an existing live discovery
+    # (mirror of pending_systems.edit_system_id). NULL = a brand-new discovery.
+    # Validated against the DB inside the transaction below (must exist + live
+    # on the same system — edits can change planet/moon, never move systems).
+    edit_discovery_id = payload.get('edit_discovery_id')
+    try:
+        edit_discovery_id = int(edit_discovery_id) if edit_discovery_id not in (None, '') else None
+    except (TypeError, ValueError):
+        edit_discovery_id = None
+    payload['edit_discovery_id'] = edit_discovery_id
+
     # Get client IP for tracking
     client_ip = request.client.host if request.client else "unknown"
 
@@ -730,6 +760,15 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
         if sys_row:
             system_name = sys_row['name']
 
+        # Validate the edit target: must exist and live on the SAME system.
+        if edit_discovery_id is not None:
+            cursor.execute('SELECT system_id FROM discoveries WHERE id = ?', (edit_discovery_id,))
+            tgt = cursor.fetchone()
+            if not tgt:
+                raise HTTPException(status_code=404, detail='The discovery you are editing no longer exists.')
+            if str(tgt['system_id']) != str(system_id):
+                raise HTTPException(status_code=400, detail='An edit cannot move a discovery to a different system.')
+
         planet_name = None
         if payload.get('planet_id'):
             cursor.execute('SELECT name FROM planets WHERE id = ?', (payload['planet_id'],))
@@ -766,8 +805,9 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
                 system_id, system_name, planet_name, moon_name, location_type,
                 discord_tag, submitted_by, submitted_by_ip,
                 submitter_account_id, submitter_account_type, submitter_profile_id,
-                submission_date, photo_url, source, latitude, longitude, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                submission_date, photo_url, source, latitude, longitude,
+                edit_discovery_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             discovery_data,
             discovery_name,
@@ -789,6 +829,7 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             SOURCE_MANUAL,
             latitude,
             longitude,
+            edit_discovery_id,
         ))
         conn.commit()
         submission_id = cursor.lastrowid
@@ -803,11 +844,20 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
 
         return JSONResponse({
             'status': 'pending',
-            'message': 'Discovery submitted for approval!',
+            'message': 'Discovery edit submitted for approval!' if edit_discovery_id else 'Discovery submitted for approval!',
             'submission_id': submission_id
         }, status_code=201)
 
+    except HTTPException:
+        raise
     except Exception as e:
+        # Roll back deterministically so a failed write never lingers holding
+        # the SQLite write lock (the "database is locked" busy-timeout risk).
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Error submitting discovery: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -841,11 +891,11 @@ async def get_pending_discoveries(session: Optional[str] = Cookie(None)):
 
         select_cols = '''
             id, discovery_name, discovery_type, type_slug,
-            system_name, planet_name, moon_name, location_type,
+            system_id, system_name, planet_name, moon_name, location_type,
             latitude, longitude,
             discord_tag, submitted_by, submission_date, photo_url,
             status, reviewed_by, review_date, rejection_reason,
-            submitter_account_id, submitter_account_type
+            submitter_account_id, submitter_account_type, edit_discovery_id
         '''
 
         # Single-query scoping via civ_scope_filter (migration 1.80.0).
@@ -957,6 +1007,116 @@ async def get_pending_discovery_detail(submission_id: int, session: Optional[str
             conn.close()
 
 
+# Editable fields a super admin can change on a pending discovery before
+# approval. system_id and discord_tag are intentionally locked (a discovery
+# stays on its system and keeps its community).
+_EDITABLE_DISCOVERY_FIELDS = (
+    'discovery_name', 'discovery_type', 'description', 'significance',
+    'location_type', 'planet_id', 'moon_id', 'location_name',
+    'latitude', 'longitude', 'photo_url', 'evidence_urls', 'type_metadata',
+)
+
+
+@router.put('/api/pending_discoveries/{submission_id}')
+async def edit_pending_discovery(submission_id: int, payload: dict, session: Optional[str] = Cookie(None)):
+    """Super-admin inline edit of a PENDING discovery before approval.
+
+    Mirrors PUT /api/pending_systems/{id}: merges the edited fields into the
+    discovery_data JSON blob and re-syncs the denormalized columns the queue
+    card reads. Does not approve — the row stays pending.
+    """
+    session_data = get_session(session)
+    if not session_data or session_data.get('user_type') != 'super_admin':
+        raise HTTPException(status_code=403, detail="Super admin required")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        submission = dict(row)
+        if submission['status'] != 'pending':
+            raise HTTPException(status_code=400, detail="Only pending submissions can be edited")
+
+        # Merge edited fields into the existing discovery_data blob
+        data = {}
+        if submission.get('discovery_data'):
+            try:
+                data = json.loads(submission['discovery_data'])
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+        for k in _EDITABLE_DISCOVERY_FIELDS:
+            if k in payload:
+                data[k] = payload[k]
+
+        discovery_name = (data.get('discovery_name') or submission.get('discovery_name') or 'Unnamed Discovery')
+        discovery_type = data.get('discovery_type') or submission.get('discovery_type') or 'Unknown'
+        type_slug = get_discovery_type_slug(discovery_type)
+        location_type = data.get('location_type') or 'space'
+
+        # Re-denormalize planet/moon names + coords
+        planet_name = None
+        if data.get('planet_id'):
+            cursor.execute('SELECT name FROM planets WHERE id = ?', (data['planet_id'],))
+            r = cursor.fetchone()
+            planet_name = r['name'] if r else None
+        moon_name = None
+        if data.get('moon_id'):
+            cursor.execute('SELECT name FROM moons WHERE id = ?', (data['moon_id'],))
+            r = cursor.fetchone()
+            moon_name = r['name'] if r else None
+        latitude, longitude = normalize_discovery_coords(data.get('latitude'), data.get('longitude'))
+        if location_type == 'space':
+            latitude, longitude = None, None
+        data['latitude'], data['longitude'] = latitude, longitude
+
+        cursor.execute('''
+            UPDATE pending_discoveries SET
+                discovery_data = ?, discovery_name = ?, discovery_type = ?, type_slug = ?,
+                location_type = ?, planet_name = ?, moon_name = ?,
+                latitude = ?, longitude = ?, photo_url = ?
+            WHERE id = ?
+        ''', (
+            json.dumps(data), discovery_name, discovery_type, type_slug,
+            location_type, planet_name, moon_name,
+            latitude, longitude, data.get('photo_url') or submission.get('photo_url'),
+            submission_id,
+        ))
+
+        cursor.execute('''
+            INSERT INTO approval_audit_log
+            (timestamp, action, submission_type, submission_id, submission_name,
+             approver_username, approver_type, approver_account_id, approver_discord_tag,
+             submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            'edit_pending_discovery', 'discovery', submission_id, discovery_name,
+            session_data.get('username'), 'super_admin', None, session_data.get('discord_tag'),
+            submission.get('submitted_by'), submission.get('submitter_account_id'),
+            submission.get('submitter_account_type'), submission.get('discord_tag'),
+            submission.get('source', 'manual'),
+        ))
+        conn.commit()
+
+        logger.info(f"Pending discovery {submission_id} edited inline by super admin")
+        return {'status': 'ok'}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error editing pending discovery: {e}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
+
+
 @router.post('/api/approve_discovery/{submission_id}')
 async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(None)):
     """
@@ -1024,44 +1184,93 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
         if location_type == 'space':
             latitude, longitude = None, None
 
-        cursor.execute('''
-            INSERT INTO discoveries (
-                discovery_type, discovery_name, system_id, planet_id, moon_id,
-                location_type, location_name, description, significance,
-                discovered_by, submission_timestamp,
-                mystery_tier, analysis_status, pattern_matches,
-                discord_user_id, discord_guild_id,
-                photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source,
-                latitude, longitude
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            discovery_type,
-            discovery_name,
-            discovery_data.get('system_id'),
-            discovery_data.get('planet_id'),
-            discovery_data.get('moon_id'),
-            location_type,
-            discovery_data.get('location_name') or '',
-            discovery_data.get('description') or '',
-            discovery_data.get('significance') or 'Notable',
-            discovery_data.get('discord_username') or submission.get('submitted_by') or 'anonymous',
-            submission.get('submission_date') or datetime.now(timezone.utc).isoformat(),
-            discovery_data.get('mystery_tier') or 1,
-            'approved',
-            0,
-            discovery_data.get('discord_user_id'),
-            discovery_data.get('discord_guild_id'),
-            discovery_data.get('photo_url') or submission.get('photo_url'),
-            discovery_data.get('evidence_urls'),
-            type_slug,
-            discovery_data.get('discord_tag') or submission.get('discord_tag'),
-            type_metadata_json,
-            submission.get('submitter_profile_id'),
-            submission.get('source') or SOURCE_MANUAL,
-            latitude,
-            longitude,
-        ))
-        discovery_id = cursor.lastrowid
+        # Is this an EDIT of an existing live discovery? (mirror of system edits)
+        edit_discovery_id = submission.get('edit_discovery_id')
+        if edit_discovery_id is None:
+            edit_discovery_id = discovery_data.get('edit_discovery_id')
+        try:
+            edit_discovery_id = int(edit_discovery_id) if edit_discovery_id not in (None, '') else None
+        except (TypeError, ValueError):
+            edit_discovery_id = None
+
+        is_edit = False
+        if edit_discovery_id is not None:
+            # EDIT path: update the live discovery in place. Preserve the original
+            # attribution (discovered_by, submission_timestamp, system_id,
+            # discord_tag, profile_id, source) — only the editable fields change.
+            cursor.execute('SELECT id FROM discoveries WHERE id = ?', (edit_discovery_id,))
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=400,
+                    detail="The discovery this edit targets no longer exists. Reject this submission instead."
+                )
+            cursor.execute('''
+                UPDATE discoveries SET
+                    discovery_type = ?, discovery_name = ?, type_slug = ?,
+                    planet_id = ?, moon_id = ?, location_type = ?, location_name = ?,
+                    description = ?, significance = ?, mystery_tier = ?,
+                    photo_url = ?, evidence_url = ?, type_metadata = ?,
+                    latitude = ?, longitude = ?
+                WHERE id = ?
+            ''', (
+                discovery_type,
+                discovery_name,
+                type_slug,
+                discovery_data.get('planet_id'),
+                discovery_data.get('moon_id'),
+                location_type,
+                discovery_data.get('location_name') or '',
+                discovery_data.get('description') or '',
+                discovery_data.get('significance') or 'Notable',
+                discovery_data.get('mystery_tier') or 1,
+                discovery_data.get('photo_url') or submission.get('photo_url'),
+                discovery_data.get('evidence_urls'),
+                type_metadata_json,
+                latitude,
+                longitude,
+                edit_discovery_id,
+            ))
+            discovery_id = edit_discovery_id
+            is_edit = True
+        else:
+            cursor.execute('''
+                INSERT INTO discoveries (
+                    discovery_type, discovery_name, system_id, planet_id, moon_id,
+                    location_type, location_name, description, significance,
+                    discovered_by, submission_timestamp,
+                    mystery_tier, analysis_status, pattern_matches,
+                    discord_user_id, discord_guild_id,
+                    photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source,
+                    latitude, longitude
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                discovery_type,
+                discovery_name,
+                discovery_data.get('system_id'),
+                discovery_data.get('planet_id'),
+                discovery_data.get('moon_id'),
+                location_type,
+                discovery_data.get('location_name') or '',
+                discovery_data.get('description') or '',
+                discovery_data.get('significance') or 'Notable',
+                discovery_data.get('discord_username') or submission.get('submitted_by') or 'anonymous',
+                submission.get('submission_date') or datetime.now(timezone.utc).isoformat(),
+                discovery_data.get('mystery_tier') or 1,
+                'approved',
+                0,
+                discovery_data.get('discord_user_id'),
+                discovery_data.get('discord_guild_id'),
+                discovery_data.get('photo_url') or submission.get('photo_url'),
+                discovery_data.get('evidence_urls'),
+                type_slug,
+                discovery_data.get('discord_tag') or submission.get('discord_tag'),
+                type_metadata_json,
+                submission.get('submitter_profile_id'),
+                submission.get('source') or SOURCE_MANUAL,
+                latitude,
+                longitude,
+            ))
+            discovery_id = cursor.lastrowid
 
         # Update pending status
         cursor.execute('''
@@ -1098,13 +1307,16 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
 
         add_activity_log(
             'discovery_approved',
-            f"Discovery '{discovery_name}' approved",
+            f"Discovery '{discovery_name}' {'edit approved' if is_edit else 'approved'}",
             details=f"Type: {discovery_type}",
             user_name=current_username
         )
 
-        logger.info(f"Discovery '{discovery_name}' approved (pending_id: {submission_id}, discovery_id: {discovery_id})")
-        return {'status': 'ok', 'discovery_id': discovery_id}
+        logger.info(
+            f"Discovery '{discovery_name}' {'EDIT ' if is_edit else ''}approved "
+            f"(pending_id: {submission_id}, discovery_id: {discovery_id})"
+        )
+        return {'status': 'ok', 'discovery_id': discovery_id, 'is_edit': is_edit}
 
     except HTTPException:
         raise

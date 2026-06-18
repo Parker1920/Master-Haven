@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.abspath(_MOD_DIR))
 
 from extraction_core import (  # noqa: E402
     decide_galaxy, build_planet_entry, build_planet_list,
-    build_system_payload, galaxy_is_known,
+    build_system_payload, galaxy_is_known, select_captures,
 )
 
 _failures = []
@@ -271,6 +271,90 @@ def test_freeze_isolation():
           and frozen["planets"][0]["biome"] == "Lush")
 
 
+def _phantom(slot):
+    # A nameless capture as stored by the hook's '_unnamed_N' fallback: no planet_name,
+    # default Lush/Small data. These are the phantoms that became 'Planet_N' in the blob.
+    return {"planet_name": "", "biome": "Lush", "biome_subtype": "Standard",
+            "weather": "Clear", "sentinel": "Minimal", "flora": "None", "fauna": "None",
+            "flora_raw": 0, "common_resource": "Ferrite Dust", "uncommon_resource": "Sodium",
+            "rare_resource": "Gold", "is_moon": False, "planet_size": "Small"}
+
+
+def test_phantom_filter():
+    print("phantom capture filter (the Odusto 2026-06-17 bug):")
+    # Odusto shape: 3 real named planets captured first, then 3 nameless phantom fires.
+    captured = {
+        "Reolus XIII": _captured_planet("Reolus XIII", biome="Lush", size="Small"),
+        "Umerisc Tau": _captured_planet("Umerisc Tau", biome="Scorched", size="Medium"),
+        "Caeanoi Sigma": _captured_planet("Caeanoi Sigma", biome="Dead", size="Medium"),
+        "_unnamed_3": _phantom(3),
+        "_unnamed_4": _phantom(4),
+        "_unnamed_5": _phantom(5),
+    }
+    chosen = select_captures(captured, count_hint=3)
+    check("phantoms dropped: 3 real bodies kept", len(chosen) == 3, f"got {len(chosen)}")
+    names = [k for k, _ in chosen]
+    check("kept exactly the named planets",
+          names == ["Reolus XIII", "Umerisc Tau", "Caeanoi Sigma"], f"got {names}")
+
+    planets = build_planet_list(captured, planet_builder=_planet_builder, count_hint=3)
+    check("built list has no 'Planet_N' placeholder",
+          all(not p["planet_name"].startswith("Planet_") for p in planets),
+          f"got {[p['planet_name'] for p in planets]}")
+
+    # count_hint is an UPPER cap only — it must NOT pad a short named list with phantoms.
+    one_named = {"Real I": _captured_planet("Real I"), "_unnamed_1": _phantom(1), "_unnamed_2": _phantom(2)}
+    chosen2 = select_captures(one_named, count_hint=3)
+    check("count_hint does not pad with phantoms", len(chosen2) == 1, f"got {len(chosen2)}")
+
+    # An over-long NAMED list is trimmed by the cap (e.g. a stray adjacent-system fire).
+    five_named = {f"N{i}": _captured_planet(f"N{i}") for i in range(5)}
+    check("count_hint trims over-long named list", len(select_captures(five_named, count_hint=3)) == 3)
+
+    # Fully degraded read (nothing got a name) -> keep the unnamed so it's never planetless.
+    all_phantom = {"_unnamed_0": _phantom(0), "_unnamed_1": _phantom(1)}
+    check("all-unnamed degraded fallback kept (never zero planets)",
+          len(select_captures(all_phantom)) == 2, f"got {len(select_captures(all_phantom))}")
+
+    # No hint -> still drop phantoms when named exist.
+    check("phantoms dropped even with no count_hint",
+          len(select_captures(captured)) == 3, f"got {len(select_captures(captured))}")
+
+
+def test_display_adjective_preference():
+    print("display-adjective preference (the Odusto 2026-06-17 adjective bug):")
+    # The hook stores the generic enum tier in flora/fauna/sentinel/weather; the live
+    # PlanetInfo refresh stores the EXACT in-game adjective in *_display. The builder must
+    # emit *_display (Umerisc Tau: Full/Abundant/Observant/Heated Atmosphere), not the enum.
+    cap = _captured_planet("Umerisc Tau", biome="Scorched", flora="Bountiful", flora_raw=3)
+    cap.update({"fauna": "Copious", "sentinel": "Limited", "weather": "Scorched",
+                "flora_display": "Full", "fauna_display": "Abundant",
+                "sentinel_display": "Observant", "weather_display": "Heated Atmosphere"})
+    p = _planet_builder(cap, 0)
+    check("flora uses display 'Full' (not enum 'Bountiful')", p["flora_level"] == "Full", f"got {p['flora_level']}")
+    check("fauna uses display 'Abundant'", p["fauna_level"] == "Abundant", f"got {p['fauna_level']}")
+    check("sentinel uses display 'Observant'", p["sentinel_level"] == "Observant", f"got {p['sentinel_level']}")
+    check("weather uses display 'Heated Atmosphere'", p["weather"] == "Heated Atmosphere", f"got {p['weather']}")
+
+    # Fallback: when no *_display was captured (left the system before PlanetInfo populated),
+    # keep the enum tier rather than emitting blank.
+    cap2 = _captured_planet("EnumOnly", flora="Bountiful", flora_raw=3)
+    cap2.update({"fauna": "Copious", "sentinel": "Limited", "weather": "Humid"})
+    p2 = _planet_builder(cap2, 1)
+    check("flora falls back to enum when no display", p2["flora_level"] == "Bountiful", f"got {p2['flora_level']}")
+    check("weather falls back to enum when no display", p2["weather"] == "Humid", f"got {p2['weather']}")
+
+    # clean_weather (passed by the caller) is applied to whichever weather value wins.
+    cap3 = dict(cap2)
+    cap3["weather_display"] = "raw_weather 6"
+    p3 = build_planet_entry(
+        cap3, 2, translate_resource=_identity_translate, biome_plant_resource=_PLANT_BIOME,
+        biome_subtype_plant_override=_PLANT_SUBTYPE, hidden_substance_names=_HIDDEN_NAMES,
+        hidden_substance_ids=_HIDDEN_IDS, clean_weather=lambda w: w.upper(),
+    )
+    check("clean_weather applied to chosen weather", p3["weather"] == "RAW_WEATHER 6", f"got {p3['weather']}")
+
+
 def test_galaxy_is_known():
     print("galaxy_is_known (export hard-stop guard):")
     check("known galaxy", galaxy_is_known({"galaxy_name": "Odyalutai"}) is True)
@@ -290,6 +374,8 @@ def main():
     test_system_name_precedence()
     test_batch_independence()
     test_freeze_isolation()
+    test_phantom_filter()
+    test_display_adjective_preference()
     test_galaxy_is_known()
     print("=" * 64)
     if _failures:

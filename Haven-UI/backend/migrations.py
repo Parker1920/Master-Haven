@@ -6727,3 +6727,122 @@ def migration_1_86_0(conn):
         f"skipped_existing={reg_skipped} name_collisions_deferred={name_collisions}; "
         f"region-name records fixed={prn_fixed}"
     )
+
+
+@register_migration("1.87.0", "Add pending_discoveries.edit_discovery_id for discovery edits through the approval queue")
+def migration_1_87_0(conn):
+    """Discoveries can now be EDITED through the approval queue, mirroring the
+    system edit flow (pending_systems.edit_system_id).
+
+    A nullable `edit_discovery_id` on `pending_discoveries`: when set, the
+    submission is an EDIT of the live `discoveries` row with that id, and
+    `approve_discovery` UPDATEs that row in place instead of INSERTing a new
+    one. NULL = a brand-new discovery submission (unchanged behavior).
+
+    Idempotent: column-presence guarded.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(pending_discoveries)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'edit_discovery_id' not in cols:
+        cursor.execute("ALTER TABLE pending_discoveries ADD COLUMN edit_discovery_id INTEGER")
+        logger.info("Migration 1.87.0: added pending_discoveries.edit_discovery_id column")
+    else:
+        logger.info("Migration 1.87.0: pending_discoveries.edit_discovery_id already present")
+
+
+@register_migration("1.88.0", "Drop global UNIQUE(custom_name) on regions — NMS region names legitimately repeat across galaxies")
+def migration_1_88_0(conn):
+    """Region names are NOT globally unique.
+
+    NMS region names repeat across the universe (the same procgen region name
+    appears in different galaxies, and even at the same voxel in different
+    galaxies — e.g. "Muxali Terminus" exists in both Euclid and Odyalutai).
+    The legacy `regions` schema carried an inline `UNIQUE(custom_name)` that
+    forbade this, so approving a region name already used anywhere else failed
+    with `sqlite3.IntegrityError: UNIQUE constraint failed: regions.custom_name`
+    and 500'd. The only real uniqueness rule is one row per voxel, enforced by
+    UNIQUE(reality, galaxy, region_x, region_y, region_z), which we keep.
+
+    SQLite can't DROP a constraint (the UNIQUE(custom_name) created an
+    auto-index that DROP INDEX can't remove), so we rebuild the table without
+    it. Column set + indexes are detected/recreated dynamically so this works
+    against both local dev and the production Pi schema (which has `source`).
+
+    Idempotent: if the live table's DDL no longer contains 'UNIQUE (custom_name)'
+    the rebuild is skipped.
+    """
+    cursor = conn.cursor()
+
+    # Idempotency: inspect the current table DDL. SQLite normalises the inline
+    # constraint to "UNIQUE (custom_name)" (with a space) in sqlite_master.sql.
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='regions'")
+    row = cursor.fetchone()
+    table_sql = (row[0] if row else '') or ''
+    normalised = table_sql.replace(' ', '').lower()
+    if 'unique(custom_name)' not in normalised:
+        logger.info("Migration 1.88.0: regions already has no UNIQUE(custom_name) — skipping rebuild")
+        return
+
+    logger.info("Rebuilding regions table to drop the global UNIQUE(custom_name) constraint...")
+
+    cursor.execute("DROP TABLE IF EXISTS regions_new")
+
+    # Detect existing columns so we carry `source` (and anything else) through.
+    cursor.execute("PRAGMA table_info(regions)")
+    existing_cols = {r[1] for r in cursor.fetchall()}
+    has_source = 'source' in existing_cols
+
+    # New table: SAME shape as current, MINUS UNIQUE(custom_name).
+    cursor.execute(f'''
+        CREATE TABLE regions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            region_x INTEGER NOT NULL,
+            region_y INTEGER NOT NULL,
+            region_z INTEGER NOT NULL,
+            custom_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            discord_tag TEXT,
+            reality TEXT DEFAULT 'Normal',
+            galaxy TEXT DEFAULT 'Euclid',
+            {"source TEXT NOT NULL DEFAULT 'manual'," if has_source else ""}
+            UNIQUE(reality, galaxy, region_x, region_y, region_z)
+        )
+    ''')
+
+    copy_cols = ['id', 'region_x', 'region_y', 'region_z', 'custom_name',
+                 'created_at', 'updated_at', 'discord_tag']
+    select_exprs = list(copy_cols)
+    copy_cols.append('reality')
+    select_exprs.append("COALESCE(reality, 'Normal')" if 'reality' in existing_cols else "'Normal'")
+    copy_cols.append('galaxy')
+    select_exprs.append("COALESCE(galaxy, 'Euclid')" if 'galaxy' in existing_cols else "'Euclid'")
+    if has_source:
+        copy_cols.append('source')
+        select_exprs.append("COALESCE(source, 'manual')")
+
+    cols_str = ', '.join(copy_cols)
+    select_str = ', '.join(select_exprs)
+    # Plain INSERT (not OR IGNORE): the composite key is already satisfied by
+    # the live data, and we want a loud failure if that assumption is ever wrong.
+    cursor.execute(f"INSERT INTO regions_new ({cols_str}) SELECT {select_str} FROM regions")
+    cursor.execute("SELECT COUNT(*) FROM regions_new")
+    copied = cursor.fetchone()[0]
+
+    cursor.execute("DROP TABLE regions")
+    cursor.execute("ALTER TABLE regions_new RENAME TO regions")
+    logger.info(f"Migration 1.88.0: rebuilt regions ({copied} rows) without UNIQUE(custom_name)")
+
+    # Recreate the non-constraint indexes (dropped with the old table). The
+    # composite UNIQUE is already enforced by the inline constraint above; the
+    # explicit UNIQUE index is recreated to match the prior prod schema exactly.
+    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_regions_reality_galaxy_coords
+                      ON regions(reality, galaxy, region_x, region_y, region_z)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_regions_coords_scoped
+                      ON regions(region_x, region_y, region_z, reality, galaxy)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_regions_coords
+                      ON regions(region_x, region_y, region_z)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_regions_discord_tag
+                      ON regions(discord_tag)''')
+    logger.info("Migration 1.88.0: recreated regions indexes")

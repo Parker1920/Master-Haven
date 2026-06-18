@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { TIER_COLORS } from '../../utils/gradeColors'
 
 // Wizard v1 left sidebar (Advanced flow). Mockup #adv-sidebar (5340-5374).
 //
@@ -24,12 +25,7 @@ export default function WizardSidebar({ sections, activeId, onJump, gradeInfo })
   const [tooltipOpen, setTooltipOpen] = useState(false)
   const grade = gradeInfo?.grade || 'C'
   const percent = gradeInfo?.percent || 0
-  const gradeColor = {
-    S: 'var(--app-accent-amber)',
-    A: '#22c55e',
-    B: '#3b82f6',
-    C: '#94a3b8',
-  }[grade]
+  const gradeColor = TIER_COLORS[grade] || TIER_COLORS.C
   const next = NEXT_GRADE_THRESHOLDS[grade]
 
   return (

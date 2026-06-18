@@ -35,6 +35,8 @@ export default function DiscoveryApprovalTab({
   const [discoveryRejectModalOpen, setDiscoveryRejectModalOpen] = useState(false)
   const [discoveryRejectionReason, setDiscoveryRejectionReason] = useState('')
   const [actionInProgress, setActionInProgress] = useState(false)
+  // For EDIT submissions: the current live discovery, so we can show old → new.
+  const [editOriginal, setEditOriginal] = useState(null)
 
   // Pre-compute self-submission status for discovery submissions
   const discoverySelfSubmissionMap = useMemo(() => {
@@ -100,11 +102,52 @@ export default function DiscoveryApprovalTab({
     try {
       const response = await axios.get(`/api/pending_discoveries/${submission.id}`)
       setSelectedDiscoveryApproval(response.data)
+      setEditOriginal(null)
+      // If this is an EDIT, pull the current live discovery so we can show old → new.
+      const editId = response.data.edit_discovery_id
+      if (editId) {
+        try {
+          const orig = await axios.get(`/api/discoveries/${editId}`)
+          setEditOriginal(orig.data)
+        } catch {
+          setEditOriginal(null)  // original may have been deleted
+        }
+      }
       setDiscoveryModalOpen(true)
     } catch (err) {
       alert('Failed to load discovery details: ' + (err.response?.data?.detail || err.message))
     }
   }
+
+  // Build the old → new change list for an edit submission.
+  const norm = (v) => (v == null ? '' : String(v)).trim()
+  const prettyLabel = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const editDiff = useMemo(() => {
+    const pending = selectedDiscoveryApproval
+    if (!pending || !pending.edit_discovery_id || !editOriginal) return []
+    const nd = pending.discovery_data || {}
+    const newOf = (k) => (nd[k] !== undefined ? nd[k] : pending[k])
+    const rows = []
+    const simple = [
+      ['discovery_name', 'Name'], ['discovery_type', 'Type'], ['description', 'Description'],
+      ['significance', 'Significance'], ['location_type', 'Location Type'],
+      ['planet_name', 'Planet'], ['moon_name', 'Moon'], ['location_name', 'Specific Location'],
+      ['latitude', 'Latitude'], ['longitude', 'Longitude'],
+    ]
+    for (const [k, label] of simple) {
+      const o = editOriginal[k]
+      const n = newOf(k)
+      if (norm(o) !== norm(n)) rows.push({ label, old: o, new: n })
+    }
+    const om = editOriginal.type_metadata && typeof editOriginal.type_metadata === 'object' ? editOriginal.type_metadata : {}
+    let nm = nd.type_metadata
+    if (typeof nm === 'string') { try { nm = JSON.parse(nm) } catch { nm = {} } }
+    nm = nm && typeof nm === 'object' ? nm : {}
+    for (const k of new Set([...Object.keys(om), ...Object.keys(nm)])) {
+      if (norm(om[k]) !== norm(nm[k])) rows.push({ label: prettyLabel(k), old: om[k], new: nm[k] })
+    }
+    return rows
+  }, [selectedDiscoveryApproval, editOriginal])
 
   async function approveDiscoverySubmission(submissionId, discoveryName) {
     if (!confirm(`Approve discovery "${discoveryName}"?\n\nThis will add it to the main database.`)) {
@@ -189,6 +232,12 @@ export default function DiscoveryApprovalTab({
                     <h4 className="font-semibold text-lg">{submission.discovery_name}</h4>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1">
                       {getStatusBadge(submission.status)}
+                      {/* New vs Edit badge */}
+                      {submission.edit_discovery_id ? (
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-orange-500/30 text-orange-200 border border-orange-400/40">EDIT</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-green-500/30 text-green-200 border border-green-400/40">NEW</span>
+                      )}
                       {/* Type badge */}
                       {submission.type_info && (
                         <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: (typeColorByLabel[submission.type_info.label] || '#6b7280') + '33', color: typeColorByLabel[submission.type_info.label] || '#6b7280' }}>
@@ -292,6 +341,7 @@ export default function DiscoveryApprovalTab({
           onClose={() => {
             setDiscoveryModalOpen(false)
             setSelectedDiscoveryApproval(null)
+            setEditOriginal(null)
           }}
         >
           <div className="space-y-4">
@@ -303,6 +353,35 @@ export default function DiscoveryApprovalTab({
                   alt={selectedDiscoveryApproval.discovery_name}
                   className="w-full h-full object-contain"
                 />
+              </div>
+            )}
+
+            {/* Edit diff (old → new) */}
+            {selectedDiscoveryApproval.edit_discovery_id && (
+              <div className="rounded p-3" style={{ backgroundColor: 'rgba(234,179,8,0.10)', border: '1px solid rgba(234,179,8,0.4)' }}>
+                <h4 className="font-semibold mb-2 text-amber-300">
+                  ✎ Edit of existing discovery #{selectedDiscoveryApproval.edit_discovery_id}
+                </h4>
+                {!editOriginal ? (
+                  <p className="text-sm text-red-300">
+                    The original discovery couldn't be loaded — it may have been deleted. Approving will fail; reject this instead.
+                  </p>
+                ) : editDiff.length === 0 ? (
+                  <p className="text-sm text-gray-300">No field changes detected.</p>
+                ) : (
+                  <div className="text-sm space-y-1">
+                    {editDiff.map((row, i) => (
+                      <div key={i} className="grid grid-cols-[130px_1fr] gap-2">
+                        <span className="text-gray-400">{row.label}</span>
+                        <span>
+                          <span className="line-through text-red-300/80">{norm(row.old) || '—'}</span>
+                          <span className="mx-1 text-gray-500">→</span>
+                          <span className="text-green-300 font-medium">{norm(row.new) || '—'}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -411,6 +490,7 @@ export default function DiscoveryApprovalTab({
                     onClick={() => {
                       setDiscoveryModalOpen(false)
                       setSelectedDiscoveryApproval(null)
+                      setEditOriginal(null)
                     }}
                     disabled={actionInProgress}
                   >
