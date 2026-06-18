@@ -661,7 +661,7 @@ class DiscoveryConfirmView(discord.ui.View):
 # -------------------- HEX KEYBOARD VIEW ---
 class HexKeypad(discord.ui.View):
     def __init__(self, api, glyph_emojis, owner_id: int, mode="system"):
-        super().__init__(timeout=none)
+        super().__init__(timeout=None)
         self.api = api
         self.owner_id = owner_id
         self.glyph_emojis = glyph_emojis
