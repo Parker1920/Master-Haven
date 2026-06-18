@@ -513,11 +513,15 @@ class SimpleHexKeypad(discord.ui.View):
         self.system_owner_tag = None
 
         for item in self.children:
-
             if isinstance(item, discord.ui.Button):
-                item.disabled = False
-
-        await self.safe_edit(interaction)
+                item.disabled = True
+        
+        await interaction.message.edit(view=self)
+        
+        await interaction.followup.send(
+            embed=self.build_embed()
+        )
+        return
 
 
 class HexKey(commands.Cog):
