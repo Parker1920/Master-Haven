@@ -6,7 +6,10 @@ import aiohttp
 import time
 import asyncio
 
-
+BASE_URL = os.getenv("HAVEN_API", "https://havenmap.online")
+API_KEY = os.getenv("HAVEN_API_KEY")
+if not API_KEY:
+    raise RuntimeError("HAVEN_API_KEY must be set in .env")
 
 class HexAPI:
     def __init__(self, base_url, api_key):
