@@ -306,7 +306,7 @@ class SystemSubmissionModal(discord.ui.Modal):
 import sqlite3
 from cogs import xp_system
 from cogs.xp_system import get_user, process_discovery_xp, DISCOVERY_TYPE_MAP
-from cogs.Data.xpdata import get_level, CONFIG
+from Data.xpdata import get_level, CONFIG
 import discord
     
 class DiscoveryTypeSelect(discord.ui.View):
@@ -661,7 +661,7 @@ class DiscoveryConfirmView(discord.ui.View):
 # -------------------- HEX KEYBOARD VIEW ---
 class HexKeypad(discord.ui.View):
     def __init__(self, api, glyph_emojis, owner_id: int, mode="system"):
-        super().__init__(timeout=60)
+        super().__init__(timeout=none)
         self.api = api
         self.owner_id = owner_id
         self.glyph_emojis = glyph_emojis
