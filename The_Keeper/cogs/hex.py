@@ -5,7 +5,7 @@ import asyncio
 import aiohttp
 import time
 import asyncio
-import os
+import os, sys
 BASE_URL = os.getenv("HAVEN_API", "https://havenmap.online")
 API_KEY = os.getenv("HAVEN_API_KEY")
 if not API_KEY:
