@@ -6,8 +6,6 @@ import aiohttp
 import time
 import asyncio
 
-from Haven_upload import HavenAPI
-
 class SystemOwnerCache:
     def __init__(self, ttl_seconds=300):
         self.ttl = ttl_seconds
@@ -187,14 +185,11 @@ class SimpleHexKeypad(discord.ui.View):
             pass
 
     async def safe_edit(self, interaction):
-
         try:
-
-            await interaction.edit_original_response(
+            await interaction.message.edit(
                 embed=self.build_embed(),
                 view=self
             )
-
         except discord.NotFound:
             pass
 
@@ -388,6 +383,7 @@ class SimpleHexKeypad(discord.ui.View):
                             self.system_owner_tag = data.get(
                                 "discord_tag"
                             )
+                            await self.safe_edit(interaction)
 
                 except Exception:
 
