@@ -433,12 +433,13 @@ class SimpleHexKeypad(discord.ui.View):
                         interaction,
                         "❌ Invalid XXX"
                     )
-                
-                system_id = self.input_string.upper()
+                glyph = self.input_string.upper()
+
                 data = await self.fetch_system_owner(
                     session,
-                    system_id
+                    glyph
                 )
+                                
                 print(f"INPUT SYSTEM ID: {system_id}")
 
                 self.system_owner_type = "uncharted"
