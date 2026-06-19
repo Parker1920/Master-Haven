@@ -4,6 +4,7 @@ import useCountdown from '../hooks/useCountdown.js'
 import { getSchedule } from '../api.js'
 import { DISCORD_INVITE_URL } from '../config.js'
 import { activityIcon, activityNote, deriveActivities } from '../scheduleUtils.js'
+import GlyphStrip from '../components/GlyphStrip.jsx'
 
 const HOME_TEASER_COUNT = 6
 
@@ -71,7 +72,7 @@ export default function Main() {
           </p>
           <div className="hero-meta">
             <div className="hero-meta-pill"><strong>WHEN</strong> June 19–21, 2026</div>
-            <div className="hero-meta-pill"><strong>WHERE</strong> Host system TBD</div>
+            <div className="hero-meta-pill"><strong>WHERE</strong>{schedule?.main_system ? <GlyphStrip code={schedule.main_system} size="sm" /> : ' Host system TBD'}</div>
             <div className="hero-meta-pill"><strong>WHO</strong> All civilizations welcome</div>
           </div>
           <button className="hero-cta" onClick={onJoin}>
