@@ -173,6 +173,94 @@ def get_system_glyph(glyph_code: str) -> Optional[str]:
     return glyph_code[-11:].upper() if len(glyph_code) >= 11 else glyph_code.upper()
 
 
+def snapshot_child_name_maps(cursor, system_id):
+    """Capture {normalized_name -> old child id} for a system's planets and moons,
+    taken BEFORE a delete-and-reinsert of those rows.
+
+    Planets/moons are routinely replaced wholesale (DELETE + re-INSERT) on every
+    save/edit/batch-approve, which hands them brand-new primary keys. Discoveries
+    link to planets/moons by id, so unless those links are re-pointed afterward,
+    every discovery on the system is silently orphaned. Pair this with
+    relink_discoveries_after_rebuild() across the delete to keep the links intact.
+
+    Returns (planet_old, moon_old):
+      planet_old: {planet_name_lower -> old planet id}
+      moon_old:   {(parent_planet_name_lower, moon_name_lower) -> old moon id}
+    Names are stripped + lowercased; same-named children collapse (acceptable — the
+    wizard blocks duplicate body names, and a collapse degrades to a correct link
+    rather than an orphan).
+    """
+    cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+    planet_old = {}
+    old_pid_to_name = {}
+    for row in cursor.fetchall():
+        pid, pname = row[0], row[1]
+        old_pid_to_name[pid] = (pname or '')
+        if pname and pname.strip():
+            planet_old[pname.strip().lower()] = pid
+    moon_old = {}
+    if old_pid_to_name:
+        qmarks = ','.join('?' * len(old_pid_to_name))
+        cursor.execute(
+            f'SELECT id, name, planet_id FROM moons WHERE planet_id IN ({qmarks})',
+            list(old_pid_to_name.keys()))
+        for row in cursor.fetchall():
+            mid, mname, parent_pid = row[0], row[1], row[2]
+            if mname and mname.strip():
+                parent_name = (old_pid_to_name.get(parent_pid) or '').strip().lower()
+                moon_old[(parent_name, mname.strip().lower())] = mid
+    return planet_old, moon_old
+
+
+def relink_discoveries_after_rebuild(cursor, system_id, planet_old, moon_old):
+    """Re-point this system's discoveries from old planet/moon ids to the new ids
+    that share the same (case-insensitive) name, after the planets/moons were
+    deleted and re-inserted. `planet_old`/`moon_old` come from
+    snapshot_child_name_maps() called BEFORE the delete. Returns the number of
+    discovery rows re-pointed. Safe no-op when nothing changed.
+    """
+    if not planet_old and not moon_old:
+        return 0
+
+    # Build new name -> id maps from the freshly-inserted rows.
+    cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+    planet_new = {}
+    new_pid_to_name = {}
+    for row in cursor.fetchall():
+        pid, pname = row[0], row[1]
+        new_pid_to_name[pid] = (pname or '')
+        if pname and pname.strip():
+            planet_new[pname.strip().lower()] = pid
+    moon_new = {}
+    if new_pid_to_name:
+        qmarks = ','.join('?' * len(new_pid_to_name))
+        cursor.execute(
+            f'SELECT id, name, planet_id FROM moons WHERE planet_id IN ({qmarks})',
+            list(new_pid_to_name.keys()))
+        for row in cursor.fetchall():
+            mid, mname, parent_pid = row[0], row[1], row[2]
+            if mname and mname.strip():
+                parent_name = (new_pid_to_name.get(parent_pid) or '').strip().lower()
+                moon_new[(parent_name, mname.strip().lower())] = mid
+
+    relinked = 0
+    for name, old_id in planet_old.items():
+        new_id = planet_new.get(name)
+        if new_id is not None and new_id != old_id:
+            cursor.execute(
+                'UPDATE discoveries SET planet_id = ? WHERE system_id = ? AND planet_id = ?',
+                (new_id, system_id, old_id))
+            relinked += cursor.rowcount
+    for key, old_id in moon_old.items():
+        new_id = moon_new.get(key)
+        if new_id is not None and new_id != old_id:
+            cursor.execute(
+                'UPDATE discoveries SET moon_id = ? WHERE system_id = ? AND moon_id = ?',
+                (new_id, system_id, old_id))
+            relinked += cursor.rowcount
+    return relinked
+
+
 def find_matching_system(cursor, glyph_code: str, galaxy: str, reality: str):
     """Find an existing system that matches by glyph coordinates + galaxy + reality.
 

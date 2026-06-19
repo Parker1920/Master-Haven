@@ -29,6 +29,8 @@ from db import (
     build_mismatch_flags,
     merge_system_data,
     get_system_glyph,
+    snapshot_child_name_maps,
+    relink_discoveries_after_rebuild,
 )
 from glyph_decoder import (
     decode_glyph_to_coords,
@@ -2652,6 +2654,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         system_data['glyph_planet'] = original_glyph_data.get('glyph_planet', 0)
                         system_data['glyph_solar_system'] = original_glyph_data.get('glyph_solar_system', 1)
 
+                # Pre-delete planet/moon name->id snapshot (populated only on the
+                # edit path, where planets are rebuilt) so discovery links survive.
+                _batch_planet_old, _batch_moon_old = {}, {}
+
                 if is_edit:
                     # Update contributors list - add edit entry
                     updater_username = submission.get('personal_discord_username') or submission.get('submitted_by') or 'Unknown'
@@ -2719,6 +2725,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         system_id
                     ))
 
+                    # Capture planet/moon name->id BEFORE deleting so discovery
+                    # links can be re-pointed to the rebuilt rows (otherwise the
+                    # new primary keys orphan every linked discovery).
+                    _batch_planet_old, _batch_moon_old = snapshot_child_name_maps(cursor, system_id)
                     # Delete existing planets, moons, and space station
                     cursor.execute('SELECT id FROM planets WHERE system_id = ?', (system_id,))
                     planet_ids = [row[0] for row in cursor.fetchall()]
@@ -2959,6 +2969,19 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                     submitter_username=submitter_username_for_coauthors,
                     submitter_profile_id=submission.get('submitter_profile_id'),
                 )
+
+                # Re-point discoveries to the rebuilt planets/moons (edit path only).
+                # Planets/moons were deleted and re-inserted with new ids above, so
+                # match them back by name — otherwise a batch-approved edit orphans
+                # every linked discovery into "in space".
+                if is_edit:
+                    _batch_relinked = relink_discoveries_after_rebuild(
+                        cursor, system_id, _batch_planet_old, _batch_moon_old)
+                    if _batch_relinked:
+                        logger.info(
+                            f"Batch job {job_id} submission {submission_id}: "
+                            f"re-pointed {_batch_relinked} discovery link(s) after planet rebuild"
+                        )
 
                 # Calculate and store completeness score
                 update_completeness_score(cursor, system_id)
