@@ -314,6 +314,14 @@ const GlyphPicker = ({ value, onChange, onDecoded }) => {
             </div>
             <div className="col-span-2">
               <span className="text-gray-400">Solar System Index:</span> <span className={`font-mono ${decodedCoords.is_phantom || decodedCoords.is_in_core ? 'text-orange-300' : 'text-green-300'}`}>{decodedCoords.solar_system} (0x{decodedCoords.solar_system?.toString(16).toUpperCase().padStart(3, '0')})</span>
+              {decodedCoords.star_category && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ml-2 ${
+                  decodedCoords.star_category === 'YRGB' ? 'bg-teal-600 text-white' :
+                  decodedCoords.star_category === 'Purple' ? 'bg-purple-600 text-white' :
+                  decodedCoords.star_category === 'Glass' ? 'bg-amber-600 text-white' :
+                  'bg-red-600 text-white'
+                }`}>{decodedCoords.star_category}</span>
+              )}
             </div>
           </div>
           {/* Classification info */}

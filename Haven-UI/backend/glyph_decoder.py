@@ -291,6 +291,16 @@ def decode_glyph_to_coords(glyph: str, apply_scale: bool = False) -> Dict:
     # Get system classification (phantom star and core void status)
     classification = get_system_classification(x, y, z, solar_system)
 
+    # Determine star category from SSI
+    if VALID_SSI_YRGB[0] <= solar_system <= VALID_SSI_YRGB[1]:
+        star_category = 'YRGB'
+    elif solar_system == VALID_SSI_SHADOW:
+        star_category = 'Glass'
+    elif VALID_SSI_PURPLE[0] <= solar_system <= VALID_SSI_PURPLE[1]:
+        star_category = 'Purple'
+    else:
+        star_category = 'Phantom'
+
     # Build warnings list
     all_warnings = []
     if error and "unusual" in error.lower():
@@ -332,6 +342,7 @@ def decode_glyph_to_coords(glyph: str, apply_scale: bool = False) -> Dict:
         'is_in_core': classification['is_in_core'],
         'is_accessible': classification['is_accessible'],
         'classification': classification['classification'],
+        'star_category': star_category,
         'warnings': '; '.join(all_warnings) if all_warnings else None
     }
 

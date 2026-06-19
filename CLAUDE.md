@@ -22,6 +22,8 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| Backend API | 1.74.2 | 2026-06-19 | See Haven-UI 1.66.4. New `star_category` field in `/api/glyph/decode` response. `/api/status` 1.74.1 → 1.74.2. |
+| Haven-UI | 1.66.4 | 2026-06-19 | Add star category badge (YRGB/Purple/Glass/Phantom) to GlyphPicker decoded coordinates popup. |
 | **Master Haven** | 1.77.1 | 2026-06-19 | **Phantom star detection fix — Purple (SSI 1001-1065) and Shadow (SSI 1000) stars no longer falsely flagged.** The Wizard's glyph decoder used a simple threshold (`solar_system_index >= 600`) which incorrectly flagged all Purple stars and the Shadow star as phantoms. Replaced with range-based validation: SSI 1-767 (YRGB), 1000 (Shadow/Glass), 1001-1065 (Purple/Atlantid Drive) are valid; SSI 0, 768-999 (phantom gap), and 1066+ are phantom. Backend-only fix in `glyph_decoder.py`; no frontend change needed (GlyphPicker.jsx reads the backend's `is_phantom` flag). Requires backend restart on the Pi. |
 | Backend API | 1.74.1 | 2026-06-19 | See Haven-UI 1.66.3. Phantom star SSI range fix in glyph_decoder.py. `/api/status` 1.74.0 → 1.74.1 in routes/auth.py. |
 | Haven-UI | 1.66.3 | 2026-06-19 | **Fix phantom star detection for Purple and Shadow stars.** `is_phantom_star()` in glyph_decoder.py replaced simple `>=600` threshold with range-based SSI validation: 1–767 valid (YRGB), 1000 valid (Shadow/Glass), 1001–1065 valid (Purple/Atlantid Drive), everything else phantom. Fixes false "PHANTOM" warnings on Purple star system uploads in the Wizard. `package.json` 1.66.2 → 1.66.3. |
