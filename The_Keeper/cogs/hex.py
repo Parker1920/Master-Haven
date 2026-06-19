@@ -245,7 +245,7 @@ class SimpleHexKeypad(discord.ui.View):
             embed.add_field(
                 name="Haven API",
                 value=(
-                    f"{BASE}/api/public/community-regions"
+                    f"{BASE}/system/{glyph}"
                     f"?community={self.system_owner_tag}"
                 ),
                 inline=False
