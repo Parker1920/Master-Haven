@@ -11,6 +11,7 @@ import { fetchTagColorsForPoster, getTagColorFromAPI, getDisplayTagName } from '
 // in favor of the shared <StatTile> with 19/24/16 fonts.
 import StatTile from '../components/shared/StatTile'
 import { glyphImageSrc } from '../utils/glyphAssets'
+import { GRADE_BADGE } from '../utils/gradeColors'
 
 // ============================================================================
 // System Thumbnail — 600×400 landscape card.
@@ -64,14 +65,8 @@ const BIOME_TINTS = {
   'Gas Giant': '#fbbf24',
 }
 
-// In-game C/B/A/S scale: S=Gold, A=Purple, B=Blue, C=Green
-// (mirror of TIER_COLORS in src/utils/gradeColors.js).
-const GRADE_BG = {
-  S: { bg: '#ffd700', fg: '#422006' },
-  A: { bg: '#c084fc', fg: '#2e1065' },
-  B: { bg: '#60a5fa', fg: '#082f49' },
-  C: { bg: '#4ade80', fg: '#052e16' },
-}
+// Grade tile colors single-sourced from gradeColors.js (S+ / S / A / B / C).
+const GRADE_BG = GRADE_BADGE
 
 export default function SystemThumb({ routeKey }) {
   const params = useParams()

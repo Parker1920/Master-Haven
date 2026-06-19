@@ -75,6 +75,8 @@ export default function OGSystemCard({ routeKey }) {
   )
 }
 
+// Score → letter fallback only. S+ ("fully charted") is checklist-based, not
+// score-derivable, so it arrives via sys.completeness_grade (preferred above).
 function gradeFromScore(score) {
   if (score == null) return '—'
   if (score >= 85) return 'S'

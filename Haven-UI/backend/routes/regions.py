@@ -187,6 +187,7 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
             # count. Keyed by (rx, ry, rz). Contributors stored as a set
             # so we can len() at response build time.
             grade_s_counts = {}
+            grade_splus_counts = {}  # S+ ("fully charted") — subset of grade_s
             contributor_sets = {}
 
             if all_region_coords:
@@ -205,7 +206,7 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
                 # it those contributors would be invisible.
                 cursor.execute(f'''
                     SELECT s.id, s.discord_tag, s.region_x, s.region_y, s.region_z,
-                           s.is_complete, s.profile_id, s.submitter_id,
+                           s.is_complete, s.is_fully_charted, s.profile_id, s.submitter_id,
                            s.personal_discord_username, s.discovered_by
                     FROM systems s
                     INNER JOIN _tmp_region_coords t ON s.region_x = t.rx AND s.region_y = t.ry AND s.region_z = t.rz
@@ -230,11 +231,15 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
                     visible_system_ids.append(system['id'])
                     visible_counts[key] = visible_counts.get(key, 0) + 1
                     # Grade S threshold (services/completeness.py): score >= 85.
+                    # S+ ("fully charted") is a subset of S — counted separately
+                    # AND still included in grade_s_count (S-or-better).
                     score = system.get('completeness_score')
                     if score is None:
                         score = system.get('is_complete')
                     if score is not None and score >= 85:
                         grade_s_counts[key] = grade_s_counts.get(key, 0) + 1
+                        if system.get('is_fully_charted'):
+                            grade_splus_counts[key] = grade_splus_counts.get(key, 0) + 1
                     # Primary submitter — exactly ONE identity per system
                     # row. profile_id is preferred (canonical FK), then a
                     # normalized username from either column. submitter_id
@@ -305,6 +310,7 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
 
                 region['system_count'] = visible_counts.get(key, 0)
                 region['grade_s_count'] = grade_s_counts.get(key, 0)
+                region['grade_splus_count'] = grade_splus_counts.get(key, 0)
                 region['contributor_count'] = len(contributor_sets.get(key, set()))
                 region['systems'] = []
                 regions.append(region)
@@ -452,6 +458,7 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
             #     Usernames pass through normalize_username_for_dedup so
             #     `turpitzz` and `turpitzz#9999` count as one person.
             grade_s = 0
+            grade_splus = 0  # S+ ("fully charted") — subset of grade_s
             contributors = set()
             sys_ids_in_region = []
             for s in region_systems:
@@ -461,6 +468,8 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
                     score = s.get('is_complete')
                 if score is not None and score >= 85:
                     grade_s += 1
+                    if s.get('is_fully_charted'):
+                        grade_splus += 1
                 # One identity per system: profile_id preferred, then a
                 # normalized username, then submitter_id as last resort.
                 # Adding all three would count one person N times.
@@ -491,6 +500,7 @@ async def api_regions_grouped(include_systems: bool = False, page: int = 1, limi
                         contributors.add(('u', ca_row['username_normalized']))
 
             region['grade_s_count'] = grade_s
+            region['grade_splus_count'] = grade_splus
             region['contributor_count'] = len(contributors)
 
             if region['custom_name']:

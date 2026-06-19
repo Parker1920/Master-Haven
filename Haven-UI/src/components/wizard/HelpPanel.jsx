@@ -142,15 +142,16 @@ you propose a name; admins approve it; subsequent submissions inherit it. This k
       {
         anchor: 'grading',
         q: 'How does the grading system work?',
-        a: `Every system gets a completeness grade: S (85+), A (65–84), B (40–64), C (<40). The score is weighted across 7 categories:
+        a: `Every system gets a completeness grade: S (85+), A (65–84), B (40–64), C (<40). The score is weighted across 6 categories:
 
 • System Core (35) — star, economy, conflict, lifeform
-• System Extra (10) — glyphs, spectral class, description
+• System Extra (10) — glyphs, spectral class
 • Planet Coverage (10) — at least one planet
-• Planet Environment (15) — biome, weather, sentinel
-• Planet Life (15) — fauna, flora (biome-aware)
-• Planet Detail (10) — resources, base location
+• Planet Environment (25) — biome, weather, sentinel (per planet)
+• Planet Life (15) — fauna, flora, resources (biome-aware)
 • Space Station (5)
+
+S+ ("fully charted") is a bonus tier on top of S: the system scores S AND has a discovery on every planet & moon, wonder notes on every planet, a documented base, and a recorded space station (abandoned systems are exempt from the station requirement).
 
 Hover the grade letter in the sidebar to see your category breakdown and how many points to the next grade. The "Boost your grade" panel below shows the top 4 fields you could fill to climb fastest.`,
       },

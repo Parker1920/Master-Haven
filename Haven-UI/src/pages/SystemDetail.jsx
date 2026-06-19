@@ -40,6 +40,7 @@ import { formatCoords } from '../components/LatLngInput'
 import FromMapBanner from '../components/FromMapBanner'
 import ActivityFeed from '../components/ActivityFeed'
 import PlanetSphere from '../components/shared/PlanetSphere'
+import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 
 const STAR_HEX = {
   Yellow: '#facc15', Blue: '#3b82f6', Red: '#ef4444', Green: '#10b981', Purple: '#a855f7',
@@ -47,12 +48,8 @@ const STAR_HEX = {
   White: '#e5e7eb', Unknown: '#94a3b8',
 }
 const STAR_TEXT = { Yellow: '#422006' } // contrast on Yellow only; others use white
-const GRADE_STYLE = {
-  S: { background: 'var(--app-accent-amber)', color: '#422006' },
-  A: { background: '#34d399', color: '#022c22' },
-  B: { background: '#60a5fa', color: '#082f49' },
-  C: { background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.85)' },
-}
+// Grade badge styling is single-sourced from gradeColors.js (S+ / S / A / B / C).
+const GRADE_STYLE = GRADE_BADGE_STYLE
 const GAME_MODE_COLOR = {
   Normal: { bg: 'rgba(148,163,184,0.2)', text: '#cbd5e1' },
   Survival: { bg: 'rgba(249,115,22,0.2)', text: '#fb923c' },
@@ -62,13 +59,12 @@ const GAME_MODE_COLOR = {
   Custom: { bg: 'rgba(168,85,247,0.2)', text: '#c084fc' },
 }
 const COMPLETENESS_CATEGORIES = [
-  ['system_core', 'System Core'],
-  ['system_extra', 'System Extra'],
-  ['planet_coverage', 'Planet Coverage'],
-  ['planet_environment', 'Planet Environment'],
-  ['planet_life', 'Planet Life'],
-  ['planet_detail', 'Planet Detail'],
-  ['space_station', 'Space Station'],
+  ['system_core', 'System Core', 35],
+  ['system_extra', 'System Extra', 10],
+  ['planet_coverage', 'Planet Coverage', 10],
+  ['planet_environment', 'Planet Environment', 25],
+  ['planet_life', 'Planet Life', 15],
+  ['space_station', 'Space Station', 5],
 ]
 const BIOME_TINT = {
   Lush: '#10b981', Frozen: '#60a5fa', Scorched: '#f97316',
@@ -402,12 +398,14 @@ export default function SystemDetail() {
                 value={system.completeness_score != null ? `${system.completeness_score}%` : '—'}
                 secondary={
                   system.completeness_score == null ? null
+                  : grade === 'S+' ? 'grade S+'
                   : system.completeness_score >= 85 ? 'grade S'
                   : system.completeness_score >= 65 ? 'grade A'
                   : system.completeness_score >= 40 ? 'grade B' : 'grade C'
                 }
                 valueClass={
-                  system.completeness_score >= 85 ? 'grade-s'
+                  grade === 'S+' ? 'grade-splus'
+                  : system.completeness_score >= 85 ? 'grade-s'
                   : system.completeness_score >= 65 ? 'grade-a'
                   : system.completeness_score >= 40 ? 'grade-b' : 'grade-c'
                 }
@@ -979,11 +977,40 @@ function DetailRow({ label, children }) {
   )
 }
 
-// Completeness breakdown panel — per-category progress bars. Backend has
-// returned this since v1.34.0 but the frontend never rendered it; only the
-// rolled-up % shown in the stat tile.
+// Per-field status styling for the expandable detail rows. `filled` = green
+// check, `missing` = red cross, `skipped` = muted dash (dead-biome planets
+// legitimately skip fauna/flora and shouldn't read as "missing").
+const COMPLETENESS_STATUS = {
+  filled: { mark: '✓', color: '#34d399' },
+  missing: { mark: '✕', color: '#f87171' },
+  skipped: { mark: '–', color: 'var(--muted)' },
+}
+
+// One field line inside an expanded category (e.g. "Star Type — Yellow").
+function CompletenessField({ item }) {
+  const st = COMPLETENESS_STATUS[item.status] || COMPLETENESS_STATUS.missing
+  const valueText =
+    item.status === 'filled' ? (item.value != null ? String(item.value) : '—')
+      : item.status === 'skipped' ? 'N/A'
+        : 'Missing'
+  return (
+    <div className="flex items-center justify-between gap-2 text-[11px] py-0.5">
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span style={{ color: st.color, width: 9, flexShrink: 0, textAlign: 'center' }}>{st.mark}</span>
+        <span className="truncate" style={{ color: 'var(--muted)' }}>{item.name}</span>
+      </span>
+      <span className="truncate text-right" style={{ color: st.color, maxWidth: '58%' }}>{valueText}</span>
+    </div>
+  )
+}
+
+// Completeness breakdown panel — per-category progress bars, each expandable
+// into the backend-supplied per-field detail. Backend has returned `breakdown`
+// since v1.34.0 and `breakdown.details` more recently; the frontend renders
+// both now.
 function CompletenessBreakdown({ breakdown, score, grade }) {
   if (!breakdown) return null
+  const allDetails = breakdown.details || {}
   return (
     <div className="haven-card p-5">
       <div className="flex items-center justify-between mb-3">
@@ -993,24 +1020,53 @@ function CompletenessBreakdown({ breakdown, score, grade }) {
         </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {COMPLETENESS_CATEGORIES.map(([key, label]) => {
-          const cat = breakdown[key]
-          if (!cat) return null
-          const pct = cat.max ? Math.round((cat.score / cat.max) * 100) : 0
-          const barColor = pct >= 85 ? '#34d399' : pct >= 65 ? '#60a5fa' : pct >= 40 ? '#fbbf24' : '#f87171'
+        {COMPLETENESS_CATEGORIES.map(([key, label, max]) => {
+          const catScore = breakdown[key]
+          if (catScore == null) return null          // null/undefined = missing, but 0 renders
+          const pct = max ? Math.round((catScore / max) * 100) : 0
+          // 0 = "not filled in yet" → neutral grey, not the derogatory red.
+          // Red is reserved for categories that have SOME data but little (1-39%).
+          const barColor = catScore === 0 ? '#6b7280' : pct >= 85 ? '#34d399' : pct >= 65 ? '#60a5fa' : pct >= 40 ? '#fbbf24' : '#f87171'
+          const details = Array.isArray(allDetails[key]) ? allDetails[key] : []
           return (
-            <div key={key} className="p-2 rounded" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-soft)' }}>
-              <div className="flex items-center justify-between text-[11px] mb-1">
-                <span style={{ color: 'var(--muted)' }}>{label}</span>
-                <span className="mono" style={{ color: barColor }}>{cat.score}/{cat.max}</span>
-              </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${pct}%`, background: barColor }}
-                />
-              </div>
-            </div>
+            <details key={key} className="group p-2 rounded" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-soft)' }}>
+              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div className="flex items-center justify-between text-[11px] mb-1">
+                  <span className="flex items-center gap-1" style={{ color: 'var(--muted)' }}>
+                    <span className="inline-block transition-transform group-open:rotate-90" style={{ fontSize: 8 }}>▶</span>
+                    {label}
+                  </span>
+                  <span className="mono" style={{ color: barColor }}>{catScore}/{max}</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${pct}%`, background: barColor }}
+                  />
+                </div>
+              </summary>
+              {details.length > 0 && (
+                <div className="mt-2 pt-2 space-y-0.5" style={{ borderTop: '1px solid var(--border-soft)' }}>
+                  {details.map((item, i) => (
+                    Array.isArray(item.fields) ? (
+                      // Planet-grouped category (planet_environment / planet_life):
+                      // planet name as a sub-header, its fields indented below.
+                      <div key={i} className="mt-1 first:mt-0">
+                        <div className="flex items-center justify-between text-[11px] font-semibold">
+                          <span className="truncate" style={{ color: 'var(--app-text)' }}>{item.name}</span>
+                          <span className="mono" style={{ color: 'var(--muted)' }}>{item.filled}/{item.total}</span>
+                        </div>
+                        <div className="pl-2 ml-1 border-l" style={{ borderColor: 'var(--border-soft)' }}>
+                          {item.fields.map((f, j) => <CompletenessField key={j} item={f} />)}
+                        </div>
+                      </div>
+                    ) : (
+                      <CompletenessField key={i} item={item} />
+                    )
+                  ))}
+                </div>
+              )}
+            </details>
           )
         })}
       </div>

@@ -14,15 +14,12 @@
 
 import React, { useEffect } from 'react'
 import { useSystems } from '../contexts/SystemsContext'
+import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 
 const STAR_HEX = { Yellow: '#facc15', Blue: '#3b82f6', Red: '#ef4444', Green: '#10b981', Purple: '#a855f7' }
 const LEVEL_TITLE = { galaxy: 'Galaxies', region: 'Regions', system: 'Systems' }
-const GRADE_STYLE = {
-  S: { background: 'var(--app-accent-amber)', color: '#422006' },
-  A: { background: '#34d399', color: '#022c22' },
-  B: { background: '#60a5fa', color: '#082f49' },
-  C: { background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.85)' },
-}
+// Grade badge styling is single-sourced from gradeColors.js (S+ / S / A / B / C).
+const GRADE_STYLE = GRADE_BADGE_STYLE
 
 export default function ComparePanel({ open, onClose }) {
   const { compareMode, pinsByLevel, togglePin } = useSystems()

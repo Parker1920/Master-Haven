@@ -6880,3 +6880,68 @@ def migration_1_89_0(conn):
         cursor.execute(
             f"CREATE INDEX IF NOT EXISTS idx_{table}_event_id ON {table}(event_id)"
         )
+
+
+@register_migration("1.90.0", "Add systems.is_fully_charted (S+ flag) + re-score all systems with description dropped from scoring")
+def migration_1_90_0(conn):
+    """S+ grade flag + scoring-formula refresh.
+
+    Two coupled changes ship together:
+
+      1. Adds `is_fully_charted INTEGER DEFAULT 0` to `systems`. S+ ("fully
+         charted") is a checklist that sits ON TOP of the S grade — a discovery
+         on every planet AND moon, wonder notes on every planet, a documented
+         base, and a recorded station (when the system has one). It can't be
+         derived from the score alone, so SQL grade ladders read this column.
+
+      2. Re-scores EVERY system with the current formula. The 2026-06-19 change
+         dropped `description` from the System Extra category (free-text prose,
+         repurposed to stash the procgen name — never a real completeness
+         signal), so stored scores shift and must be recomputed. The same pass
+         runs the S+ checklist and sets is_fully_charted.
+
+    Reuses services.completeness.update_completeness_score so the migration
+    applies exactly the live formula (single source of truth) and writes both
+    is_complete and is_fully_charted per system. Idempotent: the ADD COLUMN is
+    presence-guarded; a re-run recomputes to the same values.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute("PRAGMA table_info(systems)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'is_fully_charted' not in cols:
+        cursor.execute("ALTER TABLE systems ADD COLUMN is_fully_charted INTEGER DEFAULT 0")
+        logger.info("Migration 1.90.0: added systems.is_fully_charted column")
+    else:
+        logger.info("Migration 1.90.0: systems.is_fully_charted already present")
+
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_systems_is_fully_charted ON systems(is_fully_charted)"
+    )
+
+    # services.completeness reads rows as dicts → it needs sqlite3.Row. Migration
+    # connections don't set a row_factory by default, so set it for the rescore
+    # pass and restore it afterwards (mirrors the 1.80.0 pattern at line ~6073).
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        from services.completeness import update_completeness_score
+        id_cursor = conn.cursor()
+        id_cursor.execute("SELECT id FROM systems")
+        system_ids = [row[0] for row in id_cursor.fetchall()]
+        score_cursor = conn.cursor()
+        logger.info(
+            f"Migration 1.90.0: re-scoring {len(system_ids)} systems "
+            f"(description dropped from System Extra) + running S+ checklist..."
+        )
+        splus = 0
+        for sys_id in system_ids:
+            result = update_completeness_score(score_cursor, sys_id)
+            if result.get('is_fully_charted'):
+                splus += 1
+        logger.info(
+            f"Migration 1.90.0: re-scored {len(system_ids)} systems; "
+            f"{splus} qualify as S+ (fully charted)"
+        )
+    finally:
+        conn.row_factory = prev_factory

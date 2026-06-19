@@ -43,10 +43,101 @@ def _life_descriptor_filled(val, val_text):
     return False
 
 
+# The five "Wonders Page Notes" fields (migration 1.76.0). A planet counts as
+# having wonder information when ANY one of these is populated — root_structure
+# and nutrient_source only apply to living/lush worlds, so requiring all five
+# on every planet would make S+ unreachable.
+WONDER_FIELDS = ('estimated_age', 'core_element', 'lore_notes', 'root_structure', 'nutrient_source')
+
+
+def check_splus_eligible(cursor, system_id) -> bool:
+    """Run the S+ "fully charted" checklist for a system.
+
+    S+ is NOT a score band — it sits on top of the S grade. The caller must
+    have already confirmed score >= 85 (constants.SPLUS_MIN_SCORE). A system is
+    fully charted when ALL of these hold:
+
+      1. The system has at least one planet.
+      2. Every planet AND every moon has a discovery linked to it
+         (discoveries.planet_id / discoveries.moon_id).
+      3. Every planet carries wonder information — at least one of the five
+         Wonders Page fields (see WONDER_FIELDS) is populated.
+      4. At least one base is documented (some planet has base_location).
+      5. The space station is recorded — required only for systems that
+         actually have one. Abandoned / uncharted systems (economy_type
+         'None'/'Abandoned') are exempt.
+
+    Returns True only when every applicable item passes. The live `discoveries`
+    table holds approved discoveries (pending ones live in pending_discoveries),
+    so existence there is sufficient.
+    """
+    cursor.execute('SELECT economy_type FROM systems WHERE id = ?', (system_id,))
+    srow = cursor.fetchone()
+    if not srow:
+        return False
+    is_abandoned = dict(srow).get('economy_type') in ('None', 'Abandoned')
+
+    # 1 + 3 + 4: planets, wonder notes, base
+    cursor.execute(
+        'SELECT id, base_location, '
+        'estimated_age, core_element, lore_notes, root_structure, nutrient_source '
+        'FROM planets WHERE system_id = ?',
+        (system_id,),
+    )
+    planets = [dict(r) for r in cursor.fetchall()]
+    if not planets:
+        return False
+
+    planet_ids = [p['id'] for p in planets]
+
+    # 3. wonder info on every planet
+    for p in planets:
+        if not any(_is_filled(p.get(f)) for f in WONDER_FIELDS):
+            return False
+
+    # 4. at least one documented base
+    if not any(_is_filled(p.get('base_location')) for p in planets):
+        return False
+
+    # 2a. a discovery linked to every planet (planet ids are globally unique,
+    # so match on planet_id directly rather than relying on a stamped system_id)
+    ph = ','.join('?' * len(planet_ids))
+    cursor.execute(
+        f'SELECT DISTINCT planet_id FROM discoveries WHERE planet_id IN ({ph})',
+        planet_ids,
+    )
+    discovered_planet_ids = {row[0] for row in cursor.fetchall()}
+    if any(pid not in discovered_planet_ids for pid in planet_ids):
+        return False
+
+    # 2b. a discovery linked to every moon
+    cursor.execute(f'SELECT id FROM moons WHERE planet_id IN ({ph})', planet_ids)
+    moon_ids = [row[0] for row in cursor.fetchall()]
+    if moon_ids:
+        mph = ','.join('?' * len(moon_ids))
+        cursor.execute(
+            f'SELECT DISTINCT moon_id FROM discoveries WHERE moon_id IN ({mph})',
+            moon_ids,
+        )
+        discovered_moon_ids = {row[0] for row in cursor.fetchall()}
+        if any(mid not in discovered_moon_ids for mid in moon_ids):
+            return False
+
+    # 5. recorded station (only required when the system should have one)
+    if not is_abandoned:
+        cursor.execute('SELECT 1 FROM space_stations WHERE system_id = ? LIMIT 1', (system_id,))
+        if not cursor.fetchone():
+            return False
+
+    return True
+
+
 def calculate_completeness_score(cursor, system_id) -> dict:
     """Calculate a data completeness score (0-100) for a system.
 
-    Returns a dict with: score, grade, breakdown (with per-category details).
+    Returns a dict with: score, grade, is_fully_charted, breakdown (with
+    per-category details). `grade` is 'S+' when the score clears S AND the
+    fully-charted checklist passes (see check_splus_eligible).
     """
     cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
     system = cursor.fetchone()
@@ -95,7 +186,11 @@ def calculate_completeness_score(cursor, system_id) -> dict:
     sys_core_score = round((sys_core_filled / len(sys_core_fields)) * 35)
 
     # --- System Extra (10 pts) ---
-    sys_extra_fields = ['glyph_code', 'stellar_classification', 'description']
+    # `description` was dropped from scoring (2026-06-19): it's free-text prose
+    # (and is repurposed to stash the procgen name on renamed systems), so it
+    # was never a meaningful completeness signal. The category stays worth 10
+    # pts across the two remaining structural fields — 5 pts each.
+    sys_extra_fields = ['glyph_code', 'stellar_classification']
     sys_extra_details = []
     sys_extra_filled = 0
     for f in sys_extra_fields:
@@ -237,11 +332,16 @@ def calculate_completeness_score(cursor, system_id) -> dict:
     # Total
     total = sys_core_score + sys_extra_score + planet_coverage_score + planet_env_score + planet_life_score + station_score
     total = min(total, 100)
-    grade = score_to_grade(total)
+
+    # S+ is the "fully charted" tier on top of S — only worth checking once the
+    # score itself clears the S baseline.
+    is_fully_charted = total >= 85 and check_splus_eligible(cursor, system_id)
+    grade = score_to_grade(total, is_fully_charted)
 
     return {
         'score': total,
         'grade': grade,
+        'is_fully_charted': is_fully_charted,
         'breakdown': {
             'system_core': sys_core_score,
             'system_extra': sys_extra_score,
@@ -263,7 +363,15 @@ def calculate_completeness_score(cursor, system_id) -> dict:
 
 
 def update_completeness_score(cursor, system_id) -> dict:
-    """Calculate and store the completeness score for a system."""
+    """Calculate and store the completeness score + fully-charted flag.
+
+    Persists both the 0-100 score (is_complete) and the S+ checklist outcome
+    (is_fully_charted, 0/1) so SQL grade ladders can surface S+ without re-running
+    the checklist per row.
+    """
     result = calculate_completeness_score(cursor, system_id)
-    cursor.execute('UPDATE systems SET is_complete = ? WHERE id = ?', (result['score'], system_id))
+    cursor.execute(
+        'UPDATE systems SET is_complete = ?, is_fully_charted = ? WHERE id = ?',
+        (result['score'], 1 if result.get('is_fully_charted') else 0, system_id),
+    )
     return result

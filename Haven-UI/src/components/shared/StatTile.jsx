@@ -1,4 +1,5 @@
 import React from 'react'
+import { GRADE_BADGE } from '../../utils/gradeColors'
 
 // Shared stat tile primitive — used by:
 //   - src/posters/SystemThumb.jsx       (system_thumb cached PNG poster)
@@ -66,15 +67,12 @@ export default function StatTile({ label, value, sub, valueColor, tile, truncate
   )
 }
 
-// Grade-tile color tokens — shared between poster + wizard preview so the
-// S/A/B/C visual stays consistent.
-export const GRADE_BG = {
-  S: { bg: '#ffb44c', fg: '#422006' },          // amber
-  A: { bg: '#34d399', fg: '#022c22' },          // emerald
-  B: { bg: '#60a5fa', fg: '#082f49' },          // blue
-  C: { bg: 'rgba(255,255,255,0.20)', fg: 'rgba(255,255,255,0.95)' },
-}
+// Grade-tile color tokens — single-sourced from gradeColors.js so the poster,
+// wizard preview, and the rest of the app stay on one S+/S/A/B/C scale.
+export const GRADE_BG = GRADE_BADGE
 
+// Score → letter. S+ ("fully charted") is NOT score-derivable — it comes from
+// the backend's completeness_grade (which callers prefer over this fallback).
 export function gradeFromScore(score) {
   if (score == null) return '—'
   if (score >= 85) return 'S'

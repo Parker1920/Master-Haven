@@ -24,6 +24,7 @@ import LoadingSkeleton from './LoadingSkeleton'
 import EmptyState from './EmptyState'
 import CompareToggleButton from './CompareToggleButton'
 import { cardStateClass, hasOutdatedDot, hasConflictDot, stateBadge } from '../utils/dataStates'
+import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 
 const CARDS_PAGE_SIZE = 24
 const TABLE_ROW_HEIGHT = 44
@@ -34,12 +35,8 @@ const SORTS = {
   'name-asc': { label: 'Name A-Z', param: { sort: 'name', dir: 'asc' } },
 }
 
-const GRADE_OVERLAY_STYLE = {
-  S: { background: 'var(--app-accent-amber)', color: '#422006' },
-  A: { background: '#34d399', color: '#022c22' },
-  B: { background: '#60a5fa', color: '#082f49' },
-  C: { background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.85)' },
-}
+// Grade badge styling is single-sourced from gradeColors.js (S+ / S / A / B / C).
+const GRADE_OVERLAY_STYLE = GRADE_BADGE_STYLE
 
 export default function SystemsList() {
   const { reality, galaxy, region, q, pushRecentlyViewed, clearFilters, compareMode, pinsByLevel, togglePin } = useSystems()

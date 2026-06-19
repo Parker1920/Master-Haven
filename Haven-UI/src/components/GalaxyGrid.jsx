@@ -135,11 +135,14 @@ export default function GalaxyGrid() {
 
 function GalaxyCard({ g, onClick, pinned, pinning }) {
   const total = g.system_count || 0
+  // S+ ("fully charted") is its own segment; grade_s is S-but-not-S+ from the
+  // backend so the buckets are mutually exclusive and sum to the total.
   const segments = [
-    { cls: 'bar-s', count: g.grade_s || 0 },
-    { cls: 'bar-a', count: g.grade_a || 0 },
-    { cls: 'bar-b', count: g.grade_b || 0 },
-    { cls: 'bar-c', count: g.grade_c || 0 },
+    { cls: 'bar-splus', gcls: 'grade-splus', label: 'S+', count: g.grade_splus || 0 },
+    { cls: 'bar-s', gcls: 'grade-s', label: 'S', count: g.grade_s || 0 },
+    { cls: 'bar-a', gcls: 'grade-a', label: 'A', count: g.grade_a || 0 },
+    { cls: 'bar-b', gcls: 'grade-b', label: 'B', count: g.grade_b || 0 },
+    { cls: 'bar-c', gcls: 'grade-c', label: 'C', count: g.grade_c || 0 },
   ]
   const stateCls = cardStateClass(g)
   const badge = stateBadge(g)
@@ -216,8 +219,8 @@ function GalaxyCard({ g, onClick, pinned, pinning }) {
           </div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold mb-1">
             {segments.filter((s) => s.count > 0).map((s, i) => (
-              <span key={i} className={s.cls === 'bar-s' ? 'grade-s' : s.cls === 'bar-a' ? 'grade-a' : s.cls === 'bar-b' ? 'grade-b' : 'grade-c'}>
-                {s.count}<span className="opacity-60">{s.cls === 'bar-s' ? 'S' : s.cls === 'bar-a' ? 'A' : s.cls === 'bar-b' ? 'B' : 'C'}</span>
+              <span key={i} className={s.gcls}>
+                {s.count}<span className="opacity-60">{s.label}</span>
               </span>
             ))}
           </div>

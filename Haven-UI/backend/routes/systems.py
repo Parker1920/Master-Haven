@@ -864,7 +864,8 @@ async def api_galaxies_summary(
                 COALESCE(s.galaxy, 'Euclid') as galaxy,
                 COUNT(DISTINCT s.region_x || '-' || s.region_y || '-' || s.region_z) as region_count,
                 COUNT(*) as system_count,
-                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 85 THEN 1 ELSE 0 END) as grade_s,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 85 AND COALESCE(s.is_fully_charted, 0) = 1 THEN 1 ELSE 0 END) as grade_splus,
+                SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 85 AND COALESCE(s.is_fully_charted, 0) = 0 THEN 1 ELSE 0 END) as grade_s,
                 SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 65 AND COALESCE(s.is_complete, 0) < 85 THEN 1 ELSE 0 END) as grade_a,
                 SUM(CASE WHEN COALESCE(s.is_complete, 0) >= 40 AND COALESCE(s.is_complete, 0) < 65 THEN 1 ELSE 0 END) as grade_b,
                 SUM(CASE WHEN COALESCE(s.is_complete, 0) < 40 THEN 1 ELSE 0 END) as grade_c,
@@ -1369,17 +1370,11 @@ async def api_systems(
 
         systems = [dict(row) for row in cursor.fetchall()]
 
-        # Add completeness grade derived from stored score
+        # Add completeness grade derived from stored score + fully-charted flag
+        # (SELECT s.* above carries is_fully_charted, so S+ surfaces here).
         for sys in systems:
             score = sys.get('is_complete', 0) or 0
-            if score >= 85:
-                sys['completeness_grade'] = 'S'
-            elif score >= 65:
-                sys['completeness_grade'] = 'A'
-            elif score >= 40:
-                sys['completeness_grade'] = 'B'
-            else:
-                sys['completeness_grade'] = 'C'
+            sys['completeness_grade'] = score_to_grade(score, bool(sys.get('is_fully_charted')))
             sys['completeness_score'] = score
 
         # Apply data restrictions
@@ -1704,7 +1699,7 @@ async def api_search(
         cursor.execute(
             f"SELECT s.id, s.name, s.region_x, s.region_y, s.region_z, "
             f"       s.x, s.y, s.z, s.galaxy, s.glyph_code, s.discord_tag, "
-            f"       s.star_type, s.reality, s.is_complete, "
+            f"       s.star_type, s.reality, s.is_complete, s.is_fully_charted, "
             f"       s.discovered_by, s.personal_discord_username, "
             f"       r.custom_name as region_name, "
             f"       (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count "
@@ -1724,7 +1719,7 @@ async def api_search(
         # several columns at once; we report the most user-meaningful one.
         for sys in rows:
             score = sys.get('is_complete', 0) or 0
-            sys['completeness_grade'] = score_to_grade(score)
+            sys['completeness_grade'] = score_to_grade(score, bool(sys.get('is_fully_charted')))
             sys['completeness_score'] = score
             sys['match_reason'] = _compute_match_reason(sys, parsed, q_norm)
 
@@ -2060,7 +2055,7 @@ async def api_unified_search(
         cursor.execute(
             f"SELECT s.id, s.name, s.region_x, s.region_y, s.region_z, "
             f"       s.galaxy, s.glyph_code, s.discord_tag, s.star_type, "
-            f"       s.reality, s.is_complete, s.discovered_by, "
+            f"       s.reality, s.is_complete, s.is_fully_charted, s.discovered_by, "
             f"       s.personal_discord_username, r.custom_name AS region_name "
             f"FROM systems s "
             f"LEFT JOIN regions r ON s.region_x = r.region_x "
@@ -2074,7 +2069,7 @@ async def api_unified_search(
 
         for s in system_rows:
             score = s.get('is_complete', 0) or 0
-            s['completeness_grade'] = score_to_grade(score)
+            s['completeness_grade'] = score_to_grade(score, bool(s.get('is_fully_charted')))
             s['completeness_score'] = score
             s['match_reason'] = _compute_match_reason(s, parsed, q_raw)
 

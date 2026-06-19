@@ -1950,10 +1950,13 @@ async def public_voyager_fingerprint(username: str):
 
         # ----- Completeness grade distribution (from systems table) -----
         # Thresholds match score_to_grade() in constants.py: S>=85, A 65-84, B 40-64, C<40.
+        # S+ ("fully charted") splits out of S via is_fully_charted so the two
+        # are mutually-exclusive buckets (grade_s = S but NOT S+).
         cursor.execute(f'''
             SELECT
                 AVG(COALESCE(s.is_complete, 0)) as avg_score,
-                SUM(CASE WHEN s.is_complete >= 85 THEN 1 ELSE 0 END) as grade_s,
+                SUM(CASE WHEN s.is_complete >= 85 AND COALESCE(s.is_fully_charted, 0) = 1 THEN 1 ELSE 0 END) as grade_splus,
+                SUM(CASE WHEN s.is_complete >= 85 AND COALESCE(s.is_fully_charted, 0) = 0 THEN 1 ELSE 0 END) as grade_s,
                 SUM(CASE WHEN s.is_complete >= 65 AND s.is_complete < 85 THEN 1 ELSE 0 END) as grade_a,
                 SUM(CASE WHEN s.is_complete >= 40 AND s.is_complete < 65 THEN 1 ELSE 0 END) as grade_b,
                 SUM(CASE WHEN s.is_complete < 40 THEN 1 ELSE 0 END) as grade_c,
@@ -2003,6 +2006,7 @@ async def public_voyager_fingerprint(username: str):
             'completeness': {
                 'avg_score': avg_score,
                 'grade': completeness_grade,
+                'grade_splus': grades.get('grade_splus') or 0,
                 'grade_s': grades.get('grade_s') or 0,
                 'grade_a': grades.get('grade_a') or 0,
                 'grade_b': grades.get('grade_b') or 0,

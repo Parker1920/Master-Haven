@@ -1,17 +1,31 @@
-// Wizard v1 (May 2026): live completeness score for the wizard's progress bar
-// + grade guidance panel.
+// Wizard live completeness score for the progress bar + grade guidance panel.
 //
-// This is a CLIENT-SIDE approximation of services/completeness.py — used
-// purely for live UI feedback. The authoritative score is computed by the
-// backend on save/approve. Frontend score lets the user see "+15 to next
-// grade" suggestions before submitting.
+// This is a CLIENT-SIDE mirror of services/completeness.py — used purely for
+// live UI feedback. The authoritative score is computed by the backend on
+// save/approve. This lets the user see "+N to next grade" before submitting.
 //
-// Grade thresholds match constants.py: S(85+) A(65+) B(40+) C(<40).
-// Total weights ~= backend (35 + 10 + 5 + 50 spread across planets).
+// It matches the backend's SIX weighted categories exactly:
+//   System Core 35 · System Extra 10 · Planet Coverage 10 ·
+//   Planet Environment 25 · Planet Life 15 · Space Station 5   (= 100)
+// (System Extra dropped `description` on 2026-06-19 — glyph_code +
+//  stellar_classification only, 5 pts each.)
+//
+// Grade thresholds match constants.py: S(85+) A(65+) B(40+) C(<40). S+ ("fully
+// charted") is a checklist on top of S — the wizard can verify the parts it has
+// data for (wonder notes, base, station) but NOT the discovery-on-every-body
+// requirement, so it's surfaced as guidance (`splus`) rather than promoting the
+// displayed grade. The backend has the final say at approval.
 
 import { useMemo } from 'react'
 
-const NO_LIFE_BIOMES = new Set(['Dead', 'Airless', 'Gas Giant'])
+// Mirror of constants.NO_LIFE_BIOMES.
+const NO_LIFE_BIOMES = new Set([
+  'Dead', 'Lifeless', 'Life-Incompatible', 'Airless', 'Low Atmosphere',
+  'Gas Giant', 'Empty',
+])
+
+// Mirror of services/completeness.WONDER_FIELDS.
+const WONDER_FIELDS = ['estimated_age', 'core_element', 'lore_notes', 'root_structure', 'nutrient_source']
 
 function isFilled(val, { allowNone = false } = {}) {
   if (val == null) return false
@@ -20,6 +34,11 @@ function isFilled(val, { allowNone = false } = {}) {
   if (s === 'N/A') return false
   if (s === 'None' && !allowNone) return false
   return true
+}
+
+// Mirror of _life_descriptor_filled: ANY non-empty string is real data.
+function lifeDescriptorFilled(...vals) {
+  return vals.some((v) => v != null && String(v).trim() !== '')
 }
 
 function isAbandoned(system) {
@@ -35,28 +54,27 @@ const SYS_CORE_FIELDS = [
   { key: 'dominant_lifeform', label: 'Dominant Lifeform' },
 ]
 
+// `description` intentionally NOT here — dropped from scoring (matches backend).
 const SYS_EXTRA_FIELDS = [
   { key: 'glyph_code', label: 'Glyph Code' },
   { key: 'stellar_classification', label: 'Spectral Class' },
-  { key: 'description', label: 'Description' },
 ]
 
 export default function useCompletenessScore(system) {
   return useMemo(() => {
-    if (!system) return { score: 0, grade: 'C', breakdown: [], gaps: [] }
+    if (!system) return { score: 0, max: 100, percent: 0, grade: 'C', breakdown: [], gaps: [], splus: null }
 
     const breakdown = []
     const gaps = []
+    const abandoned = isAbandoned(system)
+    const planets = system.planets || []
 
     // --- System Core (35 pts) ---
     let coreFilled = 0
-    const abandoned = isAbandoned(system)
     SYS_CORE_FIELDS.forEach(({ key, label }) => {
       const val = system[key]
       const isEcoOrConflict = ['economy_type', 'economy_level', 'conflict_level'].includes(key)
-      // dominant_lifeform: "None" and "Abandoned" are now BOTH legitimate
-      // answers (a system with no race vs a system whose race left). Both
-      // count as filled — they're real data, not missing data.
+      // dominant_lifeform: "None" and "Abandoned" are both legitimate answers.
       const allowNone = key === 'dominant_lifeform'
       const filled = (isEcoOrConflict && abandoned) || isFilled(val, { allowNone })
       if (filled) coreFilled += 1
@@ -75,65 +93,60 @@ export default function useCompletenessScore(system) {
     breakdown.push({ name: 'System Extra', score: extraScore, max: 10 })
 
     // --- Planet Coverage (10 pts) ---
-    const planets = system.planets || []
     const planetCoverage = planets.length > 0 ? 10 : 0
     if (!planets.length) gaps.push({ delta: 10, text: 'Add at least one planet' })
     breakdown.push({ name: 'Planet Coverage', score: planetCoverage, max: 10 })
 
-    // --- Planet Environment (15 pts spread) ---
-    let envFilled = 0
-    let envTotal = 0
-    planets.forEach((p) => {
-      ['biome', 'weather', 'sentinel'].forEach((k) => {
-        envTotal += 1
-        if (isFilled(p[k], { allowNone: k === 'sentinel' })) envFilled += 1
-      })
-    })
-    const envScore = envTotal > 0 ? Math.round((envFilled / envTotal) * 15) : 0
-    breakdown.push({ name: 'Planet Environment', score: envScore, max: 15 })
-    if (envFilled < envTotal) gaps.push({ delta: 15 - envScore, text: 'Fill in planet biomes / weather / sentinels' })
+    // --- Planet Environment (25 pts) — per-planet avg of biome/weather/sentinel ---
+    let envScore = 0
+    let lifeScore = 0
+    if (planets.length) {
+      const envRatios = []
+      const lifeRatios = []
+      planets.forEach((p) => {
+        // Environment: 3 fields
+        let envFilled = 0
+        if (isFilled(p.biome)) envFilled += 1
+        if (isFilled(p.weather) || isFilled(p.weather_text)) envFilled += 1
+        if (isFilled(p.sentinel, { allowNone: true }) || isFilled(p.sentinels_text)) envFilled += 1
+        envRatios.push(Math.min(envFilled / 3, 1))
 
-    // --- Planet Life (15 pts spread) — biome-aware ---
-    let lifeFilled = 0
-    let lifeTotal = 0
-    planets.forEach((p) => {
-      const dead = NO_LIFE_BIOMES.has(p.biome) || p.is_gas_giant
-      if (dead) {
-        // Dead planets get full credit even without fauna/flora values
-        lifeFilled += 2
-        lifeTotal += 2
-        return
-      }
-      ['fauna', 'flora'].forEach((k) => {
-        lifeTotal += 1
-        const v = p[k]
-        if (v != null && String(v).trim()) lifeFilled += 1
+        // Life: fauna + flora (biome-aware) + resources
+        const deadBiome = NO_LIFE_BIOMES.has((p.biome || '').trim()) || !!p.is_gas_giant
+        let lifeFilled = 0
+        let lifeApplicable = 0
+
+        if (lifeDescriptorFilled(p.fauna, p.fauna_text)) { lifeFilled += 1; lifeApplicable += 1 }
+        else if (!deadBiome) lifeApplicable += 1
+
+        if (lifeDescriptorFilled(p.flora, p.flora_text)) { lifeFilled += 1; lifeApplicable += 1 }
+        else if (!deadBiome) lifeApplicable += 1
+
+        const hasMaterials = isFilled(p.materials)
+        const hasAnyResource = ['common_resource', 'uncommon_resource', 'rare_resource'].some((k) => isFilled(p[k]))
+        lifeApplicable += 1
+        if (hasMaterials || hasAnyResource) lifeFilled += 1
+
+        lifeRatios.push(lifeFilled / Math.max(lifeApplicable, 1))
       })
-    })
-    const lifeScore = lifeTotal > 0 ? Math.round((lifeFilled / lifeTotal) * 15) : 0
+      envScore = Math.round((envRatios.reduce((a, b) => a + b, 0) / envRatios.length) * 25)
+      lifeScore = Math.round((lifeRatios.reduce((a, b) => a + b, 0) / lifeRatios.length) * 15)
+      if (envScore < 25) gaps.push({ delta: 25 - envScore, text: 'Fill in planet biomes / weather / sentinels' })
+      if (lifeScore < 15) gaps.push({ delta: 15 - lifeScore, text: 'Add fauna / flora / resources to your planets' })
+    }
+    breakdown.push({ name: 'Planet Environment', score: envScore, max: 25 })
     breakdown.push({ name: 'Planet Life', score: lifeScore, max: 15 })
-    if (lifeFilled < lifeTotal) gaps.push({ delta: 15 - lifeScore, text: 'Add fauna/flora values to your planets' })
-
-    // --- Planet Detail (10 pts) — resources, base location ---
-    let detailFilled = 0
-    let detailTotal = 0
-    planets.forEach((p) => {
-      detailTotal += 2
-      if (isFilled(p.materials)) detailFilled += 1
-      if (isFilled(p.base_location)) detailFilled += 1
-    })
-    const detailScore = detailTotal > 0 ? Math.round((detailFilled / detailTotal) * 10) : 0
-    breakdown.push({ name: 'Planet Detail', score: detailScore, max: 10 })
 
     // --- Space Station (5 pts) ---
     const station = system.space_station
     let stationScore = 0
     if (abandoned) {
-      stationScore = 5  // Full credit for abandoned (no station expected)
-    } else if (station && isFilled(station.name) && isFilled(station.race)) {
-      stationScore = 5
+      stationScore = 5 // full credit — abandoned systems have no station
     } else if (station) {
-      stationScore = 2
+      stationScore = 3
+      const tg = station.trade_goods
+      const hasTrade = Array.isArray(tg) ? tg.length > 0 : isFilled(tg)
+      if (hasTrade) stationScore += 2
     } else {
       gaps.push({ delta: 5, text: 'Document the space station' })
     }
@@ -149,9 +162,28 @@ export default function useCompletenessScore(system) {
     else if (pct >= 65) grade = 'A'
     else if (pct >= 40) grade = 'B'
 
+    // --- S+ guidance (checklist on top of S) ---
+    // The wizard can verify the parts it has data for; it CANNOT verify a
+    // discovery on every planet AND moon (no linked discovery data here), so
+    // that requirement is reported as "verified at approval" and we never
+    // promote the displayed grade to S+ on the client.
+    const everyPlanetHasWonder = planets.length > 0 && planets.every((p) => WONDER_FIELDS.some((f) => isFilled(p[f])))
+    const hasBase = planets.some((p) => isFilled(p.base_location))
+    const stationRecorded = abandoned || !!station
+    const splus = {
+      eligible: false, // never auto-promoted client-side; backend decides
+      requirements: [
+        { met: pct >= 85, label: 'Reach an S-grade score (85+)' },
+        { met: everyPlanetHasWonder, label: 'Wonder notes on every planet' },
+        { met: hasBase, label: 'Document at least one base' },
+        { met: stationRecorded, label: abandoned ? 'Station — N/A (abandoned)' : 'Record the space station' },
+        { met: null, label: 'A discovery on every planet & moon (verified at approval)' },
+      ],
+    }
+
     // Sort gaps by delta desc, top 4
     gaps.sort((a, b) => b.delta - a.delta)
 
-    return { score, max, percent: pct, grade, breakdown, gaps: gaps.slice(0, 4) }
+    return { score, max, percent: pct, grade, breakdown, gaps: gaps.slice(0, 4), splus }
   }, [system])
 }
