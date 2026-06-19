@@ -1678,3 +1678,56 @@
     letter-spacing: 0.05em;
     text-shadow: 0 0 16px rgba(184, 244, 236, 0.4);
   }
+
+  /* Festival team / "Made possible by" credits block */
+  .footer-credits {
+    max-width: 640px;
+    margin: 0 auto 1.9rem;
+    padding-bottom: 1.7rem;
+    border-bottom: 1px solid rgba(125, 208, 255, 0.22);
+  }
+  .footer-credits-title {
+    font-family: var(--soft-display);
+    font-weight: 700;
+    font-size: 0.8rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--sunshine);
+    text-shadow: 0 0 18px rgba(255, 224, 121, 0.35);
+    margin: 0 0 1.15rem;
+  }
+  .footer-credits-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  /* One centered line per person: "Name — role". */
+  .footer-credit {
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .footer-credit-name {
+    font-family: var(--soft-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--cream);
+  }
+  .footer-credit-name::after {
+    content: " — ";
+    color: var(--aqua-1);
+    opacity: 0.5;
+    font-weight: 400;
+  }
+  .footer-credit-org {
+    font-weight: 600;
+    color: var(--aqua-1);
+    opacity: 0.92;
+  }
+  .footer-credit-role {
+    font-size: 0.88rem;
+    color: var(--aqua-1);
+    opacity: 0.82;
+  }
