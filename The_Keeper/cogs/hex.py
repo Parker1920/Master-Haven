@@ -227,8 +227,9 @@ class SimpleHexKeypad(discord.ui.View):
         if self.system_owner_tag:
 
             ownership_value = (
-                f"{self.system_owner_type}:{self.system_owner_tag}"
+                f"{self.system_owner_type.capitalize()}: {self.system_owner_tag}"
             )
+                        
 
         else:
             ownership_value = self.system_owner_type
