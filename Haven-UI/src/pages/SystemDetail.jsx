@@ -40,6 +40,7 @@ import { formatCoords } from '../components/LatLngInput'
 import FromMapBanner from '../components/FromMapBanner'
 import ActivityFeed from '../components/ActivityFeed'
 import PlanetSphere from '../components/shared/PlanetSphere'
+import DiscoveryDetailModal from '../components/discoveries/DiscoveryDetailModal'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 
 const STAR_HEX = {
@@ -110,31 +111,89 @@ export default function SystemDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const auth = useContext(AuthContext)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [system, setSystem] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [disambig, setDisambig] = useState(null)
   const [editMode, setEditMode] = useState(false)
   const [draft, setDraft] = useState({ name: '', description: '' })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [lightboxIdx, setLightboxIdx] = useState(null)
+  const [selectedDiscovery, setSelectedDiscovery] = useState(null)
 
   const reload = useCallback(async () => {
     setLoading(true)
     try {
       const r = await axios.get(`/api/systems/${encodeURIComponent(id)}`)
       setSystem(r.data)
+      setDisambig(null)
       setDraft({ name: r.data?.name || '', description: r.data?.description || '' })
       setError(null)
+      // Clean up the address bar: if we arrived via an id (old /systems/<uuid>
+      // bookmark) or a non-canonical name (wrong casing), rewrite to the
+      // canonical name URL without re-fetching (react-router params stay as-is).
+      if (r.data?.name && id !== r.data.name) {
+        const base = import.meta.env.BASE_URL || '/'
+        window.history.replaceState(null, '', `${base}systems/${encodeURIComponent(r.data.name)}`)
+      }
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Failed to load system')
+      // A name shared by multiple systems comes back as HTTP 300; axios treats
+      // 3xx as an error, so the payload lands in err.response.
+      if (err?.response?.status === 300 && err.response.data?.multiple) {
+        setDisambig(err.response.data.systems || [])
+        setSystem(null)
+        setError(null)
+      } else {
+        setError(err?.response?.data?.detail || 'Failed to load system')
+      }
     } finally {
       setLoading(false)
     }
   }, [id])
 
   useEffect(() => { reload() }, [reload])
+
+  // Discovery modal with URL sync (?discovery=<id>) — enrich each discovery
+  // with the parent system fields DiscoveryDetailModal expects (it's built for
+  // the standalone discoveries pages, not the system-scoped shape here).
+  const enrichDiscovery = useCallback((d) => ({
+    ...d,
+    is_featured: d.is_featured ?? d.featured,
+    system_id: system?.id,
+    system_name: system?.name,
+    system_galaxy: system?.galaxy,
+    system_is_stub: system?.is_stub,
+  }), [system])
+
+  const openDiscovery = useCallback((d) => {
+    setSelectedDiscovery(enrichDiscovery(d))
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('discovery', String(d.id))
+      return next
+    })
+  }, [enrichDiscovery, setSearchParams])
+
+  const closeDiscovery = useCallback(() => {
+    setSelectedDiscovery(null)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('discovery')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
+  // Auto-open the discovery referenced by ?discovery=<id> once the system (and
+  // its discoveries) have loaded — supports deep links / shared URLs.
+  useEffect(() => {
+    const discId = searchParams.get('discovery')
+    if (!discId || !system?.discoveries?.length) return
+    if (selectedDiscovery && String(selectedDiscovery.id) === String(discId)) return
+    const found = system.discoveries.find((d) => String(d.id) === String(discId))
+    if (found) setSelectedDiscovery(enrichDiscovery(found))
+  }, [system, searchParams, selectedDiscovery, enrichDiscovery])
 
   const photos = useMemo(() => gatherPhotos(system), [system])
 
@@ -217,6 +276,49 @@ export default function SystemDetail() {
         <button onClick={() => navigate('/systems')} className="haven-btn-ghost px-3 py-2 rounded text-sm">
           Back to Systems
         </button>
+      </div>
+    )
+  }
+
+  // Disambiguation: more than one system shares this name. Each card loads the
+  // specific system by its numeric id (which then replaceState's to the name).
+  if (disambig) {
+    return (
+      <div className="space-y-4">
+        <div className="haven-card p-6">
+          <h2 className="text-lg font-semibold mb-1">Multiple systems named “{id}”</h2>
+          <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
+            {disambig.length} systems share this name. Pick the one you're looking for.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {disambig.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => navigate(`/systems/${m.id}`)}
+                className="haven-card haven-card-hover p-4 text-left flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{m.name}</div>
+                  <div className="text-xs mono truncate" style={{ color: 'var(--muted)' }}>
+                    {m.glyph_code || '—'}
+                    {m.galaxy ? ` · ${m.galaxy}` : ''}
+                    {m.reality && m.reality !== 'Normal' ? ` · ${m.reality}` : ''}
+                    {m.discord_tag ? ` · ${m.discord_tag}` : ''}
+                  </div>
+                </div>
+                {m.completeness_grade && (
+                  <span
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold mono shrink-0"
+                    style={GRADE_STYLE[m.completeness_grade] || GRADE_STYLE.C}
+                  >
+                    {m.completeness_grade}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
@@ -501,7 +603,7 @@ export default function SystemDetail() {
 
       {/* DISCOVERIES (linked to this system) */}
       {(system.discoveries || []).length > 0 && (
-        <SystemDiscoveriesList discoveries={system.discoveries} />
+        <SystemDiscoveriesList discoveries={system.discoveries} onSelect={openDiscovery} />
       )}
 
       {/* COMPLETENESS BREAKDOWN */}
@@ -571,6 +673,12 @@ export default function SystemDetail() {
           </div>
         </div>
       )}
+
+      <DiscoveryDetailModal
+        discovery={selectedDiscovery}
+        isOpen={!!selectedDiscovery}
+        onClose={closeDiscovery}
+      />
     </div>
   )
 }
@@ -1131,7 +1239,7 @@ function SpaceStationCard({ station }) {
 // planet_id / moon_id / space (no link = system-wide). Backend now returns
 // these on the system detail response; previously SystemDetail had no
 // awareness of linked discoveries at all even though v1.33 added the link.
-function SystemDiscoveriesList({ discoveries }) {
+function SystemDiscoveriesList({ discoveries, onSelect }) {
   const grouped = useMemo(() => {
     const byTarget = { planet: {}, moon: {}, space: [], orphan: [] }
     for (const d of discoveries) {
@@ -1166,7 +1274,7 @@ function SystemDiscoveriesList({ discoveries }) {
       </div>
       <div className="space-y-3">
         {Object.entries(grouped.planet).map(([planet, list]) => (
-          <DiscoveryGroup key={`p-${planet}`} label={planet} icon="🌍" items={list} />
+          <DiscoveryGroup key={`p-${planet}`} label={planet} icon="🌍" items={list} onSelect={onSelect} />
         ))}
         {Object.entries(grouped.moon).map(([key, list]) => {
           const [planet, moon] = key.split('::')
@@ -1177,11 +1285,12 @@ function SystemDiscoveriesList({ discoveries }) {
               sublabel={`moon of ${planet}`}
               icon="🌑"
               items={list}
+              onSelect={onSelect}
             />
           )
         })}
         {grouped.space.length > 0 && (
-          <DiscoveryGroup label="In space" icon="✨" items={grouped.space} />
+          <DiscoveryGroup label="In space" icon="✨" items={grouped.space} onSelect={onSelect} />
         )}
         {grouped.orphan.length > 0 && (
           <div
@@ -1199,10 +1308,11 @@ function SystemDiscoveriesList({ discoveries }) {
             </div>
             <div className="flex flex-wrap gap-2">
               {grouped.orphan.map((d) => (
-                <Link
+                <button
                   key={d.id}
-                  to={`/discoveries/${d.type_slug || 'other'}`}
-                  className="px-2 py-1 rounded text-xs hover:bg-white/5 transition-colors"
+                  type="button"
+                  onClick={() => onSelect(d)}
+                  className="px-2 py-1 rounded text-xs hover:bg-white/5 transition-colors text-left"
                   style={{ background: 'rgba(255,255,255,0.05)' }}
                   title={d.description || d.discovery_name}
                 >
@@ -1213,7 +1323,7 @@ function SystemDiscoveriesList({ discoveries }) {
                   {formatCoords(d.latitude, d.longitude) && (
                     <span className="ml-1.5 text-[10px] font-mono" style={{ color: 'var(--muted)' }}>📍 {formatCoords(d.latitude, d.longitude)}</span>
                   )}
-                </Link>
+                </button>
               ))}
             </div>
           </div>
@@ -1223,7 +1333,7 @@ function SystemDiscoveriesList({ discoveries }) {
   )
 }
 
-function DiscoveryGroup({ label, sublabel, icon, items }) {
+function DiscoveryGroup({ label, sublabel, icon, items, onSelect }) {
   return (
     <div className="p-3 rounded" style={{ background: 'rgba(0,0,0,0.20)', border: '1px solid var(--border-soft)' }}>
       <div className="flex items-baseline gap-2 mb-2">
@@ -1233,10 +1343,11 @@ function DiscoveryGroup({ label, sublabel, icon, items }) {
       </div>
       <div className="flex flex-wrap gap-2">
         {items.map((d) => (
-          <Link
+          <button
             key={d.id}
-            to={`/discoveries/${d.type_slug || 'other'}`}
-            className="px-2 py-1 rounded text-xs hover:bg-white/5 transition-colors"
+            type="button"
+            onClick={() => onSelect(d)}
+            className="px-2 py-1 rounded text-xs hover:bg-white/5 transition-colors text-left"
             style={{ background: 'rgba(255,255,255,0.05)' }}
             title={d.description || d.discovery_name}
           >
@@ -1248,7 +1359,7 @@ function DiscoveryGroup({ label, sublabel, icon, items }) {
               <span className="ml-1.5 text-[10px] font-mono" style={{ color: 'var(--muted)' }}>📍 {formatCoords(d.latitude, d.longitude)}</span>
             )}
             {d.featured && <span className="ml-1.5">★</span>}
-          </Link>
+          </button>
         ))}
       </div>
     </div>

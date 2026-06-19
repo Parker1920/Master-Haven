@@ -237,7 +237,7 @@ export default function DiscoveryDetailModal({
             <div className="flex flex-wrap items-center gap-2 text-gray-300">
               {system_id && system_name && (
                 <Link
-                  to={`/systems/${system_id}`}
+                  to={`/systems/${encodeURIComponent(system_name)}`}
                   className="flex items-center gap-2 hover:text-cyan-400 transition-colors"
                 >
                   <MapPinIcon className="w-4 h-4" />

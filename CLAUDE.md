@@ -22,6 +22,11 @@ A comprehensive No Man's Sky discovery mapping and archival system for communiti
 ### Current Versions
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
+| Backend API | 1.76.0 | 2026-06-19 | See Master Haven 1.79.0. **Discovery links now survive planet rebuilds.** New shared `snapshot_child_name_maps()` + `relink_discoveries_after_rebuild()` in [db.py](Haven-UI/backend/db.py): capture planet/moon `name→id` BEFORE a delete-and-reinsert, then re-point `discoveries.planet_id`/`moon_id` to the new ids by name afterward. Wired into the two delete-and-reinsert paths that churned planet ids and orphaned discoveries — `save_system` ([control_room_api.py](Haven-UI/backend/control_room_api.py), admin direct-save) and the batch-approve edit path ([routes/approvals.py](Haven-UI/backend/routes/approvals.py)). `/api/status` 1.75.0 → 1.76.0. Backend restart required. |
+| **Master Haven** | 1.79.0 | 2026-06-19 | **Fix the recurring "Mabaya planet tags wiped" bug — discoveries orphaned on every system edit.** Mabaya (Ekimo's 64-discovery showcase, system `5547c89d`) lost all its discovery→planet links again: every discovery rendered under "✦ In space." Root cause (confirmed): the admin direct-save path `POST /api/save_system` does `DELETE FROM planets WHERE system_id=?` then re-inserts all planets with **brand-new database ids** ([control_room_api.py:2808](Haven-UI/backend/control_room_api.py)), but never re-pointed the existing `discoveries.planet_id` rows — so a logged-in admin clicking **Save** in the wizard silently orphaned all 64 discoveries (the system's `last_updated_at` was a direct save 10 min after the last pending approval, matching the report). The batch-approve edit path had the identical gap. This is the same bug class as the 06-18 incident (that time via an empty-edit approval). **Data fix:** the 64 discoveries weren't lost (still `approved`, ids 68–142) — re-pointed each from its dead planet id (35149–35154) to the current planet of the same name (36524–36529) using the verbatim `pending_systems` snapshot (id 9835); 64/64 mapped cleanly, 0 orphaned after. **Code fix:** new `snapshot_child_name_maps()`/`relink_discoveries_after_rebuild()` helpers re-link discoveries by name across both delete-and-reinsert paths (`save_system` + batch approve); the single-approve path already merges planets by name and preserves ids, so it was left as-is. Helper verified with an end-to-end simulation (planet relink, trailing-space tolerance, moon relink, other-system rows untouched, zero orphans). Backend-only; no schema change, no migration. **Backend restart required.** Durable follow-up: add the same guard to any future planet-rebuild path. |
+| Backend API | 1.75.0 | 2026-06-19 | See Master Haven 1.78.0. `GET /api/systems/{system_id}` now resolves by id **or** name (case-insensitive, `COLLATE NOCASE`): tries `WHERE id = ?` first (old numeric bookmarks keep working), then `WHERE name = ?`; a name shared by >1 system returns **HTTP 300** `{multiple:true, systems:[{id,name,galaxy,reality,glyph_code,discord_tag,completeness_grade}]}` for frontend disambiguation. The system-detail discoveries SELECT gained `evidence_url`, `photo_url`, `is_featured`, and a per-row `type_info` (emoji/label) so the discovery modal renders without a client-side lookup. `/api/status` 1.74.2 → 1.75.0. |
+| Haven-UI | 1.67.0 | 2026-06-19 | See Master Haven 1.78.0. **Pretty system URLs** — all system navigation (SystemsList, SearchOverlay, Search, RegionDetail, CommunityDetail, Profile, Wizard success screen, DiscoveryDetailModal location link) now routes to `/systems/<name>` instead of `/systems/<id>`; SystemDetail rewrites old numeric-id URLs to the clean name via `window.history.replaceState`, and renders a disambiguation picker on the backend's 300. **Discovery modal on SystemDetail** — discovery chips open `DiscoveryDetailModal` in place (URL-synced via `?discovery=<id>`, deep-linkable) instead of routing away to the type page. `package.json` 1.66.4 → 1.67.0. |
+| **Master Haven** | 1.78.0 | 2026-06-19 | **Pretty system URLs + clickable discovery links on SystemDetail.** Two UX features. **(1) Pretty URLs:** systems are now linked by name (`/systems/Mabaya`) everywhere instead of numeric IDs. `GET /api/systems/{system_id}` resolves id-first (old `/systems/1234` bookmarks still work) then falls back to a case-insensitive name lookup; duplicate names return HTTP 300 with a candidate list that SystemDetail renders as a picker (each card loads the specific system by id, which then `replaceState`s to the clean name). All 8 frontend navigation sites + the discovery modal's system link now use `encodeURIComponent(name)`. **(2) Discovery links:** discovery chips on SystemDetail open the full `DiscoveryDetailModal` inline (URL-synced `?discovery=<id>` so it's deep-linkable/shareable) instead of navigating to the discovery-type page; the backend system-detail discoveries payload gained `evidence_url`/`photo_url`/`is_featured`/`type_info` so the modal renders complete. Frontend + read-side backend only — no schema change, no migration. Backend restart required for the new read fields. |
 | Backend API | 1.74.2 | 2026-06-19 | See Haven-UI 1.66.4. New `star_category` field in `/api/glyph/decode` response. `/api/status` 1.74.1 → 1.74.2. |
 | Haven-UI | 1.66.4 | 2026-06-19 | Add star category badge (YRGB/Purple/Glass/Phantom) to GlyphPicker decoded coordinates popup. |
 | **Master Haven** | 1.77.1 | 2026-06-19 | **Phantom star detection fix — Purple (SSI 1001-1065) and Shadow (SSI 1000) stars no longer falsely flagged.** The Wizard's glyph decoder used a simple threshold (`solar_system_index >= 600`) which incorrectly flagged all Purple stars and the Shadow star as phantoms. Replaced with range-based validation: SSI 1-767 (YRGB), 1000 (Shadow/Glass), 1001-1065 (Purple/Atlantid Drive) are valid; SSI 0, 768-999 (phantom gap), and 1066+ are phantom. Backend-only fix in `glyph_decoder.py`; no frontend change needed (GlyphPicker.jsx reads the backend's `is_phantom` flag). Requires backend restart on the Pi. |
@@ -184,6 +189,54 @@ The auto-updater (`haven_updater.ps1`) looks for assets matching `HavenExtractor
 - **Full distributable** (~112 MB): The entire `NMS-Haven-Extractor/dist/HavenExtractor/` folder. For new users who need the embedded Python runtime, batch scripts, etc. Created manually by zipping the full `dist/HavenExtractor/` directory.
 
 ### Changelog
+
+#### Master Haven 1.78.0 (2026-06-19) - Pretty System URLs + Discovery Links on SystemDetail
+Two UX features Parker asked for: clean, human-readable system URLs, and being able to open a discovery from the system page without leaving it.
+
+**Feature 1 — pretty system URLs (`/systems/Mabaya` instead of `/systems/1234`)**
+
+Every share/bookmark URL was an opaque `/systems/1234` numeric ID. Systems are now linked by name everywhere.
+
+- **Backend** (`get_system` in [control_room_api.py](Haven-UI/backend/control_room_api.py)): resolves **id-first** (`SELECT * FROM systems WHERE id = ?`) so every existing numeric bookmark keeps working, then falls back to a **case-insensitive name lookup** (`WHERE name = ? COLLATE NOCASE`, backed by the existing `idx_systems_name`). A name shared by more than one system returns **HTTP 300** with `{multiple: true, systems: [{id, name, galaxy, reality, glyph_code, discord_tag, completeness_grade}]}` instead of guessing.
+- **Frontend** — all 8 navigation sites now route to `/systems/${encodeURIComponent(name)}`: [SystemsList.jsx](Haven-UI/src/components/SystemsList.jsx), [SearchOverlay.jsx](Haven-UI/src/components/SearchOverlay.jsx), [Search.jsx](Haven-UI/src/pages/Search.jsx), [RegionDetail.jsx](Haven-UI/src/pages/RegionDetail.jsx), [CommunityDetail.jsx](Haven-UI/src/pages/CommunityDetail.jsx), [Profile.jsx](Haven-UI/src/pages/Profile.jsx) (keeps its `/haven-ui/` prefix), [Wizard.jsx](Haven-UI/src/pages/Wizard.jsx) success screen, and [DiscoveryDetailModal.jsx](Haven-UI/src/components/discoveries/DiscoveryDetailModal.jsx)'s location link. [SystemDetail.jsx](Haven-UI/src/pages/SystemDetail.jsx) `reload()` rewrites the address bar to the canonical name via `window.history.replaceState` whenever it arrived via an id or non-canonical casing (no re-fetch), and renders a **disambiguation picker** when the API returns 300 (each card loads its specific system by id, which then replaceState's to the name). The `/systems/:id` route is unchanged — `:id` matches any string.
+
+**Feature 2 — clickable discovery links on SystemDetail (hybrid modal + URL sync)**
+
+The system page already listed linked discoveries (grouped by planet / moon / space / unlinked) but each chip was a `<Link>` that navigated away to the discovery-type page. Chips now open the full [DiscoveryDetailModal](Haven-UI/src/components/discoveries/DiscoveryDetailModal.jsx) **in place**:
+
+- State `selectedDiscovery` + URL sync via the existing `searchParams`: clicking sets `?discovery=<id>`; closing removes it; on load, `?discovery=<id>` auto-opens the matching discovery (deep-linkable / shareable).
+- The system-detail discovery shape is bridged to what the modal expects: each opened discovery is enriched with `system_id`/`system_name`/`system_galaxy`/`system_is_stub` from the parent and `is_featured` (mapped from the `featured` alias). `type_info` (emoji/label), `evidence_url`, and `photo_url` are now supplied by the **backend** discoveries SELECT (mirrors what browse/recent do) so no client-side type map is needed and the modal's photo gallery + external-links sections render.
+
+**Scope:** frontend + read-side backend only. No schema change, no migration. The backend needs a restart for the new discovery read fields (`evidence_url`/`photo_url`/`is_featured`/`type_info`); the frontend degrades gracefully without them.
+
+**Verification:** `npm run build` clean (2738 modules, 0 errors). Resolution paths confirmed: numeric-id → 200, exact name → 200, lowercase name → 200, nonexistent → 404, duplicate name → 300 with the 7-key candidate cards; and that a system's discoveries come back with `type_info`/`evidence_url`/`photo_url`/`is_featured`.
+
+---
+
+#### Backend API 1.75.0 (2026-06-19) - Name-Based System Lookup + Discovery Read Fields
+See Master Haven 1.78.0. `GET /api/systems/{system_id}` ([control_room_api.py](Haven-UI/backend/control_room_api.py)) now tries `SELECT * FROM systems WHERE id = ?` first (preserves old numeric bookmarks), then `SELECT * FROM systems WHERE name = ? COLLATE NOCASE`; >1 name match → `JSONResponse(status_code=300, {multiple, systems:[…7 fields incl. completeness_grade…]})`. The system-detail discoveries SELECT adds `d.evidence_url`, `d.photo_url`, `d.is_featured`, and attaches `type_info = DISCOVERY_TYPE_INFO[slug]` per row (slug via `get_discovery_type_slug`). Read-side only; no schema/migration. `/api/status` 1.74.2 → 1.75.0 in [routes/auth.py](Haven-UI/backend/routes/auth.py). Requires a backend restart.
+
+---
+
+#### Haven-UI 1.67.0 (2026-06-19) - Pretty System URLs + SystemDetail Discovery Modal
+See Master Haven 1.78.0. Every system nav link now uses `encodeURIComponent(name)` ([SystemsList.jsx](Haven-UI/src/components/SystemsList.jsx), [SearchOverlay.jsx](Haven-UI/src/components/SearchOverlay.jsx), [Search.jsx](Haven-UI/src/pages/Search.jsx), [RegionDetail.jsx](Haven-UI/src/pages/RegionDetail.jsx), [CommunityDetail.jsx](Haven-UI/src/pages/CommunityDetail.jsx), [Profile.jsx](Haven-UI/src/pages/Profile.jsx), [Wizard.jsx](Haven-UI/src/pages/Wizard.jsx), [DiscoveryDetailModal.jsx](Haven-UI/src/components/discoveries/DiscoveryDetailModal.jsx)). [SystemDetail.jsx](Haven-UI/src/pages/SystemDetail.jsx): `replaceState` to the clean name URL after an id/non-canonical load, a 300-disambiguation picker, and `DiscoveryGroup`/orphan chips converted from `<Link>` to buttons that open `DiscoveryDetailModal` with `?discovery=<id>` URL sync + parent-system enrichment. `package.json` 1.66.4 → 1.67.0.
+
+---
+
+#### Master Haven 1.79.0 (2026-06-19) - Fix Recurring Mabaya "Planet Tags Wiped" (Discoveries Orphaned on Every Edit)
+Parker: "with mabaya there is an issue again — the planet tags got wiped again … i think the super admin login caused it." On the SystemDetail page all 64 of Mabaya's discoveries had fallen into the "✦ In space" group.
+
+**Diagnosis.** The system in question is `5547c89d-1663-45ca-9cdd-c2e79b38d50f` (Ekimo / WhrStrsG, 64 discoveries). Its planets, moons, station, and special-attribute tags (`ancient_bones`, `water_world`, `salvageable_scrap`, `gravitino_balls`) were all **intact and correct** — what broke was the discovery→planet *links*. All 64 discoveries pointed at planet ids **35149–35154**, which no longer existed; the live planets had been re-created with ids **36524–36529**. So every discovery's `planet_id` was dangling and rendered as in-space ("planet tags" = which planet each discovery is pinned to).
+
+**Root cause (confirmed).** The admin direct-save path `POST /api/save_system` — what runs when a logged-in admin clicks **Save** in the wizard — does `DELETE FROM planets WHERE system_id=?` and re-inserts every planet with brand-new auto-increment ids ([control_room_api.py](Haven-UI/backend/control_room_api.py#L2808)), but never re-pointed the existing `discoveries.planet_id` rows. The system's `last_updated_at` (2026-06-19 23:07:43, by 'Haven') was a direct save ~10 min after the last pending approval — exactly Parker's "super admin login" hypothesis. The batch-approve edit path ([routes/approvals.py](Haven-UI/backend/routes/approvals.py)) had the identical gap. This is the same bug *class* that hit Mabaya on 06-18 (that time the planets were fully wiped by an empty-edit approval); Mabaya keeps breaking because it's a 64-discovery showcase and every edit churns its planet ids.
+
+**Data fix (already applied to prod).** The discoveries were never lost — all 64 still exist (`discoveries` ids 68–142, status `approved`). Re-uploading would have created 64 duplicates; instead each was re-pointed to the planet of the same name. The `pending_systems` snapshot id 9835 (a verbatim 61 KB JSON snapshot) preserves each discovery's original `planet_id` and each planet's id↔name, giving a deterministic remap: 35149→36524, 35150→36525, 35151→36526, 35152→36527, 35153→36528, 35154→36529. **64/64 remapped cleanly, 0 orphaned afterward.** Live DB was copied to a `FORENSIC_mabaya_relink_*.db` first; the relink ran in one transaction.
+
+**Code fix (prevents recurrence).** Two shared helpers in [db.py](Haven-UI/backend/db.py): `snapshot_child_name_maps(cursor, system_id)` captures `{planet_name → old id}` and `{(parent_planet, moon_name) → old moon id}` BEFORE a delete-and-reinsert; `relink_discoveries_after_rebuild(...)` re-points `discoveries.planet_id`/`moon_id` to the new ids by name AFTER. Wired into both delete-and-reinsert paths (`save_system` + batch-approve edit). The single-approve edit path already merges planets by name (preserves ids), so it was left untouched. Name matching is stripped + case-insensitive (tolerates the trailing spaces in Mabaya's planet names). Verified with an end-to-end simulation: planet relink, trailing-space tolerance, moon relink, other-system discoveries untouched, zero orphans.
+
+**Scope.** Backend-only; no schema change, no migration. `/api/status` 1.75.0 → 1.76.0. **Backend restart required** for the code fix to take effect (the data fix is already live).
+
+---
 
 #### Master Haven 1.77.1 (2026-06-19) - Phantom Star Detection Fix for Purple and Shadow Stars
 The Wizard's glyph decoder flagged Purple star systems (SSI 1001-1065, added by NMS Worlds Part II with the Atlantid Drive) and the Shadow/Glass star (SSI 1000) as "PHANTOM" because `is_phantom_star()` used a simple threshold of `solar_system_index >= 600`. The threshold predated Purple stars entirely and only had a single hardcoded exception for SSI 1000.
@@ -1930,189 +1983,4 @@ Comprehensive audit and version alignment before major 2.0 migration.
 │   NMS-Haven-Extractor │   NMS-Save-Watcher                          │
 │   (In-Game Mod)       │   (Extraction Queue)                        │
 │   Hooks into NMS.exe  │   Monitors JSON files                       │
-│   Extracts live data  │   Queues for upload                         │
-└───────────────────────┴─────────────────────────────────────────────┘
-```
-
-## Data Flow
-
-1. **Discovery Extraction**: Player uses NMS-Haven-Extractor mod while playing NMS
-2. **JSON Output**: Extractor writes system/planet data to `~/Documents/Haven-Extractor/`
-3. **Queue Management**: NMS-Save-Watcher monitors folder, queues extractions
-4. **API Submission**: Data submitted to Haven API via `/api/extraction` or `/api/submit_system`
-5. **Approval Queue**: Submissions land in `pending_systems` for admin review
-6. **Approval**: Partners/Admins approve via Haven-UI → data moves to `systems` table
-7. **Display**: Approved systems appear on 3D map and in browse interface
-
-## Key Files Reference
-
-### Backend (Haven-UI/backend/)
-- `control_room_api.py` - Main FastAPI server (18,752 lines, 235 endpoints)
-- `migrations.py` - Database schema migrations (v1.0.0 → v1.45.0)
-- `glyph_decoder.py` - Portal glyph ↔ coordinate conversion
-- `planet_atlas_wrapper.py` - 3D planet visualization generator
-
-### Frontend (Haven-UI/)
-- `src/App.jsx` - Main React app with routing
-- `src/utils/AuthContext.jsx` - Session management and role-based access
-- `src/utils/api.js` - API client helpers
-- `src/pages/` - 23 page components
-- `src/components/` - 37 reusable components
-
-### Game Integration
-- `NMS-Haven-Extractor/dist/HavenExtractor/mod/haven_extractor.py` - Main extractor mod
-- `NMS-Debug-Enabler/mod/nms_debug_enabler.py` - Debug flag enabler mod
-- `NMS-Memory-Browser/nms_memory_browser/` - Memory inspection package
-- `NMS-Save-Watcher/src/watcher.py` - Core watcher logic
-
-## Database Schema (37 Tables)
-
-**Core Data (7):**
-- `systems` - Star systems with glyph codes and coordinates
-- `planets` - Planets with biome, weather, resources
-- `moons` - Moon data (orbital, climate)
-- `space_stations` - Trading stations
-- `regions` - Custom-named galaxy regions
-- `discoveries` - Scientific discoveries (creatures, anomalies)
-- `planet_pois` - Points of Interest on planet surfaces
-
-**Approval Workflow (4):**
-- `pending_systems` - Submission queue
-- `pending_region_names` - Region name approval queue
-- `pending_discoveries` - Discovery submission queue
-- `approval_audit_log` - Full audit trail
-
-**Authentication (5):**
-- `partner_accounts` - Community partner logins
-- `sub_admin_accounts` - Delegated sub-administrators
-- `api_keys` - API authentication tokens (per-user extractor keys)
-- `super_admin_settings` - System configuration
-- `data_restrictions` - Per-partner data access rules
-
-**Analytics (2):**
-- `activity_logs` - Event logging
-- `events` - Community challenges/competitions
-
-**War Room (WIP) (18):**
-- `war_room_enrollment` - Civilization enrollment
-- `territorial_claims` - System territory claims
-- `conflicts` - Active conflicts
-- `conflict_events` - Conflict timeline events
-- `conflict_parties` - Multi-party conflict participants
-- `war_news` - News articles
-- `war_correspondents` - Reporter accounts
-- `current_debrief` - Active debrief data
-- `war_statistics` - Aggregate stats
-- `war_notifications` - Notification queue
-- `war_activity_feed` - Activity stream
-- `war_media` - Uploaded media
-- `discord_webhooks` - Webhook configurations
-- `reporting_organizations` - News organizations
-- `reporting_org_members` - Organization membership
-- `peace_proposals` - Peace treaty proposals
-- `proposal_items` - Treaty item details
-- `auto_news_events` - Auto-generated news
-
-**System (1):**
-- `schema_migrations` - Migration version tracking
-
-## User Roles
-
-| Role | Capabilities |
-|------|-------------|
-| **Public** | Browse systems, submit discoveries (goes to queue) |
-| **Partner** | Approve own community's submissions, create systems directly, manage sub-admins |
-| **Sub-Admin** | Delegated features (approvals, system create/edit) based on partner settings |
-| **Super Admin** | Full access, partner management, global settings, all communities |
-
-## Environment Setup
-
-### Development Mode
-```bash
-# Terminal 1: Backend API
-cd Master-Haven
-python Haven-UI/backend/control_room_api.py  # Runs on :8005
-
-# Terminal 2: Frontend (hot-reload)
-cd Haven-UI
-npm run dev  # Runs on :5173, proxies API to :8005
-```
-
-### Production Mode
-```bash
-# Build frontend
-cd Haven-UI && npm run build
-
-# Run single server (serves both API and built frontend)
-cd Master-Haven
-python Haven-UI/backend/control_room_api.py  # Serves everything on :8005
-```
-
-### Public Access
-Haven is self-hosted at `https://havenmap.online` on a Raspberry Pi 5 (10.0.0.229) via Nginx Proxy Manager + Cloudflare DNS + Let's Encrypt SSL.
-
-## Configuration Files
-
-| File | Purpose |
-|------|---------|
-| `config/paths.py` | Centralized path resolution (cross-platform) |
-| `Haven-UI/.env` | Frontend environment (API URL) |
-| `NMS-Save-Watcher/config.json` | Watcher API key and settings |
-| `keeper-discord-bot-main/.env` | Discord bot token and channel IDs |
-
-## Common Development Tasks
-
-### Adding a New API Endpoint
-1. Add route in `Haven-UI/backend/control_room_api.py`
-2. Add corresponding function in `Haven-UI/src/utils/api.js`
-3. Use in React components
-
-### Database Migration
-1. Add migration function in `Haven-UI/backend/migrations.py` with `@register_migration`
-2. Restart server - migrations run automatically
-
-### Adding a New Discovery Type
-1. Update `discovery_types` in keeper bot config
-2. Add modal in `keeper-discord-bot-main/src/cogs/discovery_modals.py`
-3. Update Haven-UI Discoveries page if needed
-
-## Testing
-
-```bash
-# API endpoint tests
-python tests/api/test_endpoints.py
-
-# Approval system tests
-python tests/api/test_approvals_system.py
-
-# Generate test data (30 systems with proper glyphs)
-python tests/data/generate_test_data.py
-```
-
-## Related Documentation
-
-- [Haven-UI/CLAUDE.md](Haven-UI/CLAUDE.md) - React frontend details
-- [Haven-UI/backend/CLAUDE.md](Haven-UI/backend/CLAUDE.md) - Backend API reference
-- [NMS-Haven-Extractor/CLAUDE.md](NMS-Haven-Extractor/CLAUDE.md) - Game mod architecture
-- [NMS-Debug-Enabler/README.md](NMS-Debug-Enabler/README.md) - Debug enabler mod
-- [docs/START_HERE.md](docs/START_HERE.md) - Quick-start guide
-- [docs/GLYPH_SYSTEM_IMPLEMENTATION.md](docs/GLYPH_SYSTEM_IMPLEMENTATION.md) - Coordinate system
-- [docs/FUTURE_IMPROVEMENTS.md](docs/FUTURE_IMPROVEMENTS.md) - Roadmap
-
-## Key Concepts
-
-### Portal Glyph System
-- 12-character hexadecimal code: `P-SSS-YY-ZZZ-XXX`
-- P = Planet index, SSS = Solar system, YY = Y-axis, ZZZ = Z-axis, XXX = X-axis
-- Bidirectional conversion in `Haven-UI/backend/glyph_decoder.py`
-
-### Multi-Community Support
-- Partners represent Discord communities (Haven, IEA, B.E.S, etc.)
-- Submissions tagged with `discord_tag` for routing
-- Partners only see their community's pending approvals
-- Color-coded badges in UI
-
-### Self-Approval Prevention
-- Users cannot approve their own submissions
-- Matched by account ID or Discord username
-- Ensures data quality through peer review
+│   Extracts live data  │   Queues for upload                      

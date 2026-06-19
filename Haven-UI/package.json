@@ -1,6 +1,6 @@
 {
   "name": "haven-ui",
-  "version": "1.66.4",
+  "version": "1.67.0",
   "private": true,
   "scripts": {
     "dev": "vite --config vite.config.mjs",
@@ -13,6 +13,7 @@
     "@heroicons/react": "^2.0.18",
     "@react-three/drei": "^9.120.0",
     "@react-three/fiber": "^8.17.0",
+    "@rollup/rollup-linux-x64-gnu": "^4.62.2",
     "axios": "^1.4.0",
     "date-fns": "^4.1.0",
     "esbuild": "^0.27.0",

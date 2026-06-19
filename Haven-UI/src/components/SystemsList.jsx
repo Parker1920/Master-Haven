@@ -134,8 +134,8 @@ export default function SystemsList() {
       })
       return
     }
-    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${sys.id}` })
-    navigate(`/systems/${encodeURIComponent(sys.id)}`)
+    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${encodeURIComponent(sys.name)}` })
+    navigate(`/systems/${encodeURIComponent(sys.name)}`)
   }
 
   const total = sorted.length

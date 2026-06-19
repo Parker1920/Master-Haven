@@ -109,6 +109,7 @@ from db import (
     parse_station_data, add_activity_log,
     get_system_glyph, find_matching_system, find_matching_pending_system,
     build_mismatch_flags, merge_system_data,
+    snapshot_child_name_maps, relink_discoveries_after_rebuild,
     PHOTOS_DIR, LOGS_DIR,
 )
 
@@ -2199,9 +2200,40 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
         if db_path.exists():
             conn = get_db_connection()
             cursor = conn.cursor()
-            # Lookup by ID only — system identity is glyph-based, not name-based
+            # Resolve by id first (keeps old /systems/1234 numeric bookmarks
+            # working), then fall back to a case-insensitive name lookup so
+            # pretty URLs like /systems/Mabaya resolve. A name shared by more
+            # than one system returns HTTP 300 with the candidate list so the
+            # frontend can show a disambiguation picker.
+            row = None
             cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
             row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    'SELECT * FROM systems WHERE name = ? COLLATE NOCASE',
+                    (system_id,)
+                )
+                name_rows = cursor.fetchall()
+                if len(name_rows) > 1:
+                    matches = []
+                    for nr in name_rows:
+                        nd = dict(nr)
+                        try:
+                            grade = calculate_completeness_score(cursor, nd.get('id'))['grade']
+                        except Exception:
+                            grade = None
+                        matches.append({
+                            'id': nd.get('id'),
+                            'name': nd.get('name'),
+                            'galaxy': nd.get('galaxy'),
+                            'reality': nd.get('reality'),
+                            'glyph_code': nd.get('glyph_code'),
+                            'discord_tag': nd.get('discord_tag'),
+                            'completeness_grade': grade,
+                        })
+                    return JSONResponse(status_code=300, content={'multiple': True, 'systems': matches})
+                elif len(name_rows) == 1:
+                    row = name_rows[0]
             if not row:
                 raise HTTPException(status_code=404, detail='System not found')
             system = dict(row)
@@ -2285,6 +2317,7 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
                     SELECT d.id, d.discovery_name, d.discovery_type, d.type_slug,
                            d.description, d.discovered_by, d.discord_tag,
                            d.submission_timestamp, d.photo_url AS photos, d.is_featured AS featured,
+                           d.is_featured, d.photo_url, d.evidence_url,
                            d.view_count, d.type_metadata, d.location_name,
                            d.location_type, d.latitude, d.longitude, d.planet_id, d.moon_id,
                            p.name AS planet_name,
@@ -2308,6 +2341,11 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
                                 d_dict[json_field] = json.loads(raw)
                             except (json.JSONDecodeError, TypeError):
                                 pass
+                    # Attach emoji/label so the discovery modal (and any list
+                    # render) gets type_info without a client-side lookup —
+                    # mirrors what browse/recent do.
+                    slug = d_dict.get('type_slug') or get_discovery_type_slug(d_dict.get('discovery_type', ''))
+                    d_dict['type_info'] = DISCOVERY_TYPE_INFO.get(slug, DISCOVERY_TYPE_INFO['other'])
                     discoveries_list.append(d_dict)
                 system['discoveries'] = discoveries_list
             except Exception as disc_err:
@@ -2686,6 +2724,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         editor_username = session_data.get('username') or payload.get('personal_discord_username') or 'Unknown'
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # Pre-delete planet/moon name->id snapshot (populated only on the edit path,
+        # see snapshot_child_name_maps below) so discovery links survive the rebuild.
+        _disc_planet_old, _disc_moon_old = {}, {}
+
         if existing:
             sys_id = existing['id']
 
@@ -2768,6 +2810,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
 
             # NOTE: Delete-and-reinsert for planets. Frontend sends the complete planet list
             # each time, so we replace all rather than diffing individual planet rows.
+            # Capture planet/moon name->id BEFORE the delete so we can re-point this
+            # system's discoveries to the rebuilt rows afterward — otherwise the new
+            # primary keys orphan every linked discovery (the Mabaya "tags wiped" bug).
+            _disc_planet_old, _disc_moon_old = snapshot_child_name_maps(cursor, sys_id)
             cursor.execute('DELETE FROM planets WHERE system_id = ?', (sys_id,))
             # Delete existing space station
             cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (sys_id,))
@@ -3058,6 +3104,16 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     )
             except Exception as region_err:
                 logger.warning(f"Admin region direct-write failed: {region_err}")
+
+        # Re-point discoveries to the rebuilt planets/moons (edit path only).
+        # The planets/moons were deleted and re-inserted with new ids above, so
+        # match them back to their discoveries by name. Without this, every save
+        # of a system with discoveries orphans them into "in space".
+        if existing:
+            _relinked = relink_discoveries_after_rebuild(
+                cursor, sys_id, _disc_planet_old, _disc_moon_old)
+            if _relinked:
+                logger.info(f"Re-pointed {_relinked} discovery link(s) after rebuild of system {sys_id}")
 
         # Calculate and store completeness score
         update_completeness_score(cursor, sys_id)
