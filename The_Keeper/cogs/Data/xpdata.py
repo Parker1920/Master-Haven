@@ -204,6 +204,7 @@ async def init_db():
         """)
 
         await db.commit()
+        log.info("init_db() finished")
     
 async def system_xp(user_id: int, amount: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -226,7 +227,7 @@ async def system_xp(user_id: int, amount: int):
         """, (amount, user_id))
 
         await db.commit()
-        log.info("init_db() finished")
+        
 # ---------------- CONFIG HELPERS ----------------
 def get_cfg(key, default=0):
     section, sub = key.split(".")
