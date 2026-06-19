@@ -432,15 +432,7 @@ class SimpleHexKeypad(discord.ui.View):
                     await self.temp_error(
                         interaction,
                         "❌ Invalid XXX"
-                    )
-                glyph = self.input_string.upper()
-
-                data = await self.fetch_system_owner(
-                    session,
-                    glyph
-                )
-                                
-                print(f"INPUT SYSTEM ID: {system_id}")
+                    )                
 
                 self.system_owner_type = "uncharted"
                 self.system_owner_tag = None
@@ -452,10 +444,10 @@ class SimpleHexKeypad(discord.ui.View):
                     async with aiohttp.ClientSession(
                         timeout=timeout
                     ) as session:
-
+                        glyph = self.input_string.upper()
                         data = await self.fetch_system_owner(
                             session,
-                            system_id
+                            glyph
                         )
                         
                         if data:
