@@ -90,12 +90,17 @@ CORE_VOID_RADIUS_Y = 1  # Coordinate units from center in Y axis (scaled: 8 * 25
 CORE_VOID_ENABLED = True  # Can be disabled for testing
 
 # Phantom star detection
-# Each region has 4,096 possible star systems (SSS 001-FFF)
-# Only ~600 are accessible on the Galactic Map; the rest are phantom stars
+# Each region has 4,096 possible star systems (SSS 000-FFF), but only specific
+# Solar System Index (SSI) ranges produce stars accessible on the Galactic Map.
+# Everything outside these ranges is a phantom star.
 # Reference: https://nomanssky.fandom.com/wiki/Phantom_Star
-PHANTOM_SSS_THRESHOLD = 0x258  # 600 decimal - SSS >= this are typically phantom
-PHANTOM_SSS_EXCEPTION = 0x3E8  # 1000 decimal - bug allows this to appear on map
-PHANTOM_SSS_ZERO = True  # SSS = 0x000 also produces phantom stars in some regions
+#
+# Valid SSI ranges (everything outside these is phantom)
+VALID_SSI_YRGB = (0x001, 0x2FF)      # 1-767: Yellow/Red/Green/Blue stars
+VALID_SSI_SHADOW = 0x3E8              # 1000: Shadow/Glass star (hyperjump only)
+VALID_SSI_PURPLE = (0x3E9, 0x429)     # 1001-1065: Purple stars (Atlantid Drive)
+# SSI 0x300-0x3E7 (768-999) is a phantom gap between YRGB and Shadow/Purple
+# SSI 0 and SSI 0x42A+ (1066+) are also phantom
 
 # Region size in coordinate units (NMS uses 128-unit regions)
 REGION_SIZE = 128
@@ -481,11 +486,17 @@ def is_in_core_void(x: int, y: int, z: int) -> bool:
 
 def is_phantom_star(solar_system_index: int) -> bool:
     """
-    Check if a solar system index indicates a phantom star.
+    Check if a solar system index falls outside known valid ranges (phantom star).
 
     Phantom stars are star systems that exist in the game data but are not
     normally accessible via the Galactic Map. Each region has 4,096 possible
-    systems (SSS 001-FFF), but only ~600 appear on the map.
+    systems (SSS 000-FFF), but only specific SSI ranges produce accessible stars:
+
+      - SSI 1-767 (0x001-0x2FF): Yellow/Red/Green/Blue stars
+      - SSI 1000 (0x3E8): Shadow/Glass star (hyperjump only)
+      - SSI 1001-1065 (0x3E9-0x429): Purple stars (Atlantid Drive)
+
+    Everything else (SSI 0, 768-999, 1066+) is a phantom star.
 
     Reference: https://nomanssky.fandom.com/wiki/Phantom_Star
 
@@ -495,16 +506,13 @@ def is_phantom_star(solar_system_index: int) -> bool:
     Returns:
         True if this is a phantom star, False if accessible
     """
-    # SSS = 0 produces phantom stars in some regions
-    if PHANTOM_SSS_ZERO and solar_system_index == 0:
-        return True
-
-    # SSS = 0x3E8 (1000) is a special exception - appears on map due to bug
-    if solar_system_index == PHANTOM_SSS_EXCEPTION:
+    if VALID_SSI_YRGB[0] <= solar_system_index <= VALID_SSI_YRGB[1]:
         return False
-
-    # SSS >= 600 (0x258) are typically phantom stars
-    return solar_system_index >= PHANTOM_SSS_THRESHOLD
+    if solar_system_index == VALID_SSI_SHADOW:
+        return False
+    if VALID_SSI_PURPLE[0] <= solar_system_index <= VALID_SSI_PURPLE[1]:
+        return False
+    return True  # SSI 0, 768-999, 1066+ are all phantom
 
 
 def get_system_classification(x: int, y: int, z: int, solar_system_index: int) -> dict:
