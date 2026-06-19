@@ -147,6 +147,7 @@ async def migrate(db):
     await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, primary_role TEXT)")
 
 async def init_db():
+    log.info("init_db() started")
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -225,7 +226,7 @@ async def system_xp(user_id: int, amount: int):
         """, (amount, user_id))
 
         await db.commit()
-
+        log.info("init_db() finished")
 # ---------------- CONFIG HELPERS ----------------
 def get_cfg(key, default=0):
     section, sub = key.split(".")
