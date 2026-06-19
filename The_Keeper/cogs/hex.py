@@ -433,14 +433,12 @@ class SimpleHexKeypad(discord.ui.View):
                         interaction,
                         "❌ Invalid XXX"
                     )
-
-                dup = await     self.api.check_duplicate(self.input_string.upper())
-
-                system_id = str(
-                    dup.get("system_id")
-                    or dup.get("id")
-                    or ""
-                ).upper()
+                
+                system_id = self.input_string.upper()
+                data = await self.fetch_system_owner(
+                    session,
+                    system_id
+                )
                 print(f"INPUT SYSTEM ID: {system_id}")
 
                 self.system_owner_type = "uncharted"
