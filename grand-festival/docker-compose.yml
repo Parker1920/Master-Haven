@@ -19,7 +19,7 @@ services:
     volumes:
       - "${GF_DATA_DIR:-./data-local}:/data"
     environment:
-      - ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-changeme}
+      - ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-GrandFestival2026!}
       - DATA_DIR=/data
       - DB_PATH=/data/grand_festival.db
       - UPLOAD_DIR=/data/uploads
