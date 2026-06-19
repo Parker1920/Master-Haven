@@ -196,11 +196,21 @@ export default function Events({ embedded = false }) {
     }
   }
 
+  // Prefer the backend-computed status (UTC-date based) — the old client-side
+  // comparison mixed a Z-suffixed ISO 'now' against bare date strings and was
+  // wrong near day boundaries. Falls back to a local derivation for safety.
   const getEventStatus = (event) => {
-    const now = new Date().toISOString()
+    const byBackend = {
+      active: { label: 'Active', pill: 'pill-emerald' },
+      upcoming: { label: 'Upcoming', pill: 'pill-amber' },
+      ended: { label: 'Ended', pill: 'pill-muted' },
+      inactive: { label: 'Inactive', pill: 'pill-muted' },
+    }
+    if (event.status && byBackend[event.status]) return byBackend[event.status]
     if (!event.is_active) return { label: 'Inactive', pill: 'pill-muted' }
-    if (event.start_date > now) return { label: 'Upcoming', pill: 'pill-amber' }
-    if (event.end_date + 'T23:59:59' < now) return { label: 'Ended', pill: 'pill-muted' }
+    const today = new Date().toISOString().slice(0, 10)
+    if ((event.start_date || '').slice(0, 10) > today) return { label: 'Upcoming', pill: 'pill-amber' }
+    if ((event.end_date || '').slice(0, 10) < today) return { label: 'Ended', pill: 'pill-muted' }
     return { label: 'Active', pill: 'pill-emerald' }
   }
 
@@ -238,7 +248,7 @@ export default function Events({ embedded = false }) {
           <div>
             <h1 className="text-2xl font-bold" style={{ color: 'var(--app-text)' }}>Community Events</h1>
             <p className="text-sm mt-1" style={{ color: 'var(--app-text)', opacity: 0.6 }}>
-              Track submissions and discoveries during event periods
+              Create competitions members opt into at submit time. Leaderboards count approved entries only.
             </p>
           </div>
         ) : <div />}

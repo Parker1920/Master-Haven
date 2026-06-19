@@ -4,6 +4,7 @@ import Button from './Button'
 import FormField from './FormField'
 import GlyphPicker from './GlyphPicker'
 import LatLngInput, { coordToFloat } from './LatLngInput'
+import EventPicker from './wizard/EventPicker'
 import { TYPE_INFO } from '../data/discoveryTypes'
 import { AuthContext } from '../utils/AuthContext'
 
@@ -93,7 +94,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editD
     longitude: '',
     discord_username: '',
     discord_tag: '',
-    evidence_urls: ''
+    evidence_urls: '',
+    event_id: null
   })
 
   const [typeMetadata, setTypeMetadata] = useState({})
@@ -185,7 +187,8 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editD
       longitude: '',
       discord_username: user?.username || '',
       discord_tag: user?.defaultCivTag || '',
-      evidence_urls: ''
+      evidence_urls: '',
+      event_id: null
     })
     setTypeMetadata({})
     setExistingPhotoUrl('')
@@ -427,6 +430,10 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editD
         type_metadata: Object.keys(metadata).length > 0 ? metadata : null,
         profile_id: user?.profileId || null,
         edit_discovery_id: isEdit ? editDiscovery.id : null,
+        // Event participation only on new submissions; an edit preserves the
+        // live discovery's existing event link server-side (approve UPDATE
+        // doesn't touch event_id).
+        event_id: isEdit ? null : (form.event_id || null),
       }
 
       const res = await fetch('/api/submit_discovery', {
@@ -853,6 +860,16 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editD
               </select>
             </FormField>
           </div>
+          {!isEdit && (
+            <div className="mt-4">
+              <EventPicker
+                value={form.event_id}
+                onChange={(id) => setField('event_id', id)}
+                discordTag={form.discord_tag}
+                kind="discovery"
+              />
+            </div>
+          )}
         </div>
 
         {/* Photos & Evidence Section */}

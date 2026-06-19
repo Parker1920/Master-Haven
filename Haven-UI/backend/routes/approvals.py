@@ -57,6 +57,7 @@ from services.completeness import (
 )
 from services.civilizations import civ_scope_filter, user_can_act_for_civ
 from services.dispatch import fire_and_forget
+from services.events import resolve_submission_event_id
 
 logger = logging.getLogger('control.room')
 
@@ -224,6 +225,9 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username,
         or 'anonymous'
     )
     source = submission.get('source') or 'manual'
+    # Co-submitted discoveries inherit the parent system's event so a system
+    # tagged into an event drags its bundled discoveries into the same event.
+    parent_event_id = submission.get('event_id')
     submission_iso = (
         submission.get('submission_date')
         or datetime.now(timezone.utc).isoformat()
@@ -292,8 +296,8 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username,
                     mystery_tier, analysis_status, pattern_matches,
                     discord_user_id, discord_guild_id,
                     photo_url, evidence_url, type_slug, discord_tag, type_metadata,
-                    profile_id, source, latitude, longitude
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    profile_id, source, latitude, longitude, event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 entry.get('discovery_type') or 'Unknown',
                 entry.get('discovery_name'),
@@ -320,6 +324,7 @@ def _promote_draft_discoveries(cursor, system_id, submission, current_username,
                 source,
                 d_lat,
                 d_lng,
+                parent_event_id,
             ))
             discovery_id = cursor.lastrowid
             promoted += 1
@@ -629,6 +634,14 @@ async def submit_system(
         except (TypeError, ValueError):
             wizard_expedition_id = None
 
+        # Event participation (opt-in competitions). The submitter picks an
+        # active event at upload time; validate it exists, is active, is in its
+        # date window, and belongs to this submission's community, else drop it
+        # (a bad/expired pick simply doesn't enter the competition).
+        wizard_event_id = resolve_submission_event_id(
+            cursor, payload.get('event_id'), discord_tag, 'submission'
+        )
+
         # Game mode from payload (per-difficulty: Normal/Permadeath/Survival/etc).
         # Previously stored only in system_data JSON which meant the approval
         # review UI and any column-level filter couldn't see it without
@@ -657,8 +670,8 @@ async def submit_system(
              source, api_key_name, discord_tag, personal_discord_username,
              edit_system_id, submitter_account_id, submitter_account_type,
              submitter_profile_id, username_normalized,
-             game_version, submitter_notes, expedition_id, discoveries_draft)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             game_version, submitter_notes, expedition_id, discoveries_draft, event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             submitter_identity['username'] if submitter_identity['username'] else submitted_by,
             client_ip,
@@ -690,6 +703,7 @@ async def submit_system(
             wizard_submitter_notes,
             wizard_expedition_id,
             json.dumps(discoveries_draft_clean) if discoveries_draft_clean else None,
+            wizard_event_id,
         ))
 
         submission_id = cursor.lastrowid
@@ -1475,6 +1489,10 @@ async def approve_system(
                 submission.get('expedition_id')
                 or system_data.get('expedition_id')
             )
+            wizard_event_id = (
+                submission.get('event_id')
+                or system_data.get('event_id')
+            )
 
             # UPDATE existing system - PRESERVE discovered_by/discovered_at, UPDATE last_updated_by/last_updated_at.
             # game_mode added — was previously frozen on edit forever, so a
@@ -1495,6 +1513,7 @@ async def approve_system(
                     last_updated_by = ?, last_updated_at = ?, contributors = ?,
                     game_version = COALESCE(?, game_version),
                     expedition_id = COALESCE(?, expedition_id),
+                    event_id = COALESCE(?, event_id),
                     game_mode = COALESCE(?, game_mode)
                 WHERE id = ?
             ''', (
@@ -1526,6 +1545,7 @@ async def approve_system(
                 json.dumps(contributors_list),
                 wizard_game_version,
                 wizard_expedition_id,
+                wizard_event_id,
                 new_game_mode,
                 system_id
             ))
@@ -1555,6 +1575,10 @@ async def approve_system(
                 submission.get('expedition_id')
                 or system_data.get('expedition_id')
             )
+            new_event_id = (
+                submission.get('event_id')
+                or system_data.get('event_id')
+            )
 
             # INSERT new system (including new tracking fields + wizard v1 fields)
             cursor.execute('''
@@ -1563,8 +1587,8 @@ async def approve_system(
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
                     contributors, created_at, game_mode, profile_id, source,
-                    game_version, expedition_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    game_version, expedition_id, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -1600,6 +1624,7 @@ async def approve_system(
                 submission.get('source', 'manual'),
                 new_game_version,
                 new_expedition_id,
+                new_event_id,
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -2642,6 +2667,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                     # fields that a prior single-approve would have preserved.
                     batch_game_version = submission.get('game_version') or system_data.get('game_version')
                     batch_expedition_id = submission.get('expedition_id') or system_data.get('expedition_id')
+                    batch_event_id = submission.get('event_id') or system_data.get('event_id')
                     batch_game_mode = submission.get('game_mode') or system_data.get('game_mode')
                     cursor.execute('''
                         UPDATE systems
@@ -2658,6 +2684,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             contributors = ?,
                             game_version = COALESCE(?, game_version),
                             expedition_id = COALESCE(?, expedition_id),
+                            event_id = COALESCE(?, event_id),
                             game_mode = COALESCE(?, game_mode)
                         WHERE id = ?
                     ''', (
@@ -2687,6 +2714,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         json.dumps(existing_contributors),
                         batch_game_version,
                         batch_expedition_id,
+                        batch_event_id,
                         batch_game_mode,
                         system_id
                     ))
@@ -2715,14 +2743,19 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         batch_new_expedition_id = int(batch_new_expedition_id) if batch_new_expedition_id else None
                     except (TypeError, ValueError):
                         batch_new_expedition_id = None
+                    batch_new_event_id = submission.get('event_id') or system_data.get('event_id')
+                    try:
+                        batch_new_event_id = int(batch_new_event_id) if batch_new_event_id else None
+                    except (TypeError, ValueError):
+                        batch_new_event_id = None
                     cursor.execute('''
                         INSERT INTO systems (id, name, galaxy, reality, x, y, z, star_x, star_y, star_z, description,
                             glyph_code, glyph_planet, glyph_solar_system, region_x, region_y, region_z,
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
                             contributors, created_at, game_mode, profile_id, source,
-                            game_version, expedition_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            game_version, expedition_id, event_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -2756,6 +2789,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         submission.get('source', 'manual'),
                         batch_new_game_version,
                         batch_new_expedition_id,
+                        batch_new_event_id,
                     ))
 
                 # Insert planets

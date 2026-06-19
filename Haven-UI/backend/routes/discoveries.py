@@ -24,6 +24,7 @@ from services.auth_service import (
     verify_api_key,
 )
 from services.civilizations import civ_scope_filter, user_can_act_for_civ
+from services.events import resolve_submission_event_id
 
 logger = logging.getLogger('control.room')
 
@@ -206,14 +207,22 @@ async def create_discovery(
         payload['latitude'] = api_lat
         payload['longitude'] = api_lng
 
+        # Event participation — only honoured if the (bot) client passed an
+        # event_id that's a valid, active, in-window discovery event for this
+        # community. Almost always None for bot traffic; kept for parity.
+        api_event_id = resolve_submission_event_id(
+            cursor, payload.get('event_id'), discord_tag, 'discovery'
+        )
+        payload['event_id'] = api_event_id
+
         cursor.execute('''
             INSERT INTO pending_discoveries (
                 discovery_data, discovery_name, discovery_type, type_slug,
                 system_id, system_name, planet_name, moon_name, location_type,
                 discord_tag, submitted_by, submitted_by_ip,
                 submitter_account_id, submitter_account_type, submitter_profile_id,
-                submission_date, photo_url, source, latitude, longitude, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                submission_date, photo_url, source, latitude, longitude, event_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             json.dumps(payload),
             discovery_name,
@@ -235,6 +244,7 @@ async def create_discovery(
             source,
             api_lat,
             api_lng,
+            api_event_id,
         ))
         conn.commit()
         submission_id = cursor.lastrowid
@@ -796,6 +806,15 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
         payload['latitude'] = latitude
         payload['longitude'] = longitude
 
+        # Event participation (opt-in competition). Validate the submitter's
+        # chosen event against this discovery's community; drop it if it's not
+        # an active, in-window, discovery-accepting event. Mirror it into the
+        # JSON blob so the approval path can read it.
+        event_id = resolve_submission_event_id(
+            cursor, payload.get('event_id'), discord_tag, 'discovery'
+        )
+        payload['event_id'] = event_id
+
         # Store entire payload as JSON
         discovery_data = json.dumps(payload)
 
@@ -806,8 +825,8 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
                 discord_tag, submitted_by, submitted_by_ip,
                 submitter_account_id, submitter_account_type, submitter_profile_id,
                 submission_date, photo_url, source, latitude, longitude,
-                edit_discovery_id, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                edit_discovery_id, event_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (
             discovery_data,
             discovery_name,
@@ -830,6 +849,7 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             latitude,
             longitude,
             edit_discovery_id,
+            event_id,
         ))
         conn.commit()
         submission_id = cursor.lastrowid
@@ -1241,8 +1261,8 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                     mystery_tier, analysis_status, pattern_matches,
                     discord_user_id, discord_guild_id,
                     photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source,
-                    latitude, longitude
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    latitude, longitude, event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 discovery_type,
                 discovery_name,
@@ -1269,6 +1289,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                 submission.get('source') or SOURCE_MANUAL,
                 latitude,
                 longitude,
+                submission.get('event_id') if submission.get('event_id') is not None else discovery_data.get('event_id'),
             ))
             discovery_id = cursor.lastrowid
 

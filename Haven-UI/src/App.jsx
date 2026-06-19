@@ -31,6 +31,7 @@ const ApprovalAudit = lazy(() => import('./pages/ApprovalAudit'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const PartnerAnalytics = lazy(() => import('./pages/PartnerAnalytics'))
 const Events = lazy(() => import('./pages/Events'))
+const EventsPublic = lazy(() => import('./pages/EventsPublic'))
 const CsvImport = lazy(() => import('./pages/CsvImport'))
 const DataRestrictions = lazy(() => import('./pages/DataRestrictions'))
 const ExtractorUsers = lazy(() => import('./pages/ExtractorUsers'))
@@ -178,7 +179,10 @@ function AppShell() {
               {/* Analytics (admin or partner) — individual routes preserved */}
               <Route path="/analytics" element={<RequireAdmin><Analytics /></RequireAdmin>} />
               <Route path="/partner-analytics" element={<RequireAdmin><PartnerAnalytics /></RequireAdmin>} />
-              <Route path="/events" element={<RequireAdmin><Events /></RequireAdmin>} />
+              {/* Public competition showcase (v1.90.0). Admin create/manage
+                  lives at /events/manage and in the Analytics Hub Events tab. */}
+              <Route path="/events" element={<EventsPublic />} />
+              <Route path="/events/manage" element={<RequireAdmin><Events /></RequireAdmin>} />
 
               {/* Access Control Hub (v1.49.0) — tabbed shell replacing
                   /admin/users, /admin/sub-admins, /admin/extractors, /api-keys. */}

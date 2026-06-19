@@ -1,7 +1,31 @@
-"""Events CRUD and leaderboard endpoints."""
+"""Events CRUD, participation picker, and approved-only leaderboards.
+
+An event is a time-boxed, community-scoped competition. Submitters opt in by
+picking an active event at upload time; the chosen `event_id` is stored on the
+pending row and carried to the live `systems` / `discoveries` row on approval
+(see services/events.py + the intake paths in approvals.py / discoveries.py).
+
+Scoring counts APPROVED rows only, grouped by `event_id` — NOT a tag+date slice
+of the whole submission firehose (the pre-v1.90 behaviour, which counted
+pending/rejected rows and couldn't tell two overlapping events apart).
+
+Routes:
+  Admin/partner (auth):
+    GET    /api/events                 — manage list (own community, approved counts)
+    GET    /api/events/active          — picker feed (active, in-window events)
+    POST   /api/events                 — create
+    GET    /api/events/{id}            — single
+    GET    /api/events/{id}/leaderboard
+    PUT    /api/events/{id}            — update / toggle active
+    DELETE /api/events/{id}
+  Public (no auth):
+    GET    /api/public/events
+    GET    /api/public/events/{id}
+    GET    /api/public/events/{id}/leaderboard
+"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, HTTPException, Request
@@ -15,25 +39,267 @@ router = APIRouter(tags=["events"])
 
 
 # ============================================================================
-# Events Endpoints (for submission events/competitions)
+# Helpers
+# ============================================================================
+
+# event_type → which submission kinds it scores.
+_TYPE_ACCEPTS = {
+    'submissions': ('systems',),
+    'discoveries': ('discoveries',),
+    'both': ('systems', 'discoveries'),
+}
+
+
+def _norm_user_sql(col: str) -> str:
+    """SQL expression that normalizes a username column to a dedup key.
+
+    Trim, drop a leading 'Anonymous'/'anonymous', strip '#', remove a trailing
+    4-digit Discord discriminator, lowercase. Applied IDENTICALLY to the
+    `discovered_by` column on both `systems` and `discoveries` so the combined
+    leaderboard merges the same person from both sources (the pre-v1.90 bug
+    normalized the two sides differently and double-counted)."""
+    raw = f"COALESCE(NULLIF(NULLIF({col}, 'Anonymous'), 'anonymous'), 'Unknown')"
+    trimmed = f"TRIM(REPLACE({raw}, '#', ''))"
+    return f'''LOWER(TRIM(
+        CASE
+            WHEN LENGTH({trimmed}) > 4
+                AND SUBSTR({trimmed}, -4) GLOB '[0-9][0-9][0-9][0-9]'
+                AND (LENGTH({trimmed}) = 4
+                    OR SUBSTR({trimmed}, -5, 1) NOT GLOB '[0-9]')
+            THEN SUBSTR({trimmed}, 1, LENGTH({trimmed}) - 4)
+            ELSE {trimmed}
+        END
+    ))'''
+
+
+_NORM = _norm_user_sql('discovered_by')
+
+
+def _compute_status(event: dict) -> str:
+    """Derive an event's lifecycle status from its dates + active flag.
+
+    Uses the UTC calendar date against the inclusive [start_date, end_date]
+    window. Returned to the client so the UI doesn't re-derive it from a
+    timezone-mismatched comparison (the pre-v1.90 frontend bug)."""
+    if not event.get('is_active'):
+        return 'inactive'
+    today = datetime.now(timezone.utc).date().isoformat()
+    start = (event.get('start_date') or '')[:10]
+    end = (event.get('end_date') or '')[:10]
+    if start and today < start:
+        return 'upcoming'
+    if end and today > end:
+        return 'ended'
+    return 'active'
+
+
+def _enrich_event(cursor, event: dict) -> dict:
+    """Attach approved-only counts + computed status to an event row."""
+    event_type = event.get('event_type') or 'submissions'
+
+    if event_type in ('submissions', 'both'):
+        cursor.execute(f'''
+            SELECT COUNT(*) AS c,
+                   COUNT(DISTINCT CASE WHEN {_NORM} != 'unknown' THEN {_NORM} END) AS p
+            FROM systems WHERE event_id = ?
+        ''', (event['id'],))
+        r = cursor.fetchone()
+        event['submission_count'] = r['c'] or 0
+        event['participant_count'] = r['p'] or 0
+    else:
+        event['submission_count'] = 0
+        event['participant_count'] = 0
+
+    if event_type in ('discoveries', 'both'):
+        cursor.execute(f'''
+            SELECT COUNT(*) AS c,
+                   COUNT(DISTINCT CASE WHEN {_NORM} != 'unknown' THEN {_NORM} END) AS p
+            FROM discoveries WHERE event_id = ?
+        ''', (event['id'],))
+        r = cursor.fetchone()
+        event['discovery_count'] = r['c'] or 0
+        event['discovery_participant_count'] = r['p'] or 0
+    else:
+        event['discovery_count'] = 0
+        event['discovery_participant_count'] = 0
+
+    event['status'] = _compute_status(event)
+    event['is_current'] = event['status'] == 'active'
+    return event
+
+
+def _caller_civ_tags(session_data) -> list:
+    """The communities a logged-in caller can manage events for.
+
+    Uses the full civ_tags list (so a leader/sub-admin of multiple civs sees
+    all of them), falling back to the legacy single discord_tag for older
+    sessions. Empty list = no community → sees nothing (closes the pre-v1.90
+    leak where a tag-less admin saw every community's events)."""
+    if not session_data:
+        return []
+    tags = list(session_data.get('civ_tags') or [])
+    legacy = session_data.get('discord_tag')
+    if not tags and legacy:
+        tags = [legacy]
+    return tags
+
+
+def _compute_leaderboard(cursor, event: dict, tab: str, limit: int) -> dict:
+    """Approved-only leaderboard for one event, keyed by event_id.
+
+    tab: 'submissions' | 'discoveries' | 'combined'. Returns {leaderboard, totals}.
+    """
+    event_id = event['id']
+    leaderboard = []
+    totals = {}
+
+    if tab == 'discoveries':
+        cursor.execute(f'''
+            SELECT MAX(discovered_by) AS username,
+                   COUNT(*) AS total_discoveries,
+                   COUNT(DISTINCT type_slug) AS types_count,
+                   GROUP_CONCAT(DISTINCT type_slug) AS type_slugs,
+                   MIN(submission_timestamp) AS first_discovery,
+                   MAX(submission_timestamp) AS last_discovery
+            FROM discoveries
+            WHERE event_id = ?
+            GROUP BY {_NORM}
+            HAVING {_NORM} != 'unknown'
+            ORDER BY total_discoveries DESC
+            LIMIT ?
+        ''', (event_id, limit))
+        for i, row in enumerate(cursor.fetchall(), start=1):
+            entry = dict(row)
+            entry['rank'] = i
+            leaderboard.append(entry)
+
+        cursor.execute(f'''
+            SELECT COUNT(*) AS total_discoveries,
+                   COUNT(DISTINCT CASE WHEN {_NORM} != 'unknown' THEN {_NORM} END) AS participants
+            FROM discoveries WHERE event_id = ?
+        ''', (event_id,))
+        tr = cursor.fetchone()
+        totals = {
+            'total_discoveries': tr['total_discoveries'] or 0,
+            'participants': tr['participants'] or 0,
+        }
+
+    elif tab == 'combined':
+        user_data = {}
+        cursor.execute(f'''
+            SELECT {_NORM} AS norm_user, MAX(discovered_by) AS username, COUNT(*) AS total_submissions
+            FROM systems
+            WHERE event_id = ?
+            GROUP BY {_NORM}
+            HAVING {_NORM} != 'unknown'
+        ''', (event_id,))
+        for row in cursor.fetchall():
+            r = dict(row)
+            user_data[r['norm_user']] = {
+                'username': r['username'],
+                'total_submissions': r['total_submissions'],
+                'total_discoveries': 0,
+            }
+
+        cursor.execute(f'''
+            SELECT {_NORM} AS norm_user, MAX(discovered_by) AS username, COUNT(*) AS total_discoveries
+            FROM discoveries
+            WHERE event_id = ?
+            GROUP BY {_NORM}
+            HAVING {_NORM} != 'unknown'
+        ''', (event_id,))
+        for row in cursor.fetchall():
+            r = dict(row)
+            norm = r['norm_user']
+            if norm in user_data:
+                user_data[norm]['total_discoveries'] = r['total_discoveries']
+            else:
+                user_data[norm] = {
+                    'username': r['username'],
+                    'total_submissions': 0,
+                    'total_discoveries': r['total_discoveries'],
+                }
+
+        ordered = sorted(
+            user_data.values(),
+            key=lambda u: u['total_submissions'] + u['total_discoveries'],
+            reverse=True,
+        )[:limit]
+        for i, entry in enumerate(ordered, start=1):
+            entry['rank'] = i
+            entry['combined_total'] = entry['total_submissions'] + entry['total_discoveries']
+            leaderboard.append(entry)
+
+        sub_total = sum(u['total_submissions'] for u in user_data.values())
+        disc_total = sum(u['total_discoveries'] for u in user_data.values())
+        totals = {
+            'total_submissions': sub_total,
+            'total_discoveries': disc_total,
+            'combined_total': sub_total + disc_total,
+            'participants': len(user_data),
+        }
+
+    else:  # 'submissions' (default)
+        cursor.execute(f'''
+            SELECT MAX(discovered_by) AS username,
+                   COUNT(*) AS total_submissions,
+                   MIN(created_at) AS first_submission,
+                   MAX(created_at) AS last_submission
+            FROM systems
+            WHERE event_id = ?
+            GROUP BY {_NORM}
+            HAVING {_NORM} != 'unknown'
+            ORDER BY total_submissions DESC
+            LIMIT ?
+        ''', (event_id, limit))
+        for i, row in enumerate(cursor.fetchall(), start=1):
+            entry = dict(row)
+            entry['rank'] = i
+            # All rows are already approved (live `systems`), so total == approved.
+            # Kept so the shared LeaderboardTable (Total/Approved/Rate columns) renders.
+            entry['approved'] = entry['total_submissions']
+            entry['rejected'] = 0
+            entry['approval_rate'] = 100.0
+            leaderboard.append(entry)
+
+        cursor.execute(f'''
+            SELECT COUNT(*) AS total_submissions,
+                   COUNT(DISTINCT CASE WHEN {_NORM} != 'unknown' THEN {_NORM} END) AS participants
+            FROM systems WHERE event_id = ?
+        ''', (event_id,))
+        tr = cursor.fetchone()
+        total_sub = tr['total_submissions'] or 0
+        totals = {
+            'total_submissions': total_sub,
+            'total_approved': total_sub,
+            'participants': tr['participants'] or 0,
+        }
+
+    return {'leaderboard': leaderboard, 'totals': totals}
+
+
+# ============================================================================
+# Admin / partner endpoints
 # ============================================================================
 
 @router.get('/api/events')
 async def list_events(
     include_inactive: bool = False,
-    session: Optional[str] = Cookie(None)
+    session: Optional[str] = Cookie(None),
 ):
-    """
-    List submission events.
-    Partners see their own community's events.
-    Super admins see all.
+    """List events the caller can manage (their community's; super admin sees all).
+
+    Counts are approved-only and event-linked. The pre-v1.90 leak — where a
+    non-super admin with no resolved discord_tag saw every community's events —
+    is closed by scoping to the caller's civ_tags and returning nothing when
+    that list is empty.
     """
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
 
     conn = None
     try:
@@ -41,11 +307,14 @@ async def list_events(
         cursor = conn.cursor()
 
         query = 'SELECT * FROM events WHERE 1=1'
-        params = []
+        params: list = []
 
-        if not is_super and user_discord_tag:
-            query += ' AND discord_tag = ?'
-            params.append(user_discord_tag)
+        if not is_super:
+            if not civ_tags:
+                return {'events': []}
+            placeholders = ','.join(['?'] * len(civ_tags))
+            query += f' AND discord_tag IN ({placeholders})'
+            params.extend(civ_tags)
 
         if not include_inactive:
             query += ' AND is_active = 1'
@@ -54,75 +323,70 @@ async def list_events(
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
-        events = []
+        events = [_enrich_event(cursor, dict(row)) for row in rows]
+        return {'events': events}
+    finally:
+        if conn:
+            conn.close()
 
-        # Define username extraction (same as Analytics for consistency)
-        # Skip 'Anonymous' and 'anonymous' values to find the actual username
-        raw_username = '''COALESCE(
-            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
-            personal_discord_username,
-            json_extract(system_data, '$.discovered_by'),
-            'Unknown'
-        )'''
-        # Normalize: trim, remove #, strip trailing 4-digit Discord discriminator, lowercase
-        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
-        normalized_username = f'''LOWER(TRIM(
-            CASE
-                WHEN LENGTH({trimmed_username}) > 4
-                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
-                    AND (LENGTH({trimmed_username}) = 4
-                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
-                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
-                ELSE {trimmed_username}
-            END
-        ))'''
 
-        for row in rows:
-            event = dict(row)
-            event_type = event.get('event_type', 'submissions') or 'submissions'
+@router.get('/api/events/active')
+async def list_active_events(
+    discord_tag: Optional[str] = None,
+    kind: Optional[str] = None,
+    session: Optional[str] = Cookie(None),
+):
+    """Picker feed: events a submitter can currently enter.
 
-            # Get submission count and participant count for this event
-            if event_type in ('submissions', 'both'):
-                cursor.execute(f'''
-                    SELECT COUNT(*) as submissions,
-                           COUNT(DISTINCT CASE WHEN {normalized_username} != 'unknown' THEN {normalized_username} END) as participants
-                    FROM pending_systems
-                    WHERE discord_tag = ?
-                      AND submission_date >= ?
-                      AND submission_date <= ?
-                ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-                stats = cursor.fetchone()
-                event['submission_count'] = stats['submissions'] or 0
-                event['participant_count'] = stats['participants'] or 0
-            else:
-                event['submission_count'] = 0
-                event['participant_count'] = 0
+    Public (no auth) so the wizard's anonymous submitters can see events for the
+    community they're uploading to. Returns only events that are active AND whose
+    date window currently contains today.
 
-            # Get discovery count and participant count for discovery events
-            if event_type in ('discoveries', 'both'):
-                cursor.execute('''
-                    SELECT COUNT(*) as discoveries,
-                           COUNT(DISTINCT LOWER(TRIM(discovered_by))) as disc_participants
-                    FROM discoveries
-                    WHERE discord_tag = ?
-                      AND submission_timestamp >= ?
-                      AND submission_timestamp <= ?
-                      AND LOWER(TRIM(discovered_by)) != 'anonymous'
-                      AND LOWER(TRIM(discovered_by)) != 'unknown'
-                ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-                disc_stats = cursor.fetchone()
-                event['discovery_count'] = disc_stats['discoveries'] or 0
-                event['discovery_participant_count'] = disc_stats['disc_participants'] or 0
-            else:
-                event['discovery_count'] = 0
-                event['discovery_participant_count'] = 0
+    Query params:
+      - discord_tag: scope to the community the submission targets (the wizard /
+        discovery modal passes the chosen community here).
+      - kind: 'submission' or 'discovery' — filters to events whose event_type
+        scores that kind (a 'discoveries' event won't show for a system upload).
+    """
+    session_data = get_session(session)
+    today = datetime.now(timezone.utc).date().isoformat()
 
-            # Check if event is currently active (based on dates)
-            now = datetime.now().isoformat()
-            event['is_current'] = event['start_date'] <= now <= event['end_date'] + 'T23:59:59'
+    # Map the submission kind → acceptable event_type values.
+    if kind == 'submission':
+        type_filter = ('submissions', 'both')
+    elif kind == 'discovery':
+        type_filter = ('discoveries', 'both')
+    else:
+        type_filter = ('submissions', 'discoveries', 'both')
 
-            events.append(event)
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
+        where = ['is_active = 1', 'start_date <= ?', 'end_date >= ?']
+        params: list = [today, today]
+
+        if discord_tag:
+            where.append('discord_tag = ?')
+            params.append(discord_tag)
+        elif session_data:
+            # Logged in but no explicit community — scope to the caller's civs.
+            civ_tags = _caller_civ_tags(session_data)
+            if civ_tags:
+                where.append('discord_tag IN (' + ','.join(['?'] * len(civ_tags)) + ')')
+                params.extend(civ_tags)
+
+        type_ph = ','.join(['?'] * len(type_filter))
+        where.append(f'event_type IN ({type_ph})')
+        params.extend(type_filter)
+
+        cursor.execute(
+            'SELECT id, name, discord_tag, start_date, end_date, event_type, description '
+            f'FROM events WHERE {" AND ".join(where)} ORDER BY end_date ASC LIMIT 100',
+            params,
+        )
+        events = [dict(r) for r in cursor.fetchall()]
         return {'events': events}
     finally:
         if conn:
@@ -131,20 +395,17 @@ async def list_events(
 
 @router.post('/api/events')
 async def create_event(request: Request, session: Optional[str] = Cookie(None)):
-    """
-    Create a new submission event.
-    Partners can create events for their community.
-    Super admins can create for any community.
-    """
+    """Create an event. Partners create for their own community; super admins
+    can target any community via discord_tag."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
 
     body = await request.json()
-    name = body.get('name')
+    name = (body.get('name') or '').strip()
     discord_tag = body.get('discord_tag')
     start_date = body.get('start_date')
     end_date = body.get('end_date')
@@ -157,27 +418,29 @@ async def create_event(request: Request, session: Optional[str] = Cookie(None)):
     if not all([name, start_date, end_date]):
         raise HTTPException(status_code=400, detail='name, start_date, and end_date are required')
 
-    # Partners can only create events for their own community
+    if (end_date or '')[:10] < (start_date or '')[:10]:
+        raise HTTPException(status_code=400, detail='end_date cannot be before start_date')
+
     if not is_super:
-        if user_discord_tag:
-            discord_tag = user_discord_tag
-        else:
+        # Partners can only create for a community they belong to.
+        if not civ_tags:
             raise HTTPException(status_code=403, detail='Cannot create events without a community')
+        if not discord_tag or discord_tag not in civ_tags:
+            discord_tag = civ_tags[0]
+    if not discord_tag:
+        raise HTTPException(status_code=400, detail='Community (discord_tag) is required')
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
         cursor.execute('''
             INSERT INTO events (name, discord_tag, start_date, end_date, description, created_by, event_type)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (name, discord_tag, start_date, end_date, description, session_data.get('username'), event_type))
-
+        ''', (name, discord_tag, start_date, end_date, description,
+              session_data.get('username'), event_type))
         conn.commit()
-        event_id = cursor.lastrowid
-
-        return {'success': True, 'event_id': event_id}
+        return {'success': True, 'event_id': cursor.lastrowid}
     finally:
         if conn:
             conn.close()
@@ -185,32 +448,26 @@ async def create_event(request: Request, session: Optional[str] = Cookie(None)):
 
 @router.get('/api/events/{event_id}')
 async def get_event(event_id: int, session: Optional[str] = Cookie(None)):
-    """Get a single event by ID."""
+    """Get a single event by ID (community-scoped for non-super callers)."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
         cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
         row = cursor.fetchone()
-
         if not row:
             raise HTTPException(status_code=404, detail='Event not found')
-
         event = dict(row)
-
-        # Check access
-        if not is_super and user_discord_tag != event['discord_tag']:
+        if not is_super and event['discord_tag'] not in civ_tags:
             raise HTTPException(status_code=403, detail='Access denied')
-
-        return {'event': event}
+        return {'event': _enrich_event(cursor, event)}
     finally:
         if conn:
             conn.close()
@@ -221,247 +478,31 @@ async def get_event_leaderboard(
     event_id: int,
     tab: str = 'submissions',
     limit: int = 50,
-    session: Optional[str] = Cookie(None)
+    session: Optional[str] = Cookie(None),
 ):
-    """
-    Get leaderboard for a specific event.
-    Shows submissions and/or discoveries during the event period.
-
-    Args:
-        tab: 'submissions', 'discoveries', or 'combined'
-    """
+    """Approved-only leaderboard for an event (community-scoped)."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
+    limit = max(1, min(limit, 200))
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # Get event details
         cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
         event_row = cursor.fetchone()
-
         if not event_row:
             raise HTTPException(status_code=404, detail='Event not found')
-
         event = dict(event_row)
-
-        # Check access
-        if not is_super and user_discord_tag != event['discord_tag']:
+        if not is_super and event['discord_tag'] not in civ_tags:
             raise HTTPException(status_code=403, detail='Access denied')
 
-        # Normalize usernames for submission leaderboard
-        raw_username = '''COALESCE(
-            NULLIF(NULLIF(submitted_by, 'Anonymous'), 'anonymous'),
-            personal_discord_username,
-            json_extract(system_data, '$.discovered_by'),
-            'Unknown'
-        )'''
-        trimmed_username = f'''TRIM(REPLACE({raw_username}, '#', ''))'''
-        normalized_username = f'''LOWER(TRIM(
-            CASE
-                WHEN LENGTH({trimmed_username}) > 4
-                    AND SUBSTR({trimmed_username}, -4) GLOB '[0-9][0-9][0-9][0-9]'
-                    AND (LENGTH({trimmed_username}) = 4
-                        OR SUBSTR({trimmed_username}, -5, 1) NOT GLOB '[0-9]')
-                THEN SUBSTR({trimmed_username}, 1, LENGTH({trimmed_username}) - 4)
-                ELSE {trimmed_username}
-            END
-        ))'''
-
-        leaderboard = []
-        totals = {}
-
-        if tab == 'submissions':
-            # Original submission leaderboard logic
-            query = f'''
-                SELECT
-                    MAX({raw_username}) as username,
-                    COUNT(*) as total_submissions,
-                    SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-                    SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-                    MIN(submission_date) as first_submission,
-                    MAX(submission_date) as last_submission
-                FROM pending_systems
-                WHERE discord_tag = ?
-                  AND submission_date >= ?
-                  AND submission_date <= ?
-                GROUP BY {normalized_username}
-                HAVING {normalized_username} != 'unknown'
-                ORDER BY total_submissions DESC
-                LIMIT ?
-            '''
-            cursor.execute(query, (event['discord_tag'], event['start_date'],
-                                   event['end_date'] + 'T23:59:59', limit))
-            rows = cursor.fetchall()
-
-            rank = 1
-            for row in rows:
-                entry = dict(row)
-                entry['rank'] = rank
-                total = entry['total_submissions']
-                approved = entry['approved'] or 0
-                entry['approval_rate'] = round((approved / total * 100), 1) if total > 0 else 0
-                leaderboard.append(entry)
-                rank += 1
-
-            cursor.execute(f'''
-                SELECT
-                    COUNT(*) as total_submissions,
-                    SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
-                    COUNT(DISTINCT CASE WHEN {normalized_username} != 'unknown' THEN {normalized_username} END) as participants
-                FROM pending_systems
-                WHERE discord_tag = ?
-                  AND submission_date >= ?
-                  AND submission_date <= ?
-            ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-            totals_row = cursor.fetchone()
-
-            totals = {
-                'total_submissions': totals_row['total_submissions'] or 0,
-                'total_approved': totals_row['total_approved'] or 0,
-                'participants': totals_row['participants'] or 0
-            }
-
-        elif tab == 'discoveries':
-            # Discovery leaderboard
-            cursor.execute('''
-                SELECT
-                    discovered_by as username,
-                    COUNT(*) as total_discoveries,
-                    COUNT(DISTINCT type_slug) as types_count,
-                    GROUP_CONCAT(DISTINCT type_slug) as type_slugs,
-                    MIN(submission_timestamp) as first_discovery,
-                    MAX(submission_timestamp) as last_discovery
-                FROM discoveries
-                WHERE discord_tag = ?
-                  AND submission_timestamp >= ?
-                  AND submission_timestamp <= ?
-                  AND LOWER(TRIM(discovered_by)) != 'anonymous'
-                  AND LOWER(TRIM(discovered_by)) != 'unknown'
-                GROUP BY LOWER(TRIM(discovered_by))
-                ORDER BY total_discoveries DESC
-                LIMIT ?
-            ''', (event['discord_tag'], event['start_date'],
-                  event['end_date'] + 'T23:59:59', limit))
-            rows = cursor.fetchall()
-
-            rank = 1
-            for row in rows:
-                entry = dict(row)
-                entry['rank'] = rank
-                leaderboard.append(entry)
-                rank += 1
-
-            cursor.execute('''
-                SELECT
-                    COUNT(*) as total_discoveries,
-                    COUNT(DISTINCT LOWER(TRIM(discovered_by))) as participants
-                FROM discoveries
-                WHERE discord_tag = ?
-                  AND submission_timestamp >= ?
-                  AND submission_timestamp <= ?
-                  AND LOWER(TRIM(discovered_by)) != 'anonymous'
-                  AND LOWER(TRIM(discovered_by)) != 'unknown'
-            ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-            totals_row = cursor.fetchone()
-
-            totals = {
-                'total_discoveries': totals_row['total_discoveries'] or 0,
-                'participants': totals_row['participants'] or 0
-            }
-
-        elif tab == 'combined':
-            # Combined: merge submissions + discoveries by normalized username
-            # Get submission counts per user
-            cursor.execute(f'''
-                SELECT
-                    {normalized_username} as norm_user,
-                    MAX({raw_username}) as username,
-                    COUNT(*) as total_submissions,
-                    SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved
-                FROM pending_systems
-                WHERE discord_tag = ?
-                  AND submission_date >= ?
-                  AND submission_date <= ?
-                GROUP BY {normalized_username}
-                HAVING {normalized_username} != 'unknown'
-            ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-
-            user_data = {}
-            for row in cursor.fetchall():
-                r = dict(row)
-                norm = r['norm_user']
-                user_data[norm] = {
-                    'username': r['username'],
-                    'total_submissions': r['total_submissions'],
-                    'approved': r['approved'] or 0,
-                    'total_discoveries': 0
-                }
-
-            # Get discovery counts per user
-            cursor.execute('''
-                SELECT
-                    LOWER(TRIM(discovered_by)) as norm_user,
-                    discovered_by as username,
-                    COUNT(*) as total_discoveries
-                FROM discoveries
-                WHERE discord_tag = ?
-                  AND submission_timestamp >= ?
-                  AND submission_timestamp <= ?
-                  AND LOWER(TRIM(discovered_by)) != 'anonymous'
-                  AND LOWER(TRIM(discovered_by)) != 'unknown'
-                GROUP BY LOWER(TRIM(discovered_by))
-            ''', (event['discord_tag'], event['start_date'], event['end_date'] + 'T23:59:59'))
-
-            for row in cursor.fetchall():
-                r = dict(row)
-                norm = r['norm_user']
-                if norm in user_data:
-                    user_data[norm]['total_discoveries'] = r['total_discoveries']
-                else:
-                    user_data[norm] = {
-                        'username': r['username'],
-                        'total_submissions': 0,
-                        'approved': 0,
-                        'total_discoveries': r['total_discoveries']
-                    }
-
-            # Sort by combined total
-            sorted_users = sorted(
-                user_data.values(),
-                key=lambda u: u['total_submissions'] + u['total_discoveries'],
-                reverse=True
-            )[:limit]
-
-            rank = 1
-            for entry in sorted_users:
-                entry['rank'] = rank
-                entry['combined_total'] = entry['total_submissions'] + entry['total_discoveries']
-                leaderboard.append(entry)
-                rank += 1
-
-            # Combined totals
-            sub_total = sum(u['total_submissions'] for u in user_data.values())
-            disc_total = sum(u['total_discoveries'] for u in user_data.values())
-            totals = {
-                'total_submissions': sub_total,
-                'total_discoveries': disc_total,
-                'combined_total': sub_total + disc_total,
-                'participants': len(user_data)
-            }
-
-        return {
-            'event': event,
-            'leaderboard': leaderboard,
-            'totals': totals,
-            'tab': tab
-        }
+        result = _compute_leaderboard(cursor, event, tab, limit)
+        return {'event': event, 'tab': tab, **result}
     finally:
         if conn:
             conn.close()
@@ -469,35 +510,28 @@ async def get_event_leaderboard(
 
 @router.put('/api/events/{event_id}')
 async def update_event(event_id: int, request: Request, session: Optional[str] = Cookie(None)):
-    """Update an event."""
+    """Update an event (name/dates/description/active/type). Community-scoped."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # Check event exists and access
         cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
         event_row = cursor.fetchone()
-
         if not event_row:
             raise HTTPException(status_code=404, detail='Event not found')
-
-        if not is_super and user_discord_tag != event_row['discord_tag']:
+        if not is_super and event_row['discord_tag'] not in civ_tags:
             raise HTTPException(status_code=403, detail='Access denied')
 
         body = await request.json()
-
-        # Build update query
         updates = []
         params = []
-
         for field in ['name', 'start_date', 'end_date', 'description', 'is_active', 'event_type']:
             if field in body:
                 if field == 'event_type' and body[field] not in ('submissions', 'discoveries', 'both'):
@@ -507,9 +541,7 @@ async def update_event(event_id: int, request: Request, session: Optional[str] =
 
         if updates:
             params.append(event_id)
-            cursor.execute(f'''
-                UPDATE events SET {', '.join(updates)} WHERE id = ?
-            ''', params)
+            cursor.execute(f'UPDATE events SET {", ".join(updates)} WHERE id = ?', params)
             conn.commit()
 
         return {'success': True}
@@ -520,33 +552,96 @@ async def update_event(event_id: int, request: Request, session: Optional[str] =
 
 @router.delete('/api/events/{event_id}')
 async def delete_event(event_id: int, session: Optional[str] = Cookie(None)):
-    """Delete an event."""
+    """Delete an event (community-scoped). The event_id stays stamped on any
+    already-linked systems/discoveries (harmless dangling reference)."""
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
     is_super = session_data.get('user_type') == 'super_admin'
-    user_discord_tag = session_data.get('discord_tag')
+    civ_tags = _caller_civ_tags(session_data)
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # Check event exists and access
         cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
         event_row = cursor.fetchone()
-
         if not event_row:
             raise HTTPException(status_code=404, detail='Event not found')
-
-        if not is_super and user_discord_tag != event_row['discord_tag']:
+        if not is_super and event_row['discord_tag'] not in civ_tags:
             raise HTTPException(status_code=403, detail='Access denied')
 
         cursor.execute('DELETE FROM events WHERE id = ?', (event_id,))
         conn.commit()
-
         return {'success': True}
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================================
+# Public endpoints (no auth) — read-only competition showcase
+# ============================================================================
+
+@router.get('/api/public/events')
+async def public_list_events(discord_tag: Optional[str] = None):
+    """Public list of active events (any community, or one via discord_tag).
+
+    Only `is_active = 1` events are exposed — toggling an event inactive is how
+    admins hide it from the public page. Each row carries approved-only counts
+    and a computed status so the page can group Active / Upcoming / Past.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if discord_tag:
+            cursor.execute(
+                'SELECT * FROM events WHERE is_active = 1 AND discord_tag = ? ORDER BY start_date DESC',
+                (discord_tag,),
+            )
+        else:
+            cursor.execute('SELECT * FROM events WHERE is_active = 1 ORDER BY start_date DESC')
+        events = [_enrich_event(cursor, dict(row)) for row in cursor.fetchall()]
+        return {'events': events}
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get('/api/public/events/{event_id}')
+async def public_get_event(event_id: int):
+    """Public single-event detail (active events only)."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM events WHERE id = ? AND is_active = 1', (event_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Event not found')
+        return {'event': _enrich_event(cursor, dict(row))}
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get('/api/public/events/{event_id}/leaderboard')
+async def public_event_leaderboard(event_id: int, tab: str = 'submissions', limit: int = 50):
+    """Public approved-only leaderboard for an active event."""
+    limit = max(1, min(limit, 200))
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM events WHERE id = ? AND is_active = 1', (event_id,))
+        event_row = cursor.fetchone()
+        if not event_row:
+            raise HTTPException(status_code=404, detail='Event not found')
+        event = dict(event_row)
+        result = _compute_leaderboard(cursor, event, tab, limit)
+        return {'event': event, 'tab': tab, **result}
     finally:
         if conn:
             conn.close()

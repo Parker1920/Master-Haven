@@ -49,6 +49,7 @@ import EditModeBanner from '../components/wizard/EditModeBanner'
 import ConflictResolutionModal from '../components/wizard/ConflictResolutionModal'
 import CoAuthorChipInput from '../components/wizard/CoAuthorChipInput'
 import ExpeditionPicker from '../components/wizard/ExpeditionPicker'
+import EventPicker from '../components/wizard/EventPicker'
 import RestoreDraftBanner from '../components/wizard/RestoreDraftBanner'
 import HelpPanel from '../components/wizard/HelpPanel'
 import HelpChip from '../components/wizard/HelpChip'
@@ -129,6 +130,7 @@ const EMPTY_SYSTEM = {
   // wizard v1 identity extras
   coauthors: [],
   expedition_id: null,
+  event_id: null,       // event participation (opt-in competition)
   submitter_notes: '',
 }
 
@@ -1101,6 +1103,7 @@ export default function Wizard() {
       discord_tag: s.discord_tag,
       coauthors: s.coauthors,
       expedition_id: s.expedition_id,
+      event_id: s.event_id,
       game_version: s.game_version,
       // Submit Another should preserve the difficulty the player set —
       // they're still in the same NMS session.
@@ -2216,6 +2219,12 @@ function SectionIdentity({
               disabled={!isLoggedIn}
             />
           </div>
+          <EventPicker
+            value={system.event_id}
+            onChange={(id) => setField('event_id', id)}
+            discordTag={system.discord_tag}
+            kind="submission"
+          />
         </>
       )}
     </Section>

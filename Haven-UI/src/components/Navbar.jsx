@@ -114,7 +114,7 @@ export default function Navbar() {
     { label: 'Create', to: '/create', visible: true },
     { label: 'Discoveries', to: '/discoveries', visible: true },
     { label: 'Community Stats', to: '/community-stats', visible: true },
-    { label: 'Events', to: '/events', visible: isAdmin && !isCorrespondent },
+    { label: 'Events', to: '/events', visible: true },
     { label: 'War Room', to: '/war-room', visible: canAccess(FEATURES.WAR_ROOM) || isCorrespondent,
       className: 'text-red-400 font-bold', badge: 'conflict' },
     { label: 'Docs', to: '/docs', visible: true },

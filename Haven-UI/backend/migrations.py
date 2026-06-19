@@ -6846,3 +6846,37 @@ def migration_1_88_0(conn):
     cursor.execute('''CREATE INDEX IF NOT EXISTS idx_regions_discord_tag
                       ON regions(discord_tag)''')
     logger.info("Migration 1.88.0: recreated regions indexes")
+
+
+@register_migration("1.89.0", "Add event_id to pending_systems/systems/pending_discoveries/discoveries for real event participation")
+def migration_1_89_0(conn):
+    """Events become real, opt-in competitions.
+
+    Previously an "event" was just a (name, discord_tag, start, end) window and
+    the leaderboard sliced the entire pending_systems / discoveries firehose by
+    tag + date. There was no link between a submission and an event, so events
+    couldn't overlap, nobody opted in, and rejected/pending rows inflated the
+    standings.
+
+    This adds a nullable `event_id` to the two submission tables and the two
+    live tables. A submission is tagged with the event the submitter picked at
+    upload time (mirrors the existing `expedition_id` pattern); on approval the
+    id is carried to the live `systems` / `discoveries` row so the leaderboard
+    counts APPROVED rows only, grouped by event_id.
+
+    Four nullable INTEGER columns. No backfill — existing rows stay NULL (i.e.
+    not part of any event). Idempotent: each ADD COLUMN is column-presence
+    guarded. Indexes added for the per-event leaderboard scans.
+    """
+    cursor = conn.cursor()
+    for table in ('pending_systems', 'systems', 'pending_discoveries', 'discoveries'):
+        cursor.execute(f"PRAGMA table_info({table})")
+        cols = {row[1] for row in cursor.fetchall()}
+        if 'event_id' not in cols:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN event_id INTEGER")
+            logger.info(f"Migration 1.89.0: added {table}.event_id column")
+        else:
+            logger.info(f"Migration 1.89.0: {table}.event_id already present")
+        cursor.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_event_id ON {table}(event_id)"
+        )

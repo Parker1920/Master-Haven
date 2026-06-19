@@ -135,6 +135,18 @@ export const getExpeditionDetail = (id) => axios.get(`/api/expeditions/${id}`).t
 export const createExpedition = (data) => axios.post('/api/expeditions', data).then(r => r.data)
 export const updateExpedition = (id, data) => axios.put(`/api/expeditions/${id}`, data).then(r => r.data)
 
+// --- Events (competitions) ---
+// Picker feed: active, in-window events a submission can be entered into.
+// kind: 'submission' | 'discovery' (filters by event_type); discordTag scopes
+// to the community the submission targets. Public — no auth required.
+export const getActiveEvents = ({ discordTag, kind } = {}) =>
+  axios.get('/api/events/active', { params: { discord_tag: discordTag, kind } }).then(r => r.data)
+// Public read-only showcase + leaderboards.
+export const getPublicEvents = (discordTag) =>
+  axios.get('/api/public/events', { params: discordTag ? { discord_tag: discordTag } : {} }).then(r => r.data)
+export const getPublicEventLeaderboard = (id, tab = 'submissions') =>
+  axios.get(`/api/public/events/${id}/leaderboard`, { params: { tab } }).then(r => r.data)
+
 /** Authenticate with the super admin password. Returns session data. */
 export async function adminLogin(password){
   const res = await fetch('/api/admin/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) })

@@ -1,0 +1,1892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viobot Documentation</title>
+  <style>
+    :root {
+      --bg: #050816;
+      --bg-2: #08111f;
+      --panel: rgba(12, 21, 38, 0.78);
+      --panel-2: rgba(16, 29, 52, 0.92);
+      --text: #edf7ff;
+      --muted: #94a9c7;
+      --soft: #c7d6ef;
+      --line: rgba(125, 211, 252, 0.18);
+      --cyan: #22d3ee;
+      --blue: #60a5fa;
+      --violet: #a78bfa;
+      --green: #34d399;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+      --radius: 22px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 5%, rgba(34, 211, 238, 0.20), transparent 28rem),
+        radial-gradient(circle at 80% 0%, rgba(167, 139, 250, 0.20), transparent 30rem),
+        radial-gradient(circle at 50% 100%, rgba(52, 211, 153, 0.08), transparent 35rem),
+        linear-gradient(135deg, #030712 0%, #061020 48%, #08111f 100%);
+      font-family: var(--sans);
+      line-height: 1.65;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(rgba(125, 211, 252, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(125, 211, 252, 0.08) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent 82%);
+    }
+
+    a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      backdrop-filter: blur(18px);
+      background: rgba(5, 8, 22, 0.78);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .nav {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: max-content;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background:
+        linear-gradient(135deg, rgba(34, 211, 238, 0.24), rgba(167, 139, 250, 0.22)),
+        rgba(15, 23, 42, 0.96);
+      border: 1px solid rgba(34, 211, 238, 0.34);
+      box-shadow: 0 0 28px rgba(34, 211, 238, 0.16);
+      font-family: var(--mono);
+      color: var(--cyan);
+      font-weight: 900;
+      letter-spacing: -0.08em;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 1.02rem;
+      letter-spacing: 0.02em;
+    }
+
+    .brand span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: -4px;
+    }
+
+    .links {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .links a {
+      color: var(--soft);
+      font-size: 0.9rem;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .links a:hover {
+      color: var(--text);
+      text-decoration: none;
+      background: rgba(96, 165, 250, 0.08);
+      border-color: rgba(96, 165, 250, 0.18);
+    }
+
+    .hero {
+      padding: 82px 0 46px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 34px;
+      align-items: center;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid var(--line);
+      color: var(--soft);
+      font-size: 0.82rem;
+      box-shadow: inset 0 0 24px rgba(34, 211, 238, 0.04);
+    }
+
+    .pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 15px rgba(52, 211, 153, 0.95);
+    }
+
+    h1 {
+      font-size: clamp(3rem, 8vw, 6.7rem);
+      line-height: 0.88;
+      letter-spacing: -0.075em;
+      margin: 0 0 22px;
+      max-width: 840px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(90deg, #fff, #a5f3fc 40%, #c4b5fd 72%, #fff);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero p {
+      color: var(--soft);
+      font-size: 1.08rem;
+      max-width: 720px;
+      margin: 0 0 28px;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 46px;
+      padding: 10px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(34, 211, 238, 0.36);
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.16), rgba(96, 165, 250, 0.10));
+      color: var(--text);
+      box-shadow: 0 0 28px rgba(34, 211, 238, 0.08);
+      font-weight: 700;
+    }
+
+    .button.secondary {
+      background: rgba(15, 23, 42, 0.72);
+      border-color: rgba(148, 163, 184, 0.22);
+      color: var(--soft);
+    }
+
+    .button:hover {
+      text-decoration: none;
+      transform: translateY(-1px);
+    }
+
+    .terminal-card {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(2, 6, 23, 0.90));
+      border: 1px solid rgba(125, 211, 252, 0.24);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow), inset 0 0 60px rgba(34, 211, 238, 0.04);
+      overflow: hidden;
+    }
+
+    .terminal-top {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(125, 211, 252, 0.14);
+      background: rgba(2, 6, 23, 0.65);
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .dots {
+      display: flex;
+      gap: 7px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.55);
+    }
+
+    .dot:nth-child(1) { background: var(--red); }
+    .dot:nth-child(2) { background: var(--yellow); }
+    .dot:nth-child(3) { background: var(--green); }
+
+    .terminal-body {
+      padding: 22px;
+      font-family: var(--mono);
+      font-size: 0.92rem;
+      color: #dbeafe;
+    }
+
+    .line {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(125, 211, 252, 0.06);
+    }
+
+    .line:last-child {
+      border-bottom: 0;
+    }
+
+    .prompt {
+      color: var(--cyan);
+      min-width: 20px;
+    }
+
+    .comment {
+      color: var(--muted);
+    }
+
+    section {
+      padding: 36px 0;
+      scroll-margin-top: 92px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 1;
+      letter-spacing: -0.055em;
+    }
+
+    .section-head p {
+      margin: 0;
+      max-width: 580px;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      position: relative;
+      border-radius: var(--radius);
+      padding: 22px;
+      background: var(--panel);
+      border: 1px solid rgba(125, 211, 252, 0.16);
+      box-shadow: 0 16px 50px rgba(0, 0, 0, 0.20);
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.8), transparent);
+      opacity: 0.6;
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 1.08rem;
+      letter-spacing: -0.02em;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .icon {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      margin-bottom: 16px;
+      background: rgba(34, 211, 238, 0.10);
+      border: 1px solid rgba(34, 211, 238, 0.18);
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .steps {
+      display: grid;
+      gap: 12px;
+      counter-reset: step;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 14px;
+      align-items: start;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.66);
+      border: 1px solid rgba(125, 211, 252, 0.14);
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.18), rgba(167, 139, 250, 0.16));
+      border: 1px solid rgba(34, 211, 238, 0.24);
+      font-family: var(--mono);
+      font-weight: 800;
+      color: var(--cyan);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .step span {
+      color: var(--muted);
+    }
+
+    .command-panel {
+      background: rgba(2, 6, 23, 0.56);
+      border: 1px solid rgba(125, 211, 252, 0.16);
+      border-radius: calc(var(--radius) + 8px);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .command-tools {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 18px;
+      background: rgba(8, 17, 31, 0.86);
+      border-bottom: 1px solid rgba(125, 211, 252, 0.14);
+    }
+
+    .search {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid rgba(125, 211, 252, 0.18);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.72);
+      color: var(--text);
+      padding: 0 14px;
+      font: 0.95rem var(--sans);
+      outline: none;
+    }
+
+    .search:focus {
+      border-color: rgba(34, 211, 238, 0.55);
+      box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.08);
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .filter {
+      border: 1px solid rgba(125, 211, 252, 0.16);
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.78);
+      color: var(--soft);
+      cursor: pointer;
+      min-height: 34px;
+      padding: 7px 12px;
+      font: 700 0.8rem var(--sans);
+    }
+
+    .filter.active,
+    .filter:hover {
+      border-color: rgba(34, 211, 238, 0.46);
+      color: var(--text);
+      background: rgba(34, 211, 238, 0.12);
+    }
+
+    .command-list {
+      display: grid;
+      gap: 1px;
+      background: rgba(125, 211, 252, 0.10);
+    }
+
+    .command {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 22px;
+      padding: 18px;
+      background: rgba(8, 17, 31, 0.94);
+    }
+
+    .command:hover {
+      background: rgba(15, 23, 42, 0.96);
+    }
+
+    .cmd-code {
+      align-self: start;
+      display: inline-flex;
+      width: fit-content;
+      max-width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(34, 211, 238, 0.20);
+      background: rgba(2, 6, 23, 0.86);
+      color: #a5f3fc;
+      font: 800 0.88rem var(--mono);
+      word-break: break-word;
+    }
+
+    .command h3 {
+      margin: 0 0 5px;
+      font-size: 1rem;
+    }
+
+    .command p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: var(--soft);
+      font-size: 0.75rem;
+      background: rgba(96, 165, 250, 0.10);
+      border: 1px solid rgba(96, 165, 250, 0.14);
+    }
+
+    .tag.plus {
+      color: #d8b4fe;
+      background: rgba(167, 139, 250, 0.12);
+      border-color: rgba(167, 139, 250, 0.22);
+    }
+
+    .tag.mod {
+      color: #a7f3d0;
+      background: rgba(52, 211, 153, 0.10);
+      border-color: rgba(52, 211, 153, 0.18);
+    }
+
+    .note {
+      border-left: 3px solid var(--cyan);
+      background: rgba(34, 211, 238, 0.07);
+      color: var(--soft);
+      border-radius: 16px;
+      padding: 16px 18px;
+      margin-top: 16px;
+    }
+
+    .compare {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: var(--radius);
+      background: rgba(8, 17, 31, 0.86);
+      border: 1px solid rgba(125, 211, 252, 0.16);
+    }
+
+    .compare th,
+    .compare td {
+      text-align: left;
+      padding: 15px 16px;
+      border-bottom: 1px solid rgba(125, 211, 252, 0.12);
+      vertical-align: top;
+    }
+
+    .compare th {
+      color: var(--text);
+      background: rgba(15, 23, 42, 0.90);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .compare td {
+      color: var(--soft);
+    }
+
+    .compare tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .faq {
+      display: grid;
+      gap: 10px;
+    }
+
+    details {
+      border-radius: 18px;
+      background: rgba(12, 21, 38, 0.76);
+      border: 1px solid rgba(125, 211, 252, 0.14);
+      padding: 14px 16px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    details p {
+      color: var(--muted);
+      margin: 10px 0 0;
+    }
+
+    footer {
+      padding: 42px 0 60px;
+      color: var(--muted);
+      text-align: center;
+      border-top: 1px solid rgba(125, 211, 252, 0.12);
+      margin-top: 28px;
+    }
+
+    .legal-links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+      margin: 10px 0 4px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+    }
+
+    .legal-links a {
+      padding: 6px 10px;
+      border: 1px solid rgba(34, 211, 238, 0.18);
+      background: rgba(2, 6, 23, 0.45);
+      color: var(--soft);
+    }
+
+    .legal-links a:hover {
+      color: var(--text);
+      border-color: rgba(34, 211, 238, 0.36);
+      text-decoration: none;
+    }
+
+    .legal-card {
+      min-height: 100%;
+    }
+
+    .legal-card .button {
+      margin-top: 8px;
+    }
+
+
+    .integration-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .integration-item {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 14px;
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.68);
+      border: 1px solid rgba(125, 211, 252, 0.14);
+    }
+
+    .integration-item strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+
+    .integration-item span {
+      color: var(--muted);
+    }
+
+    .support-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .support-panel {
+      position: relative;
+      border-radius: var(--radius);
+      padding: 24px;
+      background: linear-gradient(145deg, rgba(12, 21, 38, 0.92), rgba(7, 13, 27, 0.94));
+      border: 1px solid rgba(125, 211, 252, 0.18);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .support-panel::before {
+      content: "";
+      position: absolute;
+      inset: -80px auto auto -80px;
+      width: 180px;
+      height: 180px;
+      background: radial-gradient(circle, rgba(34, 211, 238, 0.20), transparent 70%);
+      pointer-events: none;
+    }
+
+    .support-status {
+      margin: 18px 0;
+      display: grid;
+      gap: 8px;
+      color: var(--soft);
+      font-family: var(--mono);
+      font-size: 0.92rem;
+    }
+
+    .discord-widget {
+      width: 100%;
+      max-width: 350px;
+      height: 500px;
+      border: 1px solid rgba(125, 211, 252, 0.18);
+      border-radius: 18px;
+      background: rgba(2, 6, 23, 0.72);
+      justify-self: center;
+    }
+
+    .empty {
+      display: none;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+      background: rgba(8, 17, 31, 0.94);
+    }
+
+    @media (max-width: 940px) {
+      .hero,
+      .grid.cols-3,
+      .grid.cols-2,
+      .support-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .section-head p {
+        margin-top: 12px;
+      }
+
+      .command-tools {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        justify-content: flex-start;
+      }
+
+      .command {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .links {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell,
+      .nav {
+        width: min(100% - 22px, 1180px);
+      }
+
+      .hero {
+        padding-top: 54px;
+      }
+
+      .command-tools,
+      .command,
+      .card {
+        padding: 16px;
+      }
+
+      .compare {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+
+
+    /* v5 high-tech visual pass: sharper panels, tighter corners, stronger interface lines */
+    :root {
+      --radius: 8px;
+      --shadow: 0 18px 70px rgba(0, 0, 0, 0.58);
+      --panel: rgba(8, 16, 31, 0.84);
+      --panel-2: rgba(10, 22, 42, 0.96);
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 18% 0%, rgba(34, 211, 238, 0.18), transparent 28rem),
+        radial-gradient(circle at 92% 8%, rgba(96, 165, 250, 0.14), transparent 32rem),
+        linear-gradient(135deg, #02040b 0%, #06101f 48%, #030712 100%);
+    }
+
+    body::before {
+      opacity: 0.42;
+      background-image:
+        linear-gradient(rgba(34, 211, 238, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 211, 238, 0.08) 1px, transparent 1px),
+        linear-gradient(135deg, rgba(96, 165, 250, 0.035) 25%, transparent 25%, transparent 50%, rgba(96, 165, 250, 0.035) 50%, rgba(96, 165, 250, 0.035) 75%, transparent 75%, transparent);
+      background-size: 42px 42px, 42px 42px, 18px 18px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 84%);
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.08;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,0.16) 0,
+        rgba(255,255,255,0.16) 1px,
+        transparent 1px,
+        transparent 4px
+      );
+    }
+
+    .topbar {
+      background: rgba(2, 6, 23, 0.84);
+      border-bottom: 1px solid rgba(34, 211, 238, 0.25);
+      box-shadow: 0 16px 60px rgba(0, 0, 0, 0.32);
+    }
+
+    .logo,
+    .button,
+    .terminal-card,
+    .card,
+    .step,
+    .command-panel,
+    .search,
+    .cmd-code,
+    .note,
+    .compare,
+    details,
+    .integration-item,
+    .support-panel,
+    .discord-widget {
+      border-radius: 6px;
+    }
+
+    .links a,
+    .pill,
+    .filter,
+    .tag {
+      border-radius: 4px;
+    }
+
+    .links a,
+    .button,
+    .filter,
+    .tag,
+    .pill {
+      text-transform: uppercase;
+      letter-spacing: 0.055em;
+    }
+
+    .links a {
+      padding: 8px 11px;
+      border-color: rgba(125, 211, 252, 0.08);
+    }
+
+    .links a:hover {
+      background: rgba(34, 211, 238, 0.08);
+      border-color: rgba(34, 211, 238, 0.28);
+      box-shadow: inset 0 -2px 0 rgba(34, 211, 238, 0.28);
+    }
+
+    .logo {
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(34, 211, 238, 0.28), rgba(96, 165, 250, 0.12)),
+        rgba(2, 6, 23, 0.96);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.22), 0 0 28px rgba(34, 211, 238, 0.18);
+    }
+
+    .logo::after {
+      content: "";
+      position: absolute;
+      inset: 5px;
+      border: 1px solid rgba(255,255,255,0.10);
+      clip-path: polygon(0 0, 65% 0, 65% 1px, 1px 1px, 1px 65%, 0 65%);
+    }
+
+    .pill {
+      background: linear-gradient(90deg, rgba(2, 6, 23, 0.78), rgba(15, 23, 42, 0.62));
+      border-color: rgba(34, 211, 238, 0.22);
+      box-shadow: inset 0 -1px 0 rgba(34, 211, 238, 0.14);
+    }
+
+    .pulse,
+    .dot {
+      border-radius: 50%;
+    }
+
+    .button {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(34, 211, 238, 0.18), rgba(96, 165, 250, 0.08)),
+        rgba(2, 6, 23, 0.86);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.10), 0 0 36px rgba(34, 211, 238, 0.10);
+    }
+
+    .button::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 18px;
+      height: 18px;
+      border-top: 2px solid rgba(34, 211, 238, 0.7);
+      border-right: 2px solid rgba(34, 211, 238, 0.7);
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.18), 0 0 42px rgba(34, 211, 238, 0.16);
+    }
+
+    .terminal-card,
+    .card,
+    .support-panel,
+    .command-panel {
+      border-color: rgba(34, 211, 238, 0.22);
+      background:
+        linear-gradient(180deg, rgba(12, 24, 45, 0.88), rgba(3, 8, 19, 0.94));
+    }
+
+    .terminal-card,
+    .card,
+    .support-panel {
+      clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    }
+
+    .terminal-top {
+      background: linear-gradient(90deg, rgba(2, 6, 23, 0.84), rgba(8, 47, 73, 0.22));
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .terminal-body {
+      background:
+        linear-gradient(90deg, rgba(34, 211, 238, 0.04), transparent 34%),
+        transparent;
+    }
+
+    .line {
+      border-bottom-color: rgba(34, 211, 238, 0.09);
+    }
+
+    .section-head h2 {
+      position: relative;
+      font-family: var(--mono);
+      letter-spacing: -0.04em;
+    }
+
+    .section-head h2::before {
+      content: "// ";
+      color: var(--cyan);
+      font-size: 0.7em;
+      letter-spacing: 0;
+    }
+
+    .card {
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+    }
+
+    .card::before,
+    .support-panel::before {
+      height: 2px;
+      background: linear-gradient(90deg, rgba(34, 211, 238, 0.95), rgba(96, 165, 250, 0.12), transparent);
+      opacity: 0.9;
+    }
+
+    .card::after,
+    .support-panel::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      width: 32px;
+      height: 32px;
+      border-right: 2px solid rgba(34, 211, 238, 0.32);
+      border-bottom: 2px solid rgba(34, 211, 238, 0.32);
+      pointer-events: none;
+    }
+
+    .icon,
+    .step::before {
+      border-radius: 4px;
+      background:
+        linear-gradient(135deg, rgba(34, 211, 238, 0.14), rgba(96, 165, 250, 0.08)),
+        rgba(2, 6, 23, 0.86);
+      box-shadow: inset 0 0 18px rgba(34, 211, 238, 0.08);
+    }
+
+    .step,
+    .integration-item {
+      background: linear-gradient(90deg, rgba(15, 23, 42, 0.78), rgba(2, 6, 23, 0.72));
+      border-color: rgba(34, 211, 238, 0.18);
+    }
+
+    .command-panel {
+      box-shadow: 0 24px 90px rgba(0, 0, 0, 0.52);
+      overflow: hidden;
+    }
+
+    .command-tools {
+      background:
+        linear-gradient(90deg, rgba(8, 47, 73, 0.28), rgba(8, 17, 31, 0.92));
+    }
+
+    .search {
+      border-color: rgba(34, 211, 238, 0.24);
+      box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.24);
+    }
+
+    .filter.active,
+    .filter:hover {
+      box-shadow: inset 0 -2px 0 rgba(34, 211, 238, 0.34);
+    }
+
+    .command {
+      position: relative;
+      background: rgba(3, 10, 24, 0.96);
+      border-left: 2px solid rgba(34, 211, 238, 0.15);
+    }
+
+    .command:hover {
+      background: rgba(8, 22, 42, 0.98);
+      border-left-color: rgba(34, 211, 238, 0.75);
+    }
+
+    .cmd-code {
+      background: rgba(0, 0, 0, 0.36);
+      border-color: rgba(34, 211, 238, 0.32);
+      box-shadow: inset 0 -2px 0 rgba(34, 211, 238, 0.10);
+    }
+
+    .note {
+      border-left-width: 2px;
+      border-top: 1px solid rgba(34, 211, 238, 0.18);
+      background: linear-gradient(90deg, rgba(34, 211, 238, 0.08), rgba(2, 6, 23, 0.32));
+    }
+
+    .compare {
+      border-color: rgba(34, 211, 238, 0.22);
+    }
+
+    .compare th {
+      background: rgba(2, 6, 23, 0.95);
+      color: #a5f3fc;
+      font-family: var(--mono);
+    }
+
+    details {
+      background: linear-gradient(90deg, rgba(12, 21, 38, 0.82), rgba(2, 6, 23, 0.62));
+      border-color: rgba(34, 211, 238, 0.18);
+    }
+
+    .discord-widget {
+      border-color: rgba(34, 211, 238, 0.28);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.08), 0 24px 70px rgba(0, 0, 0, 0.42);
+    }
+
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="Viobot documentation home">
+        <span class="logo">V</span>
+        <span>
+          <strong>Viobot</strong>
+          <span>Moderation docs</span>
+        </span>
+      </a>
+      <div class="links" aria-label="Page links">
+        <a href="#features">Features</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#commands">Commands</a>
+        <a href="#plus">Plus & Beta</a>
+        <a href="#automod">AutoMod</a>
+        <a href="#support">Support</a>
+        <a href="#workflows">Workflows</a>
+        <a href="#faq">FAQ</a>
+        <a href="#legal">Legal</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="hero">
+      <div>
+        <div class="badge-row">
+          <span class="pill"><span class="pulse"></span> Server safety toolkit</span>
+          <span class="pill">Prefix commands: <strong>!</strong></span>
+          <span class="pill">Slash commands supported</span>
+        </div>
+        <h1><span class="gradient-text">Viobot</span><br />keeps moderation organized.</h1>
+        <p>
+          Viobot helps Discord staff handle moderation, tickets, role restoration, aliases, logs, reminders, scheduled announcements, Plus/Beta feature access, and safety checks without juggling a dozen separate tools. This page is a user-friendly guide for server staff and members who need to understand what Viobot can do.
+        </p>
+        <div class="cta-row">
+          <a class="button" href="#commands">Browse commands</a>
+          <a class="button secondary" href="#quickstart">Configure a server</a>
+        </div>
+      </div>
+
+      <aside class="terminal-card" aria-label="Viobot status card">
+        <div class="terminal-top">
+          <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <span>viobot://status</span>
+        </div>
+        <div class="terminal-body">
+          <div class="line"><span class="prompt">$</span><span>load server_config</span></div>
+          <div class="line"><span class="prompt">✓</span><span>moderation roles ready</span></div>
+          <div class="line"><span class="prompt">✓</span><span>tickets and contact channels linked</span></div>
+          <div class="line"><span class="prompt">✓</span><span>configuration, logs, and recovery linked</span></div>
+          <div class="line"><span class="prompt">✓</span><span>announcements and premium gates ready</span></div>
+          <div class="line"><span class="prompt">#</span><span class="comment">Use !modtools for staff commands and !plustools for Plus/Beta tools.</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="features">
+      <div class="section-head">
+        <h2>What Viobot does</h2>
+        <p>Viobot is built around practical server moderation: fast actions, clean records, fewer repeated tasks, and better visibility for staff teams.</p>
+      </div>
+
+      <div class="grid cols-3">
+        <article class="card">
+          <div class="icon">MOD</div>
+          <h3>Moderation actions</h3>
+          <p>Warn, mute, voice mute, ban, unban, set nicknames, update roles, and keep a clear record of what happened and why.</p>
+        </article>
+        <article class="card">
+          <div class="icon">LOG</div>
+          <h3>Logs and accountability</h3>
+          <p>Send moderation records and safety alerts to staff channels so decisions are easier to review later.</p>
+        </article>
+        <article class="card">
+          <div class="icon">ROL</div>
+          <h3>Role restoration</h3>
+          <p>Save roles during mutes or when members leave, then restore what Viobot can safely manage when appropriate.</p>
+        </article>
+        <article class="card">
+          <div class="icon">TKT</div>
+          <h3>Tickets and contact flows</h3>
+          <p>Give members and muted users a controlled way to contact staff without opening up the whole server. Plus/Beta servers can add custom Contact Us categories.</p>
+        </article>
+        <article class="card">
+          <div class="icon">ALX</div>
+          <h3>Public and private aliases</h3>
+          <p>Create reusable message shortcuts, embeds, and moderation helper responses for your staff team.</p>
+        </article>
+        <article class="card">
+          <div class="icon">SEC</div>
+          <h3>Safety automation</h3>
+          <p>Detect suspicious scam-style image posts, flag unusual activity, and help staff respond faster.</p>
+        </article>
+        <article class="card">
+          <div class="icon">AM</div>
+          <h3>Discord AutoMod visibility</h3>
+          <p>Use Viobot alongside Discord AutoMod so staff can review important automated safety events in the same moderation workflow.</p>
+        </article>
+        <article class="card">
+          <div class="icon">SCH</div>
+          <h3>Timed announcements</h3>
+          <p>Schedule one-time announcements to post later in selected channels, then list or cancel pending announcements before they send.</p>
+        </article>
+        <article class="card">
+          <div class="icon">PLS</div>
+          <h3>Plus and Beta command access</h3>
+          <p>Keep premium and beta tools separate from regular moderation commands, with <code>!plustools</code> showing whether access is through Plus, Beta, both, or locked.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="quickstart">
+      <div class="section-head">
+        <h2>Quick start</h2>
+        <p>A simple setup path for server owners and staff. Exact permissions may depend on your server layout.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div>
+            <strong>Add Viobot and place its role correctly.</strong>
+            <span>Viobot needs its role above the roles it should manage, especially mute, verification, and moderation-related roles.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <strong>Register the server, then configure it.</strong>
+            <span>Run <code>/setup</code> once to add your server to Viobot's database. Then use <code>/config</code> to choose roles, channels, and feature settings.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <strong>Choose staff-only channels.</strong>
+            <span>Use <code>/config</code> to set where logs, violation records, papertrail links, and contact or ticket messages should go.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <strong>Test common actions.</strong>
+            <span>Try a warning, a temporary mute, a ticket flow, a scheduled announcement, and a role restore test before relying on Viobot for a large server.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="commands">
+      <div class="section-head">
+        <h2>Command guide</h2>
+        <p>These are the regular server-facing commands. Some commands require the configured moderator role, and some features may need to be enabled first. Premium and beta-only message commands are kept separate from <code>!modtools</code> and can be reviewed with <code>!plustools</code>.</p>
+      </div>
+
+      <div class="command-panel">
+        <div class="command-tools">
+          <input id="commandSearch" class="search" type="search" placeholder="Search commands, examples, or features..." aria-label="Search commands" />
+          <div class="filters" aria-label="Command filters">
+            <button class="filter active" data-filter="all">All</button>
+            <button class="filter" data-filter="setup">Setup</button>
+            <button class="filter" data-filter="moderation">Moderation</button>
+            <button class="filter" data-filter="records">Records</button>
+            <button class="filter" data-filter="aliases">Aliases</button>
+            <button class="filter" data-filter="tickets">Tickets</button>
+            <button class="filter" data-filter="utility">Utility</button>
+            <button class="filter" data-filter="plus">Plus/Beta</button>
+          </div>
+        </div>
+
+        <div id="commandList" class="command-list">
+          <article class="command" data-category="setup" data-search="setup register server guild database initialize">
+            <div><code class="cmd-code">/setup</code></div>
+            <div>
+              <h3>Register the server</h3>
+              <p>Adds the server to Viobot's database so configuration can be saved. Use <code>/config</code> afterward to change roles, channels, and feature settings.</p>
+              <div class="meta"><span class="tag mod">Staff setup</span><span class="tag">Slash command</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="setup" data-search="config configure roles channels features logging tickets papertrail violations">
+            <div><code class="cmd-code">/config</code></div>
+            <div>
+              <h3>View or edit server configuration</h3>
+              <p>Updates Viobot's configured moderator role, mute role, logging channels, ticket settings, and other server options.</p>
+              <div class="meta"><span class="tag mod">Staff setup</span><span class="tag">Slash command</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="setup tickets" data-search="tickets reload ticket system contact channels">
+            <div><code class="cmd-code">!tickets</code></div>
+            <div>
+              <h3>Reload the ticket system</h3>
+              <p>Refreshes ticket buttons, menus, and server ticket settings after configuration changes.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Message command</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="tickets plus" data-search="contactcategories custom contact us ticket categories list add remove reset plus beta">
+            <div><code class="cmd-code">/contactcategories</code></div>
+            <div>
+              <h3>Manage Contact Us categories</h3>
+              <p>Lists the default ticket categories and, for servers with access, lets staff add, remove, or reset custom Contact Us ticket categories.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag plus">Plus or Beta access</span><span class="tag">Slash command</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="tickets moderation" data-search="contactthread private ticket staff initiated user muted member no ping">
+            <div><code class="cmd-code">!contactthread &lt;userId&gt; [reason]</code></div>
+            <div>
+              <h3>Create a staff-initiated ticket thread</h3>
+              <p>Creates or reopens a private contact thread for a server member. Viobot adds the user to the thread but does not intentionally ping them in the opening message.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Tickets</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="warn warning violation reason user moderation record">
+            <div><code class="cmd-code">!warn &lt;user&gt; &lt;reason&gt;</code></div>
+            <div>
+              <h3>Warn a user</h3>
+              <p>Adds a warning to the user's moderation history and posts the record in the configured violation log.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="mute temporary mute nodm duration role restore">
+            <div><code class="cmd-code">!mute [/nodm] [duration] &lt;user&gt; &lt;reason&gt;</code></div>
+            <div>
+              <h3>Mute a user</h3>
+              <p>Removes manageable roles, applies the configured mute roles, saves roles for restoration, and records the action. Durations like <code>30m</code>, <code>2h</code>, and <code>1d</code> are supported.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Role restore</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="susmute suspicious account verification required no dm duration">
+            <div><code class="cmd-code">!susmute [duration] &lt;user&gt; [reason]</code></div>
+            <div>
+              <h3>Mute a suspicious account</h3>
+              <p>Applies the mute and verification flow without sending a DM. Useful for accounts that look compromised or risky.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">No DM</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="mutespammer compromised spam unusual account activity phishing">
+            <div><code class="cmd-code">!mutespammer [/nodm] &lt;user&gt;</code></div>
+            <div>
+              <h3>Mute a suspected spammer</h3>
+              <p>Uses your server's saved compromised-account message when available, applies mute roles, and logs the action.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Compromised account</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="unmute remove mute restore roles">
+            <div><code class="cmd-code">!unmute &lt;user&gt; [reason]</code></div>
+            <div>
+              <h3>Unmute a user</h3>
+              <p>Removes mute roles and restores saved roles when Viobot can safely manage them.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Role restore</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="voicemute voice mute role">
+            <div><code class="cmd-code">!voicemute &lt;user&gt; [reason]</code></div>
+            <div>
+              <h3>Voice mute a user</h3>
+              <p>Applies the configured voice-mute role and saves the action to the user's moderation history.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="unvoicemute remove voice mute role">
+            <div><code class="cmd-code">!unvoicemute &lt;user&gt; [reason]</code></div>
+            <div>
+              <h3>Remove a voice mute</h3>
+              <p>Removes the configured voice-mute role and records the change.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="ban nodm user reason compromised moderation action">
+            <div><code class="cmd-code">!ban [/nodm] &lt;user&gt; [reason]</code></div>
+            <div>
+              <h3>Ban a user</h3>
+              <p>Bans a user from the server, optionally skips the DM, and adds the action to the moderation log.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="unban user id remove ban">
+            <div><code class="cmd-code">!unban &lt;userId&gt; [reason]</code></div>
+            <div>
+              <h3>Unban a user</h3>
+              <p>Removes a server ban by user ID and records the reason for staff review.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="bancompromised compromised account ban spam account security">
+            <div><code class="cmd-code">!bancompromised [/nodm] &lt;user&gt;</code></div>
+            <div>
+              <h3>Ban a compromised account</h3>
+              <p>Uses your server's compromised-account wording and logs the ban as a safety action.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Compromised account</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="setrole role add remove user moderation reason">
+            <div><code class="cmd-code">!setrole &lt;user&gt; &lt;role&gt; [reason]</code></div>
+            <div>
+              <h3>Update a user's role</h3>
+              <p>Changes a user's role when Viobot has permission to manage it, then records the staff action.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation" data-search="setnick nickname nick user nodm quote reason">
+            <div><code class="cmd-code">!setnick [/nodm] &lt;user&gt; "new nickname" [reason]</code></div>
+            <div>
+              <h3>Change a user's nickname</h3>
+              <p>Sets a nickname, supports quoted names, optionally skips the DM, and saves the reason to the moderation history.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="moderation utility" data-search="commandqueue queue multiple commands setrole setnick batch moderation">
+            <div><code class="cmd-code">!commandqueue</code></div>
+            <div>
+              <h3>Run a queue of commands</h3>
+              <p>Lets staff prepare multiple supported moderation commands and run them in order. Useful for repeated cleanup or batch actions.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Batch actions</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="records" data-search="user lookup search id member info moderation history">
+            <div><code class="cmd-code">!user &lt;userId | mention | name&gt;</code></div>
+            <div>
+              <h3>Look up a user</h3>
+              <p>Shows useful member information and moderation context for staff review.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="records" data-search="user search member name partial query">
+            <div><code class="cmd-code">!user /search &lt;query&gt;</code></div>
+            <div>
+              <h3>Search for members</h3>
+              <p>Finds users by partial name or search text when staff do not have the exact ID handy.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="records plus" data-search="activityreport report moderation activity today 24h 7d 30d premium plus beta">
+            <div><code class="cmd-code">/activityreport [period] [public]</code></div>
+            <div>
+              <h3>View moderation activity</h3>
+              <p>Shows recent moderation totals, staff activity, repeat users, and recent actions. Available to servers with access to the activity reports feature.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag plus">Plus or Beta access</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="plus utility" data-search="announce announcement schedule timed message channel list delete cancel premium plus beta">
+            <div><code class="cmd-code">!announce 10m #channel message</code></div>
+            <div>
+              <h3>Schedule a timed announcement</h3>
+              <p>Schedules a one-time announcement in a selected channel. Staff can also use <code>!announce list</code> and <code>!announce delete &lt;id&gt;</code> or <code>!announce cancel &lt;id&gt;</code>.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag plus">Plus or Beta access</span><span class="tag">Scheduled</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="plus utility" data-search="plustools premium beta tools access status unlocked locked plus beta">
+            <div><code class="cmd-code">!plustools</code></div>
+            <div>
+              <h3>Show Plus and Beta tools</h3>
+              <p>Lists premium and beta message commands separately from <code>!modtools</code>, showing whether each command is locked, unlocked through Beta, unlocked through Plus, or unlocked through both.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Help</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="records" data-search="violation reply edit reason append replace papertrail logs">
+            <div><code class="cmd-code">Reply in violations channel</code></div>
+            <div>
+              <h3>Update a violation reason</h3>
+              <p>Staff can reply to a Viobot violation log to append notes. Start the reply with <code>=</code> to replace the reason instead.</p>
+              <div class="meta"><span class="tag mod">Moderator workflow</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="alias public list view create edit helptext access delete tools">
+            <div><code class="cmd-code">!alias list</code></div>
+            <div>
+              <h3>List public aliases</h3>
+              <p>Shows server-wide aliases that staff have created for reusable messages, embeds, or workflows.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="alias view public alias pseudocode help text">
+            <div><code class="cmd-code">!alias view &lt;name&gt;</code></div>
+            <div>
+              <h3>View a public alias</h3>
+              <p>Shows what a public alias does before staff use or edit it.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="alias create public modonly help access pseudocode embed say">
+            <div><code class="cmd-code">!alias create &lt;name&gt; help="..." access=modonly</code></div>
+            <div>
+              <h3>Create a public alias</h3>
+              <p>Creates a server alias using the pseudocode lines underneath the command. Access can be staff-only or public.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag plus">Higher limits with Plus</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="alias edit helptext access delete tools public alias">
+            <div><code class="cmd-code">!alias edit/helptext/access/delete/tools</code></div>
+            <div>
+              <h3>Manage public aliases</h3>
+              <p>Edit alias content, update help text, switch access, delete old aliases, or open the alias tools guide.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="palias private alias personal moderator list view create edit helptext delete tools">
+            <div><code class="cmd-code">!palias list</code></div>
+            <div>
+              <h3>List your private aliases</h3>
+              <p>Shows aliases that belong only to you. Useful for personal staff shortcuts that do not need to be server-wide.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Private</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="palias create edit private alias help pseudocode">
+            <div><code class="cmd-code">!palias create &lt;name&gt; help="..."</code></div>
+            <div>
+              <h3>Create a private alias</h3>
+              <p>Creates a personal shortcut for the moderator running the command. Other moderators do not see or use it unless they create their own.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag plus">Higher limits with Plus</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="aliases" data-search="palias view edit helptext delete tools private aliases">
+            <div><code class="cmd-code">!palias view/edit/helptext/delete/tools</code></div>
+            <div>
+              <h3>Manage private aliases</h3>
+              <p>Review, edit, rename help text, delete, or learn alias syntax for your private moderator shortcuts.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Private</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="utility" data-search="var variables reusable text mutespammer compromised message">
+            <div><code class="cmd-code">!var</code></div>
+            <div>
+              <h3>Manage saved server text</h3>
+              <p>Stores reusable text snippets used by Viobot features, such as a server's compromised-account message.</p>
+              <div class="meta"><span class="tag mod">Moderator</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="utility" data-search="feedback modal send feedback bot owner copy">
+            <div><code class="cmd-code">/feedback</code></div>
+            <div>
+              <h3>Send feedback about Viobot</h3>
+              <p>Opens a feedback form so users or staff can report issues, suggest improvements, or share comments about the bot.</p>
+              <div class="meta"><span class="tag">Slash command</span><span class="tag">User friendly</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="utility" data-search="modtools help command list moderator tools">
+            <div><code class="cmd-code">!modtools</code></div>
+            <div>
+              <h3>Show server staff commands</h3>
+              <p>Displays the regular moderation and utility commands available to staff in the current server.</p>
+              <div class="meta"><span class="tag mod">Moderator</span><span class="tag">Help</span></div>
+            </div>
+          </article>
+
+          <article class="command" data-category="utility" data-search="remind reminder message expires time user reminder list delete">
+            <div><code class="cmd-code">!remind 10m message</code></div>
+            <div>
+              <h3>Create reminders</h3>
+              <p>Stores personal reminders and sends them when they expire. Users can also list active reminders with <code>!remind list</code> or remove one with <code>!remind delete &lt;id&gt;</code>.</p>
+              <div class="meta"><span class="tag">Utility</span></div>
+            </div>
+          </article>
+
+          <div id="emptyState" class="empty">No commands match that search.</div>
+        </div>
+      </div>
+
+      <div class="note">
+        Commands that change users, roles, nicknames, bans, announcements, ticket categories, or moderation records usually require the configured moderator role. Viobot also follows Discord's role hierarchy, so it cannot manage users or roles above its own highest role. Use <code>!plustools</code> to check which Plus/Beta commands are available in the current server.
+      </div>
+    </section>
+
+    <section id="plus">
+      <div class="section-head">
+        <h2>Free, Plus, and Beta access</h2>
+        <p>Viobot's standard moderation tools remain available without Plus. Viobot Plus and approved Beta access currently unlock moderation activity reports, higher alias limits, custom Contact Us ticket categories, and timed announcement commands.</p>
+      </div>
+
+      <table class="compare" aria-label="Free, Plus, and Beta comparison">
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Standard Viobot</th>
+            <th>Viobot Plus / Beta Access</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Core moderation</td>
+            <td>Warns, mutes, bans, role changes, nickname changes, tickets, logging, reminders, and moderation records.</td>
+            <td>The same core moderation tools. Plus/Beta does not replace the regular staff workflow.</td>
+          </tr>
+          <tr>
+            <td>Moderation reports</td>
+            <td>Staff can review logs and individual moderation records.</td>
+            <td><code>/activityreport</code> summarizes recent moderation activity, staff activity, repeat users, and recent actions.</td>
+          </tr>
+          <tr>
+            <td>Alias limits</td>
+            <td>Public and private aliases are available with standard limits.</td>
+            <td>Higher public and private alias limits for larger servers and staff teams that rely on reusable responses.</td>
+          </tr>
+          <tr>
+            <td>Timed announcements</td>
+            <td>Standard reminders remain available for personal reminders.</td>
+            <td><code>!announce</code> schedules server announcements, lists pending announcements, and cancels scheduled announcements before they send.</td>
+          </tr>
+          <tr>
+            <td>Custom ticket categories</td>
+            <td>Contact Us tickets use the default categories, such as report and other.</td>
+            <td><code>/contactcategories</code> can add custom Contact Us categories for servers with access.</td>
+          </tr>
+          <tr>
+            <td>Access visibility</td>
+            <td><code>!modtools</code> lists regular staff tools.</td>
+            <td><code>!plustools</code> lists premium/beta commands and shows whether access is through Plus, Beta, both, or locked.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        Beta access is used for approved testing. Plus and Beta access can unlock individual feature flags, and <code>!plustools</code> shows the current server's access state for premium/beta message commands. Features are listed here only after they exist in Viobot.
+      </div>
+    </section>
+
+    <section id="automod">
+      <div class="section-head">
+        <h2>Discord AutoMod integration</h2>
+        <p>Viobot is designed to work alongside Discord AutoMod, not replace it. AutoMod can catch or block content automatically, while Viobot helps staff keep those events visible and organized.</p>
+      </div>
+
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="icon">AM</div>
+          <h3>Review automated safety events</h3>
+          <p>When Discord AutoMod takes action, Viobot can send useful context to the configured logging channel so staff can review what happened without digging through server settings.</p>
+        </article>
+        <article class="card">
+          <div class="icon">LOG</div>
+          <h3>Keep logs in one staff workflow</h3>
+          <p>AutoMod alerts can sit beside Viobot's moderation logs, scam alerts, role changes, tickets, and other staff-facing records.</p>
+        </article>
+      </div>
+
+      <div class="integration-list">
+        <div class="integration-item">
+          <div class="icon">1</div>
+          <div>
+            <strong>Configure Discord AutoMod in Server Settings.</strong>
+            <span>Set your server's keyword, spam, mention, or safety rules using Discord's built-in AutoMod tools.</span>
+          </div>
+        </div>
+        <div class="integration-item">
+          <div class="icon">2</div>
+          <div>
+            <strong>Use <code>/config</code> to choose Viobot's logging channel.</strong>
+            <span>Viobot uses the configured log channel to surface AutoMod events and other server safety activity for staff.</span>
+          </div>
+        </div>
+        <div class="integration-item">
+          <div class="icon">3</div>
+          <div>
+            <strong>Let staff review and follow up.</strong>
+            <span>AutoMod handles the automatic rule match. Viobot helps staff see the event, discuss it, and take follow-up moderation action when needed.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="support">
+      <div class="section-head">
+        <h2>Support server</h2>
+        <p>Need help with configuration, commands, Plus/Beta access, bug reports, or setup questions? Use the support server to contact the Viobot team.</p>
+      </div>
+
+      <div class="support-grid">
+        <article class="support-panel">
+          <div class="icon">SUP</div>
+          <h3 id="supportName">Viobot Support</h3>
+          <p>Join the support server for help with <code>/config</code>, moderation reports, alias limits, timed announcements, custom ticket categories, AutoMod logging, and general troubleshooting.</p>
+          <div class="support-status" aria-live="polite">
+            <span id="supportStatus">Use the embedded Discord widget to preview and join the support server.</span>
+            <span id="supportOnline">The widget must be enabled in Discord Server Settings to display correctly.</span>
+          </div>
+          <div class="cta-row">
+            <a id="supportInvite" class="button" href="https://discord.com/widget?id=1513732278810054776&theme=dark" target="_blank" rel="noopener">Open Discord widget</a>
+          </div>
+        </article>
+
+        <iframe
+          class="discord-widget"
+          src="https://discord.com/widget?id=1513732278810054776&theme=dark"
+          width="350"
+          height="500"
+          allowtransparency="true"
+          frameborder="0"
+          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+          title="Viobot support server widget"></iframe>
+      </div>
+    </section>
+
+    <section id="workflows">
+      <div class="section-head">
+        <h2>Common workflows</h2>
+        <p>These examples show how Viobot fits into normal staff work without needing to understand the internals.</p>
+      </div>
+
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="icon">01</div>
+          <h3>Temporary mute</h3>
+          <p>Staff runs <code>!mute 2h @User Spamming after warning</code>. Viobot saves manageable roles, applies mute roles, logs the action, and can restore roles after the mute expires.</p>
+        </article>
+        <article class="card">
+          <div class="icon">02</div>
+          <h3>Compromised account response</h3>
+          <p>Staff runs <code>!mutespammer @User</code> or <code>!bancompromised @User</code>. Viobot uses the server's saved safety message and records the action for later review.</p>
+        </article>
+        <article class="card">
+          <div class="icon">03</div>
+          <h3>Appeal or staff note</h3>
+          <p>Staff replies to a Viobot violation log to add context. Starting the reply with <code>=</code> replaces the reason instead of appending a new note.</p>
+        </article>
+        <article class="card">
+          <div class="icon">04</div>
+          <h3>Reusable staff response</h3>
+          <p>Staff creates an alias once, then uses it later as a quick response for repeated situations like contact instructions, scam warnings, or ticket guidance.</p>
+        </article>
+        <article class="card">
+          <div class="icon">05</div>
+          <h3>Scheduled announcement</h3>
+          <p>Staff runs <code>!announce 2h #announcements Event starts soon</code>. Viobot stores the announcement, posts it later, and lets staff list or cancel pending announcements.</p>
+        </article>
+        <article class="card">
+          <div class="icon">06</div>
+          <h3>Custom contact category</h3>
+          <p>Staff uses <code>/contactcategories</code> to add a server-specific ticket option. Members then choose that category from the Contact Us menu when opening a ticket.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="section-head">
+        <h2>FAQ</h2>
+        <p>Quick answers for server staff and members.</p>
+      </div>
+
+      <div class="faq">
+        <details>
+          <summary>Does Viobot replace moderators?</summary>
+          <p>No. Viobot helps staff act faster and keep better records, but moderation decisions are still made by server staff or by the server's configured automations.</p>
+        </details>
+        <details>
+          <summary>Why did a mute not remove every role?</summary>
+          <p>Discord does not allow bots to remove certain managed roles or roles above the bot. Viobot is designed to skip roles it cannot safely manage instead of breaking the whole action.</p>
+        </details>
+        <details>
+          <summary>Who can use moderation commands?</summary>
+          <p>Most moderation commands require the moderator role configured for that server. Server owners and staff control which role that is.</p>
+        </details>
+        <details>
+          <summary>How do staff see Plus or Beta command access?</summary>
+          <p>Moderators can use <code>!plustools</code> to see premium and beta message commands separately from <code>!modtools</code>. The list shows whether each command is locked or unlocked through Plus, Beta, or both.</p>
+        </details>
+        <details>
+          <summary>Can Viobot schedule announcements?</summary>
+          <p>Servers with access can use <code>!announce</code> to schedule one-time announcements, list pending announcements, and delete or cancel announcements before they send.</p>
+        </details>
+        <details>
+          <summary>Does Viobot store data?</summary>
+          <p>Viobot stores the information needed for its features, such as server configuration, moderation records, reminders, aliases, ticket metadata, role snapshots, and log references.</p>
+        </details>
+        <details>
+          <summary>Can a server change what Viobot logs?</summary>
+          <p>Yes. Server staff can use <code>/config</code> to choose logging channels and feature settings. <code>/setup</code> only registers the server so those settings can be saved.</p>
+        </details>
+      </div>
+    </section>
+    <section id="legal">
+      <div class="section-head">
+        <h2>Privacy & terms</h2>
+        <p>Review Viobot's public legal pages for information about data handling, acceptable use, ownership, limitations, and service terms.</p>
+      </div>
+
+      <div class="grid cols-2">
+        <article class="card legal-card">
+          <div class="icon">PRV</div>
+          <h3>Privacy Policy</h3>
+          <p>Explains what Viobot may store for server configuration, moderation records, reminders, scheduled announcements, aliases, tickets, role restoration, logging, Plus/Beta access, and similar bot features.</p>
+          <a class="button" href="https://goables.github.io/viobot-legal/privacy" target="_blank" rel="noopener">Open privacy policy</a>
+        </article>
+
+        <article class="card legal-card">
+          <div class="icon">TOS</div>
+          <h3>Terms of Service</h3>
+          <p>Explains the rules for using Viobot, server responsibility, service limits, proprietary ownership, Plus/Beta usage, and other terms that apply when adding or using the bot.</p>
+          <a class="button secondary" href="https://goables.github.io/viobot-legal/terms" target="_blank" rel="noopener">Open terms of service</a>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="shell">
+      <p>Viobot Documentation · Built for Discord moderation teams</p>
+      <div class="legal-links" aria-label="Legal links">
+        <a href="https://goables.github.io/viobot-legal/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+        <a href="https://goables.github.io/viobot-legal/terms" target="_blank" rel="noopener">Terms of Service</a>
+      </div>
+      <p>© 2026 Viobot. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <!-- v7 content update: timed announcements, Plus/Beta command folder, plustools, and custom Contact Us categories. -->
+  <script>
+    const searchInput = document.getElementById('commandSearch');
+    const filters = Array.from(document.querySelectorAll('.filter'));
+    const commands = Array.from(document.querySelectorAll('.command'));
+    const emptyState = document.getElementById('emptyState');
+    let activeFilter = 'all';
+
+    function normalize(value) {
+      return String(value || '').toLowerCase().trim();
+    }
+
+    function commandMatchesFilter(command) {
+      if (activeFilter === 'all') return true;
+      return command.dataset.category.split(/\s+/).includes(activeFilter);
+    }
+
+    function commandMatchesSearch(command) {
+      const query = normalize(searchInput.value);
+      if (!query) return true;
+      const haystack = normalize([
+        command.textContent,
+        command.dataset.search,
+        command.dataset.category,
+      ].join(' '));
+      return haystack.includes(query);
+    }
+
+    function applyFilters() {
+      let visibleCount = 0;
+
+      for (const command of commands) {
+        const visible = commandMatchesFilter(command) && commandMatchesSearch(command);
+        command.style.display = visible ? 'grid' : 'none';
+        if (visible) visibleCount += 1;
+      }
+
+      emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+
+    filters.forEach(button => {
+      button.addEventListener('click', () => {
+        activeFilter = button.dataset.filter;
+        filters.forEach(item => item.classList.toggle('active', item === button));
+        applyFilters();
+      });
+    });
+
+    searchInput.addEventListener('input', applyFilters);
+
+  </script>
+</body>
+</html>
