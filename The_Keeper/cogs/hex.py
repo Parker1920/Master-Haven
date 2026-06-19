@@ -291,7 +291,7 @@ class SimpleHexKeypad(discord.ui.View):
         async def _do_request():
             try:
                 async with session.get(
-                    f"{BASE}/api/systems/search?q={key}&limit=1",
+                    f"{self.api.base}/api/systems/search?q={key}&limit=1",
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as resp:
     
