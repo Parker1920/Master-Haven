@@ -762,10 +762,7 @@ body {
 /* ============================================================
    Portal glyphs (GlyphStrip) — transparent mint glyphs on navy chips
    ============================================================ */
-/* Temporarily hide all portal glyph displays sitewide.
-   Remove the rule below to re-enable. */
-.glyph-strip,
-.glyph-label { display: none !important; }
+/* Glyph displays are live — CSS kill-switch removed 2026-06-19. */
 .glyph-strip {
   display: inline-flex;
   align-items: center;
