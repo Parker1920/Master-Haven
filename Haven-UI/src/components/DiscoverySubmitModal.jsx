@@ -865,7 +865,6 @@ export default function DiscoverySubmitModal({ isOpen, onClose, onSuccess, editD
               <EventPicker
                 value={form.event_id}
                 onChange={(id) => setField('event_id', id)}
-                discordTag={form.discord_tag}
                 kind="discovery"
               />
             </div>

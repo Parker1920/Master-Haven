@@ -2,17 +2,19 @@ import React, { useEffect, useState } from 'react'
 import { getActiveEvents } from '../../utils/api'
 
 // Event participation picker — opt a system/discovery submission into an active
-// community competition. Mirrors ExpeditionPicker, but read-only selection:
-// events are created by admins on the Events page, not inline here.
+// competition. Mirrors ExpeditionPicker, but read-only selection: events are
+// created by admins on the Events page, not inline here.
 //
-// Only shows events that are active AND currently in their date window for the
-// chosen community (`discordTag`) and submission `kind`. When there are none,
-// the picker hides itself entirely so it never adds noise to the form.
+// Participation is GLOBAL (opt-in): every active, in-window event for this
+// submission `kind` is listed for everyone, regardless of which community the
+// submission targets — so a member can enter the hosting civ's event even while
+// uploading as Personal or under a different civ. When there are no active
+// events, the picker hides itself so it never adds noise to the form.
 //
 // Props:
 //   value: number | null              currently-selected event_id
 //   onChange(id|null, eventObj?)
-//   discordTag: string | null         the community the submission targets
+//   discordTag: string | null         IGNORED — kept for call-site compatibility
 //   kind: 'submission' | 'discovery'  which event types are eligible
 const TYPE_LABEL = {
   submissions: 'Systems',
@@ -20,32 +22,27 @@ const TYPE_LABEL = {
   both: 'Systems + Discoveries',
 }
 
-export default function EventPicker({ value, onChange, discordTag, kind = 'submission' }) {
+export default function EventPicker({ value, onChange, kind = 'submission' }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!discordTag || discordTag === 'personal') {
-      setEvents([])
-      // Clear a stale selection if the community changed to one with no events.
-      if (value) onChange(null, null)
-      return
-    }
     let mounted = true
     setLoading(true)
-    getActiveEvents({ discordTag, kind })
+    // No discordTag — list every active, in-window event for this kind.
+    getActiveEvents({ kind })
       .then((d) => {
         if (!mounted) return
         const list = d.events || []
         setEvents(list)
-        // Drop a selection that's no longer eligible (e.g. community changed).
+        // Drop a selection that's no longer eligible (e.g. event ended).
         if (value && !list.some((e) => e.id === value)) onChange(null, null)
       })
       .catch(() => mounted && setEvents([]))
       .finally(() => mounted && setLoading(false))
     return () => { mounted = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discordTag, kind])
+  }, [kind])
 
   // Nothing to enter — keep the form clean.
   if (!loading && events.length === 0) return null
@@ -68,6 +65,7 @@ export default function EventPicker({ value, onChange, discordTag, kind = 'submi
             </span>
             <span className="font-semibold">{selected.name}</span>
             <span className="text-xs opacity-60 ml-2">
+              {selected.discord_tag ? `${selected.discord_tag} · ` : ''}
               {TYPE_LABEL[selected.event_type] || 'Systems'} · ends {String(selected.end_date).slice(0, 10)}
             </span>
           </div>
@@ -93,7 +91,7 @@ export default function EventPicker({ value, onChange, discordTag, kind = 'submi
           <option value="">{loading ? 'Loading…' : '— Not entering an event —'}</option>
           {events.map((e) => (
             <option key={e.id} value={e.id}>
-              {e.name} ({TYPE_LABEL[e.event_type] || 'Systems'})
+              {e.name}{e.discord_tag ? ` · ${e.discord_tag}` : ''} ({TYPE_LABEL[e.event_type] || 'Systems'})
             </option>
           ))}
         </select>

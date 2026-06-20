@@ -23,10 +23,17 @@ def resolve_submission_event_id(cursor, raw_event_id, discord_tag, kind):
     """Validate a submitter-chosen event_id and return it as int, else None.
 
     Returns the event id only when the event exists, is active, its date window
-    currently contains today (UTC, inclusive), it accepts this submission
-    ``kind`` ('submission' | 'discovery'), and it belongs to the submission's
-    community (``discord_tag``). Any failure returns None so a bad or expired
-    pick simply doesn't enter the competition rather than failing the upload.
+    currently contains today (UTC, inclusive), and it accepts this submission
+    ``kind`` ('submission' | 'discovery'). Any failure returns None so a bad or
+    expired pick simply doesn't enter the competition rather than failing the
+    upload.
+
+    Participation is GLOBAL (opt-in): a submitter can enter any active, in-window
+    event regardless of which community (``discord_tag``) the submission targets.
+    The hosting civ still owns/manages the event, and the leaderboard counts by
+    ``event_id`` independent of community — so cross-civ entrants are credited
+    correctly. ``discord_tag`` is accepted for signature compatibility but is no
+    longer a gate.
     """
     if raw_event_id in (None, '', 0, '0'):
         return None
@@ -46,10 +53,6 @@ def resolve_submission_event_id(cursor, raw_event_id, discord_tag, kind):
     ev = dict(row)
 
     if not ev.get('is_active'):
-        return None
-
-    # Community scope: the submission's tag must match the event's community.
-    if discord_tag and ev.get('discord_tag') and discord_tag != ev['discord_tag']:
         return None
 
     # Type compatibility (a 'discoveries' event rejects system submissions, etc).

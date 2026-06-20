@@ -338,17 +338,17 @@ async def list_active_events(
 ):
     """Picker feed: events a submitter can currently enter.
 
-    Public (no auth) so the wizard's anonymous submitters can see events for the
-    community they're uploading to. Returns only events that are active AND whose
-    date window currently contains today.
+    Public (no auth). Participation is GLOBAL (opt-in) — returns ALL events that
+    are active AND whose date window currently contains today, regardless of
+    which community the submitter is uploading under. Anyone can enter any active
+    event; the hosting civ still owns it and the leaderboard counts by event_id.
 
     Query params:
-      - discord_tag: scope to the community the submission targets (the wizard /
-        discovery modal passes the chosen community here).
+      - discord_tag: OPTIONAL filter to one community's events (no longer a gate;
+        omit it to list every active event, which is what the picker now does).
       - kind: 'submission' or 'discovery' — filters to events whose event_type
         scores that kind (a 'discoveries' event won't show for a system upload).
     """
-    session_data = get_session(session)
     today = datetime.now(timezone.utc).date().isoformat()
 
     # Map the submission kind → acceptable event_type values.
@@ -367,15 +367,11 @@ async def list_active_events(
         where = ['is_active = 1', 'start_date <= ?', 'end_date >= ?']
         params: list = [today, today]
 
+        # Optional single-community filter; omitted by the picker so every active
+        # event is enterable by anyone (global opt-in).
         if discord_tag:
             where.append('discord_tag = ?')
             params.append(discord_tag)
-        elif session_data:
-            # Logged in but no explicit community — scope to the caller's civs.
-            civ_tags = _caller_civ_tags(session_data)
-            if civ_tags:
-                where.append('discord_tag IN (' + ','.join(['?'] * len(civ_tags)) + ')')
-                params.extend(civ_tags)
 
         type_ph = ','.join(['?'] * len(type_filter))
         where.append(f'event_type IN ({type_ph})')
