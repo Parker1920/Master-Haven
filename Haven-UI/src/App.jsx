@@ -43,6 +43,7 @@ const Changelog = lazy(() => import('./pages/Changelog'))
 const Docs = lazy(() => import('./pages/Docs'))
 const DocPage = lazy(() => import('./pages/DocPage'))
 const Search = lazy(() => import('./pages/Search'))
+const GlyphFinder = lazy(() => import('./pages/GlyphFinder'))
 
 // Consolidated admin hubs (v1.49.0). Each composes the existing single-purpose
 // pages inside a tab shell. The original routes (/analytics, /admin/users, etc.)
@@ -149,6 +150,7 @@ function AppShell() {
               <Route path="/community-stats" element={<CommunityStats />} />
               <Route path="/community-stats/:tag" element={<CommunityDetail />} />
               <Route path="/search" element={<Search />} />
+              <Route path="/glyph-finder" element={<GlyphFinder />} />
               <Route path="/changelog" element={<Changelog />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:slug" element={<DocPage />} />

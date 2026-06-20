@@ -66,6 +66,8 @@ export const searchSystems = (q, params = {}) => axios.get('/api/systems/search'
 export const getFilterOptions = (params = {}) => axios.get('/api/systems/filter-options', { params }).then(r => r.data)
 export const saveSystem = (data) => axios.post('/api/save_system', data).then(r => r.data)
 export const deleteSystem = (id) => axios.delete(`/api/systems/${id}`).then(r => r.data)
+// Reverse glyph lookup: system name (+ optional galaxy/reality) -> portal glyph code(s).
+export const resolveGlyphByName = (name, params = {}) => axios.get('/api/glyph/resolve', { params: { name, ...params } }).then(r => r.data)
 
 // --- Galaxies & Regions ---
 export const getGalaxies = () => axios.get('/api/galaxies').then(r => r.data)

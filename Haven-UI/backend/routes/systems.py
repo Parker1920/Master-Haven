@@ -1059,6 +1059,185 @@ async def api_validate_glyph(payload: dict):
         return {'valid': False, 'error': message}
 
 
+def _decode_glyph_parts(glyph_code: str) -> Optional[dict]:
+    """Split a 12-char portal glyph code into its components.
+
+    Layout (MSB-first, 48 bits): P SSS YY ZZZ XXX — planet(4) / solar-system
+    index(12) / region_y(8) / region_z(12) / region_x(12). This is the same
+    validated packing used by the standalone glyph resolver tool. Returns None
+    if the code isn't valid hex.
+    """
+    try:
+        val = int(glyph_code, 16)
+    except (ValueError, TypeError):
+        return None
+    return {
+        'planet': (val >> 44) & 0xF,
+        'ssi': (val >> 32) & 0xFFF,
+        'region_y': (val >> 24) & 0xFF,
+        'region_z': (val >> 12) & 0xFFF,
+        'region_x': val & 0xFFF,
+    }
+
+
+@router.get('/api/glyph/resolve')
+async def api_resolve_glyph_by_name(
+    name: str = '',
+    galaxy: str = None,
+    reality: str = None,
+    session: Optional[str] = Cookie(None),
+):
+    """Resolve an NMS system NAME back to its 12-char portal glyph code.
+
+    The inverse of the namegen: you know a system by name (from a spreadsheet,
+    a Discord post, the site) and want the portal glyphs to actually travel
+    there in-game. This is the instant, server-side version of the standalone
+    glyph resolver's Tier 1 (catalogue) lookup — it matches the name against
+    Haven's uploaded systems and returns each match's stored glyph code,
+    decoded SSI/region, and a confidence based on how many systems share the
+    name (NMS procgen names repeat, so a name can map to several systems).
+
+    Query:
+        name: system name to resolve (required, >= 2 chars)
+        galaxy: optional galaxy filter, e.g. "Euclid" (disambiguates repeats)
+        reality: optional reality filter, "Normal" / "Permadeath"
+
+    Response:
+        { query, galaxy, reality, method, confidence, count,
+          candidates[], suggestions[] }
+        confidence: high (1 glyph) | medium (2-5) | low (>5) | none (0)
+        suggestions: fuzzy near-name matches, returned only when count == 0
+    """
+    name_norm = (name or '').strip()
+    empty = {
+        'query': name_norm, 'galaxy': galaxy, 'reality': reality,
+        'method': 'none', 'confidence': 'none', 'count': 0,
+        'candidates': [], 'suggestions': [],
+    }
+    if len(name_norm) < 2:
+        return empty
+
+    session_data = get_session(session)
+    is_super = bool(session_data and session_data.get('user_type') == 'super_admin')
+
+    select_cols = (
+        "s.id, s.name, s.region_x, s.region_y, s.region_z, "
+        "s.galaxy, s.glyph_code, s.discord_tag, s.star_type, s.reality, "
+        "s.is_complete, s.is_fully_charted, s.discovered_by, "
+        "s.personal_discord_username, r.custom_name as region_name"
+    )
+    join = ("LEFT JOIN regions r ON s.region_x = r.region_x "
+            "AND s.region_y = r.region_y AND s.region_z = r.region_z")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # ---- Exact-name match (the authoritative catalogue path) ----------
+        where = ["s.name = ? COLLATE NOCASE"]
+        params = [name_norm]
+        if galaxy:
+            where.append("s.galaxy = ? COLLATE NOCASE")
+            params.append(galaxy)
+        if reality:
+            where.append("s.reality = ? COLLATE NOCASE")
+            params.append(reality)
+        if not is_super:
+            where.append(archived_civ_filter('s'))
+
+        cursor.execute(
+            f"SELECT {select_cols} FROM systems s {join} "
+            f"WHERE {' AND '.join(where)} ORDER BY s.name ASC LIMIT 100",
+            params,
+        )
+        rows = apply_data_restrictions([dict(r) for r in cursor.fetchall()], session_data)
+
+        seen = set()
+        candidates = []
+        for row in rows:
+            gc = (row.get('glyph_code') or '').strip().upper()
+            if len(gc) != 12 or gc in seen:
+                continue  # skip stubs/legacy rows without a usable glyph + dupes
+            seen.add(gc)
+            parts = _decode_glyph_parts(gc) or {}
+            score = row.get('is_complete', 0) or 0
+            candidates.append({
+                'id': row.get('id'),
+                'name': row.get('name'),
+                'glyph_code': gc,
+                'galaxy': row.get('galaxy'),
+                'reality': row.get('reality'),
+                'region_name': row.get('region_name'),
+                'region_x': row.get('region_x'),
+                'region_y': row.get('region_y'),
+                'region_z': row.get('region_z'),
+                'ssi': parts.get('ssi'),
+                'planet': parts.get('planet'),
+                'star_type': row.get('star_type'),
+                'discord_tag': row.get('discord_tag'),
+                'discovered_by': row.get('discovered_by') or row.get('personal_discord_username'),
+                'completeness_grade': score_to_grade(score, bool(row.get('is_fully_charted'))),
+            })
+
+        count = len(candidates)
+        confidence = ('high' if count == 1 else 'medium' if 2 <= count <= 5
+                      else 'low' if count > 5 else 'none')
+
+        # ---- No exact hit -> fuzzy near-name suggestions (not authoritative)
+        suggestions = []
+        if count == 0:
+            sug_where = ["s.name LIKE ? COLLATE NOCASE", "LENGTH(s.glyph_code) = 12"]
+            sug_params = [f'%{name_norm}%']
+            if galaxy:
+                sug_where.append("s.galaxy = ? COLLATE NOCASE")
+                sug_params.append(galaxy)
+            if reality:
+                sug_where.append("s.reality = ? COLLATE NOCASE")
+                sug_params.append(reality)
+            if not is_super:
+                sug_where.append(archived_civ_filter('s'))
+            cursor.execute(
+                f"SELECT {select_cols} FROM systems s {join} "
+                f"WHERE {' AND '.join(sug_where)} "
+                f"ORDER BY CASE WHEN LOWER(s.name) LIKE LOWER(?) THEN 0 ELSE 1 END, "
+                f"s.name ASC LIMIT 12",
+                (*sug_params, f'{name_norm}%'),
+            )
+            srows = apply_data_restrictions([dict(r) for r in cursor.fetchall()], session_data)
+            sseen = set()
+            for row in srows:
+                gc = (row.get('glyph_code') or '').strip().upper()
+                if len(gc) != 12 or gc in sseen:
+                    continue
+                sseen.add(gc)
+                suggestions.append({
+                    'id': row.get('id'),
+                    'name': row.get('name'),
+                    'glyph_code': gc,
+                    'galaxy': row.get('galaxy'),
+                    'reality': row.get('reality'),
+                    'region_name': row.get('region_name'),
+                })
+
+        return {
+            'query': name_norm,
+            'galaxy': galaxy,
+            'reality': reality,
+            'method': 'catalog' if count else 'none',
+            'confidence': confidence,
+            'count': count,
+            'candidates': candidates,
+            'suggestions': suggestions,
+        }
+    except Exception as e:
+        logger.error(f"Error resolving glyph by name: {e}")
+        return {**empty, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
 # ============================================================================
 # Duplicate Check
 # ============================================================================

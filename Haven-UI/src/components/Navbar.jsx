@@ -112,6 +112,7 @@ export default function Navbar() {
     { label: 'Systems', to: '/systems', visible: true },
     { label: 'Map', href: '/map/latest', visible: true },
     { label: 'Create', to: '/create', visible: true },
+    { label: 'Glyph Finder', to: '/glyph-finder', visible: true },
     { label: 'Discoveries', to: '/discoveries', visible: true },
     { label: 'Community Stats', to: '/community-stats', visible: true },
     { label: 'Events', to: '/events', visible: true },
