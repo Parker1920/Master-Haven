@@ -53,6 +53,7 @@ import EventPicker from '../components/wizard/EventPicker'
 import RestoreDraftBanner from '../components/wizard/RestoreDraftBanner'
 import HelpPanel from '../components/wizard/HelpPanel'
 import HelpChip from '../components/wizard/HelpChip'
+import { systemPath } from '../utils/systemUrl'
 import HelpFab from '../components/wizard/HelpFab'
 import ValidationSummary from '../components/wizard/ValidationSummary'
 import SuccessScreen from '../components/wizard/SuccessScreen'
@@ -1225,7 +1226,7 @@ export default function Wizard() {
       <SuccessScreen
         result={submitResult}
         onSubmitAnother={handleSubmitAnother}
-        onViewSystem={submitResult.system_id ? () => navigate(`/systems/${encodeURIComponent(submitResult.system_id)}`) : null}
+        onViewSystem={submitResult.system_id ? () => navigate(systemPath({ id: submitResult.system_id, name: submitResult.system_name, glyph_code: submitResult.glyph_code })) : null}
         onViewLeaderboard={() => navigate('/analytics')}
       />
     )
@@ -2222,7 +2223,6 @@ function SectionIdentity({
           <EventPicker
             value={system.event_id}
             onChange={(id) => setField('event_id', id)}
-            discordTag={system.discord_tag}
             kind="submission"
           />
         </>

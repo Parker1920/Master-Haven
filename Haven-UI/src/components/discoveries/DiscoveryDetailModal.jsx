@@ -6,6 +6,7 @@ import { AuthContext } from '../../utils/AuthContext'
 import { getPhotoUrl, getThumbnailUrl } from '../../utils/api'
 import { formatCoords } from '../LatLngInput'
 import { metaEntries } from '../../utils/discoveryMeta'
+import { systemPath } from '../../utils/systemUrl'
 
 /**
  * Renders a full-screen modal with hero image, photo gallery, location links,
@@ -68,6 +69,7 @@ export default function DiscoveryDetailModal({
     system_id,
     system_name,
     system_galaxy,
+    system_glyph_code,
     planet_name,
     moon_name,
     system_is_stub,
@@ -237,7 +239,7 @@ export default function DiscoveryDetailModal({
             <div className="flex flex-wrap items-center gap-2 text-gray-300">
               {system_id && system_name && (
                 <Link
-                  to={`/systems/${encodeURIComponent(system_id)}`}
+                  to={systemPath({ id: system_id, name: system_name, glyph_code: system_glyph_code })}
                   className="flex items-center gap-2 hover:text-cyan-400 transition-colors"
                 >
                   <MapPinIcon className="w-4 h-4" />

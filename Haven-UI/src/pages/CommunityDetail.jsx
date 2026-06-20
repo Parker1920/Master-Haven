@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import StatCard from '../components/StatCard'
 import { getTagColorStyle as getTagColors } from '../utils/tagColors'
+import { systemPath } from '../utils/systemUrl'
 import { normalizeUsernameForUrl } from '../posters/_shared/identity'
 
 /**
@@ -299,7 +300,7 @@ export default function CommunityDetail() {
                         return (
                           <Link
                             key={sys.id}
-                            to={`/systems/${encodeURIComponent(sys.id)}`}
+                            to={systemPath(sys)}
                             className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors"
                             style={{ color: 'var(--app-text)' }}
                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}

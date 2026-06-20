@@ -42,6 +42,7 @@ import ActivityFeed from '../components/ActivityFeed'
 import PlanetSphere from '../components/shared/PlanetSphere'
 import DiscoveryDetailModal from '../components/discoveries/DiscoveryDetailModal'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
+import { canonicalSystemSlug } from '../utils/systemUrl'
 
 const STAR_HEX = {
   Yellow: '#facc15', Blue: '#3b82f6', Red: '#ef4444', Green: '#10b981', Purple: '#a855f7',
@@ -131,15 +132,17 @@ export default function SystemDetail() {
       setDisambig(null)
       setDraft({ name: r.data?.name || '', description: r.data?.description || '' })
       setError(null)
-      // Clean up the address bar: if we arrived via an id (old /systems/<uuid>
-      // bookmark) or a non-canonical name (wrong casing), rewrite to the
-      // canonical name URL without re-fetching (react-router params stay as-is).
-      // Only prettify when the name is UNIQUE — NMS procgen names repeat, and
-      // rewriting an ambiguous name into the URL makes a refresh/share land on
-      // the 300 disambiguation picker instead of this system.
-      if (r.data?.name && r.data?.name_unique && id !== r.data.name) {
-        const base = import.meta.env.BASE_URL || '/'
-        window.history.replaceState(null, '', `${base}systems/${encodeURIComponent(r.data.name)}`)
+      // Clean up the address bar to the canonical slug without re-fetching
+      // (react-router params stay as-is): bare name when the name is unique,
+      // name + portal glyph when it collides, id only as a last resort. This
+      // turns an arrival via id / glyph / wrong casing into the pretty form,
+      // and keeps a duplicate-named system's URL unique so refresh/share works.
+      if (r.data?.name) {
+        const slug = canonicalSystemSlug(r.data)
+        if (slug && id !== slug) {
+          const base = import.meta.env.BASE_URL || '/'
+          window.history.replaceState(null, '', `${base}systems/${slug}`)
+        }
       }
     } catch (err) {
       // A name shared by multiple systems comes back as HTTP 300; axios treats

@@ -2208,32 +2208,59 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
             row = None
             cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))
             row = cursor.fetchone()
+
+            def _disambig(cands):
+                matches = []
+                for nr in cands:
+                    nd = dict(nr)
+                    try:
+                        grade = calculate_completeness_score(cursor, nd.get('id'))['grade']
+                    except Exception:
+                        grade = None
+                    matches.append({
+                        'id': nd.get('id'),
+                        'name': nd.get('name'),
+                        'galaxy': nd.get('galaxy'),
+                        'reality': nd.get('reality'),
+                        'glyph_code': nd.get('glyph_code'),
+                        'discord_tag': nd.get('discord_tag'),
+                        'completeness_grade': grade,
+                    })
+                return JSONResponse(status_code=300, content={'multiple': True, 'systems': matches})
+
+            # Glyph-disambiguated pretty slug "<name>-<12-hex glyph>" (used only
+            # when a name collides) or a bare 12-hex glyph. glyph_code is a
+            # system's unique NMS portal address, so it pins exactly one system;
+            # the name part (when present) breaks the rare cross-galaxy glyph tie.
             if row is None:
-                cursor.execute(
-                    'SELECT * FROM systems WHERE name = ? COLLATE NOCASE',
-                    (system_id,)
-                )
+                glyph, name_part = None, None
+                gm = re.search(r'-([0-9A-Fa-f]{12})$', system_id or '')
+                if gm:
+                    glyph, name_part = gm.group(1), system_id[:gm.start()]
+                elif re.fullmatch(r'[0-9A-Fa-f]{12}', system_id or ''):
+                    glyph = system_id
+                if glyph:
+                    cursor.execute('SELECT * FROM systems WHERE glyph_code = ? COLLATE NOCASE', (glyph,))
+                    grows = cursor.fetchall()
+                    if name_part:
+                        narrowed = [gr for gr in grows
+                                    if (gr['name'] or '').strip().lower() == name_part.strip().lower()]
+                        if narrowed:
+                            grows = narrowed
+                    if len(grows) == 1:
+                        row = grows[0]
+                    elif len(grows) > 1:
+                        return _disambig(grows)
+
+            # Bare name (pretty URL for a unique name; >1 → disambiguation picker).
+            if row is None:
+                cursor.execute('SELECT * FROM systems WHERE name = ? COLLATE NOCASE', (system_id,))
                 name_rows = cursor.fetchall()
                 if len(name_rows) > 1:
-                    matches = []
-                    for nr in name_rows:
-                        nd = dict(nr)
-                        try:
-                            grade = calculate_completeness_score(cursor, nd.get('id'))['grade']
-                        except Exception:
-                            grade = None
-                        matches.append({
-                            'id': nd.get('id'),
-                            'name': nd.get('name'),
-                            'galaxy': nd.get('galaxy'),
-                            'reality': nd.get('reality'),
-                            'glyph_code': nd.get('glyph_code'),
-                            'discord_tag': nd.get('discord_tag'),
-                            'completeness_grade': grade,
-                        })
-                    return JSONResponse(status_code=300, content={'multiple': True, 'systems': matches})
+                    return _disambig(name_rows)
                 elif len(name_rows) == 1:
                     row = name_rows[0]
+
             if not row:
                 raise HTTPException(status_code=404, detail='System not found')
             system = dict(row)

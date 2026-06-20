@@ -25,6 +25,7 @@ import EmptyState from './EmptyState'
 import CompareToggleButton from './CompareToggleButton'
 import { cardStateClass, hasOutdatedDot, hasConflictDot, stateBadge } from '../utils/dataStates'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
+import { systemPath } from '../utils/systemUrl'
 
 const CARDS_PAGE_SIZE = 24
 const TABLE_ROW_HEIGHT = 44
@@ -134,10 +135,10 @@ export default function SystemsList() {
       })
       return
     }
-    // Navigate by id, not name — names repeat across systems, so a name URL
-    // would re-trigger the disambiguation picker on a card the user already picked.
-    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${encodeURIComponent(sys.id)}` })
-    navigate(`/systems/${encodeURIComponent(sys.id)}`)
+    // Pretty + unique: name + glyph (exact, never the disambiguation picker).
+    const path = systemPath(sys)
+    pushRecentlyViewed({ type: 'system', name: sys.name, href: path })
+    navigate(path)
   }
 
   const total = sorted.length

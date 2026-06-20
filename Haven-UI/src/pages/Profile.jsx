@@ -5,6 +5,7 @@ import Card from '../components/Card'
 import SearchableSelect from '../components/SearchableSelect'
 import { AuthContext } from '../utils/AuthContext'
 import { GALAXIES } from '../data/galaxies'
+import { systemSlug } from '../utils/systemUrl'
 import { normalizeUsernameForUrl } from '../posters/_shared/identity'
 
 const TIER_LABELS = { 1: 'Super Admin', 2: 'Partner', 3: 'Sub-Admin', 4: 'Member', 5: 'Member (Read-Only)' }
@@ -376,7 +377,7 @@ export default function Profile() {
                     return (
                       <a
                         key={s.id}
-                        href={`/haven-ui/systems/${encodeURIComponent(s.id)}`}
+                        href={`/haven-ui/systems/${systemSlug(s)}`}
                         className="haven-card haven-card-hover flex items-center justify-between py-1.5 px-2 text-sm block"
                       >
                         <div className="flex items-center gap-2">

@@ -24,6 +24,7 @@ import axios from 'axios'
 import useDebounce from '../hooks/useDebounce'
 import { useSystems } from '../contexts/SystemsContext'
 import useFilters from '../hooks/useFilters'
+import { systemPath } from '../utils/systemUrl'
 
 const SCOPE_LABELS = {
   all: 'All Realities',
@@ -149,10 +150,11 @@ export default function SearchOverlay() {
       return
     }
     if (kind === 'system') {
-      // Navigate by id, not name — NMS system names repeat, and a name URL would
-      // hit the 300 disambiguation picker even though the user picked one row.
-      pushRecentlyViewed({ type: 'system', name: row.name, href: `/systems/${encodeURIComponent(row.id)}` })
-      navigate(`/systems/${encodeURIComponent(row.id)}`)
+      // Pretty + unique: name + glyph (resolves to exactly one system, never the
+      // disambiguation picker). SystemDetail trims it to the bare name if unique.
+      const path = systemPath(row)
+      pushRecentlyViewed({ type: 'system', name: row.name, href: path })
+      navigate(path)
     }
   }
 

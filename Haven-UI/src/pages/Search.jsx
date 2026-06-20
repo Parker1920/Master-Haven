@@ -18,6 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { systemPath } from '../utils/systemUrl'
 
 const SECTION_LIMIT = 24
 
@@ -231,7 +232,7 @@ function SystemsSection({ rows, total, navigate }) {
           <button
             key={s.id}
             type="button"
-            onClick={() => navigate(`/systems/${encodeURIComponent(s.id)}`)}
+            onClick={() => navigate(systemPath(s))}
             className="w-full px-4 py-3 saved-row text-left flex items-center justify-between gap-3"
             style={{ borderBottom: '1px solid var(--border-soft)' }}
           >

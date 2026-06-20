@@ -9,6 +9,7 @@ import { AuthContext } from '../utils/AuthContext'
 import { ChevronDownIcon, ChevronUpIcon, GlobeAltIcon, PencilIcon, FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { aggregateBiomesByCategory, getBiomeCategoryColor } from '../data/biomeCategoryMappings'
 import { getThumbnailUrl } from '../utils/api'
+import { systemPath } from '../utils/systemUrl'
 import useDebounce from '../hooks/useDebounce'
 
 /**
@@ -926,7 +927,7 @@ export default function RegionDetail() {
               showCheckbox={bulkMode}
               onClick={() => {
                 if (!bulkMode) {
-                  navigate(`/systems/${encodeURIComponent(system.id)}`)
+                  navigate(systemPath(system))
                 }
               }}
             />
