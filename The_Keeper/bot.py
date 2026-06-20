@@ -1,14 +1,8 @@
-# -------------------- bot.py --------
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-
+# -------------------- bot.py ----------------
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import asyncio, os
+import asyncio, os, sys
 import json
 import logging
 
@@ -211,6 +205,7 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
+    "cogs.TimeParser",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
