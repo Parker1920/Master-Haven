@@ -240,17 +240,6 @@ class SimpleHexKeypad(discord.ui.View):
             inline=False
         )
 
-        if self.system_owner_tag:
-
-            embed.add_field(
-                name="Haven API",
-                value=(
-                    f"{BASE}/api/public/community-regions"
-                    f"?community={self.system_owner_tag}"
-                ),
-                inline=False
-            )
-
         return embed
 
     async def temp_error(self, interaction, text):
