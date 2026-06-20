@@ -23,6 +23,7 @@ import useFilters from '../hooks/useFilters'
 import LoadingSkeleton from './LoadingSkeleton'
 import EmptyState from './EmptyState'
 import CompareToggleButton from './CompareToggleButton'
+import GlyphDisplay from './GlyphDisplay'
 import { cardStateClass, hasOutdatedDot, hasConflictDot, stateBadge } from '../utils/dataStates'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 import { systemPath } from '../utils/systemUrl'
@@ -333,6 +334,11 @@ function SystemCard({ s, onClick, pinned, pinning }) {
             </span>
           </div>
         </div>
+        {s.glyph_code && (
+          <div className="mb-3">
+            <GlyphDisplay glyphCode={s.glyph_code} size="small" />
+          </div>
+        )}
         <div className="pt-3 flex items-center justify-between text-[11px]" style={{ borderTop: '1px solid var(--border-soft)', color: 'rgba(255,255,255,0.7)' }}>
           <span className="mono">{s.completeness_score != null ? `${s.completeness_score}% complete` : '—'}</span>
           <span className="truncate ml-2">{s.discovered_by || s.personal_discord_username || '—'}</span>

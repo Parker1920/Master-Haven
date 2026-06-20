@@ -41,6 +41,7 @@ import FromMapBanner from '../components/FromMapBanner'
 import ActivityFeed from '../components/ActivityFeed'
 import PlanetSphere from '../components/shared/PlanetSphere'
 import DiscoveryDetailModal from '../components/discoveries/DiscoveryDetailModal'
+import GlyphDisplay from '../components/GlyphDisplay'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 import { canonicalSystemSlug } from '../utils/systemUrl'
 
@@ -482,6 +483,11 @@ export default function SystemDetail() {
                 {system.stellar_classification ? ` · ${system.stellar_classification}` : ''}
                 {system.discovered_by || system.personal_discord_username ? ` · discovered by ${system.discovered_by || system.personal_discord_username}` : ''}
               </p>
+              {system.glyph_code && (
+                <div className="mt-2">
+                  <GlyphDisplay glyphCode={system.glyph_code} size="small" />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

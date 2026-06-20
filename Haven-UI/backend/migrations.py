@@ -6945,3 +6945,57 @@ def migration_1_90_0(conn):
         )
     finally:
         conn.row_factory = prev_factory
+
+
+@register_migration("1.91.0", "Re-score systems to repair stale is_fully_charted (S+) drift from one-off discovery relinks + late discovery promotion")
+def migration_1_91_0(conn):
+    """Repair the cached S+ flag (`systems.is_fully_charted`) for systems whose
+    completeness inputs changed AFTER their last score was computed.
+
+    Why this is needed even though 1.90.0 already re-scored everything: that pass
+    ran while several showcase systems still had their discoveries ORPHANED
+    (planet_id pointing at planet rows that had been deleted-and-reinserted with
+    new ids — the recurring "Mabaya planet tags wiped" bug). Those discoveries
+    were re-pointed by a one-off prod data script (Master Haven 1.79.0) that
+    fixed `discoveries.planet_id` but did NOT re-run update_completeness_score,
+    so the systems are stuck at `is_fully_charted = 0` even though they now pass
+    the S+ checklist live. The system detail page recomputes live and shows S+,
+    but the systems list / map / search / posters read this cached column and
+    show plain S — they disagree. (Going forward, approve_discovery now recomputes
+    the parent system, and both planet-rebuild paths already recompute after
+    relinking, so this drift can't recur from the code paths.)
+
+    Re-scoring every system is the same proven, idempotent repair 1.90.0 used:
+    it applies the live formula via services.completeness.update_completeness_score
+    (single source of truth) and rewrites is_complete + is_fully_charted. A re-run
+    converges to the same values.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(systems)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'is_fully_charted' not in cols:
+        # 1.90.0 should have added it; guard so this migration is order-safe.
+        cursor.execute("ALTER TABLE systems ADD COLUMN is_fully_charted INTEGER DEFAULT 0")
+        logger.info("Migration 1.91.0: added missing systems.is_fully_charted column")
+
+    # update_completeness_score reads rows as dicts → needs sqlite3.Row (mirrors 1.90.0).
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        from services.completeness import update_completeness_score
+        id_cursor = conn.cursor()
+        id_cursor.execute("SELECT id FROM systems")
+        system_ids = [row[0] for row in id_cursor.fetchall()]
+        score_cursor = conn.cursor()
+        logger.info(f"Migration 1.91.0: re-scoring {len(system_ids)} systems to repair S+ drift...")
+        splus = 0
+        for sys_id in system_ids:
+            result = update_completeness_score(score_cursor, sys_id)
+            if result.get('is_fully_charted'):
+                splus += 1
+        logger.info(
+            f"Migration 1.91.0: re-scored {len(system_ids)} systems; "
+            f"{splus} now qualify as S+ (fully charted)"
+        )
+    finally:
+        conn.row_factory = prev_factory

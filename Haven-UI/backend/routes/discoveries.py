@@ -24,6 +24,7 @@ from services.auth_service import (
     verify_api_key,
 )
 from services.civilizations import civ_scope_filter, user_can_act_for_civ
+from services.completeness import update_completeness_score
 from services.events import resolve_submission_event_id
 
 logger = logging.getLogger('control.room')
@@ -1214,16 +1215,23 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             edit_discovery_id = None
 
         is_edit = False
+        # Parent system whose cached completeness must be refreshed after this
+        # approval (a discovery's planet/moon link feeds the S+ checklist).
+        parent_system_id = None
         if edit_discovery_id is not None:
             # EDIT path: update the live discovery in place. Preserve the original
             # attribution (discovered_by, submission_timestamp, system_id,
             # discord_tag, profile_id, source) — only the editable fields change.
-            cursor.execute('SELECT id FROM discoveries WHERE id = ?', (edit_discovery_id,))
-            if not cursor.fetchone():
+            cursor.execute('SELECT id, system_id FROM discoveries WHERE id = ?', (edit_discovery_id,))
+            live_row = cursor.fetchone()
+            if not live_row:
                 raise HTTPException(
                     status_code=400,
                     detail="The discovery this edit targets no longer exists. Reject this submission instead."
                 )
+            # Edits can change planet/moon but never the system, so the live row's
+            # system_id is the parent to re-score.
+            parent_system_id = live_row['system_id']
             cursor.execute('''
                 UPDATE discoveries SET
                     discovery_type = ?, discovery_name = ?, type_slug = ?,
@@ -1292,6 +1300,7 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                 submission.get('event_id') if submission.get('event_id') is not None else discovery_data.get('event_id'),
             ))
             discovery_id = cursor.lastrowid
+            parent_system_id = discovery_data.get('system_id')
 
         # Update pending status
         cursor.execute('''
@@ -1323,6 +1332,21 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
             submission.get('discord_tag'),
             submission.get('source', 'manual'),
         ))
+
+        # A discovery's link to a planet/moon is a primary input to the S+
+        # "fully charted" checklist, so refresh the parent system's cached
+        # completeness/is_fully_charted now that the live discovery exists.
+        # The system detail page recomputes live, but the systems list / map /
+        # search / posters read the cached column — without this they'd disagree
+        # on S vs S+ (the Mabaya bug).
+        if parent_system_id:
+            try:
+                update_completeness_score(cursor, parent_system_id)
+            except Exception as score_err:
+                logger.warning(
+                    f"Completeness recompute after discovery approve failed "
+                    f"for system {parent_system_id}: {score_err}"
+                )
 
         conn.commit()
 
