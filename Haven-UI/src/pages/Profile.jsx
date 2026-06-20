@@ -376,7 +376,7 @@ export default function Profile() {
                     return (
                       <a
                         key={s.id}
-                        href={`/haven-ui/systems/${encodeURIComponent(s.name)}`}
+                        href={`/haven-ui/systems/${encodeURIComponent(s.id)}`}
                         className="haven-card haven-card-hover flex items-center justify-between py-1.5 px-2 text-sm block"
                       >
                         <div className="flex items-center gap-2">

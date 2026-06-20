@@ -231,7 +231,7 @@ function SystemsSection({ rows, total, navigate }) {
           <button
             key={s.id}
             type="button"
-            onClick={() => navigate(`/systems/${encodeURIComponent(s.name)}`)}
+            onClick={() => navigate(`/systems/${encodeURIComponent(s.id)}`)}
             className="w-full px-4 py-3 saved-row text-left flex items-center justify-between gap-3"
             style={{ borderBottom: '1px solid var(--border-soft)' }}
           >

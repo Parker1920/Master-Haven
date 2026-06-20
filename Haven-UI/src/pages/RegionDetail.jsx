@@ -926,7 +926,7 @@ export default function RegionDetail() {
               showCheckbox={bulkMode}
               onClick={() => {
                 if (!bulkMode) {
-                  navigate(`/systems/${encodeURIComponent(system.name)}`)
+                  navigate(`/systems/${encodeURIComponent(system.id)}`)
                 }
               }}
             />

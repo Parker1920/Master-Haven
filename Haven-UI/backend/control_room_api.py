@@ -2240,6 +2240,17 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
             sys_id = system.get('id')
             system_discord_tag = system.get('discord_tag')
 
+            # name_unique: tells the frontend whether `/systems/<name>` resolves to
+            # exactly one system. When false (NMS procgen names repeat constantly),
+            # SystemDetail keeps the id in the URL instead of rewriting to the
+            # ambiguous pretty name — otherwise a refresh/share would re-trigger the
+            # 300 disambiguation picker.
+            try:
+                cursor.execute('SELECT COUNT(*) FROM systems WHERE name = ? COLLATE NOCASE', (system.get('name'),))
+                system['name_unique'] = (cursor.fetchone()[0] or 0) <= 1
+            except Exception:
+                system['name_unique'] = False
+
             # Check if viewer can bypass restrictions for this system
             can_bypass = can_bypass_restriction(session_data, system_discord_tag)
 

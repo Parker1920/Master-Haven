@@ -134,7 +134,10 @@ export default function SystemDetail() {
       // Clean up the address bar: if we arrived via an id (old /systems/<uuid>
       // bookmark) or a non-canonical name (wrong casing), rewrite to the
       // canonical name URL without re-fetching (react-router params stay as-is).
-      if (r.data?.name && id !== r.data.name) {
+      // Only prettify when the name is UNIQUE — NMS procgen names repeat, and
+      // rewriting an ambiguous name into the URL makes a refresh/share land on
+      // the 300 disambiguation picker instead of this system.
+      if (r.data?.name && r.data?.name_unique && id !== r.data.name) {
         const base = import.meta.env.BASE_URL || '/'
         window.history.replaceState(null, '', `${base}systems/${encodeURIComponent(r.data.name)}`)
       }

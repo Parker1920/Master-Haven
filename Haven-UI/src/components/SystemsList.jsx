@@ -134,8 +134,10 @@ export default function SystemsList() {
       })
       return
     }
-    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${encodeURIComponent(sys.name)}` })
-    navigate(`/systems/${encodeURIComponent(sys.name)}`)
+    // Navigate by id, not name — names repeat across systems, so a name URL
+    // would re-trigger the disambiguation picker on a card the user already picked.
+    pushRecentlyViewed({ type: 'system', name: sys.name, href: `/systems/${encodeURIComponent(sys.id)}` })
+    navigate(`/systems/${encodeURIComponent(sys.id)}`)
   }
 
   const total = sorted.length

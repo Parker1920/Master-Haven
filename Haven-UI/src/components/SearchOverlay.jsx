@@ -149,8 +149,10 @@ export default function SearchOverlay() {
       return
     }
     if (kind === 'system') {
-      pushRecentlyViewed({ type: 'system', name: row.name, href: `/systems/${encodeURIComponent(row.name)}` })
-      navigate(`/systems/${encodeURIComponent(row.name)}`)
+      // Navigate by id, not name — NMS system names repeat, and a name URL would
+      // hit the 300 disambiguation picker even though the user picked one row.
+      pushRecentlyViewed({ type: 'system', name: row.name, href: `/systems/${encodeURIComponent(row.id)}` })
+      navigate(`/systems/${encodeURIComponent(row.id)}`)
     }
   }
 

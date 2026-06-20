@@ -299,7 +299,7 @@ export default function CommunityDetail() {
                         return (
                           <Link
                             key={sys.id}
-                            to={`/systems/${encodeURIComponent(sys.name)}`}
+                            to={`/systems/${encodeURIComponent(sys.id)}`}
                             className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors"
                             style={{ color: 'var(--app-text)' }}
                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}

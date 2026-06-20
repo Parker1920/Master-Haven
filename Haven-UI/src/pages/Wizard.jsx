@@ -1225,7 +1225,7 @@ export default function Wizard() {
       <SuccessScreen
         result={submitResult}
         onSubmitAnother={handleSubmitAnother}
-        onViewSystem={submitResult.system_id ? () => navigate(`/systems/${encodeURIComponent(submitResult.system_name || submitResult.system_id)}`) : null}
+        onViewSystem={submitResult.system_id ? () => navigate(`/systems/${encodeURIComponent(submitResult.system_id)}`) : null}
         onViewLeaderboard={() => navigate('/analytics')}
       />
     )
