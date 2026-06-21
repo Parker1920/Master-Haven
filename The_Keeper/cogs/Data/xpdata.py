@@ -5,7 +5,7 @@ import time
 import logging
 
 
-
+RESET_DB = True
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "xp.db")
 logging.basicConfig(level=logging.INFO)
@@ -145,9 +145,13 @@ def get_conn():
     )
 async def migrate(db):
     await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, primary_role TEXT)")
+    
 
 async def init_db():
     log.info("init_db() started")
+    if RESET_DB and os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     async with aiosqlite.connect(DB_PATH) as db:
