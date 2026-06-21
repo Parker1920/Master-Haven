@@ -20,6 +20,7 @@ from cogs.community import SearchView, AddCivView
 from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH
 import logging
 log = logging.getLogger("commands")
+print("DB_PATH =", DB_PATH)
    
 # =========================
 # MAIN COG
