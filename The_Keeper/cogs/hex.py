@@ -153,7 +153,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.input_string = ""
         self.emoji_sequence = []
         self.class_type = None
-
+        self.system_name = None
         self.system_owner_type = "uncharted"
         self.system_owner_tag = None
 
@@ -230,7 +230,12 @@ class SimpleHexKeypad(discord.ui.View):
                 f"{self.system_owner_type.capitalize()}: {self.system_owner_tag}"
             )
                         
-
+            if self.system_name:
+                embed.add_field(
+                    name="System Name",
+                    value=self.system_name,
+                    inline=False
+                )
         else:
             ownership_value = self.system_owner_type
 
@@ -441,7 +446,8 @@ class SimpleHexKeypad(discord.ui.View):
                         )
                         
                         if data:
-                        
+
+                            self.system_name = data.get("name", "Unknown System")
                             self.system_owner_type = "community"
                             self.system_owner_tag = data.get(
                                 "discord_tag"
