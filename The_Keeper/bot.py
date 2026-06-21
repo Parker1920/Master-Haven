@@ -205,7 +205,7 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
-    "cogs.TimeParser",
+    "cogs.timeparser",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
