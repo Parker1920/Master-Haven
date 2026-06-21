@@ -8,7 +8,6 @@ import json
 from difflib import get_close_matches
 import aiohttp
 import traceback
-DB_PATH = os.path.join(os.path.dirname(__file__), "Data", "xp.db")
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "cogs", "Data"))
 
@@ -18,7 +17,7 @@ from cogs import xp_system, personality, Haven_stats, Haven_upload, featured, co
 from cogs.xp_cog import DepartmentView
 from cogs.xp_system import get_user, get_level_from_xp, make_progress_bar, get_rank, xp_needed
 from cogs.community import SearchView, AddCivView
-from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user
+from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH
 import logging
 log = logging.getLogger("commands")
    
