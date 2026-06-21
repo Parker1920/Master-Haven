@@ -5,7 +5,7 @@ import time
 import logging
 
 
-RESET_DB = True
+RESET_DB = False
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "xp.db")
 logging.basicConfig(level=logging.INFO)
