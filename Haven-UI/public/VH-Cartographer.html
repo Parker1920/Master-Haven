@@ -1154,6 +1154,11 @@ body.fly-mode #canvas-host {
   <hr class="cf-divider">
 
   <div class="cf-section">
+    <span class="cf-label">Community</span>
+    <select id="cf-civ-tag" class="cf-select"><option value="">Any</option></select>
+  </div>
+
+  <div class="cf-section">
     <span class="cf-label">Economy Type</span>
     <select id="cf-economy-type" class="cf-select"><option value="">Any</option></select>
   </div>
@@ -1232,8 +1237,8 @@ body.fly-mode #canvas-host {
       <span>Has Station</span>
     </label>
     <label class="cf-toggle">
-      <input type="checkbox" id="cf-has-planets">
-      <span>Has Planets</span>
+      <input type="checkbox" id="cf-has-moons">
+      <span>Has Moons</span>
     </label>
   </div>
 
@@ -1601,6 +1606,18 @@ async function parseSnapshot() {
     // Guarded: older backends without `ri` leave this null (region hide is then
     // skipped, system hide still works).
     S.systemRegionIdx = S.data.ri ? decodeU16(S.data.ri) : null;
+    // Per-system "has moons" flag, derived from planets_by_idx — each planet
+    // tuple carries its moon_count at index 5. (A far more useful filter than
+    // "has planets", which nearly every system satisfies.)
+    S.hasMoons = new Uint8Array(S.data.n);
+    const _pbi = S.data.planets_by_idx || {};
+    for (const k in _pbi) {
+      const arr = _pbi[k];
+      let has = 0;
+      for (let j = 0; j < arr.length; j++) { if ((arr[j][5] || 0) > 0) { has = 1; break; } }
+      const idx = +k;
+      if (has && idx >= 0 && idx < S.data.n) S.hasMoons[idx] = 1;
+    }
 
     // Region centroid positions + system counts — drives the galaxy-tier
     // dot cloud. Each region is a single point at its display centroid,
@@ -4055,6 +4072,8 @@ async function reloadSnapshot() {
     buildRegionPoints();
     buildGridLines();
     buildRegionLabels();
+    _populateCivTagDropdown();        // refresh the civ-tag list for the new scope
+    _populateGalaxyDropdown();        // keep the full galaxy list (preserve selection)
     S.regionBaseColors = null;        // force fresh base-color snapshot
     // Region set changed → any prior civ/contributor focus no longer maps.
     mapFocusFilterActive = false;
@@ -4064,6 +4083,10 @@ async function reloadSnapshot() {
     await applyFilters();             // recompute matched set against new data
     updateStats();
     updateTier();
+    // Frame the freshly-scoped galaxy from the standard galaxy view — region
+    // coords differ per galaxy, so the old camera target would otherwise be
+    // pointing at empty space and the change would look like nothing happened.
+    flyTo({ x: 0, y: 0, z: 0 }, 4400, 1.2);
   } catch (e) {
     console.error('reloadSnapshot failed', e);
   } finally {
@@ -4102,6 +4125,44 @@ function _populateFilterDropdowns() {
     el.innerHTML = '<option value="">Any</option>'
       + opts.map(o => `<option value="${escapeHtml(String(o))}">${escapeHtml(String(o))}</option>`).join('');
   }
+  _populateCivTagDropdown();
+  _populateGalaxyDropdown();
+}
+
+/**
+ * Populate the Community (civ tag) dropdown from the snapshot's tag pool
+ * (index 0 is the empty/untagged bucket — drop only that; "Personal" is kept).
+ * Re-derived per snapshot scope and preserves the current selection if that
+ * tag still exists, so a reality/galaxy reload doesn't wipe it.
+ */
+function _populateCivTagDropdown() {
+  const el = document.getElementById('cf-civ-tag');
+  if (!el) return;
+  const prev = el.value;
+  const tags = (S.data && S.data.tag_pool ? S.data.tag_pool : [])
+    .filter(t => t)   // drop only the empty/untagged bucket; keep "Personal"
+    .slice().sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  el.innerHTML = '<option value="">Any</option>'
+    + tags.map(o => `<option value="${escapeHtml(String(o))}">${escapeHtml(String(o))}</option>`).join('');
+  if (prev && tags.includes(prev)) el.value = prev;
+}
+
+/**
+ * Populate the Galaxy dropdown from the snapshot's full galaxy list (always the
+ * complete set for the current reality, even when scoped to one galaxy) so the
+ * user can switch to any galaxy that actually has data. Preserves the current
+ * selection. Falls back to the static markup on an older snapshot without the
+ * list.
+ */
+function _populateGalaxyDropdown() {
+  const el = document.getElementById('cf-galaxy');
+  if (!el) return;
+  const gals = (S.data && Array.isArray(S.data.galaxies)) ? S.data.galaxies : [];
+  if (!gals.length) return;  // older snapshot w/o galaxy list → keep static options
+  const prev = el.value || _scopeGalaxy || '';
+  el.innerHTML = '<option value="">All Galaxies</option>'
+    + gals.map(g => `<option value="${escapeHtml(String(g))}">${escapeHtml(String(g))}</option>`).join('');
+  if (prev && gals.includes(prev)) el.value = prev;
 }
 
 /**
@@ -4146,7 +4207,7 @@ async function applyFilters() {
   }
 
   const wantStation = !!document.getElementById('cf-has-station')?.checked;
-  const wantPlanets = !!document.getElementById('cf-has-planets')?.checked;
+  const wantMoons   = !!document.getElementById('cf-has-moons')?.checked;
 
   // Star type: client-side multi-select → build index set
   const activeDots = [...document.querySelectorAll('#cf-star-type .cf-star-dot.active')];
@@ -4159,8 +4220,12 @@ async function applyFilters() {
     starTypeSet = idxSet;
   }
 
+  // Community / civ tag: client-side, resolved against the snapshot's tag pool.
+  const civTag = (document.getElementById('cf-civ-tag')?.value || '');
+  const civTagIdx = civTag && S.data.tag_pool ? S.data.tag_pool.indexOf(civTag) : -1;
+
   const hasServer = params.toString().length > 0;
-  const hasClient = !!(starTypeSet || wantStation || wantPlanets);
+  const hasClient = !!(starTypeSet || wantStation || wantMoons || civTagIdx >= 0);
 
   // No filter at all → clear the matched set, repaint clean, done.
   if (!hasServer && !hasClient) {
@@ -4196,8 +4261,9 @@ async function applyFilters() {
   for (let i = 0; i < n; i++) {
     const ok = (!serverSet   || serverSet.has(i))
             && (!starTypeSet || starTypeSet.has(S.starTypes[i]))
+            && (civTagIdx < 0 || S.tagIndices[i] === civTagIdx)
             && (!wantStation || (S.hasStation && S.hasStation[i] > 0))
-            && (!wantPlanets || (S.hasPlanets && S.hasPlanets[i] > 0));
+            && (!wantMoons   || (S.hasMoons && S.hasMoons[i] > 0));
     if (ok) matched.add(i);
   }
 
@@ -4291,6 +4357,7 @@ function updatePills() {
   }
 
   for (const [id, label] of [
+    ['cf-civ-tag', 'community'],
     ['cf-economy-type', 'economy'], ['cf-lifeform', 'lifeform'],
     ['cf-biome', 'biome'], ['cf-weather', 'weather'], ['cf-resource', 'resource'],
   ]) {
@@ -4313,8 +4380,8 @@ function updatePills() {
 
   if (document.getElementById('cf-has-station')?.checked)
     pills.push(`<span class="carto-pill">has station <button onclick="document.getElementById('cf-has-station').checked=false;applyFilters()">×</button></span>`);
-  if (document.getElementById('cf-has-planets')?.checked)
-    pills.push(`<span class="carto-pill">has planets <button onclick="document.getElementById('cf-has-planets').checked=false;applyFilters()">×</button></span>`);
+  if (document.getElementById('cf-has-moons')?.checked)
+    pills.push(`<span class="carto-pill">has moons <button onclick="document.getElementById('cf-has-moons').checked=false;applyFilters()">×</button></span>`);
 
   row.innerHTML = pills.join('');
 }

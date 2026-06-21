@@ -440,7 +440,7 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
     # Empty-DB envelope keeps the shape stable so parseSnapshot() never NPEs.
     empty = {
         'n': 0, 'pos': '', 'st': '', 'ti': '', 'hp': '', 'hs': '', 'ri': '',
-        'rpos': '', 'rcount': '', 'rn': 0, 'regions': [], 'names': [],
+        'rpos': '', 'rcount': '', 'rn': 0, 'galaxies': [], 'regions': [], 'names': [],
         'glyphs': [], 'star_types': list(_STAR_TYPE_ORDER), 'tag_pool': [''],
         'tag_colors': {}, 'biomes': [''], 'sizes': [''], 'sentinel': [''],
         'planets_by_idx': {},
@@ -695,6 +695,19 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
             logger.warning("snapshot: tag_colors lookup failed: %s", e)
             tag_colors = {}
 
+        # --- Full galaxy list for the map's Galaxy dropdown. Reality-scoped but
+        #     NOT galaxy-scoped, so the dropdown keeps every option even when the
+        #     snapshot itself is narrowed to one galaxy. ---
+        gal_where = ["galaxy IS NOT NULL AND TRIM(galaxy) != ''"]
+        gal_params = []
+        if reality:
+            gal_where.append("COALESCE(reality, 'Normal') = ?")
+            gal_params.append(reality)
+        cursor.execute(
+            f"SELECT DISTINCT galaxy FROM systems WHERE {' AND '.join(gal_where)} ORDER BY galaxy",
+            gal_params)
+        all_galaxies = [r[0] for r in cursor.fetchall() if r[0]]
+
         def b64(arr):
             return base64.b64encode(arr.tobytes()).decode('ascii')
 
@@ -709,6 +722,7 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
             'rpos': b64(rpos),
             'rcount': b64(rcount),
             'rn': rn,
+            'galaxies': all_galaxies,
             'regions': regions,
             'names': names,
             'glyphs': glyphs,
@@ -1363,15 +1377,30 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
         planet_where = ("WHERE " + " AND ".join(planet_where_clauses)) if planet_where_clauses else ""
         planet_join = "JOIN systems s ON p.system_id = s.id" if planet_where_clauses else ""
 
+        # Collapse case/whitespace-variant duplicates (e.g. "Trading" vs
+        # "Trading " vs "trading") into one canonical option. SQL DISTINCT keeps
+        # them separate, which surfaced as repeated economy-type entries in the
+        # Cartographer dropdown. Keeps the first-seen trimmed casing.
+        def _dedup_clean(values):
+            seen = {}
+            for v in values:
+                if not v or not isinstance(v, str):
+                    continue
+                trimmed = v.strip()
+                key = trimmed.lower()
+                if key and key not in seen:
+                    seen[key] = trimmed
+            return sorted(seen.values(), key=lambda s: s.lower())
+
         # System-level fields
         def get_distinct_system(column):
             cursor.execute(f"SELECT DISTINCT s.{column} FROM systems s {sys_where} ORDER BY s.{column}", sys_params)
-            return [row[0] for row in cursor.fetchall() if row[0]]
+            return _dedup_clean(row[0] for row in cursor.fetchall())
 
         # Planet-level fields
         def get_distinct_planet(column):
             cursor.execute(f"SELECT DISTINCT p.{column} FROM planets p {planet_join} {planet_where} ORDER BY p.{column}", planet_params)
-            return [row[0] for row in cursor.fetchall() if row[0]]
+            return _dedup_clean(row[0] for row in cursor.fetchall())
 
         # Collect all resources from 3 columns
         def get_distinct_resources():
