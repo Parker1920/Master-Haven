@@ -925,6 +925,31 @@ body.fly-mode #canvas-host {
 .cf-select option { background: #0a0e27; }
 .cf-divider { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 6px 12px; }
 
+/* Searchable resource combobox (vanilla equivalent of the Systems-tab SearchableSelect) */
+.cf-combo { position: relative; }
+.cf-combo-input { padding-right: 22px; }
+.cf-combo-clear {
+  position: absolute; top: 50%; right: 5px; transform: translateY(-50%);
+  background: none; border: none; color: var(--bone-dim); font-size: 14px;
+  line-height: 1; cursor: pointer; padding: 0 3px; display: none;
+}
+.cf-combo-clear:hover { color: var(--teal); }
+.cf-combo.has-value .cf-combo-clear { display: block; }
+.cf-combo-menu {
+  display: none; position: absolute; top: calc(100% + 3px); left: 0; right: 0;
+  z-index: 220; max-height: 240px; overflow-y: auto;
+  background: #0e1430; border: 1px solid rgba(0,194,179,0.4); border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+}
+.cf-combo-menu.open { display: block; }
+.cf-combo-row {
+  padding: 7px 10px; font-size: 11px; color: var(--bone); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cf-combo-row:hover, .cf-combo-row.active { background: rgba(0,194,179,0.22); color: #fff; }
+.cf-combo-row.cf-combo-empty { color: var(--bone-dim); cursor: default; }
+.cf-combo-row.cf-combo-any { color: var(--bone-dim); font-style: italic; }
+
 /* Star type swatches */
 .cf-stars { display: flex; gap: 5px; flex-wrap: wrap; }
 .cf-star-dot {
@@ -1213,7 +1238,15 @@ body.fly-mode #canvas-host {
 
   <div class="cf-section">
     <span class="cf-label">Resource</span>
-    <select id="cf-resource" class="cf-select"><option value="">Any</option></select>
+    <!-- Searchable combobox (type to filter). Hidden input carries the selected
+         value so applyFilters()/updatePills() read it like any other field. -->
+    <div id="cf-resource-combo" class="cf-combo">
+      <input type="hidden" id="cf-resource" value="">
+      <input type="text" id="cf-resource-search" class="cf-select cf-combo-input"
+             placeholder="Any resource…" autocomplete="off" spellcheck="false">
+      <button type="button" id="cf-resource-clear" class="cf-combo-clear" title="Clear">×</button>
+      <div id="cf-resource-menu" class="cf-combo-menu"></div>
+    </div>
   </div>
 
   <hr class="cf-divider">
@@ -3795,6 +3828,8 @@ let _matchingIds       = null; // null = show all; Set<sysIdx> = matching only
 let _matchingRegions   = null; // null = show all; Set<regionIdx> w/ ≥1 match
 let _matchingRegionKeys= null; // matching region 'rx,ry,rz' keys (for labels)
 let _lastMatchCount    = 0;    // # systems matched by the active filter (pills)
+let _resourceOptions   = [];   // canonical resource list for the searchable combobox
+let _resourceActiveRow = -1;   // keyboard-highlighted row in the resource menu
 
 // ── SEARCH ─────────────────────────────────────────────────────
 
@@ -4030,6 +4065,8 @@ async function initFilters() {
     cb.addEventListener('change', () => { clearTimeout(_filterDebounce); _filterDebounce = setTimeout(applyFilters, 300); });
   });
 
+  initResourceCombo();
+
   // ── Reality / Galaxy → re-scope the snapshot (rebuild clouds) ──────────
   // These genuinely change which systems exist on the map, so they reload
   // /api/map/snapshot scoped by reality/galaxy rather than recoloring.
@@ -4117,7 +4154,6 @@ function _populateFilterDropdowns() {
     'cf-lifeform':     _filterOptions.dominant_lifeforms  || _filterOptions.lifeforms || [],
     'cf-biome':        _filterOptions.biomes              || [],
     'cf-weather':      _filterOptions.weather_types       || _filterOptions.weathers  || [],
-    'cf-resource':     _filterOptions.resources           || [],
   };
   for (const [id, opts] of Object.entries(map)) {
     const el = document.getElementById(id);
@@ -4127,6 +4163,7 @@ function _populateFilterDropdowns() {
   }
   _populateCivTagDropdown();
   _populateGalaxyDropdown();
+  _resourceOptions = _filterOptions.resources || [];   // Resource is a searchable combobox
 }
 
 /**
@@ -4163,6 +4200,84 @@ function _populateGalaxyDropdown() {
   el.innerHTML = '<option value="">All Galaxies</option>'
     + gals.map(g => `<option value="${escapeHtml(String(g))}">${escapeHtml(String(g))}</option>`).join('');
   if (prev && gals.includes(prev)) el.value = prev;
+}
+
+// ── Resource searchable combobox ───────────────────────────────────────────
+// Vanilla equivalent of the Systems-tab SearchableSelect: type to filter, click
+// or ↑↓/Enter to pick, × to clear. The hidden #cf-resource carries the value so
+// applyFilters()/updatePills() treat it like any other field.
+function initResourceCombo() {
+  const combo  = document.getElementById('cf-resource-combo');
+  const input  = document.getElementById('cf-resource-search');
+  const hidden = document.getElementById('cf-resource');
+  const menu   = document.getElementById('cf-resource-menu');
+  const clear  = document.getElementById('cf-resource-clear');
+  if (!combo || !input || !hidden || !menu) return;
+
+  const openMenu  = () => { _renderResourceMenu(input.value); menu.classList.add('open'); };
+  const closeMenu = () => { menu.classList.remove('open'); _resourceActiveRow = -1; };
+
+  const commit = (val) => {
+    hidden.value = val || '';
+    input.value  = val || '';
+    combo.classList.toggle('has-value', !!val);
+    closeMenu();
+    clearTimeout(_filterDebounce); _filterDebounce = setTimeout(applyFilters, 200);
+  };
+
+  input.addEventListener('focus', openMenu);
+  input.addEventListener('input', () => {
+    // Typing means the committed value is stale until they pick a row.
+    hidden.value = '';
+    combo.classList.remove('has-value');
+    openMenu();
+  });
+  input.addEventListener('keydown', e => {
+    const rows = [...menu.querySelectorAll('.cf-combo-row[data-val]')];
+    if (e.key === 'ArrowDown') { e.preventDefault(); _resourceActiveRow = Math.min(rows.length - 1, _resourceActiveRow + 1); _highlightResourceRow(rows); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _resourceActiveRow = Math.max(0, _resourceActiveRow - 1); _highlightResourceRow(rows); }
+    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[_resourceActiveRow] || rows[0]; if (r) commit(r.dataset.val); }
+    else if (e.key === 'Escape') { closeMenu(); input.blur(); }
+  });
+  menu.addEventListener('mousedown', e => {
+    // mousedown (not click) so it fires before the input blur closes the menu.
+    const row = e.target.closest('.cf-combo-row[data-val]');
+    if (row) { e.preventDefault(); commit(row.dataset.val); }
+  });
+  if (clear) clear.addEventListener('click', () => { commit(''); input.focus(); });
+  document.addEventListener('click', e => { if (!combo.contains(e.target)) closeMenu(); });
+}
+
+function _highlightResourceRow(rows) {
+  rows.forEach((r, i) => r.classList.toggle('active', i === _resourceActiveRow));
+  if (rows[_resourceActiveRow]) rows[_resourceActiveRow].scrollIntoView({ block: 'nearest' });
+}
+
+/** Reset the resource combobox (hidden value + visible input + chrome), then re-filter. */
+function clearResourceFilter() {
+  const combo  = document.getElementById('cf-resource-combo');
+  const input  = document.getElementById('cf-resource-search');
+  const hidden = document.getElementById('cf-resource');
+  if (hidden) hidden.value = '';
+  if (input)  input.value = '';
+  if (combo)  combo.classList.remove('has-value');
+  applyFilters();
+}
+
+function _renderResourceMenu(query) {
+  const menu = document.getElementById('cf-resource-menu');
+  if (!menu) return;
+  const q = (query || '').trim().toLowerCase();
+  const matches = _resourceOptions.filter(r => !q || r.toLowerCase().includes(q));
+  _resourceActiveRow = -1;
+  let html = '<div class="cf-combo-row cf-combo-any" data-val="">Any resource</div>';
+  if (!matches.length) {
+    html += '<div class="cf-combo-row cf-combo-empty">No matches</div>';
+  } else {
+    html += matches.slice(0, 200).map(r =>
+      `<div class="cf-combo-row" data-val="${escapeHtml(r)}">${escapeHtml(r)}</div>`).join('');
+  }
+  menu.innerHTML = html;
 }
 
 /**
@@ -4362,7 +4477,13 @@ function updatePills() {
     ['cf-biome', 'biome'], ['cf-weather', 'weather'], ['cf-resource', 'resource'],
   ]) {
     const v = document.getElementById(id)?.value;
-    if (v) pills.push(`<span class="carto-pill">${label}: ${escapeHtml(v)} <button onclick="document.getElementById('${id}').value='';applyFilters()">×</button></span>`);
+    if (!v) continue;
+    // Resource is a combobox (hidden value + visible input) — its pill clears
+    // through a helper that also resets the visible field; the rest are plain selects.
+    const clearJs = id === 'cf-resource'
+      ? 'clearResourceFilter()'
+      : `document.getElementById('${id}').value='';applyFilters()`;
+    pills.push(`<span class="carto-pill">${label}: ${escapeHtml(v)} <button onclick="${clearJs}">×</button></span>`);
   }
 
   for (const [id, label] of [

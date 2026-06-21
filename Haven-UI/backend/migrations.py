@@ -7161,3 +7161,43 @@ def migration_1_92_0(conn):
         )
     finally:
         conn.row_factory = prev_factory
+
+
+@register_migration("1.93.0", "Normalize planets/moons materials into canonical resource names (typo/case/separator cleanup; no resource data dropped)")
+def migration_1_93_0(conn):
+    """Clean up the free-text `materials` resource lists in place.
+
+    The materials column accumulated case variants ("Copper"/"copper"), typos
+    ("Cooper", "kupfer", "uramium"), and bad separators ("Salt. Gold. Copper",
+    "Copper and uranium"). That made the resource filter — which now matches
+    against materials — noisy, and any dropdown built from it a 170-entry mess.
+
+    resource_catalog.normalize_materials() re-splits each cell, maps every token
+    we can recognize to its canonical resource name, and PRESERVES anything it
+    can't (genuine non-resources like "Dissonance" / "High Sentinel Activity"),
+    so no information is lost. Idempotent: a second run normalizes to the same
+    string and changes nothing. The migration runner snapshots the DB first.
+    """
+    from resource_catalog import normalize_materials
+    cursor = conn.cursor()
+    total_changed = 0
+    for table in ("planets", "moons"):
+        cursor.execute("PRAGMA table_info(%s)" % table)
+        cols = {row[1] for row in cursor.fetchall()}
+        if 'materials' not in cols:
+            continue
+        cursor.execute(
+            f"SELECT id, materials FROM {table} "
+            f"WHERE materials IS NOT NULL AND TRIM(materials) != ''")
+        rows = cursor.fetchall()
+        upd = conn.cursor()
+        changed = 0
+        for row in rows:
+            pid, mats = row[0], row[1]
+            norm = normalize_materials(mats)
+            if norm != (mats or '').strip():
+                upd.execute(f"UPDATE {table} SET materials = ? WHERE id = ?", (norm, pid))
+                changed += 1
+        total_changed += changed
+        logger.info(f"Migration 1.93.0: normalized materials on {changed}/{len(rows)} {table}")
+    logger.info(f"Migration 1.93.0: total {total_changed} rows normalized")

@@ -539,10 +539,20 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
         where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.sentinel = ?)")
         params.append(params_dict['sentinel_level'])
     if params_dict.get('resource'):
-        where_clauses.append("""EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id
-            AND (p.common_resource = ? OR p.uncommon_resource = ? OR p.rare_resource = ?))""")
+        # The real resource data lives in planets.materials (a ", "-joined list,
+        # normalized to canonical names by migration 1.93.0); the dedicated
+        # common/uncommon/rare columns are ~empty. Match the resource as a whole
+        # comma-bounded token (LIKE is case-insensitive in SQLite), normalizing
+        # the two stray separators ("." and " and ") inline so pre-normalization
+        # rows still match. Dedicated columns kept as a fallback.
         res = params_dict['resource']
-        params.extend([res, res, res])
+        where_clauses.append("""EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id
+            AND (
+                ', ' || REPLACE(REPLACE(COALESCE(p.materials, ''), '. ', ', '), ' and ', ', ') || ', '
+                    LIKE '%, ' || ? || ', %'
+                OR p.common_resource = ? OR p.uncommon_resource = ? OR p.rare_resource = ?
+            ))""")
+        params.extend([res, res, res, res])
     if params_dict.get('has_moons') is not None:
         if params_dict['has_moons']:
             where_clauses.append("EXISTS (SELECT 1 FROM planets p JOIN moons m ON m.planet_id = p.id WHERE p.system_id = s.id)")
