@@ -965,6 +965,7 @@ body.fly-mode #canvas-host {
   color: var(--teal); font-size: 10px; pointer-events: all; white-space: nowrap;
 }
 .carto-pill.amber { background: rgba(255,180,76,0.1); border-color: rgba(255,180,76,0.3); color: var(--amber); }
+.carto-pill.count { background: rgba(0,194,179,0.22); border-color: rgba(0,194,179,0.55); color: var(--teal); font-weight: 600; }
 .carto-pill button { background: none; border: none; cursor: pointer; color: inherit; font-size: 12px; line-height: 1; padding: 0 0 0 2px; opacity: 0.7; }
 .carto-pill button:hover { opacity: 1; }
 
@@ -1241,7 +1242,8 @@ body.fly-mode #canvas-host {
   <div class="cf-section">
     <span class="cf-label">Reality</span>
     <div class="cpill-group-single" id="cf-reality" style="display:flex;gap:4px;margin-top:4px;">
-      <div class="cpill active" data-val="Normal">Normal</div>
+      <div class="cpill active" data-val="">All</div>
+      <div class="cpill" data-val="Normal">Normal</div>
       <div class="cpill" data-val="Permadeath">Permadeath</div>
     </div>
   </div>
@@ -1249,6 +1251,7 @@ body.fly-mode #canvas-host {
   <div class="cf-section">
     <span class="cf-label">Galaxy</span>
     <select id="cf-galaxy" style="width:100%;margin-top:4px;background:rgba(8,13,35,0.9);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--bone);padding:6px 8px;font-size:12px;">
+      <option value="">All Galaxies</option>
       <option value="Euclid">Euclid</option>
       <option value="Hilbert Dimension">Hilbert Dimension</option>
       <option value="Calypso">Calypso</option>
@@ -1351,6 +1354,19 @@ const TIER = {
 };
 
 const API_BASE = '';  // same-origin: this page is served by the Haven backend
+
+// Reality / Galaxy scope for the snapshot (null = All). Driven by the left
+// filter sidebar's Reality + Galaxy controls; changing either reloads the
+// snapshot (reloadSnapshot) and rebuilds the clouds.
+let _scopeReality = null;
+let _scopeGalaxy  = null;
+function _snapshotScopeQuery() {
+  const p = new URLSearchParams();
+  if (_scopeReality) p.set('reality', _scopeReality);
+  if (_scopeGalaxy)  p.set('galaxy', _scopeGalaxy);
+  const s = p.toString();
+  return s ? ('?' + s) : '';
+}
 
 // Star type → RGB hex
 const STAR_COLOR_HEX = {
@@ -1517,6 +1533,11 @@ function dismissBoot() {
   if (b) b.classList.add('gone');
 }
 
+function showBoot() {
+  const b = document.getElementById('boot');
+  if (b) b.classList.remove('gone');
+}
+
 async function boot() {
   bootMsg('checking WebGL');
   if (!checkWebGL()) {
@@ -1567,7 +1588,7 @@ async function parseSnapshot() {
   try {
     // v10 integration: fetch the live bulk snapshot from the Haven backend
     // (/api/map/snapshot) instead of reading a baked-in <script id="snapshot"> blob.
-    const res = await fetch(API_BASE + '/api/map/snapshot');
+    const res = await fetch(API_BASE + '/api/map/snapshot' + _snapshotScopeQuery());
     if (!res.ok) throw new Error('snapshot HTTP ' + res.status);
     S.data = await res.json();
     S.positions = decodeFloat32(S.data.pos);
@@ -1575,6 +1596,11 @@ async function parseSnapshot() {
     S.tagIndices = decodeU8(S.data.ti);
     S.hasPlanets = decodeU8(S.data.hp);
     S.hasStation = decodeU8(S.data.hs);
+    // Per-system region index → which region (in S.data.regions) each system
+    // belongs to. Drives region-layer hiding when a sidebar filter is active.
+    // Guarded: older backends without `ri` leave this null (region hide is then
+    // skipped, system hide still works).
+    S.systemRegionIdx = S.data.ri ? decodeU16(S.data.ri) : null;
 
     // Region centroid positions + system counts — drives the galaxy-tier
     // dot cloud. Each region is a single point at its display centroid,
@@ -1607,6 +1633,10 @@ function decodeU8(b64) {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+function decodeU16(b64) {
+  const u8 = decodeU8(b64);
+  return new Uint16Array(u8.buffer, u8.byteOffset, u8.byteLength / 2);
 }
 
 /* ============================================================
@@ -2136,7 +2166,9 @@ function updateColorMode(mode) {
     }
   }
 
-  S.starPoints.geometry.attributes.color.needsUpdate = true;
+  // Re-apply the active sidebar filter's hide over the freshly-painted base
+  // colors (also flips the color attribute's needsUpdate).
+  _applySystemFilterHide();
   updateLegend(mode);
 }
 
@@ -3595,29 +3627,45 @@ async function applyTerritoryFocus(kind, value) {
   frameFocusedRegions(mask);
 }
 
-/** Recolor the region point cloud (and dim labels) per the focus mask. */
+/**
+ * Recolor the region point cloud (and dim/hide labels). Composes TWO masks:
+ *   • the sidebar attribute filter (_matchingRegions) — HARD HIDE (k=0), since
+ *     a region with zero matching systems should disappear entirely; and
+ *   • the civ/contributor territory focus (S.focusedRegionMask) — soft GHOST
+ *     (k=0.06), its long-standing look.
+ * Attribute-hide wins over focus-ghost when both exclude a region. With no
+ * filter active this restores base colors. Shared by the sidebar filter, the
+ * territory focus, and snapshot reloads so the region layer has one painter.
+ */
 function applyFocusFilter() {
   if (!S.regionPoints) return;
   const attr = S.regionPoints.geometry.attributes.color;
   const arr = attr.array;
   if (!S.regionBaseColors) S.regionBaseColors = Float32Array.from(arr);
   const base = S.regionBaseColors;
-  const mask = S.focusedRegionMask;
-  const dim = mapFocusFilterActive && mapFocusFilterEnabled && mask;
   const rn = base.length / 3;
+
+  const focusMask = S.focusedRegionMask;
+  const focusOn   = !!(mapFocusFilterActive && mapFocusFilterEnabled && focusMask);
+  const attrOn    = !!_matchingRegions;
+
   for (let i = 0; i < rn; i++) {
-    const focused = !dim || mask[i];
-    const k = focused ? 1.0 : 0.06;  // additive blend → 0.06 reads as nearly hidden
+    let k = 1.0;
+    if (attrOn && !_matchingRegions.has(i))      k = 0.0;   // attribute filter: hide
+    else if (focusOn && !focusMask[i])           k = 0.06;  // territory focus: ghost
     arr[i*3]   = base[i*3]   * k;
     arr[i*3+1] = base[i*3+1] * k;
     arr[i*3+2] = base[i*3+2] * k;
   }
   attr.needsUpdate = true;
 
-  // Labels — dim non-focused region names alongside their dots.
-  const keys = S.focusedRegionKeys;
+  // Labels — hide (attribute) / dim (focus) names alongside their dots.
+  const focusKeys = S.focusedRegionKeys;
   for (const lbl of S.labelEls) {
-    if (dim && keys && lbl.key && !keys.has(lbl.key)) lbl.el.classList.add('focus-dim');
+    const key = lbl.key;
+    const hiddenByAttr = attrOn  && key && !_matchingRegionKeys.has(key);
+    const dimByFocus   = focusOn && focusKeys && key && !focusKeys.has(key);
+    if (hiddenByAttr || dimByFocus) lbl.el.classList.add('focus-dim');
     else lbl.el.classList.remove('focus-dim');
   }
 }
@@ -3656,8 +3704,8 @@ function clearMapFocus() {
   mapFocusFilterEnabled = true;
   S.focusedRegionMask = null;
   S.focusedRegionKeys = null;
-  applyFocusFilter();  // dim now false → restores base colors
-  document.querySelectorAll('.region-label.focus-dim').forEach(e => e.classList.remove('focus-dim'));
+  applyFocusFilter();  // focus off → restores base colors (and re-applies any
+                       // active sidebar attribute filter, incl. label classes)
   removePulseRing();
   updateFocusChip();
   // Drop the param so a refresh doesn't re-apply (no reload needed here).
@@ -3726,7 +3774,10 @@ let _searchResultItems = [];
 let _searchDebounce    = null;
 let _filterDebounce    = null;
 let _filterOptions     = {};
-let _matchingIds       = null; // null = show all; Set<index> = matching only
+let _matchingIds       = null; // null = show all; Set<sysIdx> = matching only
+let _matchingRegions   = null; // null = show all; Set<regionIdx> w/ ≥1 match
+let _matchingRegionKeys= null; // matching region 'rx,ry,rz' keys (for labels)
+let _lastMatchCount    = 0;    // # systems matched by the active filter (pills)
 
 // ── SEARCH ─────────────────────────────────────────────────────
 
@@ -3931,8 +3982,10 @@ async function initFilters() {
     if (r.ok) { _filterOptions = await r.json(); _populateFilterDropdowns(); }
   } catch (_) {}
 
-  // Single-select pill groups
+  // Single-select pill groups — EXCEPT #cf-reality, which scopes the snapshot
+  // (handled separately below) rather than the in-cloud attribute filter.
   document.querySelectorAll('.cpill-group-single').forEach(group => {
+    if (group.id === 'cf-reality') return;
     group.querySelectorAll('.cpill').forEach(pill => {
       pill.addEventListener('click', () => {
         const was = pill.classList.contains('active');
@@ -3951,12 +4004,88 @@ async function initFilters() {
     });
   });
 
+  // Attribute-filter selects — EXCEPT #cf-galaxy, which scopes the snapshot.
   document.querySelectorAll('#carto-filters select').forEach(sel => {
+    if (sel.id === 'cf-galaxy') return;
     sel.addEventListener('change', () => { clearTimeout(_filterDebounce); _filterDebounce = setTimeout(applyFilters, 400); });
   });
   document.querySelectorAll('#carto-filters input[type="checkbox"]').forEach(cb => {
     cb.addEventListener('change', () => { clearTimeout(_filterDebounce); _filterDebounce = setTimeout(applyFilters, 300); });
   });
+
+  // ── Reality / Galaxy → re-scope the snapshot (rebuild clouds) ──────────
+  // These genuinely change which systems exist on the map, so they reload
+  // /api/map/snapshot scoped by reality/galaxy rather than recoloring.
+  const realityGroup = document.getElementById('cf-reality');
+  if (realityGroup) {
+    realityGroup.querySelectorAll('.cpill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        if (pill.classList.contains('active')) return;       // single-select, no toggle-off
+        realityGroup.querySelectorAll('.cpill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        _scopeReality = pill.dataset.val || null;             // '' (All) → null
+        reloadSnapshot();
+      });
+    });
+  }
+  const galaxySel = document.getElementById('cf-galaxy');
+  if (galaxySel) {
+    galaxySel.addEventListener('change', () => {
+      _scopeGalaxy = galaxySel.value || null;                 // '' (All) → null
+      reloadSnapshot();
+    });
+  }
+}
+
+/**
+ * Re-scope the map to the current _scopeReality / _scopeGalaxy: tear down the
+ * existing star + region + grid clouds and DOM labels, refetch the snapshot,
+ * rebuild everything, then re-apply the active sidebar attribute filter against
+ * the new data. Mirrors the sibling map's reality/galaxy reload.
+ */
+let _reloadingSnapshot = false;
+async function reloadSnapshot() {
+  if (_reloadingSnapshot) return;
+  _reloadingSnapshot = true;
+  bootMsg('re-scoping…'); showBoot();
+  try {
+    _teardownClouds();
+    if (!(await parseSnapshot())) { bootMsg('atlas unreadable'); return; }
+    buildSystemPoints();
+    buildRegionPoints();
+    buildGridLines();
+    buildRegionLabels();
+    S.regionBaseColors = null;        // force fresh base-color snapshot
+    // Region set changed → any prior civ/contributor focus no longer maps.
+    mapFocusFilterActive = false;
+    S.focusedRegionMask = null;
+    S.focusedRegionKeys = null;
+    updateColorMode(S.colorMode);     // paint base + re-apply system hide
+    await applyFilters();             // recompute matched set against new data
+    updateStats();
+    updateTier();
+  } catch (e) {
+    console.error('reloadSnapshot failed', e);
+  } finally {
+    _reloadingSnapshot = false;
+    setTimeout(dismissBoot, 200);
+  }
+}
+
+/** Remove + dispose the three rebuildable point clouds (labels self-clear). */
+function _teardownClouds() {
+  for (const obj of [S.starPoints, S.regionPoints, S.gridLines]) {
+    if (!obj) continue;
+    S.scene.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else obj.material.dispose();
+    }
+  }
+  S.starPoints = null;
+  S.regionPoints = null;
+  S.gridLines = null;
 }
 
 function _populateFilterDropdowns() {
@@ -3975,6 +4104,19 @@ function _populateFilterDropdowns() {
   }
 }
 
+/**
+ * Build the active filter's matched-system set, then HIDE everything that
+ * doesn't match — on BOTH visible layers:
+ *   • systems  → updateColorMode() repaints base colors, then the system-hide
+ *                hook (_applySystemFilterHide) blacks out non-matching stars.
+ *   • regions  → a region is kept only if it contains ≥1 matching system;
+ *                applyFocusFilter() repaints the region cloud + labels using
+ *                _matchingRegions (it already composes the civ/contributor
+ *                territory mask the same way).
+ * Reality/Galaxy are NOT read here — they scope the snapshot via reloadSnapshot
+ * (the cloud is already galaxy/reality-filtered), so we just pass them through
+ * to the /api/systems fetch to keep the matched set consistent.
+ */
 async function applyFilters() {
   if (!S || !S.data) return;
   const params = new URLSearchParams();
@@ -4017,60 +4159,116 @@ async function applyFilters() {
     starTypeSet = idxSet;
   }
 
-  updatePills();
-
   const hasServer = params.toString().length > 0;
-  const hasClient = starTypeSet || wantStation || wantPlanets;
+  const hasClient = !!(starTypeSet || wantStation || wantPlanets);
 
-  if (!hasServer && !hasClient) { _matchingIds = null; resetStarColors(); return; }
-  if (!hasServer)               { _matchingIds = null; _applyColorOverlay(starTypeSet, null, wantStation, wantPlanets); return; }
-
-  try {
-    params.set('limit', '10000');
-    const endpoint = q.length >= 2
-      ? API_BASE + '/api/systems/search?' + params
-      : API_BASE + '/api/systems?' + params;
-    const r = await fetch(endpoint);
-    if (!r.ok) { _matchingIds = null; resetStarColors(); return; }
-    const d = await r.json();
-    _buildMatchingSet(d.systems || d);
-    _applyColorOverlay(starTypeSet, _matchingIds, wantStation, wantPlanets);
-  } catch (_) { _matchingIds = null; resetStarColors(); }
-}
-
-function _buildMatchingSet(systems) {
-  if (!S.data) return;
-  const gmap = new Map((S.data.glyphs || []).map((g, i) => [g, i]));
-  const nmap = new Map((S.data.names  || []).map((n, i) => [n, i]));
-  _matchingIds = new Set();
-  for (const s of systems) {
-    const g = s.glyph_code || '', n = s.system_name || s.name || '';
-    const gi = g ? gmap.get(g) : undefined;
-    const ni = n ? nmap.get(n) : undefined;
-    if (gi != null) _matchingIds.add(gi);
-    else if (ni != null) _matchingIds.add(ni);
+  // No filter at all → clear the matched set, repaint clean, done.
+  if (!hasServer && !hasClient) {
+    _setMatched(null);
+    updatePills();
+    return;
   }
-}
 
-function _applyColorOverlay(starTypeSet, serverSet, wantStation, wantPlanets) {
-  if (!S.starPoints || !S.data) return;
-  updateColorMode(S.colorMode); // rebuild clean base colors first
-  const colors = S.systemColors;
-  const n      = S.data.n;
-  let   dirty  = false;
-  for (let i=0; i<n; i++) {
-    const ok = (!starTypeSet || starTypeSet.has(S.starTypes[i]))
-            && (!serverSet   || serverSet.has(i))
+  // Resolve the server-side constraint set (glyph/name → snapshot index), if any.
+  let serverSet = null;
+  if (hasServer) {
+    try {
+      params.set('limit', '10000');
+      // Keep the matched set consistent with the snapshot's reality/galaxy scope.
+      if (_scopeReality) params.set('reality', _scopeReality);
+      if (_scopeGalaxy)  params.set('galaxy', _scopeGalaxy);
+      const endpoint = q.length >= 2
+        ? API_BASE + '/api/systems/search?' + params
+        : API_BASE + '/api/systems?' + params;
+      const r = await fetch(endpoint);
+      if (r.ok) {
+        const d = await r.json();
+        serverSet = _serverMatchSet(d.systems || d);
+      }
+      // On a non-OK / failed fetch, serverSet stays null → the server
+      // constraints are simply not applied (better than hiding everything).
+    } catch (_) { serverSet = null; }
+  }
+
+  // Intersect the server set with the client-side predicates into one final set.
+  const n = S.data.n;
+  const matched = new Set();
+  for (let i = 0; i < n; i++) {
+    const ok = (!serverSet   || serverSet.has(i))
+            && (!starTypeSet || starTypeSet.has(S.starTypes[i]))
             && (!wantStation || (S.hasStation && S.hasStation[i] > 0))
             && (!wantPlanets || (S.hasPlanets && S.hasPlanets[i] > 0));
-    if (!ok) { colors[i*3]=0.05; colors[i*3+1]=0.05; colors[i*3+2]=0.06; dirty=true; }
+    if (ok) matched.add(i);
   }
-  if (dirty) S.starPoints.geometry.attributes.color.needsUpdate = true;
+
+  _setMatched(matched);
+  updatePills();
 }
 
-function resetStarColors() {
-  _matchingIds = null;
-  if (S && S.data) updateColorMode(S.colorMode);
+/** Map /api/systems rows back to snapshot indices via glyph (then name). */
+function _serverMatchSet(systems) {
+  const gmap = new Map((S.data.glyphs || []).map((g, i) => [g, i]));
+  const nmap = new Map((S.data.names  || []).map((n, i) => [n, i]));
+  const set = new Set();
+  for (const s of systems) {
+    const g = s.glyph_code || '', nm = s.system_name || s.name || '';
+    const gi = g ? gmap.get(g) : undefined;
+    const ni = nm ? nmap.get(nm) : undefined;
+    if (gi != null) set.add(gi);
+    else if (ni != null) set.add(ni);
+  }
+  return set;
+}
+
+/**
+ * Commit a matched-system set (or null = no filter): derive the matching
+ * regions, then repaint both layers. Single choke point so system + region
+ * visibility never drift apart.
+ */
+function _setMatched(matched) {
+  _matchingIds     = matched;
+  _lastMatchCount  = matched ? matched.size : 0;
+  _deriveMatchingRegions(matched);
+  if (S && S.data) updateColorMode(S.colorMode); // repaint systems (+ hide hook)
+  applyFocusFilter();                            // repaint regions + labels
+}
+
+/** A region is "matching" iff at least one of its systems matched. */
+function _deriveMatchingRegions(matched) {
+  if (!matched || !S.systemRegionIdx) {
+    // No filter, or backend without per-system region index → don't hide regions.
+    _matchingRegions = null;
+    _matchingRegionKeys = null;
+    return;
+  }
+  const ri   = S.systemRegionIdx;
+  const regs = S.data.regions || [];
+  _matchingRegions    = new Set();
+  _matchingRegionKeys = new Set();
+  matched.forEach(i => {
+    const r = ri[i];
+    if (r !== 65535 && r < regs.length) {
+      _matchingRegions.add(r);
+      const reg = regs[r];
+      _matchingRegionKeys.add(reg.rx + ',' + reg.ry + ',' + reg.rz);
+    }
+  });
+}
+
+/**
+ * System-layer hide hook, called at the tail of updateColorMode() so any base
+ * repaint (mode switch, filter apply, reload) re-blacks the non-matching stars.
+ * Black (0,0,0) under additive blending = fully invisible (true hide).
+ */
+function _applySystemFilterHide() {
+  if (!S.starPoints || !S.data) return;
+  if (_matchingIds) {
+    const colors = S.systemColors, n = S.data.n;
+    for (let i = 0; i < n; i++) {
+      if (!_matchingIds.has(i)) { colors[i*3] = 0; colors[i*3+1] = 0; colors[i*3+2] = 0; }
+    }
+  }
+  S.starPoints.geometry.attributes.color.needsUpdate = true;
 }
 
 // ── ACTIVE PILLS ───────────────────────────
@@ -4079,6 +4277,13 @@ function updatePills() {
   const row = document.getElementById('carto-pills');
   if (!row) return;
   const pills = [];
+
+  // Match-count feedback so an active filter is legible even when zoomed out
+  // (or when matches are off-screen). Only shown while a filter is applied.
+  if (_matchingIds) {
+    const c = _lastMatchCount;
+    pills.push(`<span class="carto-pill count">${c.toLocaleString()} system${c === 1 ? '' : 's'} match</span>`);
+  }
 
   const q = (document.getElementById('carto-search-input')?.value || '').trim();
   if (q.length >= 2) {

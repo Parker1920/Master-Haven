@@ -31,7 +31,7 @@ export default function AccessControl() {
   // API Keys tab is super-admin only; filter it out for partners
   const TABS = [
     { key: 'users', label: 'Users', desc: 'All user accounts across all tiers', visible: true },
-    { key: 'sub-admins', label: 'Sub-Admins', desc: 'Sub-admins with feature flags', visible: true },
+    { key: 'sub-admins', label: 'Sub-Admins', desc: 'Manage sub-admin permissions & access', visible: true },
     { key: 'extractors', label: 'Extractor Users', desc: 'Haven Extractor mod API users', visible: true },
     { key: 'api-keys', label: 'API Keys', desc: 'Integration tokens', visible: isSuperAdmin },
   ].filter(t => t.visible)

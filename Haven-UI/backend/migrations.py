@@ -6999,3 +6999,165 @@ def migration_1_91_0(conn):
         )
     finally:
         conn.row_factory = prev_factory
+
+
+@register_migration("1.92.0", "Backfill tracking mirror rows for historical direct-saved systems")
+def migration_1_92_0(conn):
+    """Make past trusted DIRECT saves visible to analytics/events retroactively.
+
+    Direct admin/partner saves (POST /api/save_system) bypassed the pending
+    queue, so they never created a pending_systems row. The analytics layer
+    (submission leaderboard, community-stats, submissions-timeline, partner
+    overview) and the public contributors list / activity timeline all derive
+    from pending_systems, and the events leaderboards key off systems.event_id —
+    so a direct-saved system was effectively untracked everywhere except the
+    raw systems table and the approval audit log. As of Master Haven 1.84.0 a
+    direct save writes a pre-approved pending_systems "mirror" row going forward;
+    this migration creates one such row per historical direct-saved system so
+    older trusted contributions are counted too.
+
+    Source of truth for "which systems were direct-saved" is approval_audit_log:
+    save_system has recorded every direct save as action 'direct_add'/'direct_edit'
+    with the target system_id embedded in its notes ("...(system_id: <uuid>)").
+    Using the audit log is precise — it cannot mistake a queue-approved system
+    (which has no audit row of those actions) for a direct save, so there is no
+    risk of double-counting normal submissions. ONE mirror row per system (the
+    creation credit), attributed from the live systems row; forward parity
+    (one row per save) applies only to new saves, not retroactive edits.
+
+    Idempotent: skips any system that already has a mirror row
+    (api_key_name='direct_save'), and skips audit rows whose system no longer
+    exists.
+    """
+    import re as _re
+    from datetime import timezone as _tz
+
+    # Username normalizer — reuse the canonical helper; fall back to an inline
+    # copy of the documented rule (strip @, strip #discriminator, lowercase) if
+    # the import isn't available during early init.
+    try:
+        from services.auth_service import normalize_username_for_dedup as _norm
+    except Exception:
+        def _norm(u):
+            if not u:
+                return 'unknown'
+            s = str(u).lstrip('@').strip()
+            s = _re.sub(r'#\d{4}$', '', s)
+            if '#' in s:
+                s = s.split('#')[0]
+            return s.strip().lower() or 'unknown'
+
+    cursor = conn.cursor()
+
+    # approval_audit_log may not exist on a brand-new DB.
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='approval_audit_log'")
+    if not cursor.fetchone():
+        logger.info("Migration 1.92.0: no approval_audit_log table; nothing to backfill")
+        return
+
+    cursor.execute("""
+        SELECT notes FROM approval_audit_log
+        WHERE action IN ('direct_add', 'direct_edit')
+          AND submission_type = 'system'
+        ORDER BY timestamp ASC
+    """)
+    pat = _re.compile(r'system_id:\s*([0-9a-fA-F-]{6,})')
+    sys_ids = []
+    seen = set()
+    for row in cursor.fetchall():
+        m = pat.search(row[0] or '')
+        if not m:
+            continue
+        sid = m.group(1)
+        if sid not in seen:
+            seen.add(sid)
+            sys_ids.append(sid)  # earliest audit row first → creation credit
+
+    if not sys_ids:
+        logger.info("Migration 1.92.0: no direct-saved systems found in audit log")
+        return
+
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        read_cur = conn.cursor()
+        write_cur = conn.cursor()
+        created = 0
+        skipped = 0
+        for sid in sys_ids:
+            read_cur.execute("SELECT * FROM systems WHERE id = ?", (sid,))
+            srow = read_cur.fetchone()
+            if not srow:
+                skipped += 1
+                continue
+            s = dict(srow)
+
+            # Idempotency: one mirror row per system.
+            read_cur.execute(
+                "SELECT 1 FROM pending_systems WHERE edit_system_id = ? AND api_key_name = 'direct_save' LIMIT 1",
+                (sid,),
+            )
+            if read_cur.fetchone():
+                skipped += 1
+                continue
+
+            raw_name = s.get('discovered_by') or s.get('personal_discord_username') or 'Unknown'
+            norm = _norm(raw_name)
+            sub_date = s.get('discovered_at') or s.get('created_at') or datetime.now(_tz.utc).isoformat()
+            galaxy = s.get('galaxy') or 'Euclid'
+            reality = s.get('reality') or 'Normal'
+            blob = json.dumps({
+                'id': sid,
+                'name': s.get('name'),
+                'galaxy': galaxy,
+                'reality': reality,
+                'glyph_code': s.get('glyph_code'),
+                'discovered_by': s.get('discovered_by'),
+                'discord_tag': s.get('discord_tag'),
+            })
+            write_cur.execute('''
+                INSERT INTO pending_systems
+                (submitted_by, submission_date, system_data, status,
+                 reviewed_by, review_date,
+                 system_name, system_region, galaxy, reality,
+                 glyph_code, glyph_planet, glyph_solar_system,
+                 region_x, region_y, region_z, game_mode,
+                 source, api_key_name, discord_tag, personal_discord_username,
+                 edit_system_id, username_normalized,
+                 game_version, expedition_id, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                raw_name,
+                sub_date,
+                blob,
+                'approved',
+                raw_name,
+                sub_date,
+                s.get('name'),
+                galaxy,
+                galaxy,
+                reality,
+                s.get('glyph_code'),
+                s.get('glyph_planet') or 0,
+                s.get('glyph_solar_system') or 1,
+                s.get('region_x'),
+                s.get('region_y'),
+                s.get('region_z'),
+                s.get('game_mode') or 'Normal',
+                'manual',
+                'direct_save',
+                s.get('discord_tag'),
+                s.get('personal_discord_username'),
+                sid,
+                norm,
+                s.get('game_version'),
+                s.get('expedition_id'),
+                s.get('event_id'),
+            ))
+            created += 1
+        logger.info(
+            f"Migration 1.92.0: created {created} tracking mirror rows for historical "
+            f"direct-saved systems ({skipped} skipped: missing system or already mirrored)"
+        )
+    finally:
+        conn.row_factory = prev_factory

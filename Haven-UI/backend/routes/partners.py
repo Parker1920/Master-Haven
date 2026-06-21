@@ -259,82 +259,100 @@ async def activate_partner(partner_id: int, session: Optional[str] = Cookie(None
 
 
 # ============================================================================
-# Sub-Admin Account Management
+# Sub-Admin Roster (read) — moderation page backed by civilization_members
 # ============================================================================
+#
+# The legacy username+password sub_admin_accounts creation flow was retired.
+# Sub-admins are now civilization_members rows with role='sub_admin'; they are
+# elevated from EXISTING user_profiles via the Civilizations / Sub-Admins
+# management UI. This endpoint returns the roster the Sub-Admins moderation
+# page renders; every edit goes through the
+# /api/civilizations/{civ_id}/members[...] endpoints.
 
 @router.get('/api/sub_admins')
 async def list_sub_admins(
-    partner_id: Optional[int] = None,
-    show_all: bool = False,
-    session: Optional[str] = Cookie(None)
+    civ_id: Optional[int] = None,
+    session: Optional[str] = Cookie(None),
 ):
-    """
-    List sub-admins. Super admin sees all (optionally filtered by partner_id).
-    Partners see only their own sub-admins.
-    If show_all=false and super admin has no partner_id, shows Haven's sub-admins.
+    """List sub-admins (civilization_members role='sub_admin') with the civ
+    they belong to + their effective feature set.
+
+    Scope:
+      - Super admin: every civ's sub-admins (optionally filtered by ?civ_id).
+      - Leader / co_leader: only sub-admins of the civ(s) they lead.
+      - Anyone else: empty (a plain sub-admin can't moderate peers).
     """
     session_data = get_session(session)
     if not session_data:
         raise HTTPException(status_code=401, detail='Authentication required')
 
-    user_type = session_data.get('user_type')
-    is_super = user_type == 'super_admin'
+    is_super = session_data.get('user_type') == 'super_admin'
+    led_civ_ids = [
+        m['civ_id'] for m in (session_data.get('civ_memberships') or [])
+        if m.get('is_leader_like')
+    ]
 
-    # Partners and sub-admins can only see sub-admins for their partner
-    if not is_super:
-        partner_id = session_data.get('partner_id')
-        if not partner_id:
-            raise HTTPException(status_code=403, detail='Access denied')
+    if not is_super and not led_civ_ids:
+        return {'sub_admins': []}
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        if partner_id:
-            cursor.execute('''
-                SELECT sa.*, pa.discord_tag as parent_discord_tag, pa.display_name as parent_display_name
-                FROM sub_admin_accounts sa
-                JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
-                WHERE sa.parent_partner_id = ?
-                ORDER BY sa.username
-            ''', (partner_id,))
-        elif is_super and not show_all:
-            # Super admin viewing their own sub-admins (parent_partner_id IS NULL)
-            cursor.execute('''
-                SELECT sa.*, NULL as parent_discord_tag, 'Haven' as parent_display_name
-                FROM sub_admin_accounts sa
-                WHERE sa.parent_partner_id IS NULL
-                ORDER BY sa.username
-            ''')
+        where = ["cm.role = 'sub_admin'"]
+        params: list = []
+        if is_super:
+            if civ_id is not None:
+                where.append('cm.civ_id = ?')
+                params.append(civ_id)
         else:
-            # Super admin sees all (including their own)
-            cursor.execute('''
-                SELECT sa.*,
-                       COALESCE(pa.discord_tag, NULL) as parent_discord_tag,
-                       COALESCE(pa.display_name, 'Haven') as parent_display_name
-                FROM sub_admin_accounts sa
-                LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
-                ORDER BY COALESCE(pa.display_name, 'Haven'), sa.username
-            ''')
+            scope_ids = [civ_id] if (civ_id is not None and civ_id in led_civ_ids) else led_civ_ids
+            placeholders = ','.join(['?'] * len(scope_ids))
+            where.append(f'cm.civ_id IN ({placeholders})')
+            params.extend(scope_ids)
+
+        cursor.execute(f'''
+            SELECT cm.civ_id, cm.profile_id, cm.role, cm.enabled_features AS features_override,
+                   cm.can_approve_personal_uploads, cm.joined_at, cm.joined_via,
+                   up.username, up.display_name, up.last_login_at, up.is_active,
+                   c.tag AS civ_tag, c.display_name AS civ_display_name,
+                   c.enabled_features_default, c.is_active AS civ_is_active
+            FROM civilization_members cm
+            JOIN user_profiles up ON up.id = cm.profile_id
+            JOIN civilizations c ON c.id = cm.civ_id
+            WHERE {' AND '.join(where)}
+            ORDER BY c.display_name COLLATE NOCASE ASC, up.username COLLATE NOCASE ASC
+        ''', params)
 
         sub_admins = []
         for row in cursor.fetchall():
-            row_dict = dict(row)
+            try:
+                override = json.loads(row['features_override']) if row['features_override'] else None
+            except (TypeError, json.JSONDecodeError):
+                override = None
+            try:
+                civ_default = json.loads(row['enabled_features_default']) if row['enabled_features_default'] else []
+            except (TypeError, json.JSONDecodeError):
+                civ_default = []
+            effective = override if override is not None else civ_default
             sub_admins.append({
-                'id': row['id'],
-                'parent_partner_id': row['parent_partner_id'],
+                'civ_id': row['civ_id'],
+                'profile_id': row['profile_id'],
                 'username': row['username'],
                 'display_name': row['display_name'],
-                'enabled_features': json.loads(row['enabled_features'] or '[]'),
-                'is_active': bool(row['is_active']),
-                'created_at': row['created_at'],
+                'civ_tag': row['civ_tag'],
+                'civ_display_name': row['civ_display_name'],
+                'role': row['role'],
+                'enabled_features': effective,            # what's actually in effect
+                'enabled_features_override': override,    # None => inheriting civ default
+                'civ_default_features': civ_default,
+                'can_approve_personal_uploads': bool(row['can_approve_personal_uploads']),
+                'joined_at': row['joined_at'],
+                'joined_via': row['joined_via'],
                 'last_login_at': row['last_login_at'],
-                'created_by': row['created_by'],
-                'parent_discord_tag': row['parent_discord_tag'],
-                'parent_display_name': row['parent_display_name'],
-                'additional_discord_tags': json.loads(row_dict.get('additional_discord_tags') or '[]'),
-                'can_approve_personal_uploads': bool(row_dict.get('can_approve_personal_uploads', 0))
+                'is_active': bool(row['is_active']),
+                'civ_is_active': bool(row['civ_is_active']),
             })
 
         return {'sub_admins': sub_admins}
@@ -342,318 +360,6 @@ async def list_sub_admins(
         raise
     except Exception as e:
         logger.error(f"Error listing sub-admins: {e}")
-        logger.exception("Internal server error")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        if conn:
-            conn.close()
-
-
-@router.post('/api/sub_admins')
-async def create_sub_admin(payload: dict, session: Optional[str] = Cookie(None)):
-    """
-    Create a sub-admin account.
-    Super admin can create for any partner.
-    Partners can create sub-admins under themselves.
-    """
-    session_data = get_session(session)
-    if not session_data:
-        raise HTTPException(status_code=401, detail='Authentication required')
-
-    user_type = session_data.get('user_type')
-    is_super = user_type == 'super_admin'
-    current_username = session_data.get('username')
-
-    username = payload.get('username', '').strip()
-    password = payload.get('password', '')
-    display_name = payload.get('display_name', '').strip() or None
-    enabled_features = payload.get('enabled_features', [])
-    parent_partner_id = payload.get('parent_partner_id')
-    additional_discord_tags = payload.get('additional_discord_tags', [])  # Only for Haven sub-admins
-    can_approve_personal_uploads = payload.get('can_approve_personal_uploads', False)  # Only for Haven sub-admins
-
-    # Validation
-    if not username or len(username) < 3:
-        raise HTTPException(status_code=400, detail='Username must be at least 3 characters')
-    if not password or len(password) < 4:
-        raise HTTPException(status_code=400, detail='Password must be at least 4 characters')
-
-    # Determine parent partner
-    # Super admin can create sub-admins for themselves (NULL parent) or for a partner
-    # Partners create sub-admins under themselves
-    is_haven_sub_admin = False
-    if is_super:
-        # Super admin can optionally specify parent_partner_id
-        # If not specified, creates a "Haven" sub-admin (parent_partner_id = NULL)
-        if not parent_partner_id:
-            is_haven_sub_admin = True
-    else:
-        # Partners create sub-admins under themselves
-        parent_partner_id = session_data.get('partner_id')
-        if not parent_partner_id:
-            raise HTTPException(status_code=403, detail='Only partners and super admins can create sub-admins')
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Check partner exists and is active (only if creating under a partner)
-        if parent_partner_id:
-            cursor.execute('SELECT id, enabled_features FROM partner_accounts WHERE id = ? AND is_active = 1', (parent_partner_id,))
-            partner_row = cursor.fetchone()
-            if not partner_row:
-                raise HTTPException(status_code=404, detail='Parent partner not found or inactive')
-
-            # Validate that sub-admin features are subset of parent's features
-            parent_features = json.loads(partner_row['enabled_features'] or '[]')
-            if 'all' not in parent_features:
-                invalid_features = [f for f in enabled_features if f not in parent_features]
-                if invalid_features:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
-                    )
-        # Haven sub-admins can have any features (super admin creates them)
-
-        # Check username uniqueness across all user tables
-        cursor.execute('SELECT username FROM partner_accounts WHERE username = ?', (username,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail='Username already exists (partner account)')
-        cursor.execute('SELECT username FROM sub_admin_accounts WHERE username = ?', (username,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail='Username already exists (sub-admin account)')
-
-        # Create sub-admin
-        # additional_discord_tags and can_approve_personal_uploads only apply to Haven sub-admins (parent_partner_id is NULL)
-        tags_to_store = json.dumps(additional_discord_tags) if is_haven_sub_admin else '[]'
-        personal_uploads_perm = 1 if (is_haven_sub_admin and can_approve_personal_uploads) else 0
-        cursor.execute('''
-            INSERT INTO sub_admin_accounts
-            (parent_partner_id, username, password_hash, display_name, enabled_features, created_by, additional_discord_tags, can_approve_personal_uploads)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            parent_partner_id,
-            username,
-            hash_password(password),
-            display_name,
-            json.dumps(enabled_features),
-            current_username,
-            tags_to_store,
-            personal_uploads_perm
-        ))
-
-        sub_admin_id = cursor.lastrowid
-        conn.commit()
-
-        parent_label = f"partner {parent_partner_id}" if parent_partner_id else "Haven (super admin)"
-        logger.info(f"Sub-admin created: {username} (ID: {sub_admin_id}) under {parent_label} by {current_username}")
-
-        return {
-            'status': 'ok',
-            'sub_admin_id': sub_admin_id,
-            'username': username
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating sub-admin: {e}")
-        logger.exception("Internal server error")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        if conn:
-            conn.close()
-
-
-@router.put('/api/sub_admins/{sub_admin_id}')
-async def update_sub_admin(sub_admin_id: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Update a sub-admin account."""
-    session_data = get_session(session)
-    if not session_data:
-        raise HTTPException(status_code=401, detail='Authentication required')
-
-    user_type = session_data.get('user_type')
-    is_super = user_type == 'super_admin'
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Get sub-admin (LEFT JOIN for Haven sub-admins with NULL parent_partner_id)
-        cursor.execute('''
-            SELECT sa.*, pa.enabled_features as parent_features
-            FROM sub_admin_accounts sa
-            LEFT JOIN partner_accounts pa ON sa.parent_partner_id = pa.id
-            WHERE sa.id = ?
-        ''', (sub_admin_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail='Sub-admin not found')
-
-        # Check if this is a Haven sub-admin (no parent partner)
-        is_haven_sub_admin = row['parent_partner_id'] is None
-
-        # Permission check: super admin or parent partner can edit
-        if not is_super:
-            if is_haven_sub_admin:
-                raise HTTPException(status_code=403, detail='Only super admin can edit Haven sub-admins')
-            if session_data.get('partner_id') != row['parent_partner_id']:
-                raise HTTPException(status_code=403, detail='Can only edit your own sub-admins')
-
-        # Build update
-        updates = []
-        params = []
-
-        if 'display_name' in payload:
-            updates.append('display_name = ?')
-            params.append(payload['display_name'] or None)
-
-        if 'enabled_features' in payload:
-            new_features = payload['enabled_features']
-            # Validate features against parent (skip for Haven sub-admins - they can have any features)
-            if not is_haven_sub_admin:
-                parent_features = json.loads(row['parent_features'] or '[]')
-                if 'all' not in parent_features:
-                    invalid_features = [f for f in new_features if f not in parent_features]
-                    if invalid_features:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Sub-admin cannot have features not granted to parent: {invalid_features}"
-                        )
-            updates.append('enabled_features = ?')
-            params.append(json.dumps(new_features))
-
-        if 'is_active' in payload:
-            updates.append('is_active = ?')
-            params.append(1 if payload['is_active'] else 0)
-
-        # additional_discord_tags only for Haven sub-admins
-        if 'additional_discord_tags' in payload and is_haven_sub_admin:
-            updates.append('additional_discord_tags = ?')
-            params.append(json.dumps(payload['additional_discord_tags']))
-
-        # can_approve_personal_uploads only for Haven sub-admins
-        if 'can_approve_personal_uploads' in payload and is_haven_sub_admin:
-            updates.append('can_approve_personal_uploads = ?')
-            params.append(1 if payload['can_approve_personal_uploads'] else 0)
-
-        if updates:
-            updates.append('updated_at = ?')
-            params.append(datetime.now(timezone.utc).isoformat())
-            params.append(sub_admin_id)
-
-            cursor.execute(
-                f'UPDATE sub_admin_accounts SET {", ".join(updates)} WHERE id = ?',
-                params
-            )
-            conn.commit()
-
-        return {'status': 'ok'}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating sub-admin: {e}")
-        logger.exception("Internal server error")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        if conn:
-            conn.close()
-
-
-@router.post('/api/sub_admins/{sub_admin_id}/reset_password')
-async def reset_sub_admin_password(sub_admin_id: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Reset a sub-admin's password."""
-    session_data = get_session(session)
-    if not session_data:
-        raise HTTPException(status_code=401, detail='Authentication required')
-
-    user_type = session_data.get('user_type')
-    is_super = user_type == 'super_admin'
-
-    new_password = payload.get('new_password', '')
-    if not new_password or len(new_password) < 4:
-        raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT parent_partner_id FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail='Sub-admin not found')
-
-        # Check if this is a Haven sub-admin (no parent partner)
-        is_haven_sub_admin = row['parent_partner_id'] is None
-
-        # Permission check
-        if not is_super:
-            if is_haven_sub_admin:
-                raise HTTPException(status_code=403, detail='Only super admin can reset Haven sub-admin passwords')
-            if session_data.get('partner_id') != row['parent_partner_id']:
-                raise HTTPException(status_code=403, detail='Can only reset passwords for your own sub-admins')
-
-        cursor.execute(
-            'UPDATE sub_admin_accounts SET password_hash = ?, updated_at = ? WHERE id = ?',
-            (hash_password(new_password), datetime.now(timezone.utc).isoformat(), sub_admin_id)
-        )
-        conn.commit()
-
-        return {'status': 'ok'}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error resetting sub-admin password: {e}")
-        logger.exception("Internal server error")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        if conn:
-            conn.close()
-
-
-@router.delete('/api/sub_admins/{sub_admin_id}')
-async def delete_sub_admin(sub_admin_id: int, session: Optional[str] = Cookie(None)):
-    """Deactivate a sub-admin account."""
-    session_data = get_session(session)
-    if not session_data:
-        raise HTTPException(status_code=401, detail='Authentication required')
-
-    user_type = session_data.get('user_type')
-    is_super = user_type == 'super_admin'
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT parent_partner_id FROM sub_admin_accounts WHERE id = ?', (sub_admin_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail='Sub-admin not found')
-
-        # Check if this is a Haven sub-admin (no parent partner)
-        is_haven_sub_admin = row['parent_partner_id'] is None
-
-        # Permission check
-        if not is_super:
-            if is_haven_sub_admin:
-                raise HTTPException(status_code=403, detail='Only super admin can deactivate Haven sub-admins')
-            if session_data.get('partner_id') != row['parent_partner_id']:
-                raise HTTPException(status_code=403, detail='Can only deactivate your own sub-admins')
-
-        cursor.execute(
-            'UPDATE sub_admin_accounts SET is_active = 0, updated_at = ? WHERE id = ?',
-            (datetime.now(timezone.utc).isoformat(), sub_admin_id)
-        )
-        conn.commit()
-
-        return {'status': 'ok'}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deactivating sub-admin: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:

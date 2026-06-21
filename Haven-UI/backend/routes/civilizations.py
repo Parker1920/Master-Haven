@@ -40,6 +40,27 @@ def _require_super_admin(session):
     return session_data
 
 
+def _require_civ_manage_access(session, civ_id: int):
+    """Resolve session and authorize managing a civ's roster.
+
+    Allows a super admin (any civ) OR a leader/co_leader of THIS civ. This is
+    what lets a civ's own leaders moderate their sub-admins (add / edit
+    features / remove) from the Sub-Admins page without going through a super
+    admin — mirroring the capability partners had on the legacy
+    sub_admin_accounts page. Membership is read from the session
+    (civ_memberships), so no extra DB hit.
+    """
+    session_data = get_session(session)
+    if not session_data:
+        raise HTTPException(status_code=401, detail='Authentication required')
+    if session_data.get('user_type') == 'super_admin':
+        return session_data
+    for m in session_data.get('civ_memberships') or []:
+        if m.get('civ_id') == civ_id and m.get('is_leader_like'):
+            return session_data
+    raise HTTPException(status_code=403, detail='You must be a leader of this civilization to manage its members')
+
+
 def _serialize_civ(row) -> dict:
     """Common shape for any endpoint returning a civilization."""
     try:
@@ -357,8 +378,10 @@ async def add_member(civ_id: int, payload: dict, session: Optional[str] = Cookie
     Adding as leader / co_leader auto-promotes the profile's tier to 2
     (partner) so the auth helpers treat them as full leaders. Adding as
     sub_admin promotes to tier 3 if they're below that today.
+
+    Authorized for super admin or a leader/co_leader of this civ.
     """
-    _require_super_admin(session)
+    _require_civ_manage_access(session, civ_id)
 
     profile_id = payload.get('profile_id')
     role = payload.get('role', 'sub_admin')
@@ -529,8 +552,10 @@ async def update_member(civ_id: int, profile_id: int, payload: dict,
     Promoting/demoting role also adjusts the user_profile's tier so the
     auth helpers continue to do the right thing — see _recompute_profile_tier
     for the multi-civ-correct logic.
+
+    Authorized for super admin or a leader/co_leader of this civ.
     """
-    _require_super_admin(session)
+    _require_civ_manage_access(session, civ_id)
 
     updates = {}
     if 'role' in payload:
@@ -609,8 +634,10 @@ async def remove_member(civ_id: int, profile_id: int, session: Optional[str] = C
 
     Profile tier is recomputed from the full remaining membership set
     (H-CM2) so a multi-civ leader doesn't get accidentally demoted.
+
+    Authorized for super admin or a leader/co_leader of this civ.
     """
-    _require_super_admin(session)
+    _require_civ_manage_access(session, civ_id)
     conn = None
     try:
         conn = get_db_connection()

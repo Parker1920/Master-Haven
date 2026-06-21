@@ -139,6 +139,8 @@ from services.restrictions import (
     apply_field_restrictions, apply_data_restrictions,
 )
 
+from services.events import resolve_submission_event_id
+
 app = FastAPI()
 logger = logging.getLogger('control.room')
 
@@ -2747,6 +2749,16 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Event participation (opt-in competition). The wizard's EventPicker
+        # already puts event_id in the payload for everyone (including admins);
+        # the direct-save path simply never read it, so a trusted member's
+        # upload never joined the ongoing event. Resolve it exactly like the
+        # public submit path — a bad/expired pick resolves to None and just
+        # doesn't enter the competition.
+        resolved_event_id = resolve_submission_event_id(
+            cursor, payload.get('event_id'), payload.get('discord_tag'), 'submission'
+        )
+
         # Check if system exists - canonical dedup: glyph last-11 + galaxy + reality
         # Fallback to ID if no glyph available (legacy edge case)
         existing = None
@@ -2810,6 +2822,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     last_updated_by = ?, last_updated_at = ?, contributors = ?,
                     game_version = ?, expedition_id = ?,
                     game_mode = COALESCE(?, game_mode),
+                    event_id = COALESCE(?, event_id),
                     is_stub = 0
                 WHERE id = ?
             ''', (
@@ -2842,6 +2855,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 wizard_game_version,
                 wizard_expedition_id,
                 payload.get('game_mode'),
+                resolved_event_id,
                 sys_id
             ))
             logger.info(f"Updated system {sys_id}, last_updated_by: {editor_username}")
@@ -2877,8 +2891,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag,
                     stellar_classification, discovered_by, discovered_at, contributors,
                     profile_id, personal_discord_username, source,
-                    game_version, expedition_id, game_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    game_version, expedition_id, game_mode, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
@@ -2913,6 +2927,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 wizard_game_version,
                 wizard_expedition_id,
                 payload.get('game_mode') or 'Normal',
+                resolved_event_id,
             ))
             logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 
@@ -3153,6 +3168,83 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             if _relinked:
                 logger.info(f"Re-pointed {_relinked} discovery link(s) after rebuild of system {sys_id}")
 
+        # ----- Tracking mirror row (Master Haven 1.84.0) -----
+        # A trusted direct save bypasses the pending queue, which left it
+        # invisible to ongoing events, the analytics leaderboards / timeline /
+        # community-stats, the public contributors list, and the activity feed —
+        # all of which derive from pending_systems (or systems.event_id), NOT
+        # the live `systems` row. Model the direct save as "submitted AND
+        # approved in one step by the same trusted user": write a pre-approved
+        # pending_systems row so every existing analytics query counts it with
+        # zero query changes. It never shows in the pending queue (that filters
+        # status='pending') and is never re-approved. `api_key_name='direct_save'`
+        # marks the row; `edit_system_id` back-links it to the live system (a
+        # back-pointer only — analytics ignores it, and approval can't touch an
+        # already-approved row). Per the parity decision, each direct save —
+        # new OR edit — writes one row, mirroring the public flow where every
+        # approved (re)submission is its own row.
+        try:
+            _mirror_raw = (
+                session_data.get('username')
+                or payload.get('personal_discord_username')
+                or payload.get('discovered_by')
+                or 'Unknown'
+            )
+            _mirror_norm = normalize_username_for_dedup(_mirror_raw)
+            _mirror_expedition_id = payload.get('expedition_id')
+            try:
+                _mirror_expedition_id = int(_mirror_expedition_id) if _mirror_expedition_id else None
+            except (TypeError, ValueError):
+                _mirror_expedition_id = None
+            _mirror_now = datetime.now(timezone.utc).isoformat()
+            cursor.execute('''
+                INSERT INTO pending_systems
+                (submitted_by, submission_date, system_data, status,
+                 reviewed_by, review_date,
+                 system_name, system_region, galaxy, reality,
+                 glyph_code, glyph_planet, glyph_solar_system,
+                 region_x, region_y, region_z, game_mode,
+                 source, api_key_name, discord_tag, personal_discord_username,
+                 edit_system_id, submitter_account_id, submitter_account_type,
+                 submitter_profile_id, username_normalized,
+                 game_version, submitter_notes, expedition_id, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                editor_username,
+                _mirror_now,
+                json.dumps(payload),
+                'approved',
+                editor_username,                      # self-approved
+                _mirror_now,
+                name,
+                payload.get('galaxy', 'Euclid'),      # legacy system_region holds galaxy
+                payload.get('galaxy', 'Euclid'),
+                payload.get('reality', 'Normal'),
+                payload.get('glyph_code'),
+                payload.get('glyph_planet', 0),
+                payload.get('glyph_solar_system', 1),
+                payload.get('region_x'),
+                payload.get('region_y'),
+                payload.get('region_z'),
+                payload.get('game_mode') or 'Normal',
+                'manual',
+                'direct_save',
+                payload.get('discord_tag'),
+                session_data.get('username') or payload.get('personal_discord_username'),
+                sys_id,                               # back-link to the live system
+                session_data.get('partner_id') or session_data.get('sub_admin_id'),
+                session_data.get('user_type'),
+                session_data.get('profile_id'),
+                _mirror_norm,
+                payload.get('game_version') or None,
+                payload.get('submitter_notes') or None,
+                _mirror_expedition_id,
+                resolved_event_id,
+            ))
+            logger.info(f"Tracking mirror pending row written for direct save of '{name}' (system {sys_id})")
+        except Exception as mirror_err:
+            logger.warning(f"Failed to write tracking mirror row for system {sys_id}: {mirror_err}")
+
         # Calculate and store completeness score
         update_completeness_score(cursor, sys_id)
         conn.commit()
@@ -3193,6 +3285,19 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             logger.info(f"Audit log: {action} for system '{name}' by {current_username}")
         except Exception as audit_err:
             logger.warning(f"Failed to add audit log entry: {audit_err}")
+
+        # Dashboard activity feed: direct saves now appear here too, mirroring
+        # the approve_system 'system_approved' entry. add_activity_log opens its
+        # own connection, so it's safe to call after the commits above.
+        try:
+            add_activity_log(
+                'system_approved',
+                f"System '{name}' {'updated' if is_edit else 'added'} (direct save) by {current_username}",
+                f"Galaxy: {payload.get('galaxy', 'Euclid')}, Contributor: {current_username}",
+                current_username,
+            )
+        except Exception as feed_err:
+            logger.warning(f"Failed to add activity feed entry: {feed_err}")
 
         return {'status': 'ok', 'saved': payload, 'system_id': sys_id}
 

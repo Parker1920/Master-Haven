@@ -439,7 +439,7 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
 
     # Empty-DB envelope keeps the shape stable so parseSnapshot() never NPEs.
     empty = {
-        'n': 0, 'pos': '', 'st': '', 'ti': '', 'hp': '', 'hs': '',
+        'n': 0, 'pos': '', 'st': '', 'ti': '', 'hp': '', 'hs': '', 'ri': '',
         'rpos': '', 'rcount': '', 'rn': 0, 'regions': [], 'names': [],
         'glyphs': [], 'star_types': list(_STAR_TYPE_ORDER), 'tag_pool': [''],
         'tag_colors': {}, 'biomes': [''], 'sizes': [''], 'sentinel': [''],
@@ -518,12 +518,17 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
         names = []
         glyphs = []
         id_to_idx = {}
+        # Per-system region voxel key, captured in row order so we can emit a
+        # per-system region index (ri) once the region pool below is built. The
+        # Cartographer uses this to derive which regions contain a filter match.
+        sys_region_keys = []
 
         for i, s in enumerate(systems):
             sid = s['id']
             id_to_idx[sid] = i
             glyph = s['glyph_code'] or ''
             rx = s['region_x']
+            sys_region_keys.append((s['region_x'], s['region_y'], s['region_z']))
             if len(glyph) == 12 and rx is not None:
                 # Spread systems within their region using the same deterministic
                 # hash as glyph_decoder.calculate_star_position_in_region so every
@@ -670,6 +675,16 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
                 'tag': dom_tag,
             })
 
+        # --- Per-system region index (ri): aligned to the per-system arrays,
+        #     valued by position in the `regions` pool above. 65535 = no region
+        #     (system with NULL region coords). Lets the Cartographer filter map
+        #     a matched system back to its region for region-layer hiding. ---
+        region_key_to_idx = {(reg['rx'], reg['ry'], reg['rz']): i
+                             for i, reg in enumerate(regions)}
+        ri = np.fromiter(
+            (region_key_to_idx.get(k, 65535) for k in sys_region_keys),
+            dtype='<u2', count=n)
+
         # --- tag_colors: reuse the canonical /api/discord_tag_colors source so
         #     the map tints match the rest of the site. Lazy import avoids any
         #     module-load circular dependency between route modules. ---
@@ -690,6 +705,7 @@ async def api_map_snapshot(reality: str = None, galaxy: str = None):
             'ti': b64(ti),
             'hp': b64(hp),
             'hs': b64(hs),
+            'ri': b64(ri),
             'rpos': b64(rpos),
             'rcount': b64(rcount),
             'rn': rn,

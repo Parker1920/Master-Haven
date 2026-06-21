@@ -1,70 +1,67 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo } from 'react'
 import axios from 'axios'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { AuthContext } from '../utils/AuthContext'
+import { formatDate } from '../hooks/useDateFormat'
 
 /**
- * Sub-Admin Management
- * Route: /admin/partners/:id/sub-admins  (super admin managing a partner's sub-admins)
- *    or: /admin/sub-admins               (super admin managing Haven sub-admins, or partner managing own)
- * Auth: Any admin role (super admin or partner)
+ * Sub-Admin Moderation
+ * Route: /admin/sub-admins  (also mounted as the "Sub-Admins" tab in AccessControl)
+ * Auth: Any admin (super admin, or a civ leader/co-leader)
  *
- * CRUD interface for sub-admin accounts. Sub-admins inherit a subset of their
- * parent partner's feature flags and can only approve content for their community.
- * Haven sub-admins (no parent partner) can be granted additional discord tag visibility
- * and personal-upload approval rights.
+ * This page no longer CREATES accounts. Sub-admins are civilization_members
+ * with role='sub_admin' on the new civ system (migration 1.80.0). The legacy
+ * username+password sub_admin_accounts creation flow was retired — it wrote to
+ * a dead-end table that login shadowed behind any same-named user_profile.
  *
- * Key APIs:
- *   GET    /api/sub_admins(?partner_id=N)
- *   POST   /api/sub_admins
- *   PUT    /api/sub_admins/:id
- *   POST   /api/sub_admins/:id/reset_password
- *   DELETE /api/sub_admins/:id          (deactivate)
+ * What you can do here (the "moderation" surface Parker asked for):
+ *   - See every sub-admin you can manage, grouped by civilization.
+ *   - Add a sub-admin by elevating an EXISTING profile (username lookup).
+ *   - Change each sub-admin's features (per-member override vs civ default).
+ *   - Toggle "can approve personal uploads".
+ *   - Revoke (remove) a sub-admin from a civ.
+ *
+ * All writes go through the canonical civ-member endpoints:
+ *   GET    /api/sub_admins                                   (roster, repurposed)
+ *   POST   /api/civilizations/{civ_id}/members               (elevate, role=sub_admin)
+ *   PUT    /api/civilizations/{civ_id}/members/{profile_id}  (features / personal cap)
+ *   DELETE /api/civilizations/{civ_id}/members/{profile_id}  (revoke)
+ *
+ * Adding leaders / co-leaders and editing civ brand still live on the
+ * Civilization Management page (/admin/civilizations).
  */
 
-// Available features that can be toggled for sub-admins (subset of parent's features)
+// The partner-grade granular features a sub-admin can be granted. Mirrors
+// FEATURE_DEFAULTS in CivilizationManagement.jsx and LEADER_FEATURES on the
+// backend.
 const AVAILABLE_FEATURES = [
-  { id: 'system_create', label: 'Create Systems', description: 'Can create new star systems' },
-  { id: 'system_edit', label: 'Edit Systems', description: 'Can edit systems tagged with their Discord' },
-  { id: 'approvals', label: 'Approvals', description: 'Can approve/reject pending submissions' },
-  { id: 'batch_approvals', label: 'Batch Approvals', description: 'Can approve or reject multiple submissions at once' },
-  { id: 'stats', label: 'View Statistics', description: 'Can view database statistics' },
-  { id: 'settings', label: 'Theme Settings', description: 'Can customize theme colors' }
+  { id: 'system_create', label: 'Create Systems' },
+  { id: 'system_edit', label: 'Edit Systems' },
+  { id: 'approvals', label: 'View Approvals' },
+  { id: 'batch_approvals', label: 'Batch Approvals' },
+  { id: 'stats', label: 'View Statistics' },
+  { id: 'settings', label: 'Theme Settings' },
+  { id: 'csv_import', label: 'CSV Import' },
+  { id: 'war_room', label: 'War Room' },
 ]
 
-/** @param {Object} props @param {boolean} [props.embedded=false] When true, hides the page title row — used when mounted inside AccessControl. */
+/** @param {Object} props @param {boolean} [props.embedded=false] Hides the page title row when mounted inside AccessControl. */
 export default function SubAdminManagement({ embedded = false }) {
   const navigate = useNavigate()
-  const { partnerId } = useParams() // Optional: for super admin managing specific partner's sub-admins
   const auth = useContext(AuthContext)
   const [subAdmins, setSubAdmins] = useState([])
-  const [partners, setPartners] = useState([]) // For super admin to select partner
-  const [availableDiscordTags, setAvailableDiscordTags] = useState([]) // For Haven sub-admin tag visibility
+  const [civs, setCivs] = useState([])          // civs the user can add sub-admins to
   const [loading, setLoading] = useState(true)
   const [actionInProgress, setActionInProgress] = useState(false)
 
-  // Modal states
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [resetPasswordModalOpen, setResetPasswordModalOpen] = useState(false)
-  const [selectedSubAdmin, setSelectedSubAdmin] = useState(null)
-
-  // Form state
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-    display_name: '',
-    enabled_features: [],
-    parent_partner_id: partnerId || '',
-    additional_discord_tags: [], // For Haven sub-admins only
-    can_approve_personal_uploads: false // For Haven sub-admins only
-  })
-
-  // For password reset
-  const [newPassword, setNewPassword] = useState('')
+  // Add-sub-admin modal
+  const [addOpen, setAddOpen] = useState(false)
+  const [addUsername, setAddUsername] = useState('')
+  const [addCivId, setAddCivId] = useState('')
+  const [addError, setAddError] = useState('')
 
   useEffect(() => {
     if (!auth.isAdmin) {
@@ -72,19 +69,20 @@ export default function SubAdminManagement({ embedded = false }) {
       navigate('/systems')
       return
     }
-    loadSubAdmins()
-    if (auth.isSuperAdmin && !partnerId) {
-      loadPartners()
-      loadAvailableDiscordTags()
-    }
-  }, [auth.isAdmin, auth.isSuperAdmin, navigate, partnerId])
+    loadAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isAdmin, navigate])
 
-  async function loadSubAdmins() {
+  async function loadAll() {
     setLoading(true)
     try {
-      const url = partnerId ? `/api/sub_admins?partner_id=${partnerId}` : '/api/sub_admins'
-      const response = await axios.get(url)
-      setSubAdmins(response.data.sub_admins || [])
+      const [roster, civList] = await Promise.all([
+        axios.get('/api/sub_admins'),
+        axios.get('/api/civilizations'),
+      ])
+      setSubAdmins(roster.data.sub_admins || [])
+      // Only active civs are valid elevation targets.
+      setCivs((civList.data.civilizations || []).filter(c => c.is_active))
     } catch (err) {
       alert('Failed to load sub-admins: ' + (err.response?.data?.detail || err.message))
     } finally {
@@ -92,586 +90,322 @@ export default function SubAdminManagement({ embedded = false }) {
     }
   }
 
-  async function loadPartners() {
+  async function reloadRoster() {
     try {
-      const response = await axios.get('/api/partners')
-      setPartners(response.data.partners || [])
+      const roster = await axios.get('/api/sub_admins')
+      setSubAdmins(roster.data.sub_admins || [])
     } catch (err) {
-      console.error('Failed to load partners:', err)
+      alert('Failed to refresh: ' + (err.response?.data?.detail || err.message))
     }
   }
 
-  async function loadAvailableDiscordTags() {
-    try {
-      const response = await axios.get('/api/available_discord_tags')
-      setAvailableDiscordTags(response.data.discord_tags || [])
-    } catch (err) {
-      console.error('Failed to load discord tags:', err)
-    }
-  }
-
-  function resetForm() {
-    setFormData({
-      username: '',
-      password: '',
-      display_name: '',
-      enabled_features: [],
-      // Default to 'haven' for super admin creating sub-admins
-      parent_partner_id: partnerId || (auth.isSuperAdmin ? 'haven' : ''),
-      additional_discord_tags: [],
-      can_approve_personal_uploads: false
-    })
-  }
-
-  async function createSubAdmin() {
-    if (!formData.username.trim() || formData.username.length < 3) {
-      alert('Username must be at least 3 characters')
-      return
-    }
-    if (!formData.password || formData.password.length < 4) {
-      alert('Password must be at least 4 characters')
-      return
-    }
-    // For super admin, parent_partner_id is optional (NULL = Haven sub-admin)
-    // For partners, it's automatically set on the backend
-
+  // ---- member edits (shared civ-member endpoints) ----
+  async function saveFeatures(member, features) {
     setActionInProgress(true)
     try {
-      const payload = {
-        username: formData.username.trim(),
-        password: formData.password,
-        display_name: formData.display_name.trim() || formData.username.trim(),
-        enabled_features: formData.enabled_features
-      }
-      // Only include parent_partner_id if specified (for super admin creating under a partner)
-      if (formData.parent_partner_id && formData.parent_partner_id !== 'haven') {
-        payload.parent_partner_id = parseInt(formData.parent_partner_id)
-      } else if (formData.parent_partner_id === 'haven') {
-        // For Haven sub-admins, include additional permissions
-        payload.additional_discord_tags = formData.additional_discord_tags
-        payload.can_approve_personal_uploads = formData.can_approve_personal_uploads
-      }
-      await axios.post('/api/sub_admins', payload)
-      alert('Sub-admin account created successfully!')
-      setCreateModalOpen(false)
-      resetForm()
-      loadSubAdmins()
-    } catch (err) {
-      alert('Failed to create sub-admin: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setActionInProgress(false)
-    }
-  }
-
-  function openEditModal(subAdmin) {
-    setSelectedSubAdmin(subAdmin)
-    setFormData({
-      username: subAdmin.username,
-      password: '',
-      display_name: subAdmin.display_name || '',
-      enabled_features: subAdmin.enabled_features || [],
-      parent_partner_id: subAdmin.parent_partner_id,
-      additional_discord_tags: subAdmin.additional_discord_tags || [],
-      can_approve_personal_uploads: subAdmin.can_approve_personal_uploads || false
-    })
-    setEditModalOpen(true)
-  }
-
-  async function updateSubAdmin() {
-    setActionInProgress(true)
-    try {
-      const payload = {
-        display_name: formData.display_name.trim() || null,
-        enabled_features: formData.enabled_features,
-        is_active: selectedSubAdmin.is_active
-      }
-      // Include additional_discord_tags and can_approve_personal_uploads for Haven sub-admins (no parent_partner_id)
-      if (!selectedSubAdmin.parent_partner_id) {
-        payload.additional_discord_tags = formData.additional_discord_tags
-        payload.can_approve_personal_uploads = formData.can_approve_personal_uploads
-      }
-      await axios.put(`/api/sub_admins/${selectedSubAdmin.id}`, payload)
-      alert('Sub-admin updated successfully!')
-      setEditModalOpen(false)
-      setSelectedSubAdmin(null)
-      resetForm()
-      loadSubAdmins()
-    } catch (err) {
-      alert('Failed to update sub-admin: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setActionInProgress(false)
-    }
-  }
-
-  function openResetPasswordModal(subAdmin) {
-    setSelectedSubAdmin(subAdmin)
-    setNewPassword('')
-    setResetPasswordModalOpen(true)
-  }
-
-  async function resetPassword() {
-    if (!newPassword || newPassword.length < 4) {
-      alert('New password must be at least 4 characters')
-      return
-    }
-
-    setActionInProgress(true)
-    try {
-      await axios.post(`/api/sub_admins/${selectedSubAdmin.id}/reset_password`, {
-        new_password: newPassword
+      await axios.put(`/api/civilizations/${member.civ_id}/members/${member.profile_id}`, {
+        enabled_features: features, // array => override, null => inherit civ default
       })
-      alert('Password reset successfully!')
-      setResetPasswordModalOpen(false)
-      setSelectedSubAdmin(null)
-      setNewPassword('')
+      await reloadRoster()
     } catch (err) {
-      alert('Failed to reset password: ' + (err.response?.data?.detail || err.message))
+      alert('Failed to save permissions: ' + (err.response?.data?.detail || err.message))
     } finally {
       setActionInProgress(false)
     }
   }
 
-  async function toggleActive(subAdmin) {
-    const action = subAdmin.is_active ? 'deactivate' : 'reactivate'
-    if (!confirm(`Are you sure you want to ${action} "${subAdmin.username}"?`)) {
+  async function toggleCap(member) {
+    setActionInProgress(true)
+    try {
+      await axios.put(`/api/civilizations/${member.civ_id}/members/${member.profile_id}`, {
+        can_approve_personal_uploads: !member.can_approve_personal_uploads,
+      })
+      await reloadRoster()
+    } catch (err) {
+      alert('Failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
+  async function revoke(member) {
+    if (!confirm(`Revoke sub-admin for ${member.username} in ${member.civ_display_name}?\n\nTheir account stays — they just lose sub-admin powers for this civ.`)) {
       return
     }
+    setActionInProgress(true)
+    try {
+      await axios.delete(`/api/civilizations/${member.civ_id}/members/${member.profile_id}`)
+      await reloadRoster()
+    } catch (err) {
+      alert('Failed to revoke: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
+  function openAdd() {
+    setAddUsername('')
+    setAddCivId(civs.length === 1 ? String(civs[0].id) : '')
+    setAddError('')
+    setAddOpen(true)
+  }
+
+  async function addSubAdmin() {
+    const username = addUsername.trim()
+    setAddError('')
+    if (!username) { setAddError('Enter the exact username of an existing profile.'); return }
+    if (!addCivId) { setAddError('Pick a civilization.'); return }
 
     setActionInProgress(true)
     try {
-      if (subAdmin.is_active) {
-        await axios.delete(`/api/sub_admins/${subAdmin.id}`)
-      } else {
-        await axios.put(`/api/sub_admins/${subAdmin.id}`, { is_active: true })
+      // Require an EXISTING profile — no account creation here.
+      const lookup = await axios.post('/api/profiles/lookup', { username })
+      if (lookup.data.status !== 'found') {
+        setAddError('No profile with that exact username. They must sign in / submit at least once first, then you can elevate them.')
+        return
       }
-      loadSubAdmins()
+      await axios.post(`/api/civilizations/${addCivId}/members`, {
+        profile_id: lookup.data.profile.id,
+        role: 'sub_admin',
+      })
+      setAddOpen(false)
+      await reloadRoster()
     } catch (err) {
-      alert(`Failed to ${action} sub-admin: ` + (err.response?.data?.detail || err.message))
+      setAddError(err.response?.data?.detail || err.message)
     } finally {
       setActionInProgress(false)
     }
   }
 
-  function toggleFeature(featureId) {
-    setFormData(prev => {
-      const features = prev.enabled_features || []
-      if (features.includes(featureId)) {
-        return { ...prev, enabled_features: features.filter(f => f !== featureId) }
-      } else {
-        return { ...prev, enabled_features: [...features, featureId] }
+  // Group roster by civilization for display.
+  const grouped = useMemo(() => {
+    const map = new Map()
+    for (const sa of subAdmins) {
+      if (!map.has(sa.civ_id)) {
+        map.set(sa.civ_id, { civ_id: sa.civ_id, civ_tag: sa.civ_tag, civ_display_name: sa.civ_display_name, members: [] })
       }
-    })
-  }
-
-  function toggleDiscordTag(tag) {
-    setFormData(prev => {
-      const tags = prev.additional_discord_tags || []
-      if (tags.includes(tag)) {
-        return { ...prev, additional_discord_tags: tags.filter(t => t !== tag) }
-      } else {
-        return { ...prev, additional_discord_tags: [...tags, tag] }
-      }
-    })
-  }
+      map.get(sa.civ_id).members.push(sa)
+    }
+    return [...map.values()]
+  }, [subAdmins])
 
   if (loading) {
     return (
       <div className={embedded ? '' : 'p-4'}>
-        <Card>
-          <p style={{ color: 'var(--muted)' }}>Loading sub-admins...</p>
-        </Card>
+        <Card><p style={{ color: 'var(--muted)' }}>Loading sub-admins…</p></Card>
       </div>
     )
   }
 
   return (
     <div className={embedded ? '' : 'p-4'}>
-      <Card className={embedded ? '' : 'max-w-4xl'}>
-        <div className="flex justify-between items-center mb-4">
-          {!embedded ? (
-            <div>
-              <h2 className="text-2xl font-bold">Sub-Admin Management</h2>
-              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-                Sub-admins can approve submissions (except their own) and manage content for their community.
-              </p>
-            </div>
-          ) : <div />}
-          <div className="flex space-x-2">
-            <Button
-              className="haven-btn-primary"
-              onClick={() => {
-                resetForm()
-                setCreateModalOpen(true)
-              }}
-            >
-              + Create Sub-Admin
-            </Button>
-            <Button className="haven-btn-ghost" onClick={() => navigate(-1)}>
-              Back
-            </Button>
+      <div className="flex justify-between items-start mb-4 gap-3 flex-wrap">
+        {!embedded ? (
+          <div>
+            <h2 className="text-2xl font-bold">Sub-Admin Moderation</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+              Manage who has sub-admin powers and what they can do. Sub-admins approve
+              submissions (except their own) and help manage their civilization's content.
+            </p>
           </div>
+        ) : <div />}
+        <Button className="haven-btn-primary" onClick={openAdd}>+ Add Sub-Admin</Button>
+      </div>
+
+      <div className="haven-card p-3 mb-4 text-sm" style={{ borderColor: 'var(--app-accent-amber)' }}>
+        Sub-admins are elevated from existing member profiles — there's no separate
+        username/password to create here. To make someone a <strong>leader</strong> or
+        <strong> co-leader</strong>, or to edit a civilization's brand, use{' '}
+        <button
+          className="underline"
+          style={{ color: 'var(--app-primary)' }}
+          onClick={() => navigate('/admin/civilizations')}
+        >
+          Civilization Management
+        </button>.
+      </div>
+
+      {grouped.length === 0 ? (
+        <div className="haven-card italic p-4" style={{ color: 'var(--muted)' }}>
+          No sub-admins yet. Click <strong>+ Add Sub-Admin</strong> to elevate an existing
+          member profile.
         </div>
-
-        {subAdmins.length === 0 ? (
-          <div className="haven-card italic p-4" style={{ color: 'var(--muted)' }}>
-            No sub-admin accounts yet. Create one to allow community members to help with approvals.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {subAdmins.map(subAdmin => (
-              <div
-                key={subAdmin.id}
-                className={`haven-card haven-card-hover p-4 ${subAdmin.is_active ? '' : 'opacity-75'}`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold">{subAdmin.username}</h3>
-                      {!subAdmin.is_active && (
-                        <span className="pill pill-red">INACTIVE</span>
-                      )}
-                    </div>
-                    {subAdmin.display_name && (
-                      <p className="text-sm" style={{ color: 'var(--app-text)' }}>{subAdmin.display_name}</p>
-                    )}
-                    <p className="text-sm mt-1" style={{ color: 'var(--app-primary)' }}>
-                      Parent: {subAdmin.parent_display_name || 'Haven'}
-                      {subAdmin.parent_partner_id ? ` (${subAdmin.parent_discord_tag || 'No tag'})` : ' (Super Admin)'}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {(subAdmin.enabled_features || []).map(f => (
-                        <span key={f} className="pill pill-teal">
-                          {f}
-                        </span>
-                      ))}
-                      {(!subAdmin.enabled_features || subAdmin.enabled_features.length === 0) && (
-                        <span className="text-sm italic" style={{ color: 'var(--muted)' }}>No features enabled</span>
-                      )}
-                    </div>
-                    {/* Show additional discord tags for Haven sub-admins */}
-                    {!subAdmin.parent_partner_id && subAdmin.additional_discord_tags && subAdmin.additional_discord_tags.length > 0 && (
-                      <div className="mt-2">
-                        <span className="text-xs" style={{ color: 'var(--muted)' }}>Can also view: </span>
-                        <span className="text-xs" style={{ color: 'var(--app-accent-amber)' }}>{subAdmin.additional_discord_tags.join(', ')}</span>
-                      </div>
-                    )}
-                    {/* Show personal uploads permission for Haven sub-admins */}
-                    {!subAdmin.parent_partner_id && subAdmin.can_approve_personal_uploads && (
-                      <div className="mt-1">
-                        <span className="pill pill-purple">Can approve personal uploads</span>
-                      </div>
-                    )}
-                    <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
-                      Created: {new Date(subAdmin.created_at).toLocaleDateString()}
-                      {subAdmin.last_login_at && (
-                        <span> | Last login: {new Date(subAdmin.last_login_at).toLocaleDateString()}</span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Button
-                      className="haven-btn-ghost text-sm px-3 py-1"
-                      onClick={() => openEditModal(subAdmin)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      className="haven-btn-ghost text-sm px-3 py-1"
-                      onClick={() => openResetPasswordModal(subAdmin)}
-                    >
-                      Reset Password
-                    </Button>
-                    <Button
-                      className={`text-sm px-3 py-1 pill pill-clickable ${subAdmin.is_active ? 'pill-red' : 'pill-emerald'}`}
-                      onClick={() => toggleActive(subAdmin)}
-                      disabled={actionInProgress}
-                    >
-                      {subAdmin.is_active ? 'Deactivate' : 'Reactivate'}
-                    </Button>
-                  </div>
-                </div>
+      ) : (
+        <div className="space-y-6">
+          {grouped.map(group => (
+            <div key={group.civ_id}>
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="font-bold">{group.civ_tag}</span>
+                <span className="text-sm" style={{ color: 'var(--muted)' }}>{group.civ_display_name}</span>
+                <span className="pill pill-muted">{group.members.length}</span>
               </div>
-            ))}
-          </div>
-        )}
-      </Card>
+              <div className="space-y-2">
+                {group.members.map(m => (
+                  <SubAdminRow
+                    key={`${m.civ_id}:${m.profile_id}`}
+                    member={m}
+                    busy={actionInProgress}
+                    onSaveFeatures={features => saveFeatures(m, features)}
+                    onToggleCap={() => toggleCap(m)}
+                    onRevoke={() => revoke(m)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Create Sub-Admin Modal */}
-      {createModalOpen && (
-        <Modal title="Create Sub-Admin" onClose={() => setCreateModalOpen(false)}>
+      {/* Add Sub-Admin modal */}
+      {addOpen && (
+        <Modal title="Add Sub-Admin" onClose={() => setAddOpen(false)}>
           <div className="space-y-4">
-            {auth.isSuperAdmin && !partnerId && (
-              <div>
-                <label className="block text-sm font-semibold mb-1">Parent</label>
-                <select
-                  className="haven-input w-full p-2"
-                  value={formData.parent_partner_id}
-                  onChange={(e) => setFormData({...formData, parent_partner_id: e.target.value})}
-                >
-                  <option value="haven">Haven (Super Admin)</option>
-                  <optgroup label="Partners">
-                    {partners.filter(p => p.is_active).map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.display_name || p.username} ({p.discord_tag || 'No tag'})
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                  Haven sub-admins report directly to you (no community tag).
-                </p>
-              </div>
-            )}
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              Elevate an <strong>existing</strong> member profile to sub-admin. The person
+              must already have a profile (they've submitted, or set a member password).
+            </p>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Civilization *</label>
+              <select
+                className="haven-input w-full p-2"
+                value={addCivId}
+                onChange={e => setAddCivId(e.target.value)}
+              >
+                <option value="">— Select civilization —</option>
+                {civs.map(c => (
+                  <option key={c.id} value={c.id}>{c.tag} — {c.display_name}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-sm font-semibold mb-1">Username *</label>
               <input
                 type="text"
                 className="haven-input w-full p-2"
-                value={formData.username}
-                onChange={(e) => setFormData({...formData, username: e.target.value})}
-                placeholder="min 3 characters"
+                value={addUsername}
+                onChange={e => setAddUsername(e.target.value)}
+                placeholder="exact username (case-insensitive)"
+                onKeyDown={e => { if (e.key === 'Enter') addSubAdmin() }}
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Password *</label>
-              <input
-                type="password"
-                className="haven-input w-full p-2"
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                placeholder="min 4 characters"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Display Name</label>
-              <input
-                type="text"
-                className="haven-input w-full p-2"
-                value={formData.display_name}
-                onChange={(e) => setFormData({...formData, display_name: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Enabled Features</label>
-              <div className="space-y-2">
-                {AVAILABLE_FEATURES.map(f => (
-                  <label key={f.id} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.enabled_features.includes(f.id)}
-                      onChange={() => toggleFeature(f.id)}
-                      className="rounded"
-                    />
-                    <span className="text-sm">{f.label}</span>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }}>- {f.description}</span>
-                  </label>
-                ))}
+            {addError && (
+              <div className="haven-card p-2 text-sm" style={{ borderColor: 'var(--app-accent-amber)', color: 'var(--app-text)' }}>
+                {addError}
               </div>
-            </div>
-
-            {/* Haven-specific options - show when creating under Haven */}
-            {formData.parent_partner_id === 'haven' && auth.isSuperAdmin && (
-              <>
-                {/* Additional Discord Tags */}
-                <div>
-                  <label className="block text-sm font-semibold mb-1">Additional Discord Tag Visibility</label>
-                  <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>
-                    Select which partner discords this Haven sub-admin can see and approve submissions for.
-                  </p>
-                  <div className="haven-card max-h-32 overflow-y-auto p-2 space-y-2">
-                    {availableDiscordTags.length === 0 ? (
-                      <p className="text-sm italic" style={{ color: 'var(--muted)' }}>No partner discord tags available</p>
-                    ) : (
-                      availableDiscordTags.filter(t => t.discord_tag !== 'Haven').map(tag => (
-                        <label key={tag.discord_tag} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.additional_discord_tags.includes(tag.discord_tag)}
-                            onChange={() => toggleDiscordTag(tag.discord_tag)}
-                            className="rounded"
-                          />
-                          <span className="text-sm">{tag.discord_tag}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Personal Uploads Permission */}
-                <div className="pt-3" style={{ borderTop: '1px solid var(--border-soft)' }}>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.can_approve_personal_uploads}
-                      onChange={(e) => setFormData({...formData, can_approve_personal_uploads: e.target.checked})}
-                      className="rounded w-5 h-5"
-                    />
-                    <div>
-                      <span className="text-sm font-semibold">Can Approve Personal Uploads</span>
-                      <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                        Allow this sub-admin to approve submissions without a discord tag.
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              </>
             )}
-
-            <div className="flex space-x-2 pt-3">
-              <Button
-                className="haven-btn-primary"
-                onClick={createSubAdmin}
-                disabled={actionInProgress}
-              >
-                {actionInProgress ? 'Creating...' : 'Create Sub-Admin'}
+            <div className="flex space-x-2 pt-1">
+              <Button className="haven-btn-primary" onClick={addSubAdmin} disabled={actionInProgress}>
+                {actionInProgress ? 'Adding…' : 'Add Sub-Admin'}
               </Button>
-              <Button
-                className="haven-btn-ghost"
-                onClick={() => setCreateModalOpen(false)}
-              >
-                Cancel
-              </Button>
+              <Button className="haven-btn-ghost" onClick={() => setAddOpen(false)}>Cancel</Button>
             </div>
           </div>
         </Modal>
       )}
+    </div>
+  )
+}
 
-      {/* Edit Sub-Admin Modal */}
-      {editModalOpen && selectedSubAdmin && (
-        <Modal title={`Edit: ${selectedSubAdmin.username}`} onClose={() => setEditModalOpen(false)}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold mb-1">Display Name</label>
-              <input
-                type="text"
-                className="haven-input w-full p-2"
-                value={formData.display_name}
-                onChange={(e) => setFormData({...formData, display_name: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Enabled Features</label>
-              <div className="space-y-2">
-                {AVAILABLE_FEATURES.map(f => (
-                  <label key={f.id} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.enabled_features.includes(f.id)}
-                      onChange={() => toggleFeature(f.id)}
-                      className="rounded"
-                    />
-                    <span className="text-sm">{f.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+function SubAdminRow({ member, busy, onSaveFeatures, onToggleCap, onRevoke }) {
+  // null override => inheriting the civ default; an array => per-member override.
+  const hasOverride = Array.isArray(member.enabled_features_override)
+  const [expanded, setExpanded] = useState(false)
+  const [draft, setDraft] = useState(() => new Set(member.enabled_features || []))
 
-            {/* Additional Discord Tags - Only for Haven sub-admins */}
-            {!selectedSubAdmin.parent_partner_id && auth.isSuperAdmin && (
-              <div>
-                <label className="block text-sm font-semibold mb-1">Additional Discord Tag Visibility</label>
-                <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>
-                  Select which partner discords this Haven sub-admin can see and approve submissions for (in addition to "Haven").
-                </p>
-                <div className="haven-card max-h-48 overflow-y-auto p-2 space-y-2">
-                  {availableDiscordTags.length === 0 ? (
-                    <p className="text-sm italic" style={{ color: 'var(--muted)' }}>No partner discord tags available</p>
-                  ) : (
-                    availableDiscordTags.filter(t => t.discord_tag !== 'Haven').map(tag => (
-                      <label key={tag.discord_tag} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={formData.additional_discord_tags.includes(tag.discord_tag)}
-                          onChange={() => toggleDiscordTag(tag.discord_tag)}
-                          className="rounded"
-                        />
-                        <span className="text-sm">{tag.discord_tag}</span>
-                        {tag.display_name && (
-                          <span className="text-xs" style={{ color: 'var(--muted)' }}>({tag.display_name})</span>
-                        )}
-                      </label>
-                    ))
-                  )}
-                </div>
-                {formData.additional_discord_tags.length > 0 && (
-                  <p className="text-xs mt-1" style={{ color: 'var(--app-primary)' }}>
-                    Can view: Haven + {formData.additional_discord_tags.join(', ')}
-                  </p>
-                )}
-              </div>
-            )}
+  // Re-seed after a save round-trips (member.enabled_features changes).
+  useEffect(() => {
+    setDraft(new Set(member.enabled_features || []))
+  }, [member.enabled_features, member.enabled_features_override])
 
-            {/* Personal Uploads Permission - Only for Haven sub-admins */}
-            {!selectedSubAdmin.parent_partner_id && auth.isSuperAdmin && (
-              <div className="pt-4" style={{ borderTop: '1px solid var(--border-soft)' }}>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.can_approve_personal_uploads}
-                    onChange={(e) => setFormData({...formData, can_approve_personal_uploads: e.target.checked})}
-                    className="rounded w-5 h-5"
-                  />
-                  <div>
-                    <span className="text-sm font-semibold">Can Approve Personal Uploads</span>
-                    <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                      Allow this sub-admin to see and approve submissions without a discord tag (personal uploads).
-                      Note: Discord info will be hidden - only visible to super admin.
-                    </p>
-                  </div>
-                </label>
-              </div>
-            )}
+  function toggle(id) {
+    setDraft(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
-            <div className="flex space-x-2 pt-3">
-              <Button
-                className="haven-btn-primary"
-                onClick={updateSubAdmin}
-                disabled={actionInProgress}
-              >
-                {actionInProgress ? 'Saving...' : 'Save Changes'}
-              </Button>
-              <Button
-                className="haven-btn-ghost"
-                onClick={() => setEditModalOpen(false)}
-              >
-                Cancel
-              </Button>
-            </div>
+  return (
+    <div className={`haven-card p-3 text-sm space-y-2 ${member.is_active ? '' : 'opacity-70'}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold truncate">{member.display_name || member.username}</span>
+            {!member.is_active && <span className="pill pill-red">PROFILE INACTIVE</span>}
           </div>
-        </Modal>
+          <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+            {member.username}
+            {member.last_login_at && ` · last login ${formatDate(member.last_login_at)}`}
+          </div>
+        </div>
+        <label className="flex items-center gap-1 text-xs" title="Can approve personal-tagged (no-civ) uploads">
+          <input
+            type="checkbox"
+            checked={!!member.can_approve_personal_uploads}
+            onChange={onToggleCap}
+            disabled={busy}
+          />
+          <span style={{ color: 'var(--muted)' }}>Approve personal</span>
+        </label>
+        <button className="pill pill-muted pill-clickable" onClick={() => setExpanded(e => !e)}>
+          {expanded ? 'Hide perms' : 'Edit perms'}
+        </button>
+        <button className="pill pill-red pill-clickable" onClick={onRevoke} disabled={busy}>
+          Revoke
+        </button>
+      </div>
+
+      {/* Compact feature summary when collapsed */}
+      {!expanded && (
+        <div className="flex flex-wrap gap-1">
+          {(member.enabled_features || []).length === 0 ? (
+            <span className="text-xs italic" style={{ color: 'var(--muted)' }}>No features enabled</span>
+          ) : (
+            (member.enabled_features || []).map(f => (
+              <span key={f} className="pill pill-teal">{f}</span>
+            ))
+          )}
+          {!hasOverride && (member.enabled_features || []).length > 0 && (
+            <span className="text-xs italic" style={{ color: 'var(--muted)' }}>(civ default)</span>
+          )}
+        </div>
       )}
 
-      {/* Reset Password Modal */}
-      {resetPasswordModalOpen && selectedSubAdmin && (
-        <Modal title={`Reset Password: ${selectedSubAdmin.username}`} onClose={() => setResetPasswordModalOpen(false)}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold mb-1">New Password *</label>
-              <input
-                type="password"
-                className="haven-input w-full p-2"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="min 4 characters"
-              />
-            </div>
-            <div className="flex space-x-2 pt-3">
-              <Button
-                className="haven-btn-primary"
-                onClick={resetPassword}
-                disabled={actionInProgress}
-              >
-                {actionInProgress ? 'Resetting...' : 'Reset Password'}
-              </Button>
-              <Button
-                className="haven-btn-ghost"
-                onClick={() => setResetPasswordModalOpen(false)}
-              >
-                Cancel
-              </Button>
-            </div>
+      {expanded && (
+        <div className="border-t pt-2" style={{ borderColor: 'var(--border-soft)' }}>
+          <div className="text-xs mb-1" style={{ color: 'var(--muted)' }}>
+            {hasOverride
+              ? 'Custom permissions (per-member override).'
+              : 'Inheriting the civ default permission set — saving creates a per-member override.'}
           </div>
-        </Modal>
+          <div className="grid grid-cols-2 gap-1">
+            {AVAILABLE_FEATURES.map(f => (
+              <label key={f.id} className="flex items-center gap-1 text-xs">
+                <input type="checkbox" checked={draft.has(f.id)} onChange={() => toggle(f.id)} />
+                {f.label}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button
+              className="pill pill-emerald pill-clickable"
+              onClick={() => onSaveFeatures([...draft])}
+              disabled={busy}
+            >
+              Save permissions
+            </button>
+            {hasOverride && (
+              <button
+                className="pill pill-muted pill-clickable"
+                onClick={() => onSaveFeatures(null)}
+                disabled={busy}
+                title="Clear the override and inherit the civ default again"
+              >
+                Reset to civ default
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
