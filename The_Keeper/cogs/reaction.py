@@ -1,9 +1,9 @@
 import discord
 from discord.ext import commands
 import asyncio
+import aiosqlite
 
-from cogs.Data.xpdata import PRIMARY_ROLE_MAP, save_panel, get_panel
-
+from Data.xpdata import PRIMARY_ROLE_MAP, save_panel, get_panel, DB_PATH, ensure_user
 
 # ---------------- EMBED BUILDER ----------------
 
@@ -16,7 +16,6 @@ def build_main_embed(guild: discord.Guild):
         role = guild.get_role(role_id)
 
         if role:
-            
             count = sum(1 for _ in role.members)
         else:
             count = 0
@@ -77,11 +76,12 @@ class DepartmentView(discord.ui.View):
         guild = interaction.guild
         member = interaction.user
 
+        await ensure_user(member.id)
+
         role_id = PRIMARY_ROLE_MAP[role_key]
         new_role = guild.get_role(role_id)
 
         if not new_role:
-
             msg = "Role not found in server."
 
             if interaction.response.is_done():
@@ -106,9 +106,18 @@ class DepartmentView(discord.ui.View):
         if new_role not in member.roles:
             await member.add_roles(new_role)
 
+        # ---------------- DB UPDATE ----------------
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE users SET primary_role=? WHERE user_id=?",
+                (role_key, member.id)
+            )
+            await db.commit()
+
         await asyncio.sleep(0.5)
 
-        # ---------------- FORCE CACHE REFRESH (CRITICAL FIX) ----------------
+        # ---------------- FORCE CACHE REFRESH ----------------
 
         try:
             await guild.chunk(cache=True)
@@ -193,8 +202,6 @@ class ReactionRoles(commands.Cog):
             except discord.NotFound:
                 pass
 
-    # ---------------- COMMAND ----------------
-
     @commands.command(name="react")
     @commands.has_permissions(administrator=True)
     async def react_panel(self, ctx):
@@ -218,7 +225,7 @@ class ReactionRoles(commands.Cog):
                         view=DepartmentView()
                     )
 
-                    save_panel(ctx.guild.id, old_channel_id, old_message_id)
+                    await save_panel(ctx.guild.id, old_channel_id, old_message_id)
 
                     await ctx.send("Reaction panel updated.", delete_after=5)
                     return
@@ -228,7 +235,7 @@ class ReactionRoles(commands.Cog):
 
         msg = await ctx.send(embed=embed, view=DepartmentView())
 
-        save_panel(ctx.guild.id, ctx.channel.id, msg.id)
+        await save_panel(ctx.guild.id, ctx.channel.id, msg.id)
 
         await ctx.send("Reaction panel created and saved.", delete_after=5)
 
