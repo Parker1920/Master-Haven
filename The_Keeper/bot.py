@@ -1,4 +1,4 @@
-# -------------------- bot.py ----------------
+# -------------------- bot.py -----------
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -219,13 +219,7 @@ bot.tree.interaction_check = global_app_command_check
 @bot.event
 async def on_ready():
     guild_folder = "Data/guilds"  
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-
-    except Exception as e:
-        print(e)
-    synced_any = False
+    
     with get_conn() as conn:
         cur = conn.cursor()
         
@@ -330,6 +324,7 @@ async def on_command_error(ctx, error):
 
 
 # -------------------- RUN --------------------
+# -------------------- RUN --------------------
 async def main():    
 
     async def setup_hook():
@@ -339,13 +334,19 @@ async def main():
             try:
                 await bot.load_extension(cog)
                 print(f"[LOADED] {cog}")
-        
             except Exception as e:
                 print(f"[FAILED] {cog} -> {e}")
 
-    bot.setup_hook = setup_hook
+        print("Syncing global application commands...")
+        try:
+            synced = await bot.tree.sync()
+            print(f"Synced {len(synced)} command(s) successfully.")
+        except Exception as e:
+            print(f"Failed to sync commands in setup_hook: {e}")
 
+    bot.setup_hook = setup_hook
     await bot.start(TOKEN)
+
 
 
 if __name__ == "__main__":
