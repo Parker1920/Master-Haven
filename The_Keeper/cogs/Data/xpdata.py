@@ -80,6 +80,12 @@ CONFIG = {
   ],
 
   "roles": {
+    "voyager": {
+      "channels": [],
+      "upload_channels": [],
+      "office_channel": None
+  },
+      
     "cartographer": {
       "channels": [1432875588602822966, 1434721861664641134],
       "upload_channels": [1495581094899355819, 1495919097936871525],
@@ -350,10 +356,10 @@ async def add_xp(user_id, role, amount):
         raise
 
     
-            xp, old_level = row
-            level=int(old_level)
-            if level == 0:
-                level = 1
+        xp, old_level = row
+        level=int(old_level)
+        if level == 0:
+            level = 1
     
             xp += amount
     
