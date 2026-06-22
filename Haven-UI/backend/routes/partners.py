@@ -335,7 +335,15 @@ async def list_sub_admins(
                 civ_default = json.loads(row['enabled_features_default']) if row['enabled_features_default'] else []
             except (TypeError, json.JSONDecodeError):
                 civ_default = []
-            effective = override if override is not None else civ_default
+            # A sub-admin's effective features can never exceed the civ's own
+            # set — cap the override at civ_default so an out-of-civ grant (e.g.
+            # csv_import on a civ without it) isn't reported as in-effect. Mirrors
+            # the authoritative ceiling in _recompute_profile_features.
+            if override is not None:
+                _civ_set = set(civ_default)
+                effective = [f for f in override if f in _civ_set]
+            else:
+                effective = civ_default
             sub_admins.append({
                 'civ_id': row['civ_id'],
                 'profile_id': row['profile_id'],

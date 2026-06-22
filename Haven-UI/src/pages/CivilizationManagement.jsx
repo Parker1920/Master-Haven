@@ -784,8 +784,9 @@ function MemberRow({ member, civDefaults, isSuperAdmin, onChangeRole, onToggleCa
               <div className="grid grid-cols-2 gap-1">
                 {/* War Room is civ-scoped (controlled by the civ's feature grid,
                     applied to all moderators) — not a per-member toggle, so it's
-                    excluded here. */}
-                {FEATURE_DEFAULTS.filter(f => f.id !== 'war_room').map(f => (
+                    excluded here. Only the civ's OWN features (civDefaults) are
+                    offered: you can't grant a sub-admin a feature the civ lacks. */}
+                {FEATURE_DEFAULTS.filter(f => f.id !== 'war_room' && (civDefaults || []).includes(f.id)).map(f => (
                   <label key={f.id} className="flex items-center gap-1 text-xs">
                     <input
                       type="checkbox"
@@ -801,7 +802,7 @@ function MemberRow({ member, civDefaults, isSuperAdmin, onChangeRole, onToggleCa
               </div>
               <div className="flex gap-2 mt-2">
                 <button
-                  onClick={() => onSetFeatures([...draft].filter(x => x !== 'war_room'))}
+                  onClick={() => onSetFeatures([...draft].filter(x => x !== 'war_room' && (civDefaults || []).includes(x)))}
                   className="pill pill-emerald pill-clickable"
                 >
                   Save permissions

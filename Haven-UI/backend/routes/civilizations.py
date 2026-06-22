@@ -594,9 +594,15 @@ def _recompute_profile_features(cur, profile_id: int) -> None:
             per_member = None
         effective = per_member if per_member is not None else default
         if isinstance(effective, list):
-            # war_room is civ-scoped only (handled above) — never grantable via
-            # a sub-admin's per-member override.
-            union.update(f for f in effective if f != 'war_room')
+            # A sub-admin can NEVER hold a feature the civ itself wasn't granted.
+            # Cap the per-member override at the civ's enabled_features_default —
+            # so granting (e.g.) csv_import to a sub-admin of a civ that doesn't
+            # have csv_import is silently dropped, not honored. (war_room is
+            # civ-scoped, handled above; excluded here regardless.) This is the
+            # authoritative server-side ceiling: it holds no matter who set the
+            # override or what the UI offered.
+            default_set = set(default)
+            union.update(f for f in effective if f != 'war_room' and f in default_set)
 
     cur.execute(
         "UPDATE user_profiles SET enabled_features = ? WHERE id = ? AND tier != 1",

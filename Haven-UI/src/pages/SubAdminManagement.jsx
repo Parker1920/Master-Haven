@@ -421,12 +421,19 @@ function SubAdminRow({ member, busy, isSuperAdmin, onSaveFeatures, onToggleCap, 
               : 'Inheriting the civ default permission set — saving creates a per-member override.'}
           </div>
           <div className="grid grid-cols-2 gap-1">
-            {AVAILABLE_FEATURES.map(f => (
+            {/* Only the civ's OWN features are offered — a sub-admin can't be
+                granted a feature the civ itself wasn't given. */}
+            {AVAILABLE_FEATURES.filter(f => (member.civ_default_features || []).includes(f.id)).map(f => (
               <label key={f.id} className="flex items-center gap-1 text-xs">
                 <input type="checkbox" checked={draft.has(f.id)} onChange={() => toggle(f.id)} />
                 {f.label}
               </label>
             ))}
+            {(member.civ_default_features || []).length === 0 && (
+              <span className="text-xs italic col-span-2" style={{ color: 'var(--muted)' }}>
+                This civ has no grantable features yet — a super admin sets the civ's feature set first.
+              </span>
+            )}
           </div>
           <div className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
             War Room access is set at the civilization level (Civilization Management → edit
@@ -435,7 +442,7 @@ function SubAdminRow({ member, busy, isSuperAdmin, onSaveFeatures, onToggleCap, 
           <div className="flex gap-2 mt-2">
             <button
               className="pill pill-emerald pill-clickable"
-              onClick={() => onSaveFeatures([...draft])}
+              onClick={() => onSaveFeatures([...draft].filter(x => (member.civ_default_features || []).includes(x)))}
               disabled={busy}
             >
               Save permissions
