@@ -81,7 +81,7 @@ class CommandsRouter(commands.Cog):
     
         # ---------------- ROLE XP ----------------
         role_xp = await get_xp(member.id, primary)
-        level = await get_level(member.id, primary)
+        level = int(await get_level(member.id, primary))
     
         # find rank + xp requirement safely
         rank = next(
