@@ -284,30 +284,28 @@ async def ensure_user(user_id):
         )
         await db.commit()
 
-
-async def get_xp(user_id, role):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute(
-            "SELECT xp FROM user_roles WHERE user_id=? AND role=?",
-            (user_id, role)
-        )
-
-        row = await cur.fetchone()
-        await cur.close()
-
-    return row[0] if row else 0
-
 async def add_xp(user_id, role, amount):
     try:
         await ensure_user(user_id)
     
         async with aiosqlite.connect(DB_PATH) as db:
-    
+            cur = await db.execute("SELECT role FROM user_roles WHERE user_id = ? LIMIT 1", (user_id,))
+            row = await cur.fetchone()
+            
+            if row and row[0] != role:
+                old_track_role = row[0]
+                await db.execute(
+                    "UPDATE user_roles SET role = ? WHERE user_id = ? AND role = ?",
+                    (role, user_id, old_track_role)
+                )
+                await db.commit()
+
             await db.execute("""
             INSERT OR IGNORE INTO user_roles (user_id, role, xp, level)
             VALUES (?, ?, 0, 1)
             """, (user_id, role))
     
+            
             cur = await db.execute("""
             SELECT xp, level
             FROM user_roles
@@ -315,6 +313,41 @@ async def add_xp(user_id, role, amount):
             """, (user_id, role))
     
             row = await cur.fetchone()
+            xp, old_level = row
+            level = int(old_level)
+            if level == 0:
+                level = 1
+    
+            xp += amount
+    
+            while level < CONFIG["leveling"]["max_level"]:
+                needed = get_rank(level)["xp_per_level"]
+                if xp < needed:
+                    break
+                xp -= needed
+                level += 1
+    
+            old_rank = get_rank_name(old_level, role)
+            new_rank = get_rank_name(level, role)
+    
+           
+            await db.execute("""
+            UPDATE user_roles
+            SET xp=?, level=?
+            WHERE user_id=? AND role=?
+            """, (xp, level, user_id, role))
+    
+            await db.commit()
+    
+        leveled_up = int(level) > int(old_level)
+        log.info(f"XP ADD -> user={user_id} role={role} amount={amount}")
+    
+        return xp, level, leveled_up
+    
+    except Exception:
+        log.exception("XP error")
+        raise
+
     
             xp, old_level = row
             level=int(old_level)
