@@ -159,8 +159,8 @@ bot.ROLES = ROLES
 bot.PRIMARY_ROLES = PRIMARY_ROLES
 bot.XP_ENABLED_CHANNELS = XP_ENABLED_CHANNELS
 bot.role_welcome_messages = role_welcome_messages
-from cogs.Data.xpdata import init_db, CONFIG, add_xp
-from exchange.exchange import TravelersExchangeAPI
+from cogs.Data.xpdata import init_db, CONFIG, add_xp, check_cooldown
+
 # -------------------- COGS --------------------
 COGS = [
     "cogs.personality",
@@ -240,8 +240,16 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return 
-    if message.channel.id in CONFIG["xp_enabled_channels"]:
-        # Prevent spam via cooldown
+    allowed_channels = []
+    for item in bot.XP_ENABLED_CHANNELS:
+        if isinstance(item, list):
+            allowed_channels.extend(item)
+        else:
+            allowed_channels.append(item)
+
+    
+    if message.channel.id in allowed_channels:
+       
         if check_cooldown(message.author.id, "primary_xp", CONFIG["xp"]["primary_cooldown"]):
             await add_xp(message.author.id, "cartographer", CONFIG["xp"]["primary_per_message"])
     await bot.process_commands(message)
