@@ -264,6 +264,7 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return 
+
     allowed_channels = []
     for item in bot.XP_ENABLED_CHANNELS:
         if isinstance(item, list):
@@ -271,11 +272,25 @@ async def on_message(message):
         else:
             allowed_channels.append(item)
 
-    
     if message.channel.id in allowed_channels:
-       
         if check_cooldown(message.author.id, "primary_xp", CONFIG["xp"]["primary_cooldown"]):
-            await add_xp(message.author.id, "cartographer", CONFIG["xp"]["primary_per_message"])
+            
+            user_role = "cartographer"
+            with get_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT primary_role FROM users WHERE user_id = ?", (message.author.id,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    user_role = row[0]
+          
+            office_channel_id = CONFIG["roles"].get(user_role, {}).get("office_channel")
+            if office_channel_id and message.channel.id == office_channel_id:
+                amount = CONFIG["xp"]["office_xp"]
+            else:
+                amount = CONFIG["xp"]["primary_per_message"]
+            
+            await add_xp(message.author.id, user_role, amount)
+
     await bot.process_commands(message)
 
 @bot.event
