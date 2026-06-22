@@ -245,34 +245,22 @@ def get_cfg(key, default=0):
 
 # ---------------- DB HELPERS ----------------
 def get_rank(level):
-    """
-    Returns the rank dict that matches the user's level.
-    Falls back to highest valid rank if level exceeds defined ranges.
-    """
-
     ranks = CONFIG.get("ranks", [])
+    level = int(level)
+    fallback = None
 
     for rank in ranks:
-        min_level = rank.get("min_level")
-        max_level = rank.get("max_level")
+        min_lvl = int(rank.get("min_level", 0))
+        max_lvl = int(rank.get("max_level", 0))
 
-        if min_level is None and max_level is None:
-            if rank.get("level") == level:
-                return rank
-            continue
-
-    min_level = int(r["min_level"])
-    max_level = int(r["max_level"])
-    level = int(level)
+        if min_lvl <= level <= max_lvl:
+            return rank
             
-    if min_level <= level <= max_level:
-    
-        fallback = None
-        for rank in ranks:
-            if rank.get("min_level", 0) <= level:
-                fallback = rank
-    
-        return fallback
+        if min_lvl <= level:
+            fallback = rank
+
+    return fallback
+
 
 def get_rank_name(level: int, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
