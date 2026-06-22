@@ -189,7 +189,7 @@ async def init_db():
             PRIMARY KEY(user_id, role)
         )
         """)
-
+        await db.execute("UPDATE user_roles SET level = CAST(level AS INTEGER)")
         await db.execute("""
         CREATE TABLE IF NOT EXISTS cooldowns (
             user_id INTEGER,
