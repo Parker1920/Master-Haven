@@ -37,52 +37,22 @@ HAVEN_API = os.getenv("HAVEN_API", "https://havenmap.online")
 
 # -------------------- CONFIG --------------------
 ROLES = {
-    "cartographer": {
-        "lead": get_env_int("ROLE_LEAD_CARTOGRAPHER"),
-        "senior": get_env_int("ROLE_SENIOR_CARTOGRAPHER"),
-        "voyager": get_env_int("ROLE_VOYAGER_CARTOGRAPHER"),
-        "standard": get_env_int("ROLE_CARTOGRAPHER"),
-        "initiate": get_env_int("ROLE_INITIATE_CARTOGRAPHER"),
+    "cartographer": {       
         "primary": get_env_int("ROLE_PRIMARY_CARTOGRAPHER"),
     },
     "xenobiologist": {
-        "lead": get_env_int("ROLE_LEAD_XENOBIOLOGIST"),
-        "senior": get_env_int("ROLE_SENIOR_XENOBIOLOGIST"),
-        "voyager": get_env_int("ROLE_VOYAGER_XENOBIOLOGIST"),
-        "standard": get_env_int("ROLE_XENOBIOLOGIST"),
-        "initiate": get_env_int("ROLE_INITIATE_XENOBIOLOGIST"),
         "primary": get_env_int("ROLE_PRIMARY_XENOBIOLOGIST"),
     },
     "diplomat": {
-        "lead": get_env_int("ROLE_LEAD_DIPLOMAT"),
-        "senior": get_env_int("ROLE_SENIOR_DIPLOMAT"),
-        "voyager": get_env_int("ROLE_VOYAGER_DIPLOMAT"),
-        "standard": get_env_int("ROLE_DIPLOMAT"),
-        "initiate": get_env_int("ROLE_INITIATE_DIPLOMAT"),
         "primary": get_env_int("ROLE_PRIMARY_DIPLOMAT"),
     },
     "architect": {
-        "lead": get_env_int("ROLE_LEAD_ARCHITECT"),
-        "senior": get_env_int("ROLE_SENIOR_ARCHITECT"),
-        "voyager": get_env_int("ROLE_VOYAGER_ARCHITECT"),
-        "standard": get_env_int("ROLE_ARCHITECT"),
-        "initiate": get_env_int("ROLE_INITIATE_ARCHITECT"),
         "primary": get_env_int("ROLE_PRIMARY_ARCHITECT"),
     },
     "engineer": {
-        "lead": get_env_int("ROLE_LEAD_ENGINEER"),
-        "senior": get_env_int("ROLE_SENIOR_ENGINEER"),
-        "voyager": get_env_int("ROLE_VOYAGER_ENGINEER"),
-        "standard": get_env_int("ROLE_ENGINEER"),
-        "initiate": get_env_int("ROLE_INITIATE_ENGINEER"),
         "primary": get_env_int("ROLE_PRIMARY_ENGINEER"),
     },
     "historian": {
-        "lead": get_env_int("ROLE_LEAD_HISTORIAN"),
-        "senior": get_env_int("ROLE_SENIOR_HISTORIAN"),
-        "voyager": get_env_int("ROLE_VOYAGER_HISTORIAN"),
-        "standard": get_env_int("ROLE_HISTORIAN"),
-        "initiate": get_env_int("ROLE_INITIATE_HISTORIAN"),
         "primary": get_env_int("ROLE_PRIMARY_HISTORIAN"),
     },
 }
@@ -189,7 +159,7 @@ bot.ROLES = ROLES
 bot.PRIMARY_ROLES = PRIMARY_ROLES
 bot.XP_ENABLED_CHANNELS = XP_ENABLED_CHANNELS
 bot.role_welcome_messages = role_welcome_messages
-from cogs.Data.xpdata import init_db, CONFIG
+from cogs.Data.xpdata import init_db, CONFIG, add_xp
 from exchange.exchange import TravelersExchangeAPI
 # -------------------- COGS --------------------
 COGS = [
@@ -205,7 +175,6 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
-    "cogs.TimeParser",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
@@ -270,7 +239,11 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author.bot:
-        return
+        return 
+    if message.channel.id in CONFIG["xp_enabled_channels"]:
+        # Prevent spam via cooldown
+        if check_cooldown(message.author.id, "primary_xp", CONFIG["xp"]["primary_cooldown"]):
+            await add_xp(message.author.id, "cartographer", CONFIG["xp"]["primary_per_message"])
     await bot.process_commands(message)
 
 @bot.event
