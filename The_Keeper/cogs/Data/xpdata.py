@@ -261,15 +261,18 @@ def get_rank(level):
                 return rank
             continue
 
-        if min_level <= level <= max_level:
-            return rank
-
-    fallback = None
-    for rank in ranks:
-        if rank.get("min_level", 0) <= level:
-            fallback = rank
-
-    return fallback
+    min_level = int(r["min_level"])
+    max_level = int(r["max_level"])
+    level = int(level)
+            
+    if min_level <= level <= max_level:
+    
+        fallback = None
+        for rank in ranks:
+            if rank.get("min_level", 0) <= level:
+                fallback = rank
+    
+        return fallback
 
 def get_rank_name(level: int, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
