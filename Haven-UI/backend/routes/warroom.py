@@ -135,6 +135,81 @@ def get_war_room_partner_info(session: dict) -> dict:
         conn.close()
 
 
+def _set_civ_war_room_feature(cursor, partner_id: int, enabled: bool) -> Optional[int]:
+    """Toggle the civ-scoped 'war_room' feature for an (un)enrolled partner.
+
+    War Room visibility is a civ-scoped feature now (see
+    routes/civilizations._recompute_profile_features): a moderator sees the tab
+    only when their civ has 'war_room' in enabled_features_default. So enrolling
+    a civ adds it to the civ default and re-syncs every member's
+    user_profiles.enabled_features (the session source); unenrolling removes it.
+
+    Replaces the pre-civ code that wrote to partner_accounts.enabled_features —
+    a dead write, since the civ-era session reads user_profiles, not
+    partner_accounts.
+
+    Runs inside the caller's transaction (no commit). Returns the resolved
+    civ_id, or None if the partner couldn't be mapped to a civilization (the
+    enrollment itself still succeeds; the feature toggle is skipped + logged).
+    """
+    # Local import avoids module-load ordering coupling between the warroom and
+    # civilizations route modules.
+    from routes.civilizations import _recompute_profile_features
+
+    # Resolve the civ for this legacy partner_id: prefer the enrollment row's
+    # backfilled civ_id, else match the partner's discord_tag to a civ tag.
+    cursor.execute(
+        "SELECT civ_id FROM war_room_enrollment "
+        "WHERE partner_id = ? AND civ_id IS NOT NULL "
+        "ORDER BY is_active DESC, id DESC LIMIT 1",
+        (partner_id,),
+    )
+    row = cursor.fetchone()
+    civ_id = row[0] if row else None
+    if civ_id is None:
+        cursor.execute(
+            "SELECT c.id FROM civilizations c "
+            "JOIN partner_accounts pa ON LOWER(pa.discord_tag) = LOWER(c.tag) "
+            "WHERE pa.id = ? AND c.is_active = 1 LIMIT 1",
+            (partner_id,),
+        )
+        row = cursor.fetchone()
+        civ_id = row[0] if row else None
+
+    if civ_id is None:
+        logger.warning(
+            f"War Room: could not resolve a civilization for partner_id {partner_id}; "
+            f"skipped {'granting' if enabled else 'revoking'} the war_room feature"
+        )
+        return None
+
+    cursor.execute("SELECT enabled_features_default FROM civilizations WHERE id = ?", (civ_id,))
+    row = cursor.fetchone()
+    try:
+        features = json.loads(row[0]) if row and row[0] else []
+    except (TypeError, ValueError):
+        features = []
+    if not isinstance(features, list):
+        features = []
+
+    if enabled and 'war_room' not in features:
+        features.append('war_room')
+    elif not enabled:
+        features = [f for f in features if f != 'war_room']
+
+    cursor.execute(
+        "UPDATE civilizations SET enabled_features_default = ? WHERE id = ?",
+        (json.dumps(features), civ_id),
+    )
+
+    # Fan out so the change lands on every member's user_profiles.enabled_features.
+    cursor.execute("SELECT DISTINCT profile_id FROM civilization_members WHERE civ_id = ?", (civ_id,))
+    for (member_id,) in cursor.fetchall():
+        _recompute_profile_features(cursor, member_id)
+
+    return civ_id
+
+
 async def _deliver_discord_webhook(webhook_url: str, partner_id: int, embed: dict):
     """Deliver a Discord webhook in a background thread.
 
@@ -464,13 +539,11 @@ async def enroll_in_war_room(request: Request, session: Optional[str] = Cookie(N
                 VALUES (?, ?)
             ''', (partner_id, session_data.get('username')))
 
-        # Also add 'war_room' to partner's enabled_features so navbar shows the tab
-        current_features = json.loads(partner[2] or '[]')
-        if 'war_room' not in current_features:
-            current_features.append('war_room')
-            cursor.execute('''
-                UPDATE partner_accounts SET enabled_features = ? WHERE id = ?
-            ''', (json.dumps(current_features), partner_id))
+        # Grant War Room visibility to the civ's moderators. War Room is a
+        # civ-scoped feature: this adds 'war_room' to the enrolled civ's
+        # enabled_features_default and re-syncs every member so the navbar tab
+        # shows for all leaders/co-leaders/sub-admins of that civ.
+        _set_civ_war_room_feature(cursor, partner_id, enabled=True)
 
         # Auto-claim all systems with this partner's discord_tag as initial territory
         systems_claimed = 0
@@ -524,16 +597,10 @@ async def unenroll_from_war_room(partner_id: int, session: Optional[str] = Cooki
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Enrollment not found")
 
-        # Also remove 'war_room' from partner's enabled_features
-        cursor.execute('SELECT enabled_features FROM partner_accounts WHERE id = ?', (partner_id,))
-        row = cursor.fetchone()
-        if row:
-            current_features = json.loads(row[0] or '[]')
-            if 'war_room' in current_features:
-                current_features.remove('war_room')
-                cursor.execute('''
-                    UPDATE partner_accounts SET enabled_features = ? WHERE id = ?
-                ''', (json.dumps(current_features), partner_id))
+        # Revoke War Room visibility from the civ's moderators (civ-scoped
+        # feature): removes 'war_room' from the civ's enabled_features_default
+        # and re-syncs every member's user_profiles.enabled_features.
+        _set_civ_war_room_feature(cursor, partner_id, enabled=False)
 
         conn.commit()
 

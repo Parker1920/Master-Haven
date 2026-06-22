@@ -137,6 +137,13 @@ TIER_TO_USER_TYPE = {
 # backup_restore, partner_management) are intentionally excluded — those
 # routes gate on user_type == 'super_admin' / RequireSuperAdmin, not on the
 # features list, and a civ leader is not a site super admin.
+#
+# 'war_room' is ALSO intentionally excluded: it is NOT a by-role grant. War
+# Room is a CIV-SCOPED feature — a moderator (leader / co_leader / sub_admin)
+# sees it only when their civ has 'war_room' in enabled_features_default. A
+# blanket by-role grant is exactly what made every civ leader see the War Room
+# regardless of whether their civ was ever given it. The civ-scoped grant is
+# applied in `_recompute_profile_features` (routes/civilizations.py).
 LEADER_FEATURES = frozenset({
     'system_create',
     'system_edit',
@@ -145,7 +152,6 @@ LEADER_FEATURES = frozenset({
     'stats',
     'settings',
     'csv_import',
-    'war_room',
 })
 
 # ============================================================================

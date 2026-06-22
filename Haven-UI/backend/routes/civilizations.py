@@ -522,6 +522,25 @@ def _recompute_profile_features(cur, profile_id: int) -> None:
     union: set = set()
     for row in cur.fetchall():
         role, per_member_raw, default_raw = row[0], row[1], row[2]
+
+        # Parse the civ default up front — needed both for the sub_admin path
+        # below AND for the civ-scoped War Room grant (which applies to leaders
+        # too, who otherwise skip the civ default).
+        try:
+            default = json.loads(default_raw) if default_raw else []
+        except (TypeError, json.JSONDecodeError):
+            default = []
+        if not isinstance(default, list):
+            default = []
+
+        # War Room is CIV-SCOPED, not a by-role grant: every moderator of a civ
+        # that has it enabled gets it; a leader of a civ WITHOUT it does not.
+        # This is why 'war_room' is deliberately absent from LEADER_FEATURES
+        # (see constants.py). Without this special-case a civ leader would see
+        # the War Room of a civ that was never given the feature.
+        if 'war_room' in default:
+            union.add('war_room')
+
         if role in ('leader', 'co_leader'):
             # Full power by role — independent of civ default / override.
             union.update(LEADER_FEATURES)
@@ -530,10 +549,6 @@ def _recompute_profile_features(cur, profile_id: int) -> None:
             per_member = json.loads(per_member_raw) if per_member_raw else None
         except (TypeError, json.JSONDecodeError):
             per_member = None
-        try:
-            default = json.loads(default_raw) if default_raw else []
-        except (TypeError, json.JSONDecodeError):
-            default = []
         effective = per_member if per_member is not None else default
         if isinstance(effective, list):
             union.update(effective)

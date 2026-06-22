@@ -36,14 +36,19 @@ const FEATURE_DEFAULTS = [
   { id: 'stats', label: 'View Statistics' },
   { id: 'settings', label: 'Theme Settings' },
   { id: 'csv_import', label: 'CSV Import' },
-  { id: 'war_room', label: 'War Room' },
+  { id: 'war_room', label: 'War Room (all moderators)' },
 ]
 
-// Sensible starting permission set for sub-admins of a brand-new civ. Leaders
-// and co-leaders ALWAYS get the full set by role (granted server-side in
-// _recompute_profile_features), so this default only governs sub-admins — but
-// seeding it non-empty means a civ founded by a super admin who never touches
-// the grid still has working sub-admins instead of zero-access ones.
+// Most features here only govern SUB-ADMINS — leaders and co-leaders ALWAYS get
+// the full set by role (granted server-side in _recompute_profile_features). So
+// seeding this default non-empty means a civ founded by a super admin who never
+// touches the grid still has working sub-admins instead of zero-access ones.
+//
+// EXCEPTION: 'war_room' is civ-scoped, not by-role. Checking it grants the War
+// Room to EVERY moderator of this civ (leaders, co-leaders AND sub-admins);
+// unchecking removes it from all of them. A civ leader does NOT get the War Room
+// just for being a leader — only when this box is checked (or the civ is enrolled
+// via War Room Admin, which checks it for you).
 const DEFAULT_SUB_ADMIN_FEATURES = ['approvals', 'system_create', 'system_edit', 'stats']
 
 // Roles whose holders are full-power within the civ (access granted by role,
@@ -403,7 +408,7 @@ export default function CivilizationManagement() {
                     <code className="ml-2 text-xs">{editDraft.region_color}</code>
                   </label>
                   <div>
-                    <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access):</span>
+                    <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access; War Room applies to ALL moderators of this civ):</span>
                     <div className="grid grid-cols-2 gap-1 mt-1">
                       {FEATURE_DEFAULTS.map(f => (
                         <label key={f.id} className="flex items-center gap-1 text-xs">
@@ -537,7 +542,7 @@ export default function CivilizationManagement() {
               />
             </label>
             <div>
-              <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access):</span>
+              <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access; War Room applies to ALL moderators of this civ):</span>
               <div className="grid grid-cols-2 gap-1 mt-1">
                 {FEATURE_DEFAULTS.map(f => (
                   <label key={f.id} className="flex items-center gap-1 text-xs">
@@ -748,7 +753,10 @@ function MemberRow({ member, civDefaults, onChangeRole, onToggleCap, onSetFeatur
                   : 'Inheriting the civ default permission set. Saving creates a per-member override.'}
               </div>
               <div className="grid grid-cols-2 gap-1">
-                {FEATURE_DEFAULTS.map(f => (
+                {/* War Room is civ-scoped (controlled by the civ's feature grid,
+                    applied to all moderators) — not a per-member toggle, so it's
+                    excluded here. */}
+                {FEATURE_DEFAULTS.filter(f => f.id !== 'war_room').map(f => (
                   <label key={f.id} className="flex items-center gap-1 text-xs">
                     <input
                       type="checkbox"
@@ -759,9 +767,12 @@ function MemberRow({ member, civDefaults, onChangeRole, onToggleCap, onSetFeatur
                   </label>
                 ))}
               </div>
+              <div className="text-[11px] opacity-60 mt-1">
+                War Room access is set at the civilization level (edit the civ &amp; check War Room), not per member.
+              </div>
               <div className="flex gap-2 mt-2">
                 <button
-                  onClick={() => onSetFeatures([...draft])}
+                  onClick={() => onSetFeatures([...draft].filter(x => x !== 'war_room'))}
                   className="pill pill-emerald pill-clickable"
                 >
                   Save permissions

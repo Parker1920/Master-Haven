@@ -7282,3 +7282,109 @@ def migration_1_93_0(conn):
         total_changed += changed
         logger.info(f"Migration 1.93.0: normalized materials on {changed}/{len(rows)} {table}")
     logger.info(f"Migration 1.93.0: total {total_changed} rows normalized")
+
+
+@register_migration("1.94.0", "War Room is civ-scoped: drop war_room from the by-role leader grant; re-sync enabled_features so only members of civs that enabled War Room keep it")
+def migration_1_94_0(conn):
+    """Repairs the over-grant that migration 1.84.0 baked in: it wrote
+    'war_room' onto EVERY civ leader/co_leader by role, so any civ leader saw
+    the War Room tab regardless of whether their civ was ever given the feature
+    (e.g. IEA's leader had 'war_room' while the IEA civ default did not).
+
+    War Room is now CIV-SCOPED: a member sees it only if one of their ACTIVE
+    civs has 'war_room' in civilizations.enabled_features_default. It is no
+    longer part of the by-role LEADER_FEATURES set (constants.py).
+
+    Re-runs the role-aware union (mirroring _recompute_profile_features as of
+    1.94.0) for every profile with at least one active civ membership:
+      - leader / co_leader -> LEADER_FEATURES   (which NO LONGER includes war_room)
+      - sub_admin          -> per-member override else civ default
+      - any role           -> + 'war_room' iff that civ's default contains it
+
+    Scope is intentionally limited to profiles WITH active civ memberships
+    (matching 1.83.0 / 1.84.0): legacy Haven sub-admins with no civ_members row
+    keep their directly-assigned features and are not touched. Super admins
+    (tier 1) skipped — their access comes from user_type, not the features list.
+    The leader feature set is inlined because a migration is a frozen historical
+    record. Idempotent — re-running produces the same result.
+    """
+    import json as _json
+    cursor = conn.cursor()
+
+    # Mirrors constants.LEADER_FEATURES as of 1.94.0 — note: NO 'war_room'.
+    leader_features = {
+        'system_create', 'system_edit', 'approvals', 'batch_approvals',
+        'stats', 'settings', 'csv_import',
+    }
+
+    # Belt-and-suspenders: any civ with an ACTIVE war_room_enrollment must keep
+    # War Room. Ensure 'war_room' is in its enabled_features_default so the
+    # member re-sync below grants it. (On current prod every enrolled civ already
+    # has it via the 1.80.0 partner_accounts->civ backfill; this only guards an
+    # enrolled civ whose default was later edited to drop war_room.)
+    cursor.execute("""
+        SELECT DISTINCT c.id, c.enabled_features_default
+        FROM war_room_enrollment wre
+        JOIN civilizations c ON c.id = wre.civ_id
+        WHERE wre.is_active = 1
+    """)
+    for civ_id, def_raw in cursor.fetchall():
+        try:
+            feats = _json.loads(def_raw) if def_raw else []
+        except (TypeError, ValueError):
+            feats = []
+        if not isinstance(feats, list):
+            feats = []
+        if 'war_room' not in feats:
+            feats.append('war_room')
+            cursor.execute(
+                "UPDATE civilizations SET enabled_features_default = ? WHERE id = ?",
+                (_json.dumps(feats), civ_id),
+            )
+
+    cursor.execute("""
+        SELECT DISTINCT cm.profile_id
+        FROM civilization_members cm
+        JOIN civilizations c ON c.id = cm.civ_id
+        JOIN user_profiles up ON up.id = cm.profile_id
+        WHERE c.is_active = 1 AND up.tier != 1
+    """)
+    profile_ids = [r[0] for r in cursor.fetchall()]
+
+    updated = 0
+    for profile_id in profile_ids:
+        cursor.execute("""
+            SELECT cm.role, cm.enabled_features, c.enabled_features_default
+            FROM civilization_members cm
+            JOIN civilizations c ON c.id = cm.civ_id
+            WHERE cm.profile_id = ? AND c.is_active = 1
+        """, (profile_id,))
+        union = set()
+        for row in cursor.fetchall():
+            role, per_member_raw, default_raw = row[0], row[1], row[2]
+            try:
+                default = _json.loads(default_raw) if default_raw else []
+            except (TypeError, ValueError):
+                default = []
+            if not isinstance(default, list):
+                default = []
+            if 'war_room' in default:
+                union.add('war_room')
+            if role in ('leader', 'co_leader'):
+                union.update(leader_features)
+                continue
+            try:
+                per_member = _json.loads(per_member_raw) if per_member_raw else None
+            except (TypeError, ValueError):
+                per_member = None
+            effective = per_member if per_member is not None else default
+            if isinstance(effective, list):
+                union.update(effective)
+
+        cursor.execute(
+            "UPDATE user_profiles SET enabled_features = ? WHERE id = ?",
+            (_json.dumps(sorted(union)), profile_id),
+        )
+        updated += 1
+
+    logger.info(f"Migration 1.94.0: civ-scoped War Room re-sync of enabled_features for {updated} profiles")
