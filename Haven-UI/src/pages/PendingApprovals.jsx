@@ -299,6 +299,7 @@ export default function PendingApprovals() {
             discoverySubmissions={discoverySubmissions}
             isSuperAdmin={isSuperAdmin}
             isHavenSubAdmin={isHavenSubAdmin}
+            canAccess={canAccess}
             user={user}
             filterTag={filterTag}
             getDiscordTagBadge={getDiscordTagBadge}

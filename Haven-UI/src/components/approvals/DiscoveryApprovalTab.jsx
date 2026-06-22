@@ -3,8 +3,9 @@ import axios from 'axios'
 import Button from '../Button'
 import Modal from '../Modal'
 import { TYPE_INFO } from '../../data/discoveryTypes'
-import { getPhotoUrl, getThumbnailUrl } from '../../utils/api'
+import { getPhotoUrl, getThumbnailUrl, batchApproveDiscoveries, batchRejectDiscoveries } from '../../utils/api'
 import { formatCoords } from '../LatLngInput'
+import { FEATURES } from '../../utils/AuthContext'
 
 /**
  * DiscoveryApprovalTab - Discovery submission approval content
@@ -23,6 +24,7 @@ export default function DiscoveryApprovalTab({
   discoverySubmissions,
   isSuperAdmin,
   isHavenSubAdmin,
+  canAccess,
   user,
   filterTag,
   getDiscordTagBadge,
@@ -37,6 +39,16 @@ export default function DiscoveryApprovalTab({
   const [actionInProgress, setActionInProgress] = useState(false)
   // For EDIT submissions: the current live discovery, so we can show old → new.
   const [editOriginal, setEditOriginal] = useState(null)
+
+  // Batch approval state (mirrors SystemApprovalTab; synchronous — no job polling)
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [batchInProgress, setBatchInProgress] = useState(false)
+  const [batchRejectModalOpen, setBatchRejectModalOpen] = useState(false)
+  const [batchRejectionReason, setBatchRejectionReason] = useState('')
+  const [batchResultsModalOpen, setBatchResultsModalOpen] = useState(false)
+  const [batchResults, setBatchResults] = useState(null)
+  const canBatch = !!(canAccess && canAccess(FEATURES.BATCH_APPROVALS))
 
   // Pre-compute self-submission status for discovery submissions
   const discoverySelfSubmissionMap = useMemo(() => {
@@ -198,8 +210,127 @@ export default function DiscoveryApprovalTab({
     }
   }
 
+  // --- Batch handlers ---
+
+  function toggleSelection(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllEligible() {
+    const eligibleIds = filteredPendingDiscoveries
+      .filter(s => !checkDiscoverySelfSubmission(s))
+      .map(s => s.id)
+    setSelectedIds(new Set(eligibleIds))
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  function exitBatchMode() {
+    setBatchMode(false)
+    setSelectedIds(new Set())
+  }
+
+  async function handleBatchApprove() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Approve ${selectedIds.size} selected discovery(ies)?\n\nThis will add them to the main database.`)) {
+      return
+    }
+    setBatchInProgress(true)
+    try {
+      const data = await batchApproveDiscoveries(Array.from(selectedIds))
+      setBatchResults({ mode: 'approve', ...data })
+      setBatchResultsModalOpen(true)
+      setSelectedIds(new Set())
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch approval failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchInProgress(false)
+    }
+  }
+
+  async function handleBatchReject() {
+    if (!batchRejectionReason.trim()) {
+      alert('Please provide a rejection reason')
+      return
+    }
+    setBatchInProgress(true)
+    try {
+      const data = await batchRejectDiscoveries(Array.from(selectedIds), batchRejectionReason)
+      setBatchResults({ mode: 'reject', ...data })
+      setBatchRejectModalOpen(false)
+      setBatchRejectionReason('')
+      setBatchResultsModalOpen(true)
+      setSelectedIds(new Set())
+      loadSubmissions()
+    } catch (err) {
+      alert('Batch rejection failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setBatchInProgress(false)
+    }
+  }
+
+  const eligibleCount = useMemo(
+    () => filteredPendingDiscoveries.filter(s => !checkDiscoverySelfSubmission(s)).length,
+    [filteredPendingDiscoveries, checkDiscoverySelfSubmission]
+  )
+
   return (
     <>
+      {/* Batch Mode Toggle */}
+      {canBatch && filteredPendingDiscoveries.length > 0 && (
+        <div className="flex justify-end mb-2">
+          <Button
+            className={`text-sm ${batchMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            onClick={() => batchMode ? exitBatchMode() : setBatchMode(true)}
+          >
+            {batchMode ? 'Exit Batch' : 'Batch Mode'}
+          </Button>
+        </div>
+      )}
+
+      {/* Batch action bar */}
+      {batchMode && (
+        <div className="mb-3 p-3 rounded bg-indigo-900/40 border border-indigo-500/40 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold">
+            {selectedIds.size}/{eligibleCount} selected
+          </span>
+          <button onClick={selectAllEligible} className="text-sm text-indigo-300 hover:text-white underline">
+            Select All
+          </button>
+          {selectedIds.size > 0 && (
+            <button onClick={clearSelection} className="text-sm text-indigo-300 hover:text-white underline">
+              Clear
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <div className="flex gap-2 ml-auto">
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-sm disabled:opacity-50"
+                onClick={handleBatchApprove}
+                disabled={batchInProgress}
+              >
+                {batchInProgress ? '...' : `Approve (${selectedIds.size})`}
+              </Button>
+              <Button
+                className="bg-red-600 hover:bg-red-700 text-sm disabled:opacity-50"
+                onClick={() => setBatchRejectModalOpen(true)}
+                disabled={batchInProgress}
+              >
+                {batchInProgress ? '...' : `Reject (${selectedIds.size})`}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Pending Discoveries */}
       <div className="mb-6">
         <h3 className="text-xl font-semibold mb-3">
@@ -215,9 +346,24 @@ export default function DiscoveryApprovalTab({
             {filteredPendingDiscoveries.map(submission => (
               <div
                 key={submission.id}
-                className="border rounded p-3 bg-cyan-700 hover:bg-cyan-600"
+                className={`border rounded p-3 bg-cyan-700 hover:bg-cyan-600 ${
+                  batchMode && selectedIds.has(submission.id) ? 'ring-2 ring-indigo-400' : ''
+                }`}
               >
                 <div className="flex items-start gap-3">
+                  {/* Batch selection checkbox */}
+                  {batchMode && (
+                    <div className="flex-shrink-0 pt-1">
+                      <input
+                        type="checkbox"
+                        className="w-5 h-5 accent-indigo-500 disabled:opacity-40"
+                        checked={selectedIds.has(submission.id)}
+                        disabled={checkDiscoverySelfSubmission(submission)}
+                        title={checkDiscoverySelfSubmission(submission) ? 'You cannot approve your own submission' : ''}
+                        onChange={() => toggleSelection(submission.id)}
+                      />
+                    </div>
+                  )}
                   {/* Photo thumbnail */}
                   {submission.photo_url && (
                     <div className="flex-shrink-0 w-16 h-16 rounded overflow-hidden bg-gray-800">
@@ -552,6 +698,117 @@ export default function DiscoveryApprovalTab({
           </div>
         </Modal>
       )}
+      {/* Batch Reject Modal */}
+      {batchRejectModalOpen && (
+        <Modal
+          title={`Batch Reject ${selectedIds.size} Discovery(ies)`}
+          onClose={() => {
+            setBatchRejectModalOpen(false)
+            setBatchRejectionReason('')
+          }}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Please provide a reason for rejecting these {selectedIds.size} discovery(ies). This reason will be applied to all selected items.
+            </p>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Rejection Reason</label>
+              <textarea
+                className="w-full border rounded p-2"
+                rows="4"
+                value={batchRejectionReason}
+                onChange={(e) => setBatchRejectionReason(e.target.value)}
+                placeholder="e.g., Duplicate discoveries, insufficient evidence..."
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                className="bg-red-600 text-white hover:bg-red-700 text-sm w-full sm:w-auto disabled:opacity-50"
+                onClick={handleBatchReject}
+                disabled={batchInProgress || !batchRejectionReason.trim()}
+              >
+                {batchInProgress ? 'Rejecting...' : `Reject ${selectedIds.size}`}
+              </Button>
+              <Button
+                className="bg-gray-200 text-gray-800 text-sm w-full sm:w-auto"
+                onClick={() => {
+                  setBatchRejectModalOpen(false)
+                  setBatchRejectionReason('')
+                }}
+                disabled={batchInProgress}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Batch Results Modal */}
+      {batchResultsModalOpen && batchResults && (() => {
+        const succeeded = batchResults.mode === 'approve' ? (batchResults.approved || []) : (batchResults.rejected || [])
+        const failed = batchResults.failed || []
+        const skipped = batchResults.skipped || []
+        const verb = batchResults.mode === 'approve' ? 'Approved' : 'Rejected'
+        return (
+          <Modal
+            title="Batch Results"
+            onClose={() => { setBatchResultsModalOpen(false); setBatchResults(null) }}
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-3 rounded bg-green-900/40 border border-green-500/40">
+                  <div className="text-2xl font-bold text-green-300">{succeeded.length}</div>
+                  <div className="text-xs text-gray-300">{verb}</div>
+                </div>
+                <div className="p-3 rounded bg-red-900/40 border border-red-500/40">
+                  <div className="text-2xl font-bold text-red-300">{failed.length}</div>
+                  <div className="text-xs text-gray-300">Failed</div>
+                </div>
+                <div className="p-3 rounded bg-gray-700/60 border border-gray-500/40">
+                  <div className="text-2xl font-bold text-gray-300">{skipped.length}</div>
+                  <div className="text-xs text-gray-300">Skipped</div>
+                </div>
+              </div>
+
+              {failed.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-red-300 mb-1">Failed</h4>
+                  <ul className="text-xs space-y-1 max-h-40 overflow-y-auto">
+                    {failed.map((item, i) => (
+                      <li key={i} className="text-gray-300">
+                        #{item.id}{item.name ? ` (${item.name})` : ''}: <span className="text-red-300">{item.error}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {skipped.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-300 mb-1">Skipped</h4>
+                  <ul className="text-xs space-y-1 max-h-40 overflow-y-auto">
+                    {skipped.map((item, i) => (
+                      <li key={i} className="text-gray-300">
+                        #{item.id}{item.name ? ` (${item.name})` : ''}: <span className="text-gray-400">{item.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button
+                  className="bg-indigo-600 hover:bg-indigo-700 text-sm"
+                  onClick={() => { setBatchResultsModalOpen(false); setBatchResults(null) }}
+                >
+                  Done
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
     </>
   )
 }

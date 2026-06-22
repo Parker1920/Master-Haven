@@ -1138,6 +1138,253 @@ async def edit_pending_discovery(submission_id: int, payload: dict, session: Opt
             conn.close()
 
 
+def _resolve_account_id(session_data):
+    """Partner/sub-admin account id for audit attribution (None for super admin)."""
+    user_type = session_data.get('user_type')
+    if user_type == 'partner':
+        return session_data.get('partner_id')
+    if user_type == 'sub_admin':
+        return session_data.get('sub_admin_id')
+    return None
+
+
+def _apply_discovery_approval(cursor, submission, session_data):
+    """Apply one pending-discovery approval against an OPEN cursor.
+
+    Shared by POST /api/approve_discovery/{id} and the batch-approve loop so the
+    edit-vs-new branch, coordinate handling, status flip, audit log, and
+    completeness recompute can never drift between the two paths. Does NOT
+    commit and does NOT emit an activity log — the caller owns the transaction
+    boundary and decides per-item vs per-batch activity logging.
+
+    Returns {discovery_id, is_edit, discovery_name, discovery_type, parent_system_id}.
+    Raises HTTPException(400) if this is an edit whose target discovery no longer
+    exists (the caller records a per-item failure in batch, or surfaces the 400
+    in the single path). That check runs before any write, so it never leaves a
+    partial row behind.
+    """
+    current_username = session_data.get('username')
+    current_user_type = session_data.get('user_type')
+    current_account_id = _resolve_account_id(session_data)
+
+    # Parse discovery data
+    discovery_data = {}
+    if submission.get('discovery_data'):
+        try:
+            discovery_data = json.loads(submission['discovery_data'])
+        except (json.JSONDecodeError, TypeError):
+            discovery_data = {}
+
+    discovery_type = discovery_data.get('discovery_type') or submission.get('discovery_type') or 'Unknown'
+    type_slug = get_discovery_type_slug(discovery_type)
+    discovery_name = discovery_data.get('discovery_name') or submission.get('discovery_name') or 'Unnamed Discovery'
+
+    # Serialize type_metadata
+    type_metadata_raw = discovery_data.get('type_metadata')
+    type_metadata_json = json.dumps(type_metadata_raw) if type_metadata_raw and isinstance(type_metadata_raw, dict) else None
+
+    # Surface coordinates — prefer the dedicated pending columns, fall back
+    # to the JSON blob (covers rows queued before the columns existed).
+    location_type = discovery_data.get('location_type') or 'space'
+    latitude, longitude = normalize_discovery_coords(
+        submission.get('latitude') if submission.get('latitude') is not None else discovery_data.get('latitude'),
+        submission.get('longitude') if submission.get('longitude') is not None else discovery_data.get('longitude'),
+    )
+    if location_type == 'space':
+        latitude, longitude = None, None
+
+    # Is this an EDIT of an existing live discovery? (mirror of system edits)
+    edit_discovery_id = submission.get('edit_discovery_id')
+    if edit_discovery_id is None:
+        edit_discovery_id = discovery_data.get('edit_discovery_id')
+    try:
+        edit_discovery_id = int(edit_discovery_id) if edit_discovery_id not in (None, '') else None
+    except (TypeError, ValueError):
+        edit_discovery_id = None
+
+    is_edit = False
+    # Parent system whose cached completeness must be refreshed after this
+    # approval (a discovery's planet/moon link feeds the S+ checklist).
+    parent_system_id = None
+    if edit_discovery_id is not None:
+        # EDIT path: update the live discovery in place. Preserve the original
+        # attribution (discovered_by, submission_timestamp, system_id,
+        # discord_tag, profile_id, source) — only the editable fields change.
+        cursor.execute('SELECT id, system_id FROM discoveries WHERE id = ?', (edit_discovery_id,))
+        live_row = cursor.fetchone()
+        if not live_row:
+            raise HTTPException(
+                status_code=400,
+                detail="The discovery this edit targets no longer exists. Reject this submission instead."
+            )
+        # Edits can change planet/moon but never the system, so the live row's
+        # system_id is the parent to re-score.
+        parent_system_id = live_row['system_id']
+        cursor.execute('''
+            UPDATE discoveries SET
+                discovery_type = ?, discovery_name = ?, type_slug = ?,
+                planet_id = ?, moon_id = ?, location_type = ?, location_name = ?,
+                description = ?, significance = ?, mystery_tier = ?,
+                photo_url = ?, evidence_url = ?, type_metadata = ?,
+                latitude = ?, longitude = ?
+            WHERE id = ?
+        ''', (
+            discovery_type,
+            discovery_name,
+            type_slug,
+            discovery_data.get('planet_id'),
+            discovery_data.get('moon_id'),
+            location_type,
+            discovery_data.get('location_name') or '',
+            discovery_data.get('description') or '',
+            discovery_data.get('significance') or 'Notable',
+            discovery_data.get('mystery_tier') or 1,
+            discovery_data.get('photo_url') or submission.get('photo_url'),
+            discovery_data.get('evidence_urls'),
+            type_metadata_json,
+            latitude,
+            longitude,
+            edit_discovery_id,
+        ))
+        discovery_id = edit_discovery_id
+        is_edit = True
+    else:
+        cursor.execute('''
+            INSERT INTO discoveries (
+                discovery_type, discovery_name, system_id, planet_id, moon_id,
+                location_type, location_name, description, significance,
+                discovered_by, submission_timestamp,
+                mystery_tier, analysis_status, pattern_matches,
+                discord_user_id, discord_guild_id,
+                photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source,
+                latitude, longitude, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            discovery_type,
+            discovery_name,
+            discovery_data.get('system_id'),
+            discovery_data.get('planet_id'),
+            discovery_data.get('moon_id'),
+            location_type,
+            discovery_data.get('location_name') or '',
+            discovery_data.get('description') or '',
+            discovery_data.get('significance') or 'Notable',
+            discovery_data.get('discord_username') or submission.get('submitted_by') or 'anonymous',
+            submission.get('submission_date') or datetime.now(timezone.utc).isoformat(),
+            discovery_data.get('mystery_tier') or 1,
+            'approved',
+            0,
+            discovery_data.get('discord_user_id'),
+            discovery_data.get('discord_guild_id'),
+            discovery_data.get('photo_url') or submission.get('photo_url'),
+            discovery_data.get('evidence_urls'),
+            type_slug,
+            discovery_data.get('discord_tag') or submission.get('discord_tag'),
+            type_metadata_json,
+            submission.get('submitter_profile_id'),
+            submission.get('source') or SOURCE_MANUAL,
+            latitude,
+            longitude,
+            submission.get('event_id') if submission.get('event_id') is not None else discovery_data.get('event_id'),
+        ))
+        discovery_id = cursor.lastrowid
+        parent_system_id = discovery_data.get('system_id')
+
+    # Flip the pending row to approved
+    cursor.execute('''
+        UPDATE pending_discoveries
+        SET status = 'approved', reviewed_by = ?, review_date = ?
+        WHERE id = ?
+    ''', (current_username, datetime.now(timezone.utc).isoformat(), submission['id']))
+
+    # Audit log
+    cursor.execute('''
+        INSERT INTO approval_audit_log
+        (timestamp, action, submission_type, submission_id, submission_name,
+         approver_username, approver_type, approver_account_id, approver_discord_tag,
+         submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        datetime.now(timezone.utc).isoformat(),
+        'approved',
+        'discovery',
+        submission['id'],
+        discovery_name,
+        current_username,
+        current_user_type,
+        current_account_id,
+        session_data.get('discord_tag'),
+        submission.get('submitted_by'),
+        submission.get('submitter_account_id'),
+        submission.get('submitter_account_type'),
+        submission.get('discord_tag'),
+        submission.get('source', 'manual'),
+    ))
+
+    # A discovery's link to a planet/moon is a primary input to the S+ "fully
+    # charted" checklist, so refresh the parent system's cached completeness/
+    # is_fully_charted now that the live discovery exists (the Mabaya bug).
+    if parent_system_id:
+        try:
+            update_completeness_score(cursor, parent_system_id)
+        except Exception as score_err:
+            logger.warning(
+                f"Completeness recompute after discovery approve failed "
+                f"for system {parent_system_id}: {score_err}"
+            )
+
+    return {
+        'discovery_id': discovery_id,
+        'is_edit': is_edit,
+        'discovery_name': discovery_name,
+        'discovery_type': discovery_type,
+        'parent_system_id': parent_system_id,
+    }
+
+
+def _apply_discovery_rejection(cursor, submission, reason, session_data):
+    """Apply one pending-discovery rejection against an OPEN cursor.
+
+    Shared by POST /api/reject_discovery/{id} and the batch-reject loop. Does
+    NOT commit and does NOT emit an activity log. Returns the discovery name.
+    """
+    current_username = session_data.get('username')
+    current_user_type = session_data.get('user_type')
+    current_account_id = _resolve_account_id(session_data)
+    discovery_name = submission.get('discovery_name', 'Unknown')
+
+    cursor.execute('''
+        UPDATE pending_discoveries
+        SET status = 'rejected', reviewed_by = ?, review_date = ?, rejection_reason = ?
+        WHERE id = ?
+    ''', (current_username, datetime.now(timezone.utc).isoformat(), reason, submission['id']))
+
+    cursor.execute('''
+        INSERT INTO approval_audit_log
+        (timestamp, action, submission_type, submission_id, submission_name,
+         approver_username, approver_type, approver_account_id, approver_discord_tag,
+         submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        datetime.now(timezone.utc).isoformat(),
+        'rejected',
+        'discovery',
+        submission['id'],
+        discovery_name,
+        current_username,
+        current_user_type,
+        current_account_id,
+        session_data.get('discord_tag'),
+        submission.get('submitted_by'),
+        submission.get('submitter_account_id'),
+        submission.get('submitter_account_type'),
+        reason,
+        submission.get('discord_tag'),
+        submission.get('source', 'manual'),
+    ))
+    return discovery_name
+
+
 @router.post('/api/approve_discovery/{submission_id}')
 async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(None)):
     """
@@ -1179,181 +1426,19 @@ async def approve_discovery(submission_id: int, session: Optional[str] = Cookie(
                 detail="You cannot approve your own submission. Another admin must review it."
             )
 
-        # Parse discovery data and insert into discoveries table
-        discovery_data = {}
-        if submission.get('discovery_data'):
-            try:
-                discovery_data = json.loads(submission['discovery_data'])
-            except (json.JSONDecodeError, TypeError):
-                discovery_data = {}
-
-        discovery_type = discovery_data.get('discovery_type') or submission.get('discovery_type') or 'Unknown'
-        type_slug = get_discovery_type_slug(discovery_type)
-        discovery_name = discovery_data.get('discovery_name') or submission.get('discovery_name') or 'Unnamed Discovery'
-
-        # Serialize type_metadata
-        type_metadata_raw = discovery_data.get('type_metadata')
-        type_metadata_json = json.dumps(type_metadata_raw) if type_metadata_raw and isinstance(type_metadata_raw, dict) else None
-
-        # Surface coordinates — prefer the dedicated pending columns, fall back
-        # to the JSON blob (covers rows queued before the columns existed).
-        location_type = discovery_data.get('location_type') or 'space'
-        latitude, longitude = normalize_discovery_coords(
-            submission.get('latitude') if submission.get('latitude') is not None else discovery_data.get('latitude'),
-            submission.get('longitude') if submission.get('longitude') is not None else discovery_data.get('longitude'),
-        )
-        if location_type == 'space':
-            latitude, longitude = None, None
-
-        # Is this an EDIT of an existing live discovery? (mirror of system edits)
-        edit_discovery_id = submission.get('edit_discovery_id')
-        if edit_discovery_id is None:
-            edit_discovery_id = discovery_data.get('edit_discovery_id')
-        try:
-            edit_discovery_id = int(edit_discovery_id) if edit_discovery_id not in (None, '') else None
-        except (TypeError, ValueError):
-            edit_discovery_id = None
-
-        is_edit = False
-        # Parent system whose cached completeness must be refreshed after this
-        # approval (a discovery's planet/moon link feeds the S+ checklist).
-        parent_system_id = None
-        if edit_discovery_id is not None:
-            # EDIT path: update the live discovery in place. Preserve the original
-            # attribution (discovered_by, submission_timestamp, system_id,
-            # discord_tag, profile_id, source) — only the editable fields change.
-            cursor.execute('SELECT id, system_id FROM discoveries WHERE id = ?', (edit_discovery_id,))
-            live_row = cursor.fetchone()
-            if not live_row:
-                raise HTTPException(
-                    status_code=400,
-                    detail="The discovery this edit targets no longer exists. Reject this submission instead."
-                )
-            # Edits can change planet/moon but never the system, so the live row's
-            # system_id is the parent to re-score.
-            parent_system_id = live_row['system_id']
-            cursor.execute('''
-                UPDATE discoveries SET
-                    discovery_type = ?, discovery_name = ?, type_slug = ?,
-                    planet_id = ?, moon_id = ?, location_type = ?, location_name = ?,
-                    description = ?, significance = ?, mystery_tier = ?,
-                    photo_url = ?, evidence_url = ?, type_metadata = ?,
-                    latitude = ?, longitude = ?
-                WHERE id = ?
-            ''', (
-                discovery_type,
-                discovery_name,
-                type_slug,
-                discovery_data.get('planet_id'),
-                discovery_data.get('moon_id'),
-                location_type,
-                discovery_data.get('location_name') or '',
-                discovery_data.get('description') or '',
-                discovery_data.get('significance') or 'Notable',
-                discovery_data.get('mystery_tier') or 1,
-                discovery_data.get('photo_url') or submission.get('photo_url'),
-                discovery_data.get('evidence_urls'),
-                type_metadata_json,
-                latitude,
-                longitude,
-                edit_discovery_id,
-            ))
-            discovery_id = edit_discovery_id
-            is_edit = True
-        else:
-            cursor.execute('''
-                INSERT INTO discoveries (
-                    discovery_type, discovery_name, system_id, planet_id, moon_id,
-                    location_type, location_name, description, significance,
-                    discovered_by, submission_timestamp,
-                    mystery_tier, analysis_status, pattern_matches,
-                    discord_user_id, discord_guild_id,
-                    photo_url, evidence_url, type_slug, discord_tag, type_metadata, profile_id, source,
-                    latitude, longitude, event_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                discovery_type,
-                discovery_name,
-                discovery_data.get('system_id'),
-                discovery_data.get('planet_id'),
-                discovery_data.get('moon_id'),
-                location_type,
-                discovery_data.get('location_name') or '',
-                discovery_data.get('description') or '',
-                discovery_data.get('significance') or 'Notable',
-                discovery_data.get('discord_username') or submission.get('submitted_by') or 'anonymous',
-                submission.get('submission_date') or datetime.now(timezone.utc).isoformat(),
-                discovery_data.get('mystery_tier') or 1,
-                'approved',
-                0,
-                discovery_data.get('discord_user_id'),
-                discovery_data.get('discord_guild_id'),
-                discovery_data.get('photo_url') or submission.get('photo_url'),
-                discovery_data.get('evidence_urls'),
-                type_slug,
-                discovery_data.get('discord_tag') or submission.get('discord_tag'),
-                type_metadata_json,
-                submission.get('submitter_profile_id'),
-                submission.get('source') or SOURCE_MANUAL,
-                latitude,
-                longitude,
-                submission.get('event_id') if submission.get('event_id') is not None else discovery_data.get('event_id'),
-            ))
-            discovery_id = cursor.lastrowid
-            parent_system_id = discovery_data.get('system_id')
-
-        # Update pending status
-        cursor.execute('''
-            UPDATE pending_discoveries
-            SET status = 'approved', reviewed_by = ?, review_date = ?
-            WHERE id = ?
-        ''', (current_username, datetime.now(timezone.utc).isoformat(), submission_id))
-
-        # Audit log
-        cursor.execute('''
-            INSERT INTO approval_audit_log
-            (timestamp, action, submission_type, submission_id, submission_name,
-             approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, submission_discord_tag, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            datetime.now(timezone.utc).isoformat(),
-            'approved',
-            'discovery',
-            submission_id,
-            discovery_name,
-            current_username,
-            current_user_type,
-            current_account_id,
-            session_data.get('discord_tag'),
-            submission.get('submitted_by'),
-            submission.get('submitter_account_id'),
-            submission.get('submitter_account_type'),
-            submission.get('discord_tag'),
-            submission.get('source', 'manual'),
-        ))
-
-        # A discovery's link to a planet/moon is a primary input to the S+
-        # "fully charted" checklist, so refresh the parent system's cached
-        # completeness/is_fully_charted now that the live discovery exists.
-        # The system detail page recomputes live, but the systems list / map /
-        # search / posters read the cached column — without this they'd disagree
-        # on S vs S+ (the Mabaya bug).
-        if parent_system_id:
-            try:
-                update_completeness_score(cursor, parent_system_id)
-            except Exception as score_err:
-                logger.warning(
-                    f"Completeness recompute after discovery approve failed "
-                    f"for system {parent_system_id}: {score_err}"
-                )
-
+        # Apply the approval (shared with the batch-approve path so the two
+        # can never drift — see _apply_discovery_approval).
+        result = _apply_discovery_approval(cursor, submission, session_data)
         conn.commit()
+
+        discovery_id = result['discovery_id']
+        is_edit = result['is_edit']
+        discovery_name = result['discovery_name']
 
         add_activity_log(
             'discovery_approved',
             f"Discovery '{discovery_name}' {'edit approved' if is_edit else 'approved'}",
-            details=f"Type: {discovery_type}",
+            details=f"Type: {result['discovery_type']}",
             user_name=current_username
         )
 
@@ -1421,38 +1506,8 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
                 detail="You cannot reject your own submission."
             )
 
-        # Update status
-        cursor.execute('''
-            UPDATE pending_discoveries
-            SET status = 'rejected', reviewed_by = ?, review_date = ?, rejection_reason = ?
-            WHERE id = ?
-        ''', (current_username, datetime.now(timezone.utc).isoformat(), reason, submission_id))
-
-        # Audit log
-        discovery_name = submission.get('discovery_name', 'Unknown')
-        cursor.execute('''
-            INSERT INTO approval_audit_log
-            (timestamp, action, submission_type, submission_id, submission_name,
-             approver_username, approver_type, approver_account_id, approver_discord_tag,
-             submitter_username, submitter_account_id, submitter_type, notes, submission_discord_tag, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            datetime.now(timezone.utc).isoformat(),
-            'rejected',
-            'discovery',
-            submission_id,
-            discovery_name,
-            current_username,
-            current_user_type,
-            current_account_id,
-            session_data.get('discord_tag'),
-            submission.get('submitted_by'),
-            submission.get('submitter_account_id'),
-            submission.get('submitter_account_type'),
-            reason,
-            submission.get('discord_tag'),
-            submission.get('source', 'manual'),
-        ))
+        # Apply the rejection (shared with the batch-reject path).
+        discovery_name = _apply_discovery_rejection(cursor, submission, reason, session_data)
 
         conn.commit()
 
@@ -1470,6 +1525,188 @@ async def reject_discovery(submission_id: int, payload: dict, session: Optional[
         raise
     except Exception as e:
         logger.error(f"Error rejecting discovery: {e}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post('/api/approve_discoveries/batch')
+async def batch_approve_discoveries(payload: dict, session: Optional[str] = Cookie(None)):
+    """Batch approve pending discovery submissions (synchronous).
+
+    Mirrors the region-name batch pattern (a per-item loop in one request)
+    rather than the system batch-job queue: discovery approval is light (one
+    insert/update + a completeness recompute), volume is low, and there's no
+    60s-timeout risk that justified the async job machinery for systems.
+
+    Requires the 'approvals' feature, plus 'batch_approvals' for non-super
+    admins. Already-reviewed rows and self-submissions are SKIPPED (not failed)
+    so a partner can safely select-all. Each item is wrapped in a SAVEPOINT so
+    one bad row rolls back only itself, never the whole batch.
+    """
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    require_feature(session_data, 'approvals')
+    is_super = session_data.get('user_type') == 'super_admin'
+    if not is_super and 'batch_approvals' not in session_data.get('enabled_features', []):
+        raise HTTPException(status_code=403, detail="Batch approvals permission required")
+
+    submission_ids = payload.get('submission_ids', [])
+    if not submission_ids or not isinstance(submission_ids, list):
+        raise HTTPException(status_code=400, detail="submission_ids array is required")
+    if len(submission_ids) > 1000:
+        raise HTTPException(status_code=400, detail="Batch too large (>1000 submissions)")
+
+    current_username = session_data.get('username')
+    results = {'approved': [], 'failed': [], 'skipped': []}
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+                row = cursor.fetchone()
+                if not row:
+                    results['failed'].append({'id': submission_id, 'name': None, 'error': 'Submission not found'})
+                    continue
+
+                submission = dict(row)
+                discovery_name = submission.get('discovery_name')
+
+                # Idempotency: already approved/rejected by another admin → skip.
+                if submission['status'] != 'pending':
+                    results['skipped'].append({'id': submission_id, 'name': discovery_name, 'reason': f"Already {submission['status']}"})
+                    continue
+
+                # Self-approval: skip (not fail) so select-all is safe.
+                if check_self_submission(submission, session_data):
+                    results['skipped'].append({'id': submission_id, 'name': discovery_name, 'reason': 'Self-submission'})
+                    continue
+
+                # Atomic per item: a mid-write failure rolls back just this row.
+                cursor.execute('SAVEPOINT disc_item')
+                try:
+                    outcome = _apply_discovery_approval(cursor, submission, session_data)
+                    cursor.execute('RELEASE SAVEPOINT disc_item')
+                except Exception:
+                    cursor.execute('ROLLBACK TO SAVEPOINT disc_item')
+                    cursor.execute('RELEASE SAVEPOINT disc_item')
+                    raise
+
+                results['approved'].append({
+                    'id': submission_id,
+                    'name': outcome['discovery_name'],
+                    'is_edit': outcome['is_edit'],
+                })
+            except HTTPException as he:
+                # e.g. an edit whose target discovery was deleted (400).
+                results['failed'].append({'id': submission_id, 'name': None, 'error': he.detail})
+            except Exception as e:
+                logger.warning(f"Batch discovery approve failed for {submission_id}: {e}")
+                results['failed'].append({'id': submission_id, 'name': None, 'error': str(e)})
+
+        conn.commit()
+
+        add_activity_log(
+            'batch_discovery_approved',
+            f"Batch approved {len(results['approved'])} discoveries",
+            details=f"Approved: {len(results['approved'])}, Failed: {len(results['failed'])}, Skipped: {len(results['skipped'])}",
+            user_name=current_username,
+        )
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error in batch discovery approve: {e}")
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post('/api/reject_discoveries/batch')
+async def batch_reject_discoveries(payload: dict, session: Optional[str] = Cookie(None)):
+    """Batch reject pending discovery submissions with one shared reason.
+
+    Same permission gate and skip semantics as batch_approve_discoveries.
+    """
+    if not verify_session(session):
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+
+    session_data = get_session(session)
+    require_feature(session_data, 'approvals')
+    is_super = session_data.get('user_type') == 'super_admin'
+    if not is_super and 'batch_approvals' not in session_data.get('enabled_features', []):
+        raise HTTPException(status_code=403, detail="Batch approvals permission required")
+
+    submission_ids = payload.get('submission_ids', [])
+    reason = payload.get('reason', '')
+    if not submission_ids or not isinstance(submission_ids, list):
+        raise HTTPException(status_code=400, detail="submission_ids array is required")
+    if not reason or not reason.strip():
+        raise HTTPException(status_code=400, detail="Rejection reason is required")
+
+    current_username = session_data.get('username')
+    results = {'rejected': [], 'failed': [], 'skipped': []}
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for submission_id in submission_ids:
+            try:
+                cursor.execute('SELECT * FROM pending_discoveries WHERE id = ?', (submission_id,))
+                row = cursor.fetchone()
+                if not row:
+                    results['failed'].append({'id': submission_id, 'name': None, 'error': 'Submission not found'})
+                    continue
+
+                submission = dict(row)
+                discovery_name = submission.get('discovery_name')
+
+                if submission['status'] != 'pending':
+                    results['skipped'].append({'id': submission_id, 'name': discovery_name, 'reason': f"Already {submission['status']}"})
+                    continue
+
+                # Self-rejection: skip (not fail).
+                if check_self_submission(submission, session_data):
+                    results['skipped'].append({'id': submission_id, 'name': discovery_name, 'reason': 'Self-submission'})
+                    continue
+
+                _apply_discovery_rejection(cursor, submission, reason, session_data)
+                results['rejected'].append({'id': submission_id, 'name': discovery_name})
+            except Exception as e:
+                logger.warning(f"Batch discovery reject failed for {submission_id}: {e}")
+                results['failed'].append({'id': submission_id, 'name': None, 'error': str(e)})
+
+        conn.commit()
+
+        add_activity_log(
+            'batch_discovery_rejected',
+            f"Batch rejected {len(results['rejected'])} discoveries",
+            details=f"Rejected: {len(results['rejected'])}, Failed: {len(results['failed'])}, Skipped: {len(results['skipped'])}",
+            user_name=current_username,
+        )
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error in batch discovery reject: {e}")
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:

@@ -93,6 +93,9 @@ export const getDiscoveries = (params = {}) => axios.get('/api/discoveries/brows
 export const getDiscoveryTypes = () => axios.get('/api/discoveries/types').then(r => r.data)
 export const getDiscoveryStats = () => axios.get('/api/discoveries/stats').then(r => r.data)
 export const submitDiscovery = (data) => axios.post('/api/submit_discovery', data).then(r => r.data)
+// Synchronous batch (returns {approved/rejected, failed, skipped} directly — no job polling).
+export const batchApproveDiscoveries = (ids) => axios.post('/api/approve_discoveries/batch', { submission_ids: ids }).then(r => r.data)
+export const batchRejectDiscoveries = (ids, reason) => axios.post('/api/reject_discoveries/batch', { submission_ids: ids, reason }).then(r => r.data)
 
 // --- Analytics ---
 export const getSubmissionLeaderboard = (params = {}) => axios.get('/api/analytics/submission-leaderboard', { params }).then(r => r.data)
