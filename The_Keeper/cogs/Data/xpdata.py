@@ -270,6 +270,7 @@ def get_rank_name(level: int, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
     role = role.lower().replace("primary", "").strip()
     role_name = role.capitalize() if role_id is None else role.capitalize()
+    current_level = int(level)
 
     rank = next(
         r for r in CONFIG["ranks"]
