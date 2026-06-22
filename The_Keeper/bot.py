@@ -1,4 +1,4 @@
-# -------------------- bot.py -----------
+# -------------------- bot.py ----------------
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -218,7 +218,8 @@ bot.tree.interaction_check = global_app_command_check
 # -------------------- EVENTS --------------------
 @bot.event
 async def on_ready():
-    guild_folder = "Data/guilds"  
+    guild_folder = "Data/guilds" 
+    synced_any = False 
     
     with get_conn() as conn:
         cur = conn.cursor()
@@ -239,8 +240,7 @@ async def on_ready():
                     if not cur.fetchone():
                         cur.execute("INSERT INTO users (user_id, primary_role) VALUES (?, ?)", (member.id, role_name))
                         synced_any = True
-                        
-                    # Also ensure they have a starting record track in user_roles
+                                          
                     cur.execute("INSERT OR IGNORE INTO user_roles (user_id, role, xp, level) VALUES (?, ?, 0, 1)", (member.id, role_name))
                     
         conn.commit()
