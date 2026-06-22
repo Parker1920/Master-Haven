@@ -274,22 +274,44 @@ async def add_xp(user_id, role, amount):
         await ensure_user(user_id)
     
         async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute("SELECT role FROM user_roles WHERE user_id = ? LIMIT 1", (user_id,))
-            row = await cur.fetchone()
+            # 1. Check for old role tracks
+            cur = await db.execute("SELECT role FROM user_roles WHERE user_id = ? AND role != ?", (user_id, role))
+            old_rows = await cur.fetchall()
             
-            if row and row[0] != role:
-                old_track_role = row[0]
-                await db.execute(
-                    "UPDATE user_roles SET role = ? WHERE user_id = ? AND role = ?",
-                    (role, user_id, old_track_role)
-                )
-                await db.commit()
+            if old_rows:
+                # We have an old track. Let's look up its details to merge them.
+                old_track_role = old_rows[0][0]
+                
+                # Fetch old track stats
+                old_cur = await db.execute("SELECT xp, level FROM user_roles WHERE user_id=? AND role=?", (user_id, old_track_role))
+                old_data = await old_cur.fetchone()
+                
+                if old_data:
+                    old_xp, old_lvl = old_data
+                    
+                    # Ensure the new target role exists so we can update it safely
+                    await db.execute("""
+                    INSERT OR IGNORE INTO user_roles (user_id, role, xp, level)
+                    VALUES (?, ?, 0, 1)
+                    """, (user_id, role))
+                    
+                    # Merge data: Add old track XP and take the highest level achieved
+                    await db.execute("""
+                    UPDATE user_roles 
+                    SET xp = xp + ?, level = MAX(level, ?) 
+                    WHERE user_id = ? AND role = ?
+                    """, (old_xp, old_lvl, user_id, role))
+                    
+                    # Clean up and delete the old track so only one remains
+                    await db.execute("DELETE FROM user_roles WHERE user_id = ? AND role = ?", (user_id, old_track_role))
+                    await db.commit()
 
+            # 2. Normal safety execution check
             await db.execute("""
             INSERT OR IGNORE INTO user_roles (user_id, role, xp, level)
             VALUES (?, ?, 0, 1)
             """, (user_id, role))
-            
+    
             cur = await db.execute("""
             SELECT xp, level FROM user_roles WHERE user_id=? AND role=?
             """, (user_id, role))
@@ -324,6 +346,7 @@ async def add_xp(user_id, role, amount):
     except Exception:
         log.exception("XP error")
         raise
+
 
 async def get_level(user_id, role):
     async with aiosqlite.connect(DB_PATH) as db:
