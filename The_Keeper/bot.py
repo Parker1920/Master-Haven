@@ -107,7 +107,7 @@ get_env_int("HELP_CHANNEL_ID"),
     "engineer_office": get_env_int("E_OFFICE_CHANNEL_ID"),
     "historian_office": get_env_int("H_OFFICE_CHANNEL_ID"),
 }
-from exchange.exchange import BASE_URL, API_KEY
+from exchange.exchange import BASE_URL, API_KEY, TravelersExchancheAPI
 
 # -------------------- XP ENABLED CHANNELS
 XP_ENABLED_CHANNELS = [
