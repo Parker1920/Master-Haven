@@ -20,7 +20,6 @@ from cogs.community import SearchView, AddCivView
 from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH
 import logging
 log = logging.getLogger("commands")
-print("DB_PATH =", DB_PATH)
    
 # =========================
 # MAIN COG
@@ -46,9 +45,6 @@ class CommandsRouter(commands.Cog):
 # ---------------- XP ----------------
     @commands.command(name="xp", help="check rank and level progress")
     async def xp(self, ctx, member: discord.Member = None):
-    
-        if ctx.channel.id != int(os.getenv("QUALIFY_CHANNEL_ID")):
-            return
     
         member = member or ctx.author
     
@@ -89,10 +85,10 @@ class CommandsRouter(commands.Cog):
     
         # find rank + xp requirement safely
         rank = next(
-            (r for r in CONFIG["ranks"]
-             if r["min_level"] <= level <= r["max_level"]),
-            None
+            r for r in CONFIG["ranks"]
+            if r["min_level"] <= level <= r["max_level"]
         )
+
     
         if not rank:
             rank = {"name": "Unknown", "xp_per_level": 100}
