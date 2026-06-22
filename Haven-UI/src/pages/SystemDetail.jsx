@@ -41,6 +41,7 @@ import FromMapBanner from '../components/FromMapBanner'
 import ActivityFeed from '../components/ActivityFeed'
 import PlanetSphere from '../components/shared/PlanetSphere'
 import DiscoveryDetailModal from '../components/discoveries/DiscoveryDetailModal'
+import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 import GlyphDisplay from '../components/GlyphDisplay'
 import { GRADE_BADGE_STYLE } from '../utils/gradeColors'
 import { canonicalSystemSlug } from '../utils/systemUrl'
@@ -124,6 +125,10 @@ export default function SystemDetail() {
   const [toast, setToast] = useState(null)
   const [lightboxIdx, setLightboxIdx] = useState(null)
   const [selectedDiscovery, setSelectedDiscovery] = useState(null)
+  // Editing an existing discovery: opens the shared submit modal in edit mode.
+  // Goes to pending_discoveries (edit_discovery_id) → normal approval, exactly
+  // like editing from the Discoveries page.
+  const [editingDiscovery, setEditingDiscovery] = useState(null)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -191,6 +196,19 @@ export default function SystemDetail() {
       return next
     }, { replace: true })
   }, [setSearchParams])
+
+  // Open the shared submit modal in edit mode for an existing discovery.
+  // The discovery is already enriched (system_id/system_name via enrichDiscovery);
+  // belt-and-suspenders fall back to the parent system if either is missing.
+  const handleEditDiscovery = useCallback((d) => {
+    if (!d) return
+    setEditingDiscovery({
+      ...d,
+      system_id: d.system_id || system?.id,
+      system_name: d.system_name || system?.name,
+    })
+    closeDiscovery()
+  }, [system, closeDiscovery])
 
   // Auto-open the discovery referenced by ?discovery=<id> once the system (and
   // its discoveries) have loaded — supports deep links / shared URLs.
@@ -690,6 +708,14 @@ export default function SystemDetail() {
         discovery={selectedDiscovery}
         isOpen={!!selectedDiscovery}
         onClose={closeDiscovery}
+        onEdit={handleEditDiscovery}
+      />
+
+      <DiscoverySubmitModal
+        isOpen={!!editingDiscovery}
+        editDiscovery={editingDiscovery}
+        onClose={() => setEditingDiscovery(null)}
+        onSuccess={() => setEditingDiscovery(null)}
       />
     </div>
   )

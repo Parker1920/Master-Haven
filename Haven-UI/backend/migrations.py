@@ -7388,3 +7388,111 @@ def migration_1_94_0(conn):
         updated += 1
 
     logger.info(f"Migration 1.94.0: civ-scoped War Room re-sync of enabled_features for {updated} profiles")
+
+
+@register_migration("1.95.0", "Sub-admins start at zero permissions: convert NULL (civ-default-inheriting) sub_admin overrides to an explicit empty set, then re-sync enabled_features")
+def migration_1_95_0(conn):
+    """Enforce 'a sub-admin has no permissions until a leader explicitly grants
+    them'.
+
+    Before this, a sub_admin whose civilization_members.enabled_features was
+    NULL silently inherited the civ's enabled_features_default — so the moment
+    someone was added as a sub-admin they could already approve / create / edit
+    (whatever the civ default happened to seed), with nobody having granted it.
+    That implicit grant is the "permissions feel broken" complaint.
+
+    add_member (routes/civilizations.py) now seeds new sub-admins with an empty
+    override ([]). This migration brings EXISTING sub-admins in line: every
+    sub_admin membership with a NULL override is set to '[]' (explicit zero).
+    The civ default is preserved and stays available as a one-click "Reset to
+    civ default" opt-in in the UI, so a leader can restore the standard set
+    deliberately.
+
+    Sub-admins who already had an EXPLICIT override (an array, even empty) are
+    untouched — someone chose those. Leaders / co_leaders are untouched (their
+    override is NULL by design; they're full-power by role). After flipping the
+    memberships, every affected profile's materialized
+    user_profiles.enabled_features is recomputed (mirrors
+    _recompute_profile_features as of 1.95.0: leader -> LEADER_FEATURES;
+    sub_admin -> override-else-civ-default with war_room stripped from the
+    override; + war_room iff the civ default has it).
+
+    Idempotent: a re-run finds no NULL sub_admin overrides (already '[]') and
+    no-ops. Operational note: on deploy, existing sub-admins drop to zero access
+    until their leader re-grants (or clicks "Reset to civ default").
+    """
+    import json as _json
+    cursor = conn.cursor()
+
+    # Mirrors constants.LEADER_FEATURES as of 1.95.0 (no 'war_room' — civ-scoped).
+    leader_features = {
+        'system_create', 'system_edit', 'approvals', 'batch_approvals',
+        'stats', 'settings', 'csv_import',
+    }
+
+    # 1. Flip every IMPLICIT (NULL-override) sub_admin grant to an explicit
+    #    empty set so the "no permissions until granted" rule applies to
+    #    existing sub-admins. Explicit overrides (arrays) are someone's choice
+    #    and are left alone.
+    cursor.execute("""
+        UPDATE civilization_members
+        SET enabled_features = '[]'
+        WHERE role = 'sub_admin' AND enabled_features IS NULL
+    """)
+    flipped = cursor.rowcount
+
+    # 2. Re-sync the materialized feature list for EVERY profile with an active
+    #    civ membership (matching the sweep scope of 1.94.0), not just the
+    #    flipped ones. This also retroactively strips any war_room that an old
+    #    buggy UI leaked into a sub-admin's explicit override (1.94.0 re-synced
+    #    but did NOT strip war_room from sub_admin overrides). Idempotent.
+    cursor.execute("""
+        SELECT DISTINCT cm.profile_id
+        FROM civilization_members cm
+        JOIN civilizations c ON c.id = cm.civ_id
+        JOIN user_profiles up ON up.id = cm.profile_id
+        WHERE c.is_active = 1 AND up.tier != 1
+    """)
+    affected_profiles = [r[0] for r in cursor.fetchall()]
+
+    resynced = 0
+    for profile_id in affected_profiles:
+        cursor.execute("""
+            SELECT cm.role, cm.enabled_features, c.enabled_features_default
+            FROM civilization_members cm
+            JOIN civilizations c ON c.id = cm.civ_id
+            WHERE cm.profile_id = ? AND c.is_active = 1
+        """, (profile_id,))
+        union = set()
+        for row in cursor.fetchall():
+            role, per_member_raw, default_raw = row[0], row[1], row[2]
+            try:
+                default = _json.loads(default_raw) if default_raw else []
+            except (TypeError, ValueError):
+                default = []
+            if not isinstance(default, list):
+                default = []
+            if 'war_room' in default:
+                union.add('war_room')
+            if role in ('leader', 'co_leader'):
+                union.update(leader_features)
+                continue
+            try:
+                per_member = _json.loads(per_member_raw) if per_member_raw else None
+            except (TypeError, ValueError):
+                per_member = None
+            effective = per_member if per_member is not None else default
+            if isinstance(effective, list):
+                # war_room never granted via a sub-admin override (civ-scoped only).
+                union.update(f for f in effective if f != 'war_room')
+
+        cursor.execute(
+            "UPDATE user_profiles SET enabled_features = ? WHERE id = ? AND tier != 1",
+            (_json.dumps(sorted(union)), profile_id),
+        )
+        resynced += 1
+
+    logger.info(
+        f"Migration 1.95.0: zeroed {flipped} implicit sub_admin override(s); "
+        f"re-synced enabled_features for {resynced} profile(s)"
+    )

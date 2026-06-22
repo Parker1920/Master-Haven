@@ -58,6 +58,7 @@ import HelpFab from '../components/wizard/HelpFab'
 import ValidationSummary from '../components/wizard/ValidationSummary'
 import SuccessScreen from '../components/wizard/SuccessScreen'
 import DiscoveryInlineList from '../components/wizard/DiscoveryInlineList'
+import DiscoverySubmitModal from '../components/DiscoverySubmitModal'
 
 // Fields tracked by the conflict-resolution check on edit submit.
 // Planets/moons are deep arrays — too noisy for per-field conflicts; we only
@@ -190,12 +191,14 @@ export default function Wizard() {
   // Discoveries — owned by the wizard so DiscoveryInlineList stays controlled.
   // Submitted to /api/submit_discovery one at a time after the system save returns.
   const [discoveries, setDiscoveries] = useState([])
-  // Edit mode only: live discoveries already linked to this system. Shown as
-  // a read-only summary so the approver/editor knows what's already attached
-  // and can choose to add new ones in the editable list below. Existing ones
-  // aren't touched by the edit submit — the approval pipeline only inserts
-  // entries from `discoveries_draft`, never updates live `discoveries` rows.
+  // Edit mode only: live discoveries already linked to this system. Each row
+  // has an Edit button that opens the shared discovery submit modal in edit
+  // mode — that change rides through pending_discoveries (edit_discovery_id)
+  // and normal approval, separate from this system's own edit. New discoveries
+  // are added in the editable list below (they ride as `discoveries_draft`).
   const [existingDiscoveries, setExistingDiscoveries] = useState([])
+  // The existing discovery currently open in the edit modal (null = closed).
+  const [editingDiscovery, setEditingDiscovery] = useState(null)
 
   // Same-name soft warning (mockup v11CheckSameName 9937)
   const [sameNameMatches, setSameNameMatches] = useState([])
@@ -312,6 +315,19 @@ export default function Wizard() {
       })
       .catch(() => {})
   }, [editId])
+
+  // Open the shared discovery submit modal in edit mode for an existing
+  // discovery. Enrich with the system id/name (the get_system discoveries
+  // payload may predate the system_id field, so fall back to the edited system)
+  // so the modal can load the planet/moon dropdowns.
+  const handleEditExistingDiscovery = useCallback((d) => {
+    if (!d) return
+    setEditingDiscovery({
+      ...d,
+      system_id: d.system_id || system?.id || editId,
+      system_name: d.system_name || system?.name,
+    })
+  }, [system, editId])
 
   // Discord tag list
   useEffect(() => {
@@ -1485,6 +1501,7 @@ export default function Wizard() {
               discoveries={discoveries}
               setDiscoveries={setDiscoveries}
               existingDiscoveries={existingDiscoveries}
+              onEditExisting={handleEditExistingDiscovery}
               defaultGameVersion={system.game_version}
               requiredOnly={requiredOnly}
               openHelp={openHelpAt}
@@ -1592,6 +1609,16 @@ export default function Wizard() {
           onClose={() => { setProfileModalOpen(false); setPendingSubmitPayload(null); setIsSubmitting(false) }}
         />
       )}
+
+      {/* Edit an existing discovery attached to this system. Runs the shared
+          discovery edit flow (→ pending_discoveries, edit_discovery_id), which
+          is approved separately from this system's own edit. */}
+      <DiscoverySubmitModal
+        isOpen={!!editingDiscovery}
+        editDiscovery={editingDiscovery}
+        onClose={() => setEditingDiscovery(null)}
+        onSuccess={() => setEditingDiscovery(null)}
+      />
 
       {/* Personal Discord username modal (when discord_tag === 'personal') */}
       {personalModalOpen && (
@@ -2090,7 +2117,7 @@ function SectionStation({ system, hasStation, toggleStation, setStationField, to
   )
 }
 
-function SectionDiscoveries({ system, discoveries, setDiscoveries, existingDiscoveries = [], defaultGameVersion, requiredOnly, openHelp }) {
+function SectionDiscoveries({ system, discoveries, setDiscoveries, existingDiscoveries = [], onEditExisting, defaultGameVersion, requiredOnly, openHelp }) {
   if (requiredOnly) return null
   // Flatten moons across planets so the discovery card can pick by name+parent.
   const planetList = (system.planets || []).filter((p) => !p.is_moon)
@@ -2109,7 +2136,7 @@ function SectionDiscoveries({ system, discoveries, setDiscoveries, existingDisco
           style={{ backgroundColor: 'rgba(124,217,234,0.07)', border: '1px solid var(--app-primary)' }}
         >
           <div className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-2">
-            Existing discoveries on this system ({existingDiscoveries.length}) — read-only
+            Existing discoveries on this system ({existingDiscoveries.length})
           </div>
           <ul className="space-y-1 text-sm">
             {existingDiscoveries.map((d) => {
@@ -2124,12 +2151,22 @@ function SectionDiscoveries({ system, discoveries, setDiscoveries, existingDisco
                   {!d.planet_id && !d.moon_id && d.location_type !== 'space' && (
                     <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300">⚠ unlinked</span>
                   )}
+                  {onEditExisting && (
+                    <button
+                      type="button"
+                      onClick={() => onEditExisting(d)}
+                      className="ml-auto shrink-0 px-2 py-0.5 rounded text-[11px] font-medium"
+                      style={{ backgroundColor: 'rgba(124,217,234,0.15)', border: '1px solid var(--app-primary)', color: 'var(--app-primary)' }}
+                    >
+                      Edit
+                    </button>
+                  )}
                 </li>
               )
             })}
           </ul>
           <div className="text-[11px] opacity-60 mt-2">
-            These will remain attached to the system on save. Add new discoveries below.
+            Edits to these go to the approval queue (separate from this system's edit). Add brand-new discoveries below.
           </div>
         </div>
       )}

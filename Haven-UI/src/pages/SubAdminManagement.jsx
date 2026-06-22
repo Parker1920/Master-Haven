@@ -34,9 +34,13 @@ import { formatDate } from '../hooks/useDateFormat'
  * Civilization Management page (/admin/civilizations).
  */
 
-// The partner-grade granular features a sub-admin can be granted. Mirrors
-// FEATURE_DEFAULTS in CivilizationManagement.jsx and LEADER_FEATURES on the
-// backend.
+// The partner-grade granular features a sub-admin can be granted per-member.
+// Mirrors FEATURE_DEFAULTS in CivilizationManagement.jsx and LEADER_FEATURES on
+// the backend. 'war_room' is intentionally ABSENT: it is civ-scoped (controlled
+// by the civ's feature grid in Civilization Management, applied to ALL
+// moderators), not a per-member grant. The backend strips war_room from any
+// sub-admin override, so listing it here would be a no-op at best and a
+// misleading toggle at worst.
 const AVAILABLE_FEATURES = [
   { id: 'system_create', label: 'Create Systems' },
   { id: 'system_edit', label: 'Edit Systems' },
@@ -45,8 +49,10 @@ const AVAILABLE_FEATURES = [
   { id: 'stats', label: 'View Statistics' },
   { id: 'settings', label: 'Theme Settings' },
   { id: 'csv_import', label: 'CSV Import' },
-  { id: 'war_room', label: 'War Room' },
 ]
+
+// Roles whose holder can manage a civ's roster (add/edit/revoke sub-admins).
+const LEADER_ROLES = ['leader', 'co_leader']
 
 /** @param {Object} props @param {boolean} [props.embedded=false] Hides the page title row when mounted inside AccessControl. */
 export default function SubAdminManagement({ embedded = false }) {
@@ -102,9 +108,12 @@ export default function SubAdminManagement({ embedded = false }) {
   // ---- member edits (shared civ-member endpoints) ----
   async function saveFeatures(member, features) {
     setActionInProgress(true)
+    // war_room is civ-scoped (set in Civilization Management), never a per-member
+    // grant — strip it so it can't ride into a sub-admin override.
+    const cleaned = Array.isArray(features) ? features.filter(f => f !== 'war_room') : features
     try {
       await axios.put(`/api/civilizations/${member.civ_id}/members/${member.profile_id}`, {
-        enabled_features: features, // array => override, null => inherit civ default
+        enabled_features: cleaned, // array => override, null => inherit civ default
       })
       await reloadRoster()
     } catch (err) {
@@ -143,9 +152,23 @@ export default function SubAdminManagement({ embedded = false }) {
     }
   }
 
+  // Civs the current user can actually elevate a sub-admin into. Super admin:
+  // every active civ. Leader/co-leader: only the active civs they lead (the
+  // backend 403s otherwise, so don't offer civs that will fail). Derived from
+  // the session's civ memberships (role-based), not just "civs I belong to".
+  const manageableCivs = useMemo(() => {
+    if (auth.isSuperAdmin) return civs
+    const ledIds = new Set(
+      (auth.user?.civMemberships || [])
+        .filter(m => LEADER_ROLES.includes(m.role))
+        .map(m => m.civ_id)
+    )
+    return civs.filter(c => ledIds.has(c.id))
+  }, [civs, auth.isSuperAdmin, auth.user])
+
   function openAdd() {
     setAddUsername('')
-    setAddCivId(civs.length === 1 ? String(civs[0].id) : '')
+    setAddCivId(manageableCivs.length === 1 ? String(manageableCivs[0].id) : '')
     setAddError('')
     setAddOpen(true)
   }
@@ -204,12 +227,15 @@ export default function SubAdminManagement({ embedded = false }) {
           <div>
             <h2 className="text-2xl font-bold">Sub-Admin Moderation</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-              Manage who has sub-admin powers and what they can do. Sub-admins approve
-              submissions (except their own) and help manage their civilization's content.
+              Manage who has sub-admin powers and what they can do. New sub-admins start
+              with <strong>no permissions</strong> — grant them explicitly under
+              "Edit perms" (or click "Reset to civ default" to apply your civ's standard set).
             </p>
           </div>
         ) : <div />}
-        <Button className="haven-btn-primary" onClick={openAdd}>+ Add Sub-Admin</Button>
+        {manageableCivs.length > 0 && (
+          <Button className="haven-btn-primary" onClick={openAdd}>+ Add Sub-Admin</Button>
+        )}
       </div>
 
       <div className="haven-card p-3 mb-4 text-sm" style={{ borderColor: 'var(--app-accent-amber)' }}>
@@ -263,6 +289,8 @@ export default function SubAdminManagement({ embedded = false }) {
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
               Elevate an <strong>existing</strong> member profile to sub-admin. The person
               must already have a profile (they've submitted, or set a member password).
+              They'll start with <strong>zero permissions</strong> — grant access afterward
+              under "Edit perms".
             </p>
             <div>
               <label className="block text-sm font-semibold mb-1">Civilization *</label>
@@ -272,7 +300,7 @@ export default function SubAdminManagement({ embedded = false }) {
                 onChange={e => setAddCivId(e.target.value)}
               >
                 <option value="">— Select civilization —</option>
-                {civs.map(c => (
+                {manageableCivs.map(c => (
                   <option key={c.id} value={c.id}>{c.tag} — {c.display_name}</option>
                 ))}
               </select>
@@ -385,6 +413,10 @@ function SubAdminRow({ member, busy, onSaveFeatures, onToggleCap, onRevoke }) {
                 {f.label}
               </label>
             ))}
+          </div>
+          <div className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
+            War Room access is set at the civilization level (Civilization Management → edit
+            the civ &amp; check War Room) and applies to all moderators — it isn't a per-member toggle.
           </div>
           <div className="flex gap-2 mt-2">
             <button

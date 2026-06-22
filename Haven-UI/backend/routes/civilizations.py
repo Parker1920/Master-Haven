@@ -308,9 +308,16 @@ async def create_civilization(payload: dict, session: Optional[str] = Cookie(Non
 
 @router.put('/api/civilizations/{civ_id}')
 async def update_civilization(civ_id: int, payload: dict, session: Optional[str] = Cookie(None)):
-    """Update civilization brand / defaults. Super admin only for now —
-    leader-edit path can be added later by checking user_is_leader_of."""
-    _require_super_admin(session)
+    """Update civilization brand / defaults.
+
+    Authorized for super admin OR a leader/co_leader of THIS civ — a leader
+    can edit their own civ's brand (display name, color, theme), defaults, and
+    the sub-admin feature template. Archiving / unarchiving (`is_active`) stays
+    super-admin-only: it severs every member's access site-wide and hides all
+    of the civ's data, which is a platform-level decision, not a leader one.
+    """
+    session_data = _require_civ_manage_access(session, civ_id)
+    is_super = session_data.get('user_type') == 'super_admin'
 
     allowed = {
         'display_name', 'region_color', 'theme_settings',
@@ -323,6 +330,42 @@ async def update_civilization(civ_id: int, payload: dict, session: Optional[str]
             updates[k] = payload[k]
     if not updates:
         raise HTTPException(status_code=400, detail='No updatable fields provided')
+
+    # Archive / unarchive is super-admin-only — a leader cannot deactivate
+    # (or reactivate) their own civilization.
+    if 'is_active' in updates and not is_super:
+        raise HTTPException(status_code=403, detail='Only a super admin can archive or unarchive a civilization')
+
+    # War Room membership in enabled_features_default is super-admin-controlled:
+    # it's the civ-scoped grant that lights up the War Room for the WHOLE
+    # moderator team, and it's tied to the super-admin enrollment step (territory
+    # / home-region setup) — see 1.90.0. A leader editing the sub-admin feature
+    # template must not be able to add OR remove it. Strip whatever war_room the
+    # leader submitted and re-apply the civ's CURRENT war_room state.
+    if 'enabled_features_default' in updates and not is_super:
+        new_default = updates['enabled_features_default']
+        if isinstance(new_default, str):
+            try:
+                new_default = json.loads(new_default)
+            except (TypeError, json.JSONDecodeError):
+                new_default = []
+        new_default = [f for f in (new_default or []) if f != 'war_room']
+        _conn = get_db_connection()
+        try:
+            _row = _conn.cursor().execute(
+                "SELECT enabled_features_default FROM civilizations WHERE id = ?", (civ_id,)
+            ).fetchone()
+        finally:
+            _conn.close()
+        cur_default = []
+        if _row and _row[0]:
+            try:
+                cur_default = json.loads(_row[0]) or []
+            except (TypeError, json.JSONDecodeError):
+                cur_default = []
+        if 'war_room' in cur_default:
+            new_default.append('war_room')
+        updates['enabled_features_default'] = new_default
 
     # JSON columns
     for k in ('theme_settings', 'enabled_features_default'):
@@ -381,7 +424,7 @@ async def add_member(civ_id: int, payload: dict, session: Optional[str] = Cookie
 
     Authorized for super admin or a leader/co_leader of this civ.
     """
-    _require_civ_manage_access(session, civ_id)
+    session_data = _require_civ_manage_access(session, civ_id)
 
     profile_id = payload.get('profile_id')
     role = payload.get('role', 'sub_admin')
@@ -392,6 +435,16 @@ async def add_member(civ_id: int, payload: dict, session: Optional[str] = Cookie
         raise HTTPException(status_code=400, detail='profile_id (integer) is required')
     if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f'role must be one of {VALID_ROLES}')
+
+    # A new sub-admin starts with ZERO permissions until a leader explicitly
+    # grants them — store an EMPTY override ([]), not NULL. NULL falls through
+    # to the civ's enabled_features_default in _recompute_profile_features,
+    # which is the silent "I added them and they could already approve" bug.
+    # The civ default is kept as a one-click "Reset to civ default" opt-in, not
+    # an auto-grant. Leaders / co_leaders are full-power BY ROLE and ignore this
+    # column entirely, so we leave their override NULL.
+    if features is None and role == 'sub_admin':
+        features = []
 
     conn = None
     try:
@@ -420,7 +473,7 @@ async def add_member(civ_id: int, payload: dict, session: Optional[str] = Cookie
         """, (civ_id, profile_id, role,
               json.dumps(features) if features is not None else None,
               1 if cap else 0, now,
-              f"invited_by:{session_user_id(session)}"))
+              f"invited_by:{session_data.get('profile_id')}"))
 
         # H-CM2: recompute tier from the FULL membership set including the
         # row we just inserted. This is correct whether the profile is new
@@ -503,6 +556,11 @@ def _recompute_profile_features(cur, profile_id: int) -> None:
       - sub_admin -> per-member override (civilization_members.enabled_features)
         if set, else civ default (civilizations.enabled_features_default).
         Kept delegable/restrictable so a leader can hand a sub-admin a subset.
+        A NEW sub-admin's override is seeded EMPTY ([]) by add_member, so they
+        start with zero access until a leader explicitly grants it. 'war_room'
+        is ALWAYS stripped from a sub-admin's effective set here — it is granted
+        only via the civ-scoped check above, never via a per-member override, so
+        a stray war_room in an override can't leak it out of civ scope.
 
     Inactive civs are skipped so a deactivated civ stops granting features.
 
@@ -551,7 +609,9 @@ def _recompute_profile_features(cur, profile_id: int) -> None:
             per_member = None
         effective = per_member if per_member is not None else default
         if isinstance(effective, list):
-            union.update(effective)
+            # war_room is civ-scoped only (handled above) — never grantable via
+            # a sub-admin's per-member override.
+            union.update(f for f in effective if f != 'war_room')
 
     cur.execute(
         "UPDATE user_profiles SET enabled_features = ? WHERE id = ? AND tier != 1",
@@ -691,9 +751,3 @@ async def remove_member(civ_id: int, profile_id: int, session: Optional[str] = C
     finally:
         if conn:
             conn.close()
-
-
-# Tiny helper to grab the acting user's profile id for audit context.
-def session_user_id(session_token: Optional[str]) -> Optional[int]:
-    sd = get_session(session_token)
-    return sd.get('profile_id') if sd else None

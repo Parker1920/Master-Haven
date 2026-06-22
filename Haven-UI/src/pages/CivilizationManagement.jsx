@@ -10,16 +10,21 @@ import { formatDate } from '../hooks/useDateFormat'
 /**
  * Civilization Management (replaces Partner Management — migration 1.80.0 / PR-B)
  * Route: /admin/civilizations
- * Auth: Super admin only
+ * Auth: Super admin OR a civ leader / co-leader (scoped to civs they lead).
  *
  * One page covers what used to be Partner Management + Sub-Admin Management:
  *   - List civilizations (one card per civilization entity, NOT per user).
+ *     Super admin sees all; a leader sees only the civ(s) they belong to.
  *   - Click a civ to open a detail modal with its full membership roster.
  *   - Add, promote/demote, remove members. Roles: leader / co_leader / sub_admin.
  *   - Edit civ brand: display_name, region_color, default features.
- *   - "Found new civilization" creates the civ + seeds the first leader.
  *
- * Backed by /api/civilizations (see backend/routes/civilizations.py).
+ * Super-admin-only controls (hidden for leaders):
+ *   - "Found new civilization" (creating a civ is a platform-level act).
+ *   - Archive / Unarchive (severs members' access + hides all civ data).
+ *
+ * Backed by /api/civilizations (see backend/routes/civilizations.py). The
+ * backend enforces the same scoping — a leader can only touch civs they lead.
  */
 
 const ROLES = [
@@ -84,14 +89,19 @@ export default function CivilizationManagement() {
   const [archiveTarget, setArchiveTarget] = useState(null)  // civ object to archive/unarchive
   const [archiving, setArchiving] = useState(false)
 
+  // Super admin manages any civ; a leader / co-leader (tier 2 = partner)
+  // manages the civ(s) they lead. Plain sub-admins / members are bounced.
+  const canManageCivs = auth.isSuperAdmin || auth.isPartner
+
   useEffect(() => {
-    if (!auth.isSuperAdmin) {
-      alert('Super admin access required')
+    if (!canManageCivs) {
+      alert('You must be a civilization leader or a super admin to manage civilizations')
       navigate('/systems')
       return
     }
     loadCivs()
-  }, [auth.isSuperAdmin, navigate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageCivs, navigate])
 
   async function loadCivs() {
     setLoading(true)
@@ -279,7 +289,9 @@ export default function CivilizationManagement() {
             scoping perms within their civ.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>+ Found new civilization</Button>
+        {auth.isSuperAdmin && (
+          <Button onClick={() => setCreateOpen(true)}>+ Found new civilization</Button>
+        )}
       </div>
 
       <div className="mb-4">
@@ -361,13 +373,15 @@ export default function CivilizationManagement() {
                               style={{ backgroundColor: 'rgba(0,194,179,0.15)', color: '#00C2B3' }}>
                           Active
                         </span>
-                        <button
-                          className="text-xs px-2 py-1 rounded border cursor-pointer"
-                          style={{ borderColor: '#ef4444', color: '#ef4444', background: 'transparent' }}
-                          onClick={() => setArchiveTarget(detail)}
-                        >
-                          Archive Civilization
-                        </button>
+                        {auth.isSuperAdmin && (
+                          <button
+                            className="text-xs px-2 py-1 rounded border cursor-pointer"
+                            style={{ borderColor: '#ef4444', color: '#ef4444', background: 'transparent' }}
+                            onClick={() => setArchiveTarget(detail)}
+                          >
+                            Archive Civilization
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
@@ -375,13 +389,15 @@ export default function CivilizationManagement() {
                               style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
                           Archived
                         </span>
-                        <button
-                          className="text-xs px-2 py-1 rounded border cursor-pointer"
-                          style={{ borderColor: '#00C2B3', color: '#00C2B3', background: 'transparent' }}
-                          onClick={() => setArchiveTarget(detail)}
-                        >
-                          Unarchive Civilization
-                        </button>
+                        {auth.isSuperAdmin && (
+                          <button
+                            className="text-xs px-2 py-1 rounded border cursor-pointer"
+                            style={{ borderColor: '#00C2B3', color: '#00C2B3', background: 'transparent' }}
+                            onClick={() => setArchiveTarget(detail)}
+                          >
+                            Unarchive Civilization
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -410,7 +426,10 @@ export default function CivilizationManagement() {
                   <div>
                     <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access; War Room applies to ALL moderators of this civ):</span>
                     <div className="grid grid-cols-2 gap-1 mt-1">
-                      {FEATURE_DEFAULTS.map(f => (
+                      {/* War Room is super-admin-controlled (tied to enrollment);
+                          a leader can't toggle it for their own civ — hidden here
+                          and re-applied server-side on save. */}
+                      {FEATURE_DEFAULTS.filter(f => auth.isSuperAdmin || f.id !== 'war_room').map(f => (
                         <label key={f.id} className="flex items-center gap-1 text-xs">
                           <input
                             type="checkbox"

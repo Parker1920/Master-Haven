@@ -2360,6 +2360,7 @@ async def get_system(system_id: str, session: Optional[str] = Cookie(None)):
                            d.is_featured, d.photo_url, d.evidence_url,
                            d.view_count, d.type_metadata, d.location_name,
                            d.location_type, d.latitude, d.longitude, d.planet_id, d.moon_id,
+                           d.system_id,
                            p.name AS planet_name,
                            m.name AS moon_name
                     FROM discoveries d

@@ -165,8 +165,11 @@ function AppShell() {
                   component so any bookmarks / nav entries still resolve. The legacy
                   PartnerManagement page is no longer mounted on a route but lives in
                   src/pages/PartnerManagement.jsx for reference. */}
-              <Route path="/admin/civilizations" element={<RequireSuperAdmin><CivilizationManagement /></RequireSuperAdmin>} />
-              <Route path="/admin/partners" element={<RequireSuperAdmin><CivilizationManagement /></RequireSuperAdmin>} />
+              {/* Civilization Management is open to civ leaders/co-leaders (scoped
+                  to civs they lead) as well as super admins. The page + backend
+                  both enforce the scoping; founding/archiving stay super-admin-only. */}
+              <Route path="/admin/civilizations" element={<RequireAdmin><CivilizationManagement /></RequireAdmin>} />
+              <Route path="/admin/partners" element={<RequireAdmin><CivilizationManagement /></RequireAdmin>} />
               <Route path="/admin/partners/:partnerId/sub-admins" element={<RequireSuperAdmin><SubAdminManagement /></RequireSuperAdmin>} />
               <Route path="/admin/audit" element={<RequireSuperAdmin><ApprovalAudit /></RequireSuperAdmin>} />
 

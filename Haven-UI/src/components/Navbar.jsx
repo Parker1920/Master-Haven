@@ -139,6 +139,10 @@ export default function Navbar() {
       items: [
         { label: 'Approvals', to: '/pending-approvals', visible: canAccess(FEATURES.APPROVALS), badge: 'pending' },
         { label: 'Access Control', to: '/admin/access', visible: isAdmin && !isCorrespondent },
+        // Leaders/co-leaders (tier 2 = partner) manage their own civ here. Super
+        // admins reach the same page via the Super Admin dropdown, so gate on
+        // isPartner to avoid a duplicate entry for them.
+        { label: 'Civilization', to: '/admin/civilizations', visible: isPartner },
         { label: 'CSV Import', to: '/csv-import', visible: canAccess(FEATURES.CSV_IMPORT) },
         { label: 'Settings', to: '/settings', visible: canAccess(FEATURES.SETTINGS) },
       ]
