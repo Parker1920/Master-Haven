@@ -328,6 +328,17 @@ async def update_civilization(civ_id: int, payload: dict, session: Optional[str]
     for k in allowed:
         if k in payload:
             updates[k] = payload[k]
+
+    # The feature template (`enabled_features_default`) is a PERMISSION setting,
+    # so it is super-admin-only. A civ leader manages the roster (add member,
+    # change role, remove), NOT permissions — this stops a leader changing their
+    # civ's feature set, and therefore stops them escalating their own or anyone
+    # else's access. The frontend hides the grid for leaders; this is the
+    # authoritative server-side guard. (War Room, also a member of this set, was
+    # already leader-locked — this subsumes that.)
+    if not is_super:
+        updates.pop('enabled_features_default', None)
+
     if not updates:
         raise HTTPException(status_code=400, detail='No updatable fields provided')
 
@@ -335,37 +346,6 @@ async def update_civilization(civ_id: int, payload: dict, session: Optional[str]
     # (or reactivate) their own civilization.
     if 'is_active' in updates and not is_super:
         raise HTTPException(status_code=403, detail='Only a super admin can archive or unarchive a civilization')
-
-    # War Room membership in enabled_features_default is super-admin-controlled:
-    # it's the civ-scoped grant that lights up the War Room for the WHOLE
-    # moderator team, and it's tied to the super-admin enrollment step (territory
-    # / home-region setup) — see 1.90.0. A leader editing the sub-admin feature
-    # template must not be able to add OR remove it. Strip whatever war_room the
-    # leader submitted and re-apply the civ's CURRENT war_room state.
-    if 'enabled_features_default' in updates and not is_super:
-        new_default = updates['enabled_features_default']
-        if isinstance(new_default, str):
-            try:
-                new_default = json.loads(new_default)
-            except (TypeError, json.JSONDecodeError):
-                new_default = []
-        new_default = [f for f in (new_default or []) if f != 'war_room']
-        _conn = get_db_connection()
-        try:
-            _row = _conn.cursor().execute(
-                "SELECT enabled_features_default FROM civilizations WHERE id = ?", (civ_id,)
-            ).fetchone()
-        finally:
-            _conn.close()
-        cur_default = []
-        if _row and _row[0]:
-            try:
-                cur_default = json.loads(_row[0]) or []
-            except (TypeError, json.JSONDecodeError):
-                cur_default = []
-        if 'war_room' in cur_default:
-            new_default.append('war_room')
-        updates['enabled_features_default'] = new_default
 
     # JSON columns
     for k in ('theme_settings', 'enabled_features_default'):
@@ -425,10 +405,15 @@ async def add_member(civ_id: int, payload: dict, session: Optional[str] = Cookie
     Authorized for super admin or a leader/co_leader of this civ.
     """
     session_data = _require_civ_manage_access(session, civ_id)
+    is_super = session_data.get('user_type') == 'super_admin'
 
     profile_id = payload.get('profile_id')
     role = payload.get('role', 'sub_admin')
-    features = payload.get('enabled_features')
+    # Per-member feature overrides are a permission setting → super-admin-only.
+    # A leader adds the member with a role; their access comes from the role
+    # (leaders are full by role) or, for a sub-admin, the zero-perm default
+    # below — a super admin grants features afterward.
+    features = payload.get('enabled_features') if is_super else None
     cap = bool(payload.get('can_approve_personal_uploads', False))
 
     if not isinstance(profile_id, int):
@@ -630,14 +615,18 @@ async def update_member(civ_id: int, profile_id: int, payload: dict,
 
     Authorized for super admin or a leader/co_leader of this civ.
     """
-    _require_civ_manage_access(session, civ_id)
+    session_data = _require_civ_manage_access(session, civ_id)
+    is_super = session_data.get('user_type') == 'super_admin'
 
     updates = {}
     if 'role' in payload:
         if payload['role'] not in VALID_ROLES:
             raise HTTPException(status_code=400, detail=f'role must be one of {VALID_ROLES}')
         updates['role'] = payload['role']
-    if 'enabled_features' in payload:
+    # Per-member feature overrides are a permission setting → super-admin-only.
+    # A leader can change a member's role (and remove them), but not edit the
+    # feature set — so a leader can never change their own or anyone's perms.
+    if 'enabled_features' in payload and is_super:
         f = payload['enabled_features']
         updates['enabled_features'] = json.dumps(f) if f is not None else None
     if 'can_approve_personal_uploads' in payload:

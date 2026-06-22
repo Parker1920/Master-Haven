@@ -423,13 +423,15 @@ export default function CivilizationManagement() {
                     />
                     <code className="ml-2 text-xs">{editDraft.region_color}</code>
                   </label>
+                  {/* The feature template is a PERMISSION setting — super-admin-only.
+                      Civ leaders manage the roster (add / role / remove), not perms,
+                      so they can't edit their civ's (or their own) feature set. The
+                      backend rejects enabled_features_default from non-super-admins. */}
+                  {auth.isSuperAdmin && (
                   <div>
                     <span className="opacity-70 text-xs">Default features for sub-admins (leaders &amp; co-leaders always get full access; War Room applies to ALL moderators of this civ):</span>
                     <div className="grid grid-cols-2 gap-1 mt-1">
-                      {/* War Room is super-admin-controlled (tied to enrollment);
-                          a leader can't toggle it for their own civ — hidden here
-                          and re-applied server-side on save. */}
-                      {FEATURE_DEFAULTS.filter(f => auth.isSuperAdmin || f.id !== 'war_room').map(f => (
+                      {FEATURE_DEFAULTS.map(f => (
                         <label key={f.id} className="flex items-center gap-1 text-xs">
                           <input
                             type="checkbox"
@@ -445,6 +447,7 @@ export default function CivilizationManagement() {
                       ))}
                     </div>
                   </div>
+                  )}
                   {/* is_active is now controlled via the Archive/Unarchive buttons below,
                       not through the edit form — too impactful for an unceremonious checkbox */}
                 </div>
@@ -475,6 +478,7 @@ export default function CivilizationManagement() {
                     key={m.profile_id}
                     member={m}
                     civDefaults={detail.enabled_features_default || []}
+                    isSuperAdmin={auth.isSuperAdmin}
                     onChangeRole={r => changeMemberRole(m.profile_id, r)}
                     onToggleCap={() => toggleMemberCap(m.profile_id, m.can_approve_personal_uploads)}
                     onSetFeatures={features => setMemberFeatures(m.profile_id, features)}
@@ -692,7 +696,7 @@ function Stat({ label, value }) {
   )
 }
 
-function MemberRow({ member, civDefaults, onChangeRole, onToggleCap, onSetFeatures, onRemove }) {
+function MemberRow({ member, civDefaults, isSuperAdmin, onChangeRole, onToggleCap, onSetFeatures, onRemove }) {
   const isLeader = LEADER_ROLES.includes(member.role)
   // null/absent enabled_features means "inherit civ default"; an array means
   // this member has an explicit per-member override.
@@ -742,13 +746,19 @@ function MemberRow({ member, civDefaults, onChangeRole, onToggleCap, onSetFeatur
           />
           <span className="opacity-70">Approve personal</span>
         </label>
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="pill pill-muted pill-clickable"
-          title="View / edit this member's permissions"
-        >
-          {expanded ? 'Hide perms' : 'Perms'}
-        </button>
+        {/* Permissions editing is super-admin-only — a civ leader manages the
+            roster (role + remove), not perms, so the Perms editor is hidden for
+            non-super-admins. The backend also rejects per-member feature writes
+            from non-super-admins. */}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="pill pill-muted pill-clickable"
+            title="View / edit this member's permissions"
+          >
+            {expanded ? 'Hide perms' : 'Perms'}
+          </button>
+        )}
         <button
           onClick={onRemove}
           className="pill pill-red pill-clickable"
@@ -757,7 +767,7 @@ function MemberRow({ member, civDefaults, onChangeRole, onToggleCap, onSetFeatur
         </button>
       </div>
 
-      {expanded && (
+      {isSuperAdmin && expanded && (
         <div className="border-t pt-2" style={{ borderColor: 'var(--border-soft)' }}>
           {isLeader ? (
             <div className="text-xs opacity-70">

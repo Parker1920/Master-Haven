@@ -226,11 +226,18 @@ export default function SubAdminManagement({ embedded = false }) {
         {!embedded ? (
           <div>
             <h2 className="text-2xl font-bold">Sub-Admin Moderation</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-              Manage who has sub-admin powers and what they can do. New sub-admins start
-              with <strong>no permissions</strong> — grant them explicitly under
-              "Edit perms" (or click "Reset to civ default" to apply your civ's standard set).
-            </p>
+            {auth.isSuperAdmin ? (
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                Manage who has sub-admin powers and what they can do. New sub-admins start
+                with <strong>no permissions</strong> — grant them explicitly under
+                "Edit perms" (or click "Reset to civ default" to apply your civ's standard set).
+              </p>
+            ) : (
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                Add or remove your civilization's sub-admins. New sub-admins start with
+                <strong> no permissions</strong> — a super admin grants what each one can do.
+              </p>
+            )}
           </div>
         ) : <div />}
         {manageableCivs.length > 0 && (
@@ -271,6 +278,7 @@ export default function SubAdminManagement({ embedded = false }) {
                     key={`${m.civ_id}:${m.profile_id}`}
                     member={m}
                     busy={actionInProgress}
+                    isSuperAdmin={auth.isSuperAdmin}
                     onSaveFeatures={features => saveFeatures(m, features)}
                     onToggleCap={() => toggleCap(m)}
                     onRevoke={() => revoke(m)}
@@ -334,7 +342,7 @@ export default function SubAdminManagement({ embedded = false }) {
   )
 }
 
-function SubAdminRow({ member, busy, onSaveFeatures, onToggleCap, onRevoke }) {
+function SubAdminRow({ member, busy, isSuperAdmin, onSaveFeatures, onToggleCap, onRevoke }) {
   // null override => inheriting the civ default; an array => per-member override.
   const hasOverride = Array.isArray(member.enabled_features_override)
   const [expanded, setExpanded] = useState(false)
@@ -375,9 +383,15 @@ function SubAdminRow({ member, busy, onSaveFeatures, onToggleCap, onRevoke }) {
           />
           <span style={{ color: 'var(--muted)' }}>Approve personal</span>
         </label>
-        <button className="pill pill-muted pill-clickable" onClick={() => setExpanded(e => !e)}>
-          {expanded ? 'Hide perms' : 'Edit perms'}
-        </button>
+        {/* Editing a sub-admin's feature set is a permission change → super-admin-only.
+            Civ leaders manage the roster (add / revoke + approve-personal), not perms,
+            so the editor is hidden for them; the backend also rejects per-member
+            feature writes from non-super-admins. */}
+        {isSuperAdmin && (
+          <button className="pill pill-muted pill-clickable" onClick={() => setExpanded(e => !e)}>
+            {expanded ? 'Hide perms' : 'Edit perms'}
+          </button>
+        )}
         <button className="pill pill-red pill-clickable" onClick={onRevoke} disabled={busy}>
           Revoke
         </button>
@@ -399,7 +413,7 @@ function SubAdminRow({ member, busy, onSaveFeatures, onToggleCap, onRevoke }) {
         </div>
       )}
 
-      {expanded && (
+      {isSuperAdmin && expanded && (
         <div className="border-t pt-2" style={{ borderColor: 'var(--border-soft)' }}>
           <div className="text-xs mb-1" style={{ color: 'var(--muted)' }}>
             {hasOverride
