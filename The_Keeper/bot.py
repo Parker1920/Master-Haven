@@ -107,7 +107,6 @@ get_env_int("HELP_CHANNEL_ID"),
     "engineer_office": get_env_int("E_OFFICE_CHANNEL_ID"),
     "historian_office": get_env_int("H_OFFICE_CHANNEL_ID"),
 }
-from exchange.exchange import BASE_URL, API_KEY, TravelersExchancheAPI
 
 # -------------------- XP ENABLED CHANNELS
 XP_ENABLED_CHANNELS = [
@@ -178,9 +177,7 @@ COGS = [
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
-    "cmds.voyager",
-    "exchange.wallet",
-    "exchange.connect",
+    "cmds.voyager",    
     "setup",
 ]
 
@@ -285,15 +282,7 @@ async def on_command_error(ctx, error):
 
 
 # -------------------- RUN --------------------
-async def main():
-    api = TravelersExchangeAPI(
-        bot=bot,
-        base_url=BASE_URL,
-        api_key=API_KEY,
-        timeout=30
-    )
-
-    bot.exchange_api = api
+async def main():    
 
     async def setup_hook():
         await init_db()
