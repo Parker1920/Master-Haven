@@ -158,7 +158,7 @@ bot.ROLES = ROLES
 bot.PRIMARY_ROLES = PRIMARY_ROLES
 bot.XP_ENABLED_CHANNELS = XP_ENABLED_CHANNELS
 bot.role_welcome_messages = role_welcome_messages
-from cogs.Data.xpdata import init_db, CONFIG, add_xp, check_cooldown
+from cogs.Data.xpdata import init_db, CONFIG, add_xp, check_cooldown, get_conn
 
 # -------------------- COGS --------------------
 COGS = [
@@ -225,6 +225,33 @@ async def on_ready():
 
     except Exception as e:
         print(e)
+    synced_any = False
+    with get_conn() as conn:
+        cur = conn.cursor()
+        
+        for guild in bot.guilds:
+            for role_name, role_id in bot.PRIMARY_ROLES.items():
+                if not role_id: 
+                    continue
+                role = guild.get_role(role_id)
+                if not role: 
+                    continue
+                    
+                for member in role.members:
+                    if member.bot: 
+                        continue
+                                        
+                    cur.execute("SELECT 1 FROM users WHERE user_id = ?", (member.id,))
+                    if not cur.fetchone():
+                        cur.execute("INSERT INTO users (user_id, primary_role) VALUES (?, ?)", (member.id, role_name))
+                        synced_any = True
+                        
+                    # Also ensure they have a starting record track in user_roles
+                    cur.execute("INSERT OR IGNORE INTO user_roles (user_id, role, xp, level) VALUES (?, ?, 0, 1)", (member.id, role_name))
+                    
+        conn.commit()
+        
+    print("[BOOTSTRAP] roles synced" if synced_any else "[BOOTSTRAP] no roles to assign")
 
     print("COMMANDS:", [cmd.name for cmd in bot.commands])
     print("SLASH:", [cmd.name for cmd in bot.tree.get_commands()])
