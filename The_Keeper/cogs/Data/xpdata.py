@@ -161,25 +161,25 @@ async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, primary_role TEXT)")
         await db.execute("PRAGMA journal_mode=WAL;")
+        
+        # 1. Base Users Table
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, 
+            primary_role TEXT
+        )""")
         await migrate(db)
-        await db.commit()
+
+        # 2. Panels Table
         await db.execute("""
         CREATE TABLE IF NOT EXISTS panels (
             guild_id INTEGER PRIMARY KEY,
             channel_id INTEGER,
             message_id INTEGER
-        )
-        """)
+        )""")
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            primary_role TEXT
-        )
-        """)
-
+        # 3. User Roles Table (Ensure Level defaults to 1 properly)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_roles (
             user_id INTEGER,
@@ -187,34 +187,29 @@ async def init_db():
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 1,
             PRIMARY KEY(user_id, role)
-        )
-        """)
-        await db.execute("UPDATE user_roles SET level = CAST(level AS INTEGER)")
+        )""")
+
+        # 4. Cooldowns Table
         await db.execute("""
         CREATE TABLE IF NOT EXISTS cooldowns (
             user_id INTEGER,
             key TEXT,
             last_used REAL,
             PRIMARY KEY(user_id, key)
-        )
-        """)
+        )""")
 
+        # 5. Global Levels Table
         await db.execute("""
         CREATE TABLE IF NOT EXISTS global_levels (
             user_id INTEGER PRIMARY KEY,
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 1,
             senior_dm_sent INTEGER DEFAULT 0
-        )
-        """)
-        await db.execute("""
-        UPDATE user_roles
-        SET level = 1
-        WHERE typeof(level) = 'text'
-        """)
+        )""")
 
         await db.commit()
         log.info("init_db() finished")
+
     
 async def system_xp(user_id: int, amount: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -245,22 +240,31 @@ def get_cfg(key, default=0):
 
 # ---------------- DB HELPERS ----------------
 def get_rank(level):
+    """
+    Returns the rank dict that matches the user's level.
+    Falls back to highest valid rank if level exceeds defined ranges.
+    """
+
     ranks = CONFIG.get("ranks", [])
-    level = int(level)
-    fallback = None
 
     for rank in ranks:
-        min_lvl = int(rank.get("min_level", 0))
-        max_lvl = int(rank.get("max_level", 0))
+        min_level = rank.get("min_level")
+        max_level = rank.get("max_level")
 
-        if min_lvl <= level <= max_lvl:
+        if min_level is None and max_level is None:
+            if rank.get("level") == level:
+                return rank
+            continue
+
+        if min_level <= level <= max_level:
             return rank
-            
-        if min_lvl <= level:
+
+    fallback = None
+    for rank in ranks:
+        if rank.get("min_level", 0) <= level:
             fallback = rank
 
     return fallback
-
 
 def get_rank_name(level: int, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
@@ -322,7 +326,7 @@ async def add_xp(user_id, role, amount):
             xp += amount
     
             while level < CONFIG["leveling"]["max_level"]:
-                needed = get_rank(level, role)["xp_per_level"]
+                needed = get_rank(level)["xp_per_level"]
     
                 if xp < needed:
                     break
