@@ -57,6 +57,23 @@ def register_migration(version: str, name: str, down: Optional[Callable] = None)
             cursor.execute("ALTER TABLE systems ADD COLUMN new_column TEXT")
     """
     def decorator(up_func: Callable[[sqlite3.Connection], None]):
+        # Guard against duplicate version numbers. The runner records applied
+        # versions in schema_migrations.version (UNIQUE) and only runs a
+        # migration whose version is GREATER than the highest already applied —
+        # so a second migration sharing an existing version would silently NEVER
+        # run on any DB that already applied the first one (e.g. prod). That's a
+        # data-integrity landmine when two branches independently grab the same
+        # number, so fail loudly at import instead. Bump to the next free number.
+        existing = next((m for m in _migrations if m.version == version), None)
+        if existing is not None:
+            highest = _migrations[-1].version if _migrations else 'none'
+            raise ValueError(
+                f"Duplicate migration version {version!r} "
+                f"(new: {name!r}; existing: {existing.name!r}). "
+                f"Each migration needs a unique version — bump to the next free "
+                f"number (current highest is {highest}). A duplicate would be "
+                f"silently skipped on any DB that already applied the first one."
+            )
         _migrations.append(Migration(
             version=version,
             name=name,
@@ -91,14 +108,82 @@ def get_current_version(conn: sqlite3.Connection) -> Optional[str]:
     if not cursor.fetchone():
         return None
 
-    # Get highest successfully applied version
-    cursor.execute("""
+    # Numerically-highest successfully applied REAL migration. Excludes the
+    # underscore-prefixed bridge marker, and sorts by version tuple in Python
+    # (string ORDER BY mis-ranks 1.9.0 vs 1.10.0, and a backfilled row's id is
+    # not its version order).
+    cursor.execute(r"""
         SELECT version FROM schema_migrations
-        WHERE success = 1
-        ORDER BY id DESC LIMIT 1
+        WHERE success = 1 AND version NOT LIKE '\_%' ESCAPE '\'
     """)
-    row = cursor.fetchone()
-    return row[0] if row else None
+    versions = [r[0] for r in cursor.fetchall()]
+    if not versions:
+        return None
+    try:
+        return max(versions, key=_version_tuple)
+    except (ValueError, TypeError):
+        return versions[-1]
+
+
+# Sentinel row recorded once when a legacy DB is bridged from the old
+# high-water-mark runner to per-migration tracking, so the backfill never repeats.
+_BACKFILL_MARKER = '_per_migration_backfill'
+
+
+def _get_applied_versions(conn: sqlite3.Connection) -> set:
+    """Set of migration version strings already applied successfully."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT version FROM schema_migrations WHERE success = 1")
+    return {row[0] for row in cursor.fetchall()}
+
+
+def _backfill_applied_versions_once(conn: sqlite3.Connection, migrations) -> None:
+    """One-time bridge from the legacy high-water-mark model to per-migration
+    tracking.
+
+    The OLD runner stored only "the last applied version" and ran everything
+    numbered above it. So migrations from before the tracking table existed (and
+    anything ever skipped for being <= the watermark) have NO success row. If we
+    switched straight to "run anything not recorded", all of those would re-run.
+
+    To prevent that, the FIRST time the new runner sees a legacy DB we record
+    every registered migration at-or-below the current watermark as
+    already-applied (faithfully capturing what the old logic assumed), then drop
+    a marker so this never runs again. Migrations ABOVE the watermark — and any
+    migration added later at any number — are intentionally NOT backfilled, so
+    they run. Idempotent; a fresh DB just gets the marker (nothing to bridge).
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM schema_migrations WHERE version = ? AND success = 1",
+        (_BACKFILL_MARKER,))
+    if cursor.fetchone():
+        return  # already bridged
+
+    watermark = get_current_version(conn)  # legacy: last-applied version (None on fresh DB)
+    now = datetime.now().isoformat()
+    backfilled = 0
+    if watermark is not None:
+        wm = _version_tuple(watermark)
+        already = _get_applied_versions(conn)
+        for m in migrations:
+            if m.version not in already and _version_tuple(m.version) <= wm:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO schema_migrations
+                    (version, migration_name, applied_at, success)
+                    VALUES (?, ?, ?, 1)
+                ''', (m.version, m.name + ' (backfilled)', now))
+                backfilled += 1
+    cursor.execute('''
+        INSERT OR IGNORE INTO schema_migrations
+        (version, migration_name, applied_at, success)
+        VALUES (?, ?, ?, 1)
+    ''', (_BACKFILL_MARKER, 'per-migration tracking bridge', now))
+    conn.commit()
+    if watermark is not None:
+        logger.info(
+            "Migration runner: bridged to per-migration tracking "
+            f"(watermark was {watermark}; backfilled {backfilled} prior versions)")
 
 
 def create_migrations_table(conn: sqlite3.Connection):
@@ -163,20 +248,16 @@ def run_pending_migrations(db_path: Path) -> Tuple[int, List[str]]:
         # Ensure migrations table exists
         create_migrations_table(conn)
 
-        current_version = get_current_version(conn)
-        migrations = get_migrations()
+        migrations = get_migrations()  # sorted ascending by version
 
-        # Filter to pending migrations
-        pending = []
-        for m in migrations:
-            if current_version is None:
-                pending.append(m)
-            else:
-                # Compare versions numerically
-                current_parts = _version_tuple(current_version)
-                migration_parts = _version_tuple(m.version)
-                if migration_parts > current_parts:
-                    pending.append(m)
+        # Bridge legacy high-water-mark DBs to per-migration tracking (once),
+        # then run any migration NOT yet recorded as applied — independent of how
+        # its number compares to others. This removes the old landmine where a
+        # migration numbered at-or-below the last-applied version silently never
+        # ran (a duplicate version, or a lower number added by a parallel branch).
+        _backfill_applied_versions_once(conn, migrations)
+        applied_versions = _get_applied_versions(conn)
+        pending = [m for m in migrations if m.version not in applied_versions]
 
         if not pending:
             logger.info("Database schema is up to date")

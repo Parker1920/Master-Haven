@@ -56,7 +56,7 @@ router = APIRouter()
 # ============================================================================
 
 # _build_advanced_filter_clauses lives in db.py (shared across systems, regions, galaxies)
-from db import _build_advanced_filter_clauses, archived_civ_filter
+from db import _build_advanced_filter_clauses, archived_civ_filter, norm_token
 
 
 # ============================================================================
@@ -1377,20 +1377,28 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
         planet_where = ("WHERE " + " AND ".join(planet_where_clauses)) if planet_where_clauses else ""
         planet_join = "JOIN systems s ON p.system_id = s.id" if planet_where_clauses else ""
 
-        # Collapse case/whitespace-variant duplicates (e.g. "Trading" vs
-        # "Trading " vs "trading") into one canonical option. SQL DISTINCT keeps
-        # them separate, which surfaced as repeated economy-type entries in the
-        # Cartographer dropdown. Keeps the first-seen trimmed casing.
+        # Collapse duplicate options that differ only by case, internal spacing,
+        # or punctuation ("Power Generation" / "PowerGeneration" / "trading" /
+        # "Trading ") into ONE entry, and drop obvious junk (single chars,
+        # pure-numeric values like "1"). The dedup key is norm_token() — the very
+        # same normalizer the filter WHERE clauses use — so a collapsed option
+        # always still matches its rows. Among the variants in a group we surface
+        # the best-formatted one (most word breaks, mixed case, then longest).
         def _dedup_clean(values):
-            seen = {}
+            def _score(s):
+                return (s.count(' '), 0 if (s.isupper() or s.islower()) else 1, len(s))
+            groups = {}
             for v in values:
                 if not v or not isinstance(v, str):
                     continue
-                trimmed = v.strip()
-                key = trimmed.lower()
-                if key and key not in seen:
-                    seen[key] = trimmed
-            return sorted(seen.values(), key=lambda s: s.lower())
+                disp = ' '.join(v.split())  # trim + collapse internal whitespace runs
+                key = norm_token(disp)
+                if len(key) < 2 or key.isdigit():
+                    continue  # drop single-char / pure-numeric noise ("1")
+                cur = groups.get(key)
+                if cur is None or _score(disp) > _score(cur):
+                    groups[key] = disp
+            return sorted(groups.values(), key=lambda s: s.lower())
 
         # System-level fields
         def get_distinct_system(column):

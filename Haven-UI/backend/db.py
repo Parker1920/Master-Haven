@@ -52,6 +52,21 @@ def get_db_path() -> Path:
     return HAVEN_UI_DIR_RESOLVED / 'data' / 'haven_ui.db'
 
 
+def norm_token(value):
+    """Normalize a categorical value for case / spacing / punctuation-insensitive
+    matching: lowercase, keep only alphanumerics.
+
+    Registered as a SQLite function on every connection AND used in Python by the
+    filter-options dedup, so the two stay perfectly in step. This is what lets the
+    dropdown collapse formatting variants ("Power Generation" / "PowerGeneration"
+    / "power-generation") into ONE option while the filter still matches every
+    variant row. Returns '' for NULL.
+    """
+    if value is None:
+        return ''
+    return ''.join(ch for ch in str(value).lower() if ch.isalnum())
+
+
 def get_db_connection():
     """Create a properly configured database connection with timeout and WAL mode.
 
@@ -77,6 +92,15 @@ def get_db_connection():
     # this PRAGMA — SQLite defaults FKs to OFF per-connection. Enables FK
     # enforcement for every new statement on this conn.
     conn.execute('PRAGMA foreign_keys=ON')
+    # Categorical-match normalizer (see norm_token). try/except keeps it working
+    # on older sqlite builds that reject the `deterministic` kwarg.
+    try:
+        conn.create_function('norm_token', 1, norm_token, deterministic=True)
+    except (TypeError, sqlite3.NotSupportedError):
+        # Older Python rejects the kwarg (TypeError); older SQLite rejects
+        # deterministic functions (NotSupportedError). Plain registration works
+        # everywhere — this factory must never throw.
+        conn.create_function('norm_token', 1, norm_token)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -488,27 +512,31 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
             return None
         return [p.strip() for p in s.split(',') if p.strip()]
 
+    # Categorical fields are matched through norm_token() (case / spacing /
+    # punctuation-insensitive) so a dropdown option that the filter-options dedup
+    # collapsed ("Power Generation") still matches every stored variant
+    # ("PowerGeneration", "power-generation", ...). Same normalizer on both sides.
     star_types = _split_csv(params_dict.get('star_type'))
     if star_types:
-        where_clauses.append(f"s.star_type IN ({','.join(['?'] * len(star_types))})")
-        params.extend(star_types)
+        where_clauses.append(f"norm_token(s.star_type) IN ({','.join(['?'] * len(star_types))})")
+        params.extend(norm_token(v) for v in star_types)
     if params_dict.get('economy_type'):
-        where_clauses.append("s.economy_type = ?")
-        params.append(params_dict['economy_type'])
+        where_clauses.append("norm_token(s.economy_type) = ?")
+        params.append(norm_token(params_dict['economy_type']))
     economy_levels = _split_csv(params_dict.get('economy_level'))
     if economy_levels:
-        where_clauses.append(f"s.economy_level IN ({','.join(['?'] * len(economy_levels))})")
-        params.extend(economy_levels)
+        where_clauses.append(f"norm_token(s.economy_level) IN ({','.join(['?'] * len(economy_levels))})")
+        params.extend(norm_token(v) for v in economy_levels)
     conflict_levels = _split_csv(params_dict.get('conflict_level'))
     if conflict_levels:
-        where_clauses.append(f"s.conflict_level IN ({','.join(['?'] * len(conflict_levels))})")
-        params.extend(conflict_levels)
+        where_clauses.append(f"norm_token(s.conflict_level) IN ({','.join(['?'] * len(conflict_levels))})")
+        params.extend(norm_token(v) for v in conflict_levels)
     if params_dict.get('dominant_lifeform'):
-        where_clauses.append("s.dominant_lifeform = ?")
-        params.append(params_dict['dominant_lifeform'])
+        where_clauses.append("norm_token(s.dominant_lifeform) = ?")
+        params.append(norm_token(params_dict['dominant_lifeform']))
     if params_dict.get('stellar_classification'):
-        where_clauses.append("s.stellar_classification = ?")
-        params.append(params_dict['stellar_classification'])
+        where_clauses.append("norm_token(s.stellar_classification) = ?")
+        params.append(norm_token(params_dict['stellar_classification']))
     is_complete_val = params_dict.get('is_complete')
     if is_complete_val is not None:
         grade_thresholds = {'S': (85, 100), 'A': (65, 84), 'B': (40, 64), 'C': (0, 39)}
@@ -530,14 +558,14 @@ def _build_advanced_filter_clauses(params_dict, where_clauses, params):
         else:
             where_clauses.append("s.is_complete < 65")
     if params_dict.get('biome'):
-        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.biome = ?)")
-        params.append(params_dict['biome'])
+        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND norm_token(p.biome) = ?)")
+        params.append(norm_token(params_dict['biome']))
     if params_dict.get('weather'):
-        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.weather = ?)")
-        params.append(params_dict['weather'])
+        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND norm_token(p.weather) = ?)")
+        params.append(norm_token(params_dict['weather']))
     if params_dict.get('sentinel_level'):
-        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND p.sentinel = ?)")
-        params.append(params_dict['sentinel_level'])
+        where_clauses.append("EXISTS (SELECT 1 FROM planets p WHERE p.system_id = s.id AND norm_token(p.sentinel) = ?)")
+        params.append(norm_token(params_dict['sentinel_level']))
     if params_dict.get('resource'):
         # The real resource data lives in planets.materials (a ", "-joined list,
         # normalized to canonical names by migration 1.93.0); the dedicated
