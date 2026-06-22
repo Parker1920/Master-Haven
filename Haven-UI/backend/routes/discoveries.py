@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -1148,6 +1149,109 @@ def _resolve_account_id(session_data):
     return None
 
 
+def _existing_link_id(cursor, table, value):
+    """Return `value` only if it references a live row in `table`, else None.
+
+    The live `discoveries` table has FK constraints planet_id→planets(id) and
+    moon_id→moons(id), and PRAGMA foreign_keys is ON (since migration 1.65.0).
+    Planet/moon rows are deleted-and-reinserted with brand-new ids on every
+    system rebuild (the recurring planet-churn bug), so an old pending discovery
+    routinely holds a planet_id/moon_id that no longer exists — approving it
+    would raise "FOREIGN KEY constraint failed" and abort. Nulling the dangling
+    link instead approves the discovery at the system level ("unlinked"), which
+    is exactly the fallback the wizard co-submit path and the SystemDetail
+    "Unlinked" group already handle. `table` is always a trusted literal
+    ('planets'/'moons'), never user input.
+    """
+    if value in (None, ''):
+        return None
+    cursor.execute(f'SELECT 1 FROM {table} WHERE id = ?', (value,))
+    return value if cursor.fetchone() else None
+
+
+def _match_body_by_name(cursor, system_id, kind, location_name):
+    """Best-effort recover a dropped planet/moon link by matching the body's
+    name — as it appears in the freeform `location_name` — against the system's
+    CURRENT planets/moons.
+
+    Conservative on purpose (we'd rather leave a discovery unlinked than pin it
+    to the wrong planet): whole-name match bounded by non-alphanumeric chars,
+    names under 3 chars ignored, the longest (most specific) match wins, and a
+    tie between two distinct same-length names returns None instead of guessing.
+    `kind` is the literal 'planets' or 'moons'. Returns a live id or None.
+    """
+    if not location_name or not system_id:
+        return None
+    if kind == 'moons':
+        # moons link to a system only via their parent planet.
+        cursor.execute(
+            'SELECT m.id AS id, m.name AS name FROM moons m '
+            'JOIN planets p ON p.id = m.planet_id WHERE p.system_id = ?',
+            (system_id,),
+        )
+    else:
+        cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+    ln = location_name.lower()
+    best_id, best_len, ambiguous = None, 0, False
+    for row in cursor.fetchall():
+        name = (row['name'] or '').strip()
+        if len(name) < 3:
+            continue
+        # Names contain spaces/digits/'/', so bound the match on alphanumerics only.
+        pattern = r'(?<![A-Za-z0-9])' + re.escape(name.lower()) + r'(?![A-Za-z0-9])'
+        if re.search(pattern, ln):
+            if len(name) > best_len:
+                best_id, best_len, ambiguous = row['id'], len(name), False
+            elif len(name) == best_len and row['id'] != best_id:
+                ambiguous = True
+    return None if ambiguous else best_id
+
+
+def _resolve_discovery_links(cursor, system_id, location_type, raw_planet_id, raw_moon_id, location_name, pending_id):
+    """Resolve a discovery's planet/moon links for insertion against live FKs.
+
+    1. Keep stored ids that still reference a live row.
+    2. For a stored id that's gone (planet/moon rebuilt with a new id — common
+       for old pending rows), best-effort re-link to the correct CURRENT body by
+       matching its name inside `location_name` (see _match_body_by_name).
+    3. If still unresolved, null it so the FK can't fail — the discovery is
+       approved at the system level ("unlinked"), with its location_name intact.
+    Returns (planet_id, moon_id).
+    """
+    planet_id = _existing_link_id(cursor, 'planets', raw_planet_id)
+    moon_id = _existing_link_id(cursor, 'moons', raw_moon_id)
+
+    if location_type != 'space' and system_id:
+        if raw_planet_id and planet_id is None:
+            recovered = _match_body_by_name(cursor, system_id, 'planets', location_name)
+            if recovered is not None:
+                planet_id = recovered
+                logger.info(
+                    f"Discovery approve (pending #{pending_id}): stale planet_id "
+                    f"{raw_planet_id} re-linked to live planet {recovered} by name."
+                )
+        if raw_moon_id and moon_id is None:
+            recovered = _match_body_by_name(cursor, system_id, 'moons', location_name)
+            if recovered is not None:
+                moon_id = recovered
+                logger.info(
+                    f"Discovery approve (pending #{pending_id}): stale moon_id "
+                    f"{raw_moon_id} re-linked to live moon {recovered} by name."
+                )
+
+    if raw_planet_id and planet_id is None:
+        logger.warning(
+            f"Discovery approve (pending #{pending_id}): planet_id {raw_planet_id} "
+            f"could not be resolved — approving as unlinked (system level)."
+        )
+    if raw_moon_id and moon_id is None:
+        logger.warning(
+            f"Discovery approve (pending #{pending_id}): moon_id {raw_moon_id} "
+            f"could not be resolved — approving as unlinked (system level)."
+        )
+    return planet_id, moon_id
+
+
 def _apply_discovery_approval(cursor, submission, session_data):
     """Apply one pending-discovery approval against an OPEN cursor.
 
@@ -1193,7 +1297,9 @@ def _apply_discovery_approval(cursor, submission, session_data):
     if location_type == 'space':
         latitude, longitude = None, None
 
-    # Is this an EDIT of an existing live discovery? (mirror of system edits)
+    # Resolve the edit target up front. An edit's system is fixed (you can change
+    # a discovery's planet/moon but never move it to another system), so we need
+    # the live row's system_id to know which system to match links against below.
     edit_discovery_id = submission.get('edit_discovery_id')
     if edit_discovery_id is None:
         edit_discovery_id = discovery_data.get('edit_discovery_id')
@@ -1202,14 +1308,10 @@ def _apply_discovery_approval(cursor, submission, session_data):
     except (TypeError, ValueError):
         edit_discovery_id = None
 
-    is_edit = False
+    is_edit = edit_discovery_id is not None
     # Parent system whose cached completeness must be refreshed after this
     # approval (a discovery's planet/moon link feeds the S+ checklist).
-    parent_system_id = None
-    if edit_discovery_id is not None:
-        # EDIT path: update the live discovery in place. Preserve the original
-        # attribution (discovered_by, submission_timestamp, system_id,
-        # discord_tag, profile_id, source) — only the editable fields change.
+    if is_edit:
         cursor.execute('SELECT id, system_id FROM discoveries WHERE id = ?', (edit_discovery_id,))
         live_row = cursor.fetchone()
         if not live_row:
@@ -1217,9 +1319,24 @@ def _apply_discovery_approval(cursor, submission, session_data):
                 status_code=400,
                 detail="The discovery this edit targets no longer exists. Reject this submission instead."
             )
-        # Edits can change planet/moon but never the system, so the live row's
-        # system_id is the parent to re-score.
-        parent_system_id = live_row['system_id']
+        link_system_id = live_row['system_id']
+    else:
+        link_system_id = discovery_data.get('system_id')
+    parent_system_id = link_system_id
+
+    # Resolve planet/moon links against live FKs: keep ids that still exist,
+    # best-effort recover a rebuilt body by matching its name in location_name,
+    # else null it (approve as unlinked) so the discoveries FK can't fail.
+    planet_id, moon_id = _resolve_discovery_links(
+        cursor, link_system_id, location_type,
+        discovery_data.get('planet_id'), discovery_data.get('moon_id'),
+        discovery_data.get('location_name') or '', submission.get('id'),
+    )
+
+    if is_edit:
+        # EDIT path: update the live discovery in place. Preserve the original
+        # attribution (discovered_by, submission_timestamp, system_id,
+        # discord_tag, profile_id, source) — only the editable fields change.
         cursor.execute('''
             UPDATE discoveries SET
                 discovery_type = ?, discovery_name = ?, type_slug = ?,
@@ -1232,8 +1349,8 @@ def _apply_discovery_approval(cursor, submission, session_data):
             discovery_type,
             discovery_name,
             type_slug,
-            discovery_data.get('planet_id'),
-            discovery_data.get('moon_id'),
+            planet_id,
+            moon_id,
             location_type,
             discovery_data.get('location_name') or '',
             discovery_data.get('description') or '',
@@ -1263,8 +1380,8 @@ def _apply_discovery_approval(cursor, submission, session_data):
             discovery_type,
             discovery_name,
             discovery_data.get('system_id'),
-            discovery_data.get('planet_id'),
-            discovery_data.get('moon_id'),
+            planet_id,
+            moon_id,
             location_type,
             discovery_data.get('location_name') or '',
             discovery_data.get('description') or '',
