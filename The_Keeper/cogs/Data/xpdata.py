@@ -240,44 +240,41 @@ def get_cfg(key, default=0):
 
 # ---------------- DB HELPERS ----------------
 def get_rank(level):
-    """
-    Returns the rank dict that matches the user's level.
-    Falls back to highest valid rank if level exceeds defined ranges.
-    """
-
     ranks = CONFIG.get("ranks", [])
+    current_level = int(level)
 
     for rank in ranks:
         min_level = rank.get("min_level")
         max_level = rank.get("max_level")
 
         if min_level is None and max_level is None:
-            if rank.get("level") == level:
+            if rank.get("level") == current_level:
                 return rank
             continue
 
-        if min_level <= level <= max_level:
+        if min_level <= current_level <= max_level:
             return rank
 
     fallback = None
     for rank in ranks:
-        if rank.get("min_level", 0) <= level:
+        if rank.get("min_level", 0) <= current_level:
             fallback = rank
 
     return fallback
 
-def get_rank_name(level: int, role: str):
+
+def get_rank_name(level, role: str):
     role_id = PRIMARY_ROLE_MAP.get(role.lower())
     role = role.lower().replace("primary", "").strip()
     role_name = role.capitalize() if role_id is None else role.capitalize()
-    level = int(level)
 
     rank = next(
         r for r in CONFIG["ranks"]
-        if r["min_level"] <= level <= r["max_level"]
+        if int(r["min_level"]) <= int(level) <= int(r["max_level"])
     )
 
     return f"{rank['name']} {role_name}"
+
 
 async def ensure_user(user_id):
     async with aiosqlite.connect(DB_PATH) as db:
