@@ -1,4 +1,4 @@
-from cogs.Data.xpdata import *
+from Data.xpdata import *
 import time
 import discord
 from discord.ext import commands
@@ -140,7 +140,7 @@ def xp_needed(level):
 
 
 def add_global_xp(user_id, amount):
-    xp, level, dm = get_global(user_id)
+    xp, level, dm = await get_global(user_id)
 
     xp += amount
     leveled_up = False
@@ -178,7 +178,7 @@ async def process_message_xp(message):
 
     await add_xp(user_id, role, xp)
 
-    level, leveled_up, dm = add_global_xp(user_id, xp)
+    level, leveled_up, dm = await add_global_xp(user_id, xp)
 
     return xp
 
