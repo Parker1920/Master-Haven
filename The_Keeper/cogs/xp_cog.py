@@ -139,7 +139,7 @@ def xp_needed(level):
     return 100 + (level * 50)
 
 
-def add_global_xp(user_id, amount):
+async def add_global_xp(user_id, amount):
     xp, level, dm = await get_global(user_id)
 
     xp += amount
