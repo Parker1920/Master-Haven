@@ -230,12 +230,13 @@ export default function FilterModal({ open, onClose }) {
             </Section>
 
             <Section title="⛏ Resources">
-              <SelectField
-                label="Specific resource present"
-                value={filters.resource || ''}
-                onChange={(v) => setSingle('resource', v)}
+              <MultiSelectField
+                label="Resources present"
+                hint="any of"
+                selected={filters.resource || []}
+                onToggle={(v) => toggleMulti('resource', v)}
                 options={options.resources || []}
-                placeholder="Any resource"
+                placeholder="Add a resource…"
               />
             </Section>
           </div>
@@ -378,6 +379,52 @@ function SelectField({ label, value, onChange, options, placeholder }) {
       >
         <option value="">{effectivePlaceholder}</option>
         {(options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function MultiSelectField({ label, hint, selected, onToggle, options, placeholder }) {
+  // Dropdown-driven multi-select for long option lists (e.g. ~40 resources):
+  // pick from the dropdown to add a chip, click a chip's × to remove it. The
+  // dropdown only lists not-yet-selected options, so picking always adds.
+  // selected is an array (filters.resource); toggleMulti adds/removes.
+  const isEmpty = !options || options.length === 0
+  const sel = Array.isArray(selected) ? selected : []
+  const available = (options || []).filter((o) => !sel.includes(o))
+  return (
+    <div>
+      <label className="text-[11px] mb-1 flex items-center justify-between" style={{ color: 'var(--muted)' }}>
+        <span>
+          {label}{' '}
+          {hint && <span className="text-[10px]" style={{ color: 'var(--app-primary)' }}>({hint})</span>}
+        </span>
+        {sel.length > 0 && <span style={{ color: 'var(--app-primary)' }}>{sel.length} selected</span>}
+      </label>
+      {sel.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {sel.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onToggle(s)}
+              className="pill pill-teal px-2 py-1 rounded text-xs flex items-center gap-1"
+              title={`Remove ${s}`}
+            >
+              <span>{s}</span>
+              <span aria-hidden>×</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <select
+        value=""
+        onChange={(e) => { if (e.target.value) onToggle(e.target.value) }}
+        className="haven-input w-full px-3 py-2 text-sm"
+        disabled={isEmpty}
+      >
+        <option value="">{isEmpty ? '(no options)' : placeholder}</option>
+        {available.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
   )

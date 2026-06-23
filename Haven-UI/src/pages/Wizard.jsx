@@ -32,6 +32,7 @@ import { AuthContext } from '../utils/AuthContext'
 import { generateStationPosition } from '../utils/stationPlacement'
 import { getTradeGoodsForEconomyAndTier } from '../utils/economyTradeGoods'
 import { GALAXIES, REALITIES } from '../data/galaxies'
+import { PLANET_DEFAULTS, MOON_DEFAULTS } from '../data/bodyDefaults'
 import { checkExistingSystem } from '../utils/api'
 
 import useDebounce from '../hooks/useDebounce'
@@ -139,21 +140,9 @@ const EMPTY_SYSTEM = {
   submitter_notes: '',
 }
 
-const PLANET_DEFAULTS = {
-  name: '', biome: '', weather: '', sentinel: 'None',
-  fauna: 'N/A', flora: 'N/A', materials: '', base_location: '',
-  base_latitude: '', base_longitude: '',
-  photo: '', notes: '', moons: [],
-  has_rings: 0, is_dissonant: 0, is_infested: 0,
-  extreme_weather: 0, water_world: 0, vile_brood: 0,
-  ancient_bones: 0, salvageable_scrap: 0, storm_crystals: 0, gravitino_balls: 0,
-  is_gas_giant: 0, is_bubble: 0, is_floating_islands: 0, exotic_trophy: '',
-  swarm_debris: 0, trash_debris: 0, high_sentinel_activity: 0, aggressive_sentinel_activity: 0,
-  // Wonders Page Notes — free-form narrative from NMS Log Exploration Guide.
-  // Backend migration 1.76.0 adds matching columns on planets + moons.
-  estimated_age: '', core_element: '', lore_notes: '',
-  root_structure: '', nutrient_source: '',
-}
+// PLANET_DEFAULTS / MOON_DEFAULTS now live in ../data/bodyDefaults (imported
+// above) so the count-dropdown generator and the manual "Add Moon" modal build
+// identical body shells.
 
 // ===========================================================================
 // Component
@@ -555,19 +544,127 @@ export default function Wizard() {
     setEditingPlanet({ ...PLANET_DEFAULTS })
     setPlanetModalOpen(true)
   }
-  // Generate Placeholders button (mockup 5705). Pre-fills N empty planet
-  // cards so the user can fill them in instead of clicking "Add Planet"
-  // repeatedly. NMS systems usually have 1-6 planets — default to 6 if
-  // we have no other signal. Existing planets are preserved.
-  function generatePlaceholders(count = 6) {
-    const have = (system.planets || []).length
-    const need = Math.max(0, count - have)
-    if (need === 0) return
-    const stubs = Array.from({ length: need }, (_, i) => ({
-      ...PLANET_DEFAULTS,
-      name: `Planet ${have + i + 1}`,
-    }))
-    setSystem((s) => ({ ...s, planets: [...(s.planets || []), ...stubs] }))
+  // --- Body-count generator (planets + moons, capped at 6 combined) --------
+  // Two dropdowns (in SectionPlanets) drive these so the user picks counts
+  // instead of clicking "Add" repeatedly. A celestial body counts as "has
+  // data" once the user touches anything beyond a bare generated shell — used
+  // so REDUCING a count never silently deletes filled-in work without a confirm.
+  function bodyHasData(b) {
+    if (!b) return false
+    const nm = (b.name || '').trim()
+    if (nm && !/^(Planet|Moon) \d+$/.test(nm)) return true
+    if ((b.biome || '').trim() || (b.weather || '').trim()) return true
+    if ((b.materials || '').trim() || (b.base_location || '').trim() || (b.notes || '').trim()) return true
+    if (b.photo) return true
+    if ((b.fauna && b.fauna !== 'N/A') || (b.flora && b.flora !== 'N/A')) return true
+    if (b.sentinel && b.sentinel !== 'None') return true
+    for (const k of [
+      'has_rings', 'is_dissonant', 'is_infested', 'extreme_weather', 'water_world', 'vile_brood',
+      'ancient_bones', 'salvageable_scrap', 'storm_crystals', 'gravitino_balls', 'is_gas_giant',
+      'is_bubble', 'is_floating_islands', 'swarm_debris', 'trash_debris',
+      'high_sentinel_activity', 'aggressive_sentinel_activity',
+    ]) {
+      if (b[k]) return true
+    }
+    if ((b.moons || []).length) return true
+    return false
+  }
+  function countMoons(planets) {
+    return (planets || []).reduce((n, p) => n + ((p.moons || []).length), 0)
+  }
+  // Trim total moons down to `target`, removing from the LAST planet backwards.
+  // EMPTY shells go first (no data loss); only if that isn't enough do filled
+  // moons get touched. Returns { planets, ok } — ok=false means the caller's
+  // change couldn't be applied without losing data (and was declined / blocked),
+  // so the caller should keep the original state.
+  //   confirm   — ask before removing a FILLED moon (direct moon-count change).
+  //   emptyOnly — never remove a filled moon; signal ok=false instead (used when
+  //               raising the planet count squeezes the combined cap).
+  function trimMoons(planets, target, { confirm = false, emptyOnly = false } = {}) {
+    let total = countMoons(planets)
+    if (total <= target) return { planets, ok: true }
+    const next = planets.map((p) => ({ ...p, moons: [...(p.moons || [])] }))
+    // Pass 1: drop empty moon shells (last planet first).
+    for (let pi = next.length - 1; pi >= 0 && total > target; pi -= 1) {
+      const moons = next[pi].moons
+      for (let mi = moons.length - 1; mi >= 0 && total > target; mi -= 1) {
+        if (!bodyHasData(moons[mi])) { moons.splice(mi, 1); total -= 1 }
+      }
+    }
+    if (total <= target) return { planets: next, ok: true }
+    if (emptyOnly) return { planets, ok: false }  // remaining would be filled moons — block
+    // Pass 2: filled moons — confirm before removing.
+    if (confirm && !window.confirm(`Remove ${total - target} moon(s) with data you've entered?`)) {
+      return { planets, ok: false }
+    }
+    for (let pi = next.length - 1; pi >= 0 && total > target; pi -= 1) {
+      const moons = next[pi].moons
+      while (moons.length && total > target) { moons.pop(); total -= 1 }
+    }
+    return { planets: next, ok: true }
+  }
+  // Set the number of planets (0-6). Generates empty shells when increasing,
+  // trims from the end when decreasing (confirm if a filled planet would go),
+  // then enforces the 6-body cap by trimming excess EMPTY moons. If filled
+  // moons would have to be dropped to fit, the increase is blocked instead.
+  function setPlanetCount(n) {
+    n = Math.max(0, Math.min(6, n))
+    setSystem((s) => {
+      let planets = [...(s.planets || [])]
+      const have = planets.length
+      if (n > have) {
+        for (let i = have; i < n; i += 1) planets.push({ ...PLANET_DEFAULTS, name: `Planet ${i + 1}` })
+      } else if (n < have) {
+        const toRemove = planets.slice(n)
+        if (toRemove.some(bodyHasData) && !window.confirm(`Remove ${have - n} planet(s)? Some have data you've entered.`)) {
+          return s
+        }
+        planets = planets.slice(0, n)
+      }
+      const { planets: trimmed, ok } = trimMoons(planets, Math.max(0, 6 - n), { emptyOnly: true })
+      if (!ok) {
+        window.alert('Reduce the moon count first — those filled moons would push this system past the 6-body cap.')
+        return s
+      }
+      return { ...s, planets: trimmed }
+    })
+  }
+  // Set the TOTAL number of moons across the system (0 .. 6 - planets). New
+  // moons attach to the FIRST planet (reassign via the moon "Orbits" selector);
+  // trimming removes empty shells first, then filled moons with a confirm.
+  function setMoonCount(m) {
+    setSystem((s) => {
+      const planets = (s.planets || []).map((p) => ({ ...p, moons: [...(p.moons || [])] }))
+      if (!planets.length) return s  // need at least one planet to hold a moon
+      const cap = Math.max(0, 6 - planets.length)
+      m = Math.max(0, Math.min(cap, m))
+      let current = countMoons(planets)
+      if (m > current) {
+        const first = planets[0]
+        while (current < m) {
+          first.moons.push({ ...MOON_DEFAULTS, name: `Moon ${first.moons.length + 1}` })
+          current += 1
+        }
+        return { ...s, planets }
+      }
+      if (m < current) {
+        const { planets: trimmed, ok } = trimMoons(planets, m, { confirm: true })
+        return ok ? { ...s, planets: trimmed } : s
+      }
+      return s
+    })
+  }
+  // Move a moon from one planet to another (the per-moon "Orbits" selector).
+  function reassignMoon(fromIdx, moonIdx, toIdx) {
+    if (fromIdx === toIdx) return
+    setSystem((s) => {
+      const planets = (s.planets || []).map((p) => ({ ...p, moons: [...(p.moons || [])] }))
+      if (!planets[fromIdx] || !planets[toIdx]) return s
+      const [moon] = planets[fromIdx].moons.splice(moonIdx, 1)
+      if (!moon) return s
+      planets[toIdx].moons.push(moon)
+      return { ...s, planets }
+    })
   }
   function editPlanet(i) {
     setEditingPlanetIndex(i)
@@ -720,6 +817,13 @@ export default function Wizard() {
         if (!m.name?.trim()) push(`moon-${i}-${j}`, `Moon ${j + 1} of planet ${i + 1} needs a name`, 'wiz-planets', 'planets')
       })
     })
+    // NMS systems hold at most 6 celestial bodies (planets + moons combined).
+    // The count dropdowns enforce this, but guard the submit too in case bodies
+    // were added another way.
+    {
+      const _bodies = (system.planets || []).reduce((n, p) => n + 1 + ((p.moons || []).length), 0)
+      if (_bodies > 6) push('body-cap', `A system can have at most 6 bodies (planets + moons); you have ${_bodies}`, 'wiz-planets', 'planets')
+    }
     // Duplicate body names break the discovery-promotion pipeline on approval
     // (_promote_draft_discoveries uses (planet, moon) tuples as map keys with
     // setdefault — second match wins NULL link). Block at submit time so the
@@ -1461,7 +1565,9 @@ export default function Wizard() {
               editPlanet={editPlanet}
               updatePlanet={updatePlanet}
               removePlanet={removePlanet}
-              generatePlaceholders={generatePlaceholders}
+              setPlanetCount={setPlanetCount}
+              setMoonCount={setMoonCount}
+              reassignMoon={reassignMoon}
               openHelp={openHelpAt}
             />
           )}
@@ -1983,40 +2089,79 @@ function SectionAttrs({ system, setField, setSystem, requiredOnly, diffMap = {},
   )
 }
 
-function SectionPlanets({ system, addPlanet, editPlanet, updatePlanet, removePlanet, generatePlaceholders, openHelp }) {
-  const planetCount = (system.planets || []).length
+function SectionPlanets({ system, addPlanet, editPlanet, updatePlanet, removePlanet, setPlanetCount, setMoonCount, reassignMoon, openHelp }) {
+  const planets = system.planets || []
+  const planetCount = planets.length
+  const moonCount = planets.reduce((n, p) => n + ((p.moons || []).length), 0)
+  const totalBodies = planetCount + moonCount
+  const atCap = totalBodies >= 6
+  const moonMax = Math.max(0, 6 - planetCount)
+  const selectStyle = { backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }
   return (
     <Section id="planets" title="03 · Planets & Moons">
       <div id="wiz-planets">
-        {(system.planets || []).map((p, i) => (
+        {/* Body-count generator — NMS systems hold up to 6 bodies (planets +
+            moons combined). Pick the counts and shells are generated for you. */}
+        <div className="flex flex-wrap items-end gap-4 mb-3 p-3 rounded" style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-3)' }}>
+          <div>
+            <label className="block text-xs font-medium mb-1 opacity-80">Planets</label>
+            <select
+              className="p-2 rounded text-sm"
+              style={selectStyle}
+              value={planetCount}
+              onChange={(e) => setPlanetCount(Number(e.target.value))}
+            >
+              {[0, 1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1 opacity-80">Moons</label>
+            <select
+              className="p-2 rounded text-sm disabled:opacity-50"
+              style={selectStyle}
+              value={moonCount}
+              disabled={planetCount === 0}
+              onChange={(e) => setMoonCount(Number(e.target.value))}
+              title={planetCount === 0 ? 'Add a planet first — moons orbit a planet' : `Up to ${moonMax} with ${planetCount} planet(s)`}
+            >
+              {Array.from({ length: moonMax + 1 }, (_, n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="text-sm">
+            <span className="opacity-70">Bodies: </span>
+            <span className="font-semibold" style={{ color: atCap ? 'var(--app-accent-amber)' : 'var(--app-primary)' }}>
+              {totalBodies} / 6
+            </span>
+            {planetCount > 0 && (
+              <span className="opacity-60 ml-2">New moons attach to {planets[0]?.name || 'Planet 1'} — use “Orbits” to move them.</span>
+            )}
+          </div>
+        </div>
+
+        {planets.map((p, i) => (
           <div key={i} className="mb-2">
-            <PlanetEditor index={i} planet={p} onChange={updatePlanet} onRemove={removePlanet} openHelp={openHelp} />
+            <PlanetEditor
+              index={i}
+              planet={p}
+              planets={planets}
+              onChange={updatePlanet}
+              onRemove={removePlanet}
+              onReassignMoon={(moonIdx, toIdx) => reassignMoon(i, moonIdx, toIdx)}
+              openHelp={openHelp}
+            />
             <div className="mt-1">
               <button type="button" onClick={() => editPlanet(i)} className="px-3 py-1.5 bg-sky-600 text-white rounded text-sm">Edit</button>
             </div>
           </div>
         ))}
         {planetCount === 0 && (
-          <p className="text-sm opacity-70 mb-2">No planets added yet. Add one to score points on the Planets categories.</p>
+          <p className="text-sm opacity-70 mb-2">No planets yet. Pick a planet count above (or “Add Planet”) to score the Planets categories.</p>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button onClick={addPlanet}>+ Add Planet</Button>
-          {generatePlaceholders && (
-            <button
-              type="button"
-              onClick={() => generatePlaceholders(6)}
-              className="px-3 py-2 rounded text-sm font-medium"
-              style={{ backgroundColor: 'var(--app-accent-2)', color: '#fff' }}
-              title="Pre-fill 6 empty planet cards (NMS systems usually have up to 6)"
-            >
-              + Generate Placeholders
-            </button>
-          )}
+          <Button onClick={addPlanet} disabled={atCap}>+ Add Planet</Button>
         </div>
-        {planetCount > 0 && planetCount < 6 && generatePlaceholders && (
-          <p className="text-xs opacity-60 mt-1">
-            {planetCount} planet{planetCount !== 1 ? 's' : ''} so far. Click "Generate Placeholders" to top up to 6 with empty cards.
-          </p>
+        {atCap && (
+          <p className="text-xs opacity-60 mt-1">Maximum of 6 celestial bodies reached.</p>
         )}
       </div>
     </Section>

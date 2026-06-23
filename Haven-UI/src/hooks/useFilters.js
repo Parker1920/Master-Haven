@@ -16,7 +16,7 @@
  *   biome              : string    (single)
  *   weather            : string    (single)
  *   sentinel_level     : string    (single)
- *   resource           : string    (substring)
+ *   resource           : string[]  (OR, multi)   e.g. ['Gold','Copper']
  *   is_complete        : string[]  (OR, multi)   e.g. ['S','A']  — grade
  *   has_moons          : bool|null (tri-state)
  *   min_planets        : number
@@ -42,7 +42,7 @@ export const FILTER_LABELS = {
   max_planets: 'Planets ≤',
 }
 
-export const MULTI_KEYS = ['star_type', 'economy_level', 'conflict_level', 'is_complete']
+export const MULTI_KEYS = ['star_type', 'economy_level', 'conflict_level', 'is_complete', 'resource']
 
 export function isEmptyFilterValue(v) {
   if (v == null) return true

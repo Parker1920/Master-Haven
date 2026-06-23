@@ -36,11 +36,11 @@ const RECENTLY_VIEWED_KEY = 'haven.systemsv2.recentlyViewed'
 const RECENTLY_VIEWED_CAP = 8
 
 // Keys that should be parsed back as arrays from the URL (OR-logic multi).
-const FILTER_MULTI_KEYS = ['star_type', 'economy_level', 'conflict_level', 'is_complete']
+const FILTER_MULTI_KEYS = ['star_type', 'economy_level', 'conflict_level', 'is_complete', 'resource']
 // Keys that are scalar. tri-state has_moons stored as 'true'/'false'.
 const FILTER_SCALAR_KEYS = [
   'economy_type', 'dominant_lifeform', 'biome', 'weather', 'sentinel_level',
-  'resource', 'stellar_classification', 'has_moons', 'min_planets', 'max_planets',
+  'stellar_classification', 'has_moons', 'min_planets', 'max_planets',
 ]
 // Hierarchy keys we must NOT treat as filters.
 const HIERARCHY_KEYS = new Set(['reality', 'galaxy', 'rx', 'ry', 'rz', 'rname'])

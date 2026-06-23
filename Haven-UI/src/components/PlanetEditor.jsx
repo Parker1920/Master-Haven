@@ -2,15 +2,23 @@ import React, { useState } from 'react'
 import CelestialBodyEditor from './CelestialBodyEditor'
 import MoonEditor from './MoonEditor'
 import Modal from './Modal'
+import { MOON_DEFAULTS } from '../data/bodyDefaults'
 
 /**
  * Planet editor - thin wrapper around CelestialBodyEditor that adds moon management.
- * Props: planet, index, onChange, onRemove, onSave.
+ * Props:
+ *   planet, index, onChange, onRemove, onSave, openHelp
+ *   planets        - full planet list (for the moon "Orbits" reassignment dropdown)
+ *   onReassignMoon - (moonIdx, toPlanetIdx) => void, move a moon to another planet
  */
-export default function PlanetEditor({ planet, index, onChange, onRemove, onSave, openHelp }) {
+export default function PlanetEditor({ planet, index, onChange, onRemove, onSave, openHelp, planets = [], onReassignMoon }) {
   const [moonModalOpen, setMoonModalOpen] = useState(false)
   const [editingMoonIndex, setEditingMoonIndex] = useState(null)
   const [editingMoon, setEditingMoon] = useState(null)
+
+  // 6-body cap (planets + moons combined). Disable "Add Moon" at the cap.
+  const totalBodies = (planets || []).reduce((n, p) => n + 1 + ((p.moons || []).length), 0)
+  const atCap = (planets && planets.length) ? totalBodies >= 6 : false
 
   function setField(k, v) {
     const p = { ...planet, [k]: v }
@@ -19,19 +27,7 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
 
   function openAddMoonModal() {
     setEditingMoonIndex(-1)
-    setEditingMoon({
-      name: '', biome: '', weather: '', sentinel: 'None',
-      fauna: 'N/A', flora: 'N/A', materials: '', notes: '', photo: null,
-      has_rings: 0, is_dissonant: 0, is_infested: 0,
-      extreme_weather: 0, water_world: 0, vile_brood: 0, exotic_trophy: '',
-      // v1.65.0 audit promoted these from planet-only to shared. Initialize
-      // so the moon's edit state has the keys the toggles expect.
-      ancient_bones: 0, salvageable_scrap: 0, storm_crystals: 0, gravitino_balls: 0,
-      is_bubble: 0, is_floating_islands: 0,
-      // Wonders Page Notes (migration 1.76.0)
-      estimated_age: '', core_element: '', lore_notes: '',
-      root_structure: '', nutrient_source: ''
-    })
+    setEditingMoon({ ...MOON_DEFAULTS })
     setMoonModalOpen(true)
   }
 
@@ -76,14 +72,37 @@ export default function PlanetEditor({ planet, index, onChange, onRemove, onSave
     >
       {/* Moon management — planet-only feature */}
       <div className="mt-3 mb-1">
-        <button type="button" onClick={openAddMoonModal} className="px-3 py-1.5 bg-green-600 rounded text-sm">Add Moon</button>
+        <button
+          type="button"
+          onClick={openAddMoonModal}
+          disabled={atCap}
+          className="px-3 py-1.5 bg-green-600 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          title={atCap ? 'System already has 6 celestial bodies (planets + moons)' : 'Add a moon to this planet'}
+        >
+          Add Moon
+        </button>
       </div>
       <div className="mt-1">
         {(planet.moons || []).map((m, i) => (
           <div key={i}>
             <MoonEditor index={i} moon={m} onChange={updateMoon} onRemove={removeMoon} />
-            <div className="mt-1">
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
               <button type="button" onClick={() => editMoon(i)} className="px-2 py-1 bg-sky-600 text-white rounded">Edit Moon</button>
+              {planets.length > 1 && onReassignMoon && (
+                <label className="text-xs opacity-80 flex items-center gap-1">
+                  Orbits:
+                  <select
+                    value={index}
+                    onChange={(e) => onReassignMoon(i, Number(e.target.value))}
+                    className="p-1 rounded text-xs"
+                    style={{ backgroundColor: 'var(--app-card)', border: '1px solid var(--app-accent-3)' }}
+                  >
+                    {planets.map((pp, pi) => (
+                      <option key={pi} value={pi}>{pp.name || `Planet ${pi + 1}`}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           </div>
         ))}

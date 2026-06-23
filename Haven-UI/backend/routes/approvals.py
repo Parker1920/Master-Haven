@@ -105,11 +105,16 @@ def validate_system_data(system: dict) -> tuple[bool, str]:
         if not isinstance(system['planets'], list):
             return False, "Planets must be a list"
 
+        # NMS systems hold at most 6 celestial bodies total (planets + moons
+        # combined). Enforce the cap here so it holds for every intake path —
+        # wizard, direct save, and API — not just the frontend dropdowns.
+        total_bodies = 0
         for i, planet in enumerate(system['planets']):
             if not isinstance(planet, dict):
                 return False, f"Planet {i} is invalid"
             if not planet.get('name') or not planet['name'].strip():
                 return False, f"Planet {i} is missing a name"
+            total_bodies += 1
 
             # Validate moons if present
             if 'moons' in planet and planet['moons']:
@@ -120,6 +125,10 @@ def validate_system_data(system: dict) -> tuple[bool, str]:
                         return False, f"Planet {i} moon {j} is invalid"
                     if not moon.get('name') or not moon['name'].strip():
                         return False, f"Planet {i} moon {j} is missing a name"
+                    total_bodies += 1
+
+        if total_bodies > 6:
+            return False, f"A system can have at most 6 celestial bodies (planets + moons); got {total_bodies}"
 
     return True, ""
 

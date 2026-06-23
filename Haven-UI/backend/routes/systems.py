@@ -1410,25 +1410,31 @@ async def api_systems_filter_options(reality: str = None, galaxy: str = None):
             cursor.execute(f"SELECT DISTINCT p.{column} FROM planets p {planet_join} {planet_where} ORDER BY p.{column}", planet_params)
             return _dedup_clean(row[0] for row in cursor.fetchall())
 
-        # Resources come from the planets.materials list (the dedicated
-        # common/uncommon/rare columns are ~empty). Normalize each cell to
-        # canonical names (migration 1.93.0 already did this in the DB; this
-        # also covers any not-yet-normalized rows) and keep only tokens that
+        # Resources come from the planets.materials AND moons.materials lists
+        # (the dedicated common/uncommon/rare columns are ~empty). Normalize each
+        # cell to canonical names (migration 1.93.0 already did this in the DB;
+        # this also covers any not-yet-normalized rows) and keep only tokens that
         # map to a real canonical resource — so the dropdown is the clean set
-        # actually present, not the 170-entry typo/case mess.
+        # actually present, not the 170-entry typo/case mess. Moons are scanned
+        # too so a resource that only occurs on a moon is still listed + filterable.
         def get_distinct_resources():
             from resource_catalog import normalize_materials, CANONICAL_RESOURCES
             canon_by_lower = {r.lower(): r for r in CANONICAL_RESOURCES}
             present = set()
-            cursor.execute(f"SELECT DISTINCT p.materials FROM planets p {planet_join} {planet_where}", planet_params)
-            for row in cursor.fetchall():
-                mats = row[0]
-                if not mats:
-                    continue
-                for part in normalize_materials(mats).split(','):
-                    key = part.strip().lower()
-                    if key in canon_by_lower:
-                        present.add(canon_by_lower[key])
+
+            def _collect(sql):
+                cursor.execute(sql, planet_params)
+                for row in cursor.fetchall():
+                    mats = row[0]
+                    if not mats:
+                        continue
+                    for part in normalize_materials(mats).split(','):
+                        key = part.strip().lower()
+                        if key in canon_by_lower:
+                            present.add(canon_by_lower[key])
+
+            _collect(f"SELECT DISTINCT p.materials FROM planets p {planet_join} {planet_where}")
+            _collect(f"SELECT DISTINCT m.materials FROM moons m JOIN planets p ON m.planet_id = p.id {planet_join} {planet_where}")
             return sorted(present)
 
         return {

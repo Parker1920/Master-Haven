@@ -43,6 +43,100 @@ def _life_descriptor_filled(val, val_text):
     return False
 
 
+def _score_body_environment(body):
+    """Environment completeness for ONE celestial body (planet OR moon).
+
+    Both the planets and moons tables carry biome / weather / sentinel (and the
+    *_text variants), so the same three-field check applies to a moon as to a
+    planet. Returns (filled_count, total_fields, field_details).
+    """
+    fields = []
+    filled = 0
+
+    if _is_filled(body.get('biome')):
+        filled += 1
+        fields.append({'name': 'Biome', 'value': body.get('biome'), 'status': 'filled'})
+    else:
+        fields.append({'name': 'Biome', 'value': None, 'status': 'missing'})
+
+    if _is_filled(body.get('weather')):
+        filled += 1
+        fields.append({'name': 'Weather', 'value': body.get('weather'), 'status': 'filled'})
+    elif _is_filled(body.get('weather_text')):
+        filled += 1
+        fields.append({'name': 'Weather', 'value': body.get('weather_text'), 'status': 'filled'})
+    else:
+        fields.append({'name': 'Weather', 'value': None, 'status': 'missing'})
+
+    if _is_filled(body.get('sentinel'), allow_none_sentinel=True):
+        filled += 1
+        fields.append({'name': 'Sentinels', 'value': body.get('sentinel'), 'status': 'filled'})
+    elif _is_filled(body.get('sentinels_text')):
+        filled += 1
+        fields.append({'name': 'Sentinels', 'value': body.get('sentinels_text'), 'status': 'filled'})
+    else:
+        fields.append({'name': 'Sentinels', 'value': None, 'status': 'missing'})
+
+    return filled, 3, fields
+
+
+def _score_body_life(body):
+    """Life completeness for ONE celestial body (planet OR moon).
+
+    Dead-biome bodies legitimately have no fauna/flora, so those fields are
+    skipped (not counted against the body) when the biome is in NO_LIFE_BIOMES.
+    Returns (ratio, filled_count, applicable_count, field_details).
+    """
+    fields = []
+    filled = 0
+    applicable = 0
+    biome_val = (body.get('biome') or '').strip()
+    is_dead_biome = biome_val in NO_LIFE_BIOMES
+
+    if _life_descriptor_filled(body.get('fauna'), body.get('fauna_text')):
+        filled += 1
+        applicable += 1
+        fields.append({'name': 'Fauna', 'value': body.get('fauna') or body.get('fauna_text'), 'status': 'filled'})
+    elif not is_dead_biome:
+        applicable += 1
+        fields.append({'name': 'Fauna', 'value': None, 'status': 'missing'})
+    else:
+        fields.append({'name': 'Fauna', 'value': None, 'status': 'skipped'})
+
+    if _life_descriptor_filled(body.get('flora'), body.get('flora_text')):
+        filled += 1
+        applicable += 1
+        fields.append({'name': 'Flora', 'value': body.get('flora') or body.get('flora_text'), 'status': 'filled'})
+    elif not is_dead_biome:
+        applicable += 1
+        fields.append({'name': 'Flora', 'value': None, 'status': 'missing'})
+    else:
+        fields.append({'name': 'Flora', 'value': None, 'status': 'skipped'})
+
+    materials_val = (body.get('materials') or '').strip()
+    has_materials = bool(materials_val) and materials_val not in ('N/A', 'None')
+    if has_materials:
+        applicable += 1
+        filled += 1
+        display = materials_val[:50] + ('...' if len(materials_val) > 50 else '')
+        fields.append({'name': 'Resources', 'value': display, 'status': 'filled'})
+    else:
+        res_filled = 0
+        for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
+            if _is_filled(body.get(f)):
+                res_filled += 1
+        if res_filled > 0:
+            applicable += 1
+            filled += 1
+            fields.append({'name': 'Resources', 'value': f'{res_filled}/3 types', 'status': 'filled'})
+        else:
+            applicable += 1
+            fields.append({'name': 'Resources', 'value': None, 'status': 'missing'})
+
+    ratio = filled / max(applicable, 1)
+    return ratio, filled, applicable, fields
+
+
 # The five "Wonders Page Notes" fields (migration 1.76.0). A planet counts as
 # having wonder information when ANY one of these is populated — root_structure
 # and nutrient_source only apply to living/lush worlds, so requiring all five
@@ -203,6 +297,24 @@ def calculate_completeness_score(cursor, system_id) -> dict:
     cursor.execute('SELECT * FROM planets WHERE system_id = ?', (system_id,))
     planets = [dict(row) for row in cursor.fetchall()]
 
+    # Moons count as equal celestial bodies in the planet grade: each body
+    # (planet OR moon) is weighted 1/(planets+moons) of the Planet Environment
+    # and Planet Life categories. So a 5-planet + 1-moon system gives each body
+    # ~16.7%, and a moon earns its share by carrying its own biome/weather/
+    # sentinel + fauna/flora/resources. Built here as one ordered list so the
+    # env/life averaging and the per-body detail breakdown stay in lockstep.
+    bodies = []
+    for p in planets:
+        bodies.append({'body': p, 'label': p.get('name') or 'Unknown', 'is_moon': False})
+        cursor.execute('SELECT * FROM moons WHERE planet_id = ?', (p.get('id'),))
+        for mrow in cursor.fetchall():
+            m = dict(mrow)
+            bodies.append({
+                'body': m,
+                'label': f"🌙 {m.get('name') or 'Unknown'} (moon of {p.get('name') or 'Unknown'})",
+                'is_moon': True,
+            })
+
     cursor.execute('SELECT * FROM space_stations WHERE system_id = ?', (system_id,))
     station = cursor.fetchone()
     station = dict(station) if station else None
@@ -264,102 +376,30 @@ def calculate_completeness_score(cursor, system_id) -> dict:
 
     # --- Planet Environment avg (25 pts) ---
     # --- Planet Life avg (15 pts) ---
+    # Averaged across ALL bodies (planets AND moons) so each body weighs
+    # 1/(planets+moons). Moons are scored with the exact same per-body helpers
+    # as planets — a moon that's left blank drags the planet grade down just
+    # like an undocumented planet would.
     planet_env_score = 0
     planet_life_score = 0
     planet_env_details = []
     planet_life_details = []
 
-    if planets:
+    if bodies:
         env_totals = []
         life_totals = []
 
-        for p in planets:
-            p_name = p.get('name', 'Unknown')
-            p_env_fields = []
-            p_life_fields = []
+        for b in bodies:
+            body = b['body']
+            label = b['label']
 
-            # Environment scoring
-            env_filled = 0
-            if _is_filled(p.get('biome')):
-                env_filled += 1
-                p_env_fields.append({'name': 'Biome', 'value': p.get('biome'), 'status': 'filled'})
-            else:
-                p_env_fields.append({'name': 'Biome', 'value': None, 'status': 'missing'})
-
-            weather_filled = _is_filled(p.get('weather'))
-            weather_text_filled = _is_filled(p.get('weather_text'))
-            if weather_filled:
-                env_filled += 1
-                p_env_fields.append({'name': 'Weather', 'value': p.get('weather'), 'status': 'filled'})
-            elif weather_text_filled:
-                env_filled += 1
-                p_env_fields.append({'name': 'Weather', 'value': p.get('weather_text'), 'status': 'filled'})
-            else:
-                p_env_fields.append({'name': 'Weather', 'value': None, 'status': 'missing'})
-
-            if _is_filled(p.get('sentinel'), allow_none_sentinel=True):
-                env_filled += 1
-                p_env_fields.append({'name': 'Sentinels', 'value': p.get('sentinel'), 'status': 'filled'})
-            elif _is_filled(p.get('sentinels_text')):
-                env_filled += 1
-                p_env_fields.append({'name': 'Sentinels', 'value': p.get('sentinels_text'), 'status': 'filled'})
-            else:
-                p_env_fields.append({'name': 'Sentinels', 'value': None, 'status': 'missing'})
-
-            env_total_fields = 3
+            env_filled, env_total_fields, p_env_fields = _score_body_environment(body)
             env_totals.append(min(env_filled / env_total_fields, 1.0))
-            planet_env_details.append({'name': p_name, 'filled': env_filled, 'total': env_total_fields, 'fields': p_env_fields})
+            planet_env_details.append({'name': label, 'filled': env_filled, 'total': env_total_fields, 'fields': p_env_fields})
 
-            # Life scoring
-            life_filled = 0
-            life_applicable = 0
-            biome_val = (p.get('biome') or '').strip()
-            is_dead_biome = biome_val in NO_LIFE_BIOMES
-
-            if _life_descriptor_filled(p.get('fauna'), p.get('fauna_text')):
-                life_filled += 1
-                life_applicable += 1
-                p_life_fields.append({'name': 'Fauna', 'value': p.get('fauna') or p.get('fauna_text'), 'status': 'filled'})
-            elif not is_dead_biome:
-                life_applicable += 1
-                p_life_fields.append({'name': 'Fauna', 'value': None, 'status': 'missing'})
-            else:
-                p_life_fields.append({'name': 'Fauna', 'value': None, 'status': 'skipped'})
-
-            if _life_descriptor_filled(p.get('flora'), p.get('flora_text')):
-                life_filled += 1
-                life_applicable += 1
-                p_life_fields.append({'name': 'Flora', 'value': p.get('flora') or p.get('flora_text'), 'status': 'filled'})
-            elif not is_dead_biome:
-                life_applicable += 1
-                p_life_fields.append({'name': 'Flora', 'value': None, 'status': 'missing'})
-            else:
-                p_life_fields.append({'name': 'Flora', 'value': None, 'status': 'skipped'})
-
-            materials_val = (p.get('materials') or '').strip()
-            has_materials = bool(materials_val) and materials_val not in ('N/A', 'None')
-            if has_materials:
-                life_applicable += 1
-                life_filled += 1
-                display = materials_val[:50] + ('...' if len(materials_val) > 50 else '')
-                p_life_fields.append({'name': 'Resources', 'value': display, 'status': 'filled'})
-            else:
-                res_filled = 0
-                res_total = 0
-                for f in ['common_resource', 'uncommon_resource', 'rare_resource']:
-                    res_total += 1
-                    if _is_filled(p.get(f)):
-                        res_filled += 1
-                if res_filled > 0:
-                    life_applicable += 1
-                    life_filled += 1
-                    p_life_fields.append({'name': 'Resources', 'value': f'{res_filled}/{res_total} types', 'status': 'filled'})
-                else:
-                    life_applicable += 1
-                    p_life_fields.append({'name': 'Resources', 'value': None, 'status': 'missing'})
-
-            life_totals.append(life_filled / max(life_applicable, 1))
-            planet_life_details.append({'name': p_name, 'filled': life_filled, 'total': life_applicable, 'fields': p_life_fields})
+            life_ratio, life_filled, life_applicable, p_life_fields = _score_body_life(body)
+            life_totals.append(life_ratio)
+            planet_life_details.append({'name': label, 'filled': life_filled, 'total': life_applicable, 'fields': p_life_fields})
 
         planet_env_score = round((sum(env_totals) / len(env_totals)) * 25)
         planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
@@ -410,6 +450,7 @@ def calculate_completeness_score(cursor, system_id) -> dict:
             'planet_life': planet_life_score,
             'space_station': station_score,
             'planet_count': len(planets),
+            'body_count': len(bodies),
             'details': {
                 'system_core': sys_core_details,
                 'system_extra': sys_extra_details,

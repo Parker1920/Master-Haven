@@ -7690,3 +7690,39 @@ def migration_1_97_0(conn):
         )
     finally:
         conn.row_factory = prev_factory
+
+
+@register_migration("1.98.0", "Re-score systems for moon-weighted Planet Environment/Life grading (moons now count as equal celestial bodies)")
+def migration_1_98_0(conn):
+    """Materialize the body-weighted planet grade into the cached scores.
+
+    The Planet Environment (25 pts) and Planet Life (15 pts) categories now
+    average over ALL celestial bodies — planets AND moons — so each body weighs
+    1/(planets+moons) of those categories (Feature: moon-weighted grading). The
+    live formula already does this; this pass rewrites every system's cached
+    `is_complete` (0-100) and `is_fully_charted` flag so the systems list / map /
+    search / posters (which read the cached column) agree with the live detail
+    page. Idempotent and order-safe: it just re-runs the single-source live
+    scorer (services.completeness.update_completeness_score). Running after the
+    1.97.0 re-score in the same deploy is harmless — it converges to the same
+    values; running standalone applies the new moon weighting to systems scored
+    before this change.
+    """
+    # update_completeness_score reads rows as dicts → needs sqlite3.Row (mirrors 1.90/1.91/1.97).
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        from services.completeness import update_completeness_score
+        id_cursor = conn.cursor()
+        id_cursor.execute("SELECT id FROM systems")
+        system_ids = [row[0] for row in id_cursor.fetchall()]
+        score_cursor = conn.cursor()
+        logger.info(f"Migration 1.98.0: re-scoring {len(system_ids)} systems for moon-weighted planet grading...")
+        for sys_id in system_ids:
+            try:
+                update_completeness_score(score_cursor, sys_id)
+            except Exception as e:  # noqa: BLE001 — one bad row shouldn't abort the migration
+                logger.warning(f"Migration 1.98.0: re-score failed for {sys_id}: {e}")
+        logger.info(f"Migration 1.98.0: re-scored {len(system_ids)} systems (moon-weighted)")
+    finally:
+        conn.row_factory = prev_factory
