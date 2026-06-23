@@ -1060,6 +1060,10 @@ class HavenScraperCog(commands.Cog):
             except discord.HTTPException:
                 continue
 
+            # Optional: Skip if the bot has already reacted to this post in the past
+            if any(r.me and r.emoji == "✅" for r in starter_message.reactions):
+                continue
+
             body_match = BODY_PATTERN.search(starter_message.content)
             if not body_match:
                 continue
@@ -1085,8 +1089,17 @@ class HavenScraperCog(commands.Cog):
             try:
                 await self.api.submit_system(payload)
                 success_count += 1
+                
+                # --- ADDED: React to the starter message on success ---
+                await starter_message.add_reaction("✅")
+                
             except Exception as e:
                 print(f"Failed to sync thread {thread.id} to Haven API: {e}")
+                # Optional: Add a failure emoji if the API call breaks
+                try:
+                    await starter_message.add_reaction("❌")
+                except:
+                    pass
 
         await ctx.send(f"Sync complete! Successfully submitted {success_count} entries to Haven API.")
 
@@ -1137,11 +1150,16 @@ class HavenScraperCog(commands.Cog):
 
         try:
             await self.api.submit_system(payload)
-            print(f"Successfully auto-submitted new system: {system_name}")
+            print(f"Successfully submitted new system: {system_name}")
+            
+            await starter_message.add_reaction("✅")
+            
         except Exception as e:
             print(f"Failed to auto-submit system {system_name}: {e}")
-
-
+            try:
+                await starter_message.add_reaction("❌")
+            except:
+                pass
     
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
