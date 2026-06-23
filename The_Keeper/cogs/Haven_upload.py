@@ -165,6 +165,7 @@ class RealitySelectView(discord.ui.View):
         await interaction.response.send_modal(GalaxyModal(self.glyph_code, self.user_id, self.api, self.selected_reality))
     
     # -------------------- GALAXY MODAL ----------------
+# -------------------- GALAXY MODAL ----------------
 class GalaxyModal(discord.ui.Modal):
     def __init__(self, glyph_code, user_id, api, reality):
         super().__init__(title="Galaxy Submission")
@@ -182,37 +183,10 @@ class GalaxyModal(discord.ui.Modal):
         self.add_item(self.galaxy_name)
     
     async def on_submit(self, interaction: discord.Interaction):
-        provided_name = self.system_name.value.strip()
-        
-        if not provided_name:
-            generated_name = generate_system_name(
-                glyph_code=self.glyph_code,
-                community_tag=self.community_tag.value,
-                levels_data=self.levels
-            )
-        else:
-            generated_name = provided_name
-    
-        system_payload = {
-            "glyph_code": self.glyph_code,
-            "system_name": generated_name, 
-            "discord_tag": self.community_tag.value,
-            "galaxy_name": self.galaxy,
-            "reality": self.reality,
-            "dominant_lifeform": self.levels.get("race", "Unknown"),
-            "conflict_level": self.levels.get("conflict_lvl", "Unknown"),
-            "economy_type": self.levels.get("star_type", "Unknown"),
-            "economy_strength": self.levels.get("economy_lvl", "1"),
-            "user_id": self.user_id
-        }
-        
-        view = PlanetPromptView(self.user_id, self.api, system_payload)
-        await interaction.response.send_message(
-            f"Captured details for **{generated_name}**!\n"
-            "Would you like to add planets to this system before final submission?", 
-            view=view, 
-            ephemeral=True
-        )
+
+        galaxy = self.galaxy_name.value
+        view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality)
+        await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
 
     
 #-------------------- LEVEL MODAL --------------
@@ -291,7 +265,7 @@ class LevelSelectView(discord.ui.View):
                 )
   
     
-    # -------------------- SYSTEM MODAL -----------
+# -------------------- SYSTEM MODAL -----------
 class SystemSubmissionModal(discord.ui.Modal):
     def __init__(self, glyph_code, user_id, api, galaxy, reality, levels):
         super().__init__(title="Submit System Log")
@@ -302,7 +276,12 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.reality = reality
         self.levels = levels
     
-        self.system_name = TextInput(label="System Name", max_length=50, required=True)
+        self.system_name = TextInput(
+            label="System Name", 
+            placeholder="Leave blank to autogenerate", 
+            max_length=50, 
+            required=False
+        )
         self.add_item(self.system_name)
     
         self.community_tag = TextInput(
@@ -314,23 +293,35 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.add_item(self.community_tag)
     
     async def on_submit(self, interaction: discord.Interaction):
+       
+        provided_name = self.system_name.value.strip()
         
+        if not provided_name:
+            generated_name = generate_system_name(
+                glyph_code=self.glyph_code,
+                community_tag=self.community_tag.value,
+                levels_data=self.levels
+            )
+        else:
+            generated_name = provided_name
+
         system_payload = {
             "glyph_code": self.glyph_code,
-            "system_name": self.system_name.value,
+            "system_name": generated_name,
             "discord_tag": self.community_tag.value,
             "galaxy_name": self.galaxy,
             "reality": self.reality,
             "dominant_lifeform": self.levels.get("race", "Unknown"),
             "conflict_level": self.levels.get("conflict_lvl", "Unknown"),
-            "economy_type": self.levels.get("star_type", "Unknown"), 
+            "economy_type": self.levels.get("star_type", "Unknown"),
             "economy_strength": self.levels.get("economy_lvl", "1"),
             "user_id": self.user_id
         }
         
         view = PlanetPromptView(self.user_id, self.api, system_payload)
         await interaction.response.send_message(
-            "System details captured! **Would you like to add planets to this system before final submission?**", 
+            f"Captured details for **{generated_name}**!\n"
+            "Would you like to add planets to this system before final submission?", 
             view=view, 
             ephemeral=True
         )
