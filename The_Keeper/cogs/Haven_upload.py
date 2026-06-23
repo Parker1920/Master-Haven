@@ -194,13 +194,14 @@ class GalaxyModal(discord.ui.Modal):
 
 #-------------------- LEVEL SELECT VIEW ------
 class LevelSelectView(discord.ui.View):
-    def __init__(self, glyph_code, user_id, api, galaxy, reality):
+    def __init__(self, glyph_code, user_id, api, galaxy, reality, api_generated_name):
         super().__init__(timeout=180)
         self.glyph_code = glyph_code
         self.user_id = user_id
         self.api = api
         self.galaxy = galaxy
         self.reality = reality
+        self.api_generated_name = api_generated_name 
         self.values = {}
     
         self.star_dropdown = Select(
@@ -858,10 +859,10 @@ class HexKeypad(discord.ui.View):
             embed.add_field(name="Preview", value=" ".join(self.emoji_sequence), inline=False)
 
         return embed
-
-    # ---------------- CALLBACK FACTORY ----------------
-    def make_callback(self, key, emoji):
-        async def callback(interaction):
+        
+# ---------------- CALLBACK FACTORY ---------
+        def make_callback(self, key, emoji):
+        async def callback(interaction: discord.Interaction):
             if len(self.input_string) >= 12:
                 return
         
@@ -875,14 +876,44 @@ class HexKeypad(discord.ui.View):
             if len(self.input_string) == 12:
                 glyph = self.input_string
                 self.emoji_sequence = self.emoji_sequence[:12]
+                
+                await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
+                
+                try:
+                    valid = await self.api.validate_glyph(glyph)
+                    if not valid.get("valid"):
+                        self.reset_state()
+                        await interaction.followup.send(
+                            "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
+                            ephemeral=True
+                        )
+                        return
 
-            if len(self.input_string) != 12:
-                return
+                    api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
 
-            glyph = self.input_string
-            self.emoji_sequence = self.emoji_sequence[:12]
+                    dup = await self.api.check_duplicate(glyph)
+                    if dup.get("exists"):
+                        existing_name = dup.get('system_name') or dup.get('name') or 'Unknown'
+                        await interaction.followup.send(
+                            f"⚠️ This system has already been logged: **{existing_name}**",
+                            ephemeral=True
+                        )
+                        self.reset_state()
+                        self.stop()
+                        return
 
-            # ---------------- VALIDATION ----------------
+                    await interaction.followup.send(
+                        f"🌐 **System Recognized by API:** `{api_generated_name}`\nSelect Reality:",
+                        view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
+                        ephemeral=True
+                    )
+                    self.stop()
+
+                except Exception as e:
+                    await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
+                    self.reset_state()
+
+# ---------------- VALIDATION ----------------
             valid = await self.api.validate_glyph(glyph)
             if not valid.get("valid"):
                 self.reset_state()
