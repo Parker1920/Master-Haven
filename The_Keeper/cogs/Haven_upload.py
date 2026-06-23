@@ -347,6 +347,10 @@ class PlanetPromptView(discord.ui.View):
 
     @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Prevent opening the modal if 6 planets are already queued
+        if len(self.planets) >= 6:
+            await interaction.response.send_message("❌ Maximum limit of 6 planets/moons reached for this system.", ephemeral=True)
+            return
 
         await interaction.response.send_modal(PlanetInputModal(self))
 
@@ -357,6 +361,10 @@ class PlanetPromptView(discord.ui.View):
 
     async def execute_final_submission(self, interaction: discord.Interaction):
         try:
+            # Enforce strict ceiling before final execution
+            if len(self.planets) > 6:
+                self.planets = self.planets[:6]
+
             system_result = await self.api.submit_system(self.system_payload)
             
             system_id = (
@@ -389,7 +397,6 @@ class PlanetPromptView(discord.ui.View):
                 for _ in self.planets:
                     await process_discovery_xp(user_id=self.user_id, discovery_type="planet", channel_id=interaction.channel.id)
 
-           
             embed = discord.Embed(
                 title="✅ Submission Complete!",
                 description=f"**{self.system_payload['system_name']}** and {len(self.planets)} planet(s) are now in review.",
