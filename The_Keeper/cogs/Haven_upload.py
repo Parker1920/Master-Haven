@@ -266,42 +266,136 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.add_item(self.community_tag)
     
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True)
-    
+        
         system_payload = {
-            "glyph_code": self.glyph,
-            "system_name": self.system_name,
-            "discord_tag": self.community_tag,
-            "galaxy_name": self.galaxy_name,
-            "reality": getattr(self, "reality", "Normal"),
-            "dominant_lifeform": getattr(self, "race", "Unknown"),
-            "conflict_level": getattr(self, "conflict_lvl", "Unknown"),
-            "economy_type": getattr(self, "economy_type", "Unknown"),
-            "economy_strength": getattr(self, "economy_strength", "1"),
+            "glyph_code": self.glyph_code,
+            "system_name": self.system_name.value,
+            "discord_tag": self.community_tag.value,
+            "galaxy_name": self.galaxy,
+            "reality": self.reality,
+            "dominant_lifeform": self.levels.get("race", "Unknown"),
+            "conflict_level": self.levels.get("conflict_lvl", "Unknown"),
+            "economy_type": self.levels.get("star_type", "Unknown"), 
+            "economy_strength": self.levels.get("economy_lvl", "1"),
             "user_id": self.user_id
         }
-    
+        
+        view = PlanetPromptView(self.user_id, self.api, system_payload)
+        await interaction.response.send_message(
+            "System details captured! **Would you like to add planets to this system before final submission?**", 
+            view=view, 
+            ephemeral=True
+        )
+
+class PlanetPromptView(discord.ui.View):
+    def __init__(self, user_id, api, system_payload):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.api = api
+        self.system_payload = system_payload
+        self.planets = []
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your submission session.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
+    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Open up the planet input modal
+        await interaction.response.send_modal(PlanetInputModal(self))
+
+    @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(thinking=True)
+        await self.execute_final_submission(interaction)
+
+    async def execute_final_submission(self, interaction: discord.Interaction):
         try:
-            await self.api.submit_system(payload)
-            from cogs import xp_system
-            from cogs.xp_system import get_user, process_discovery_xp
-            from cogs.xp_cog import DepartmentView
-                
+            system_result = await self.api.submit_system(self.system_payload)
+            
+            system_id = (
+                system_result.get("system_id")
+                or system_result.get("submission_id")
+                or system_result.get("id")
+                or (system_result.get("system") or {}).get("id")
+            )
+
+            for planet in self.planets:
+                planet_payload = {
+                    "system_id": system_id,
+                    "discovery_name": planet["name"],
+                    "discovery_type": "planet",
+                    "community_tag": self.system_payload["discord_tag"],
+                    "discord_tag": self.system_payload["discord_tag"],
+                    "notes": f"Biome: {planet['biome']} | Fauna: {planet['fauna']} | Flora: {planet['flora']} | Sentinels: {planet['sentinel']}",
+                    "discord_username": interaction.user.name,
+                }
+                await self.api.submit_discovery(planet_payload)
+
+            from cogs.xp_system import process_discovery_xp
             await process_discovery_xp(
                 user_id=self.user_id,
                 discovery_type="system",  
                 channel_id=interaction.channel.id
             )
+
+            if self.planets:
+                for _ in self.planets:
+                    await process_discovery_xp(user_id=self.user_id, discovery_type="planet", channel_id=interaction.channel.id)
+
+           
             embed = discord.Embed(
-                title="✅ Submission Sent",
-                description=f"**{self.system_name.value}** is now in review.",
+                title="✅ Submission Complete!",
+                description=f"**{self.system_payload['system_name']}** and {len(self.planets)} planet(s) are now in review.",
                 color=0x00FF00
             )
-            embed.add_field(name="Glyph", value=f"`{self.glyph_code}`", inline=False)
-            await interaction.followup.send(embed=embed)
+            embed.add_field(name="Glyph", value=f"`{self.system_payload['glyph_code']}`", inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            self.stop()
+
         except Exception as e:
-            await interaction.followup.send(f"❌ Submission failed: {e}")
-    
+            await interaction.followup.send(f"❌ Submission failed: {e}", ephemeral=True)
+            
+#--------------------INPUT MODAL-------------
+class PlanetInputModal(discord.ui.Modal):
+    def __init__(self, prompt_view: PlanetPromptView):
+        super().__init__(title=f"Planet #{len(prompt_view.planets) + 1} Details")
+        self.prompt_view = prompt_view
+
+        self.p_name = TextInput(label="Planet Name", required=True, max_length=100)
+        self.biome = TextInput(label="Biome Type", placeholder="e.g. Lush, Desert, Toxic, Frozen...", required=True, max_length=50)
+        self.fauna = TextInput(label="Fauna Description / Count", placeholder="e.g. 12 Fauna, Aggressive...", required=False, max_length=100)
+        self.flora = TextInput(label="Flora Description", placeholder="e.g. Abundant, Vermilion...", required=False, max_length=100)
+        self.sentinel = TextInput(label="Sentinel Activity", placeholder="e.g. Low, High, Aggressive...", required=False, max_length=50)
+
+        self.add_item(self.p_name)
+        self.add_item(self.biome)
+        self.add_item(self.fauna)
+        self.add_item(self.flora)
+        self.add_item(self.sentinel)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.prompt_view.planets.append({
+            "name": self.p_name.value,
+            "biome": self.biome.value,
+            "fauna": self.fauna.value or "Unknown",
+            "flora": self.flora.value or "Unknown",
+            "sentinel": self.sentinel.value or "Unknown"
+        })
+
+        
+        planet_list = "\n".join([f"• `{p['name']}` ({p['biome']})" for p in self.prompt_view.planets])
+        msg = (
+            f"### Current Queue to Submit:\n"
+            f"**System**: `{self.prompt_view.system_payload['system_name']}`\n"
+            f"**Planets Added:**\n{planet_list}\n\n"
+            f"Would you like to add another planet, or proceed with final submission?"
+        )
+        
+        await interaction.response.edit_message(content=msg, view=self.prompt_view)
+   
 #-------------------Discovery Modal--------------
 import sqlite3
 from cogs import xp_system
