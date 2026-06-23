@@ -704,6 +704,10 @@
             if (data.is_bubble)                   specials.push({ l: 'Bubble planet', c: 't-p' });
             if (data.is_floating_islands)         specials.push({ l: 'Floating islands', c: 't-t' });
             if (data.is_gas_giant)                specials.push({ l: 'Gas giant',     c: 't-x' });
+            if (data.swarm)                       specials.push({ l: 'Swarm',        c: 't-a' });
+            if (data.trash_debris)                specials.push({ l: 'Trash debris', c: 't-x' });
+            if (data.high_sentinel_activity)      specials.push({ l: 'High sentinels', c: 't-a' });
+            if (data.aggressive_sentinel_activity) specials.push({ l: 'Aggressive sentinels', c: 't-r' });
 
             const discCount = (data.discoveries || []).length;
             const locationKey = (isMoon ? 'moon_' : 'planet_') + rawName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -1457,6 +1461,10 @@
                 if (data.is_gas_giant)                      specials.push({ l: 'Gas giant',       c: 't-x' });
                 if (data.water_world)                       specials.push({ l: 'Water world',     c: 't-b' });
                 if (data.has_rings)                         specials.push({ l: 'Has rings',       c: 't-b' });
+                if (data.swarm)                             specials.push({ l: 'Swarm',           c: 't-a' });
+                if (data.trash_debris)                      specials.push({ l: 'Trash debris',    c: 't-x' });
+                if (data.high_sentinel_activity)            specials.push({ l: 'High sentinels',  c: 't-a' });
+                if (data.aggressive_sentinel_activity)      specials.push({ l: 'Aggressive sentinels', c: 't-r' });
                 if (specials.length) {
                     html += `<div class="shud-section-title">Special Features</div>`;
                     html += `<div class="shud-special">${specials.map(s => `<span class="tag ${s.c}" style="font-size:8px">${escapeHtml(s.l)}</span>`).join('')}</div>`;

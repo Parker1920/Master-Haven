@@ -290,6 +290,11 @@ SPECIAL_FEATURE_KEYWORDS = {
     'ringed': 'has_rings',
     'infested': 'is_infested',
     'gas giant': 'is_gas_giant',
+    'swarm': 'swarm',
+    'trash debris': 'trash_debris',
+    'trash/debris': 'trash_debris',
+    'high sentinel activity': 'high_sentinel_activity',
+    'aggressive sentinel activity': 'aggressive_sentinel_activity',
     'bubbles': None,
     'bioluminescent': None,
     'bioluminescence': None,
@@ -652,12 +657,32 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                 ))
 
                 for planet in sys_data.get('planets', []):
+                    # 1.79.0: Ancient Bones / Salvageable Scrap / Vile Brood are
+                    # ATTRIBUTES, not materials. If a CSV parked one in the
+                    # materials cell, lift it onto its boolean flag and strip it
+                    # from the materials list (matches the dropdown removal).
+                    _mats = planet.get('materials')
+                    if _mats:
+                        _kept = []
+                        for _tok in _mats.split(','):
+                            _t = _tok.strip()
+                            _tl = _t.lower()
+                            if _tl in ('ancient bones', 'ancient bone'):
+                                planet['ancient_bones'] = 1
+                            elif _tl in ('salvageable scrap', 'salvagable scrap', 'salvage scrap'):
+                                planet['salvageable_scrap'] = 1
+                            elif _tl in ('vile brood', 'vile brood detected'):
+                                planet['vile_brood'] = 1
+                            elif _t:
+                                _kept.append(_t)
+                        planet['materials'] = ', '.join(_kept) if _kept else None
                     cursor.execute('''
                         INSERT INTO planets (system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
                             materials, notes, planet_index,
                             has_rings, is_dissonant, is_infested, vile_brood,
-                            ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant)
-                        VALUES (?, ?, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant,
+                            swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity)
+                        VALUES (?, ?, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         sys_id, planet['name'],
                         planet.get('materials'), planet.get('notes'), planet.get('planet_index', 0),
@@ -670,6 +695,10 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                         1 if planet.get('storm_crystals') else 0,
                         1 if planet.get('gravitino_balls') else 0,
                         1 if planet.get('is_gas_giant') else 0,
+                        1 if planet.get('swarm') else 0,
+                        1 if planet.get('trash_debris') else 0,
+                        1 if planet.get('high_sentinel_activity') else 0,
+                        1 if planet.get('aggressive_sentinel_activity') else 0,
                     ))
 
                 try:

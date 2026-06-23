@@ -37,8 +37,11 @@ CANONICAL_RESOURCES = [
     "Somnal Dust", "Star Bulb", "Sulphurine", "Tainted Metal", "Tritium",
     "Uranium", "Viscous Fluids", "Void Mote",
     # Special Harvestables
-    "Ancient Bones", "Buried Technology", "Salvageable Scrap", "Storm Crystals",
-    "Vile Brood Detected", "Whispering Eggs",
+    # NOTE: "Ancient Bones", "Salvageable Scrap" and "Vile Brood [Detected]" were
+    # removed (Master Haven 1.79.0) — they are planet/moon ATTRIBUTES (boolean
+    # flags: ancient_bones / salvageable_scrap / vile_brood), not materials. See
+    # NON_MATERIAL_TOKENS below + migration 1.96.0 which moved existing data.
+    "Buried Technology", "Storm Crystals", "Whispering Eggs",
     # Cave & Underground Collectibles
     "Albumen Pearl", "Vortex Cube", "Submerged Relic",
     # Hazardous Flora Collectibles
@@ -94,14 +97,8 @@ RESOURCE_ALIASES = {
     "feacium": "Faecium",
     # Cactus Flesh
     "cactus flrsh": "Cactus Flesh", "cactus": "Cactus Flesh",
-    # Ancient Bones
-    "acient bones": "Ancient Bones", "ancient bone": "Ancient Bones",
-    "bones": "Ancient Bones",
-    # Salvageable Scrap
-    "salvagable scrap": "Salvageable Scrap", "salvage scrap": "Salvageable Scrap",
-    "salvageable": "Salvageable Scrap", "scrap": "Salvageable Scrap",
-    # Vile Brood (canonical is "Vile Brood Detected")
-    "vile brood": "Vile Brood Detected", "vile brood detected": "Vile Brood Detected",
+    # NOTE: Ancient Bones / Salvageable Scrap / Vile Brood aliases removed —
+    # those are attributes, not materials (see NON_MATERIAL_TOKENS / 1.96.0).
     # Sulphurine
     "suphurine": "Sulphurine", "sulphurite": "Sulphurine",
     # Ammonia
@@ -111,6 +108,16 @@ RESOURCE_ALIASES = {
     "frost crystals": "Frost Crystal",
     # Cadmium
     "cadium": "Cadmium",
+}
+
+# Tokens that are NOT materials — they are planet/moon ATTRIBUTES (boolean flags),
+# not harvestable resources. normalize_materials() drops these so they can never
+# (re)appear in a materials list. Existing occurrences were moved into their
+# attribute columns by migration 1.96.0. Lower-cased, whitespace-collapsed.
+NON_MATERIAL_TOKENS = {
+    'ancient bones', 'ancient bone',
+    'salvageable scrap', 'salvagable scrap', 'salvage scrap',
+    'vile brood', 'vile brood detected',
 }
 
 
@@ -180,6 +187,10 @@ def normalize_materials(raw):
     for part in _SPLIT_RE.split(str(raw)):
         tok = part.strip()
         if not tok:
+            continue
+        # Drop attribute-only tokens (Ancient Bones / Salvageable Scrap / Vile
+        # Brood) — they belong on the boolean flags, never in materials.
+        if " ".join(tok.split()).strip(" .,:;-").lower() in NON_MATERIAL_TOKENS:
             continue
         canon = normalize_resource_token(tok)
         value = canon if canon else tok

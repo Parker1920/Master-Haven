@@ -71,11 +71,17 @@ def check_splus_eligible(cursor, system_id) -> bool:
     table holds approved discoveries (pending ones live in pending_discoveries),
     so existence there is sufficient.
     """
-    cursor.execute('SELECT economy_type FROM systems WHERE id = ?', (system_id,))
+    cursor.execute('SELECT economy_type, no_space_station FROM systems WHERE id = ?', (system_id,))
     srow = cursor.fetchone()
     if not srow:
         return False
-    is_abandoned = dict(srow).get('economy_type') in ('None', 'Abandoned')
+    srow = dict(srow)
+    # Station is exempt from the S+ checklist when the system is Abandoned OR has
+    # been explicitly marked as having no space station (no_space_station flag).
+    station_exempt = (
+        srow.get('economy_type') in ('None', 'Abandoned')
+        or bool(srow.get('no_space_station'))
+    )
 
     # 1 + 3 + 4: planets, wonder notes, base
     cursor.execute(
@@ -124,7 +130,7 @@ def check_splus_eligible(cursor, system_id) -> bool:
             return False
 
     # 5. recorded station (only required when the system should have one)
-    if not is_abandoned:
+    if not station_exempt:
         cursor.execute('SELECT 1 FROM space_stations WHERE system_id = ? LIMIT 1', (system_id,))
         if not cursor.fetchone():
             return False
@@ -310,12 +316,17 @@ def calculate_completeness_score(cursor, system_id) -> dict:
         planet_life_score = round((sum(life_totals) / len(life_totals)) * 15)
 
     # --- Space Station (5 pts) ---
+    # A system explicitly flagged as having no station (no_space_station) gets
+    # full credit just like an Abandoned-economy system — "no station" is a
+    # complete answer, not missing data.
+    no_station = bool(system.get('no_space_station'))
     station_score = 0
     station_details = []
-    if is_abandoned:
+    if is_abandoned or no_station:
         station_score = 5
-        station_details.append({'name': 'Station', 'value': 'N/A (Abandoned)', 'status': 'filled'})
-        station_details.append({'name': 'Trade Goods', 'value': 'N/A (Abandoned)', 'status': 'filled'})
+        _slabel = 'N/A (Abandoned)' if is_abandoned else 'N/A (No Station)'
+        station_details.append({'name': 'Station', 'value': _slabel, 'status': 'filled'})
+        station_details.append({'name': 'Trade Goods', 'value': _slabel, 'status': 'filled'})
     elif station:
         station_score += 3
         station_details.append({'name': 'Station', 'value': 'Present', 'status': 'filled'})

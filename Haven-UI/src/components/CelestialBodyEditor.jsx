@@ -41,6 +41,11 @@ const SHARED_ATTRIBUTES = [
   { key: 'gravitino_balls', label: 'Gravitino Balls', icon: '\u{1F7E3}' },
   { key: 'is_bubble', label: 'Bubble Planet', icon: '\u{1FAE7}' },
   { key: 'is_floating_islands', label: 'Floating Islands', icon: '\u{1F3DD}' },
+  // Master Haven 1.79.0 additions
+  { key: 'swarm', label: 'Swarm', icon: '\u{1F41D}' },
+  { key: 'trash_debris', label: 'Trash Debris', icon: '\u{1F5D1}' },
+  { key: 'high_sentinel_activity', label: 'High Sentinel Activity', icon: '\u{1F441}' },
+  { key: 'aggressive_sentinel_activity', label: 'Aggressive Sentinel Activity', icon: '\u{1F534}' },
 ]
 
 // Planet-only attributes

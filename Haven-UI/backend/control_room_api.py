@@ -1136,7 +1136,17 @@ def init_database():
     add_column_if_missing('moons', 'is_floating_islands', 'INTEGER DEFAULT 0')
     add_column_if_missing('moons', 'plant_resource', 'TEXT')
 
+    # Master Haven 1.79.0: new planet/moon attributes (Swarm, Trash Debris,
+    # High/Aggressive Sentinel Activity). Authoritative add is migration 1.96.0;
+    # mirrored here as a fresh-DB safety net (same convention as the specials above).
+    for _attr_table in ('planets', 'moons'):
+        add_column_if_missing(_attr_table, 'swarm', 'INTEGER DEFAULT 0')
+        add_column_if_missing(_attr_table, 'trash_debris', 'INTEGER DEFAULT 0')
+        add_column_if_missing(_attr_table, 'high_sentinel_activity', 'INTEGER DEFAULT 0')
+        add_column_if_missing(_attr_table, 'aggressive_sentinel_activity', 'INTEGER DEFAULT 0')
+
     # Systems table migrations (for NMS Save Watcher companion app)
+    add_column_if_missing('systems', 'no_space_station', 'INTEGER DEFAULT 0')  # definitive "no station" flag (1.79.0)
     add_column_if_missing('systems', 'star_type', 'TEXT')  # Yellow, Red, Green, Blue, Purple
     add_column_if_missing('systems', 'economy_type', 'TEXT')  # Trading, Mining, Technology, etc.
     add_column_if_missing('systems', 'economy_level', 'TEXT')  # Low, Medium, High
@@ -2843,6 +2853,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     game_version = ?, expedition_id = ?,
                     game_mode = COALESCE(?, game_mode),
                     event_id = COALESCE(?, event_id),
+                    no_space_station = ?,
                     is_stub = 0
                 WHERE id = ?
             ''', (
@@ -2876,6 +2887,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 wizard_expedition_id,
                 payload.get('game_mode'),
                 resolved_event_id,
+                1 if payload.get('no_space_station') else 0,
                 sys_id
             ))
             logger.info(f"Updated system {sys_id}, last_updated_by: {editor_username}")
@@ -2911,8 +2923,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform, discord_tag,
                     stellar_classification, discovered_by, discovered_at, contributors,
                     profile_id, personal_discord_username, source,
-                    game_version, expedition_id, game_mode, event_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    game_version, expedition_id, game_mode, event_id, no_space_station)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 name,
@@ -2948,6 +2960,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 wizard_expedition_id,
                 payload.get('game_mode') or 'Normal',
                 resolved_event_id,
+                1 if payload.get('no_space_station') else 0,
             ))
             logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 
@@ -2965,9 +2978,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                     ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                     is_bubble, is_floating_islands,
+                    swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                     estimated_age, core_element, lore_notes, root_structure, nutrient_source
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 sys_id,
                 planet.get('name', 'Unknown'),
@@ -3021,6 +3035,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('exotic_trophy'),
                 1 if planet.get('is_bubble') else 0,
                 1 if planet.get('is_floating_islands') else 0,
+                1 if planet.get('swarm') else 0,
+                1 if planet.get('trash_debris') else 0,
+                1 if planet.get('high_sentinel_activity') else 0,
+                1 if planet.get('aggressive_sentinel_activity') else 0,
                 # Wonders Page Notes — free-form text NMS prints on the Log
                 # Exploration Guide page (surfaced in the Wonders catalogue
                 # after upload). Migration 1.76.0.
@@ -3044,9 +3062,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
+                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name', 'Unknown'),
@@ -3075,6 +3094,10 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
+                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('trash_debris') else 0,
+                    1 if moon.get('high_sentinel_activity') else 0,
+                    1 if moon.get('aggressive_sentinel_activity') else 0,
                     # Per-moon biome / resource fields (parity with approval paths)
                     moon.get('biome'),
                     moon.get('biome_subtype'),

@@ -834,11 +834,11 @@ export const resourcesList = [
   "Viscous Fluids",
   "Void Mote",
   // Special Harvestables (shown on planet discovery)
-  "Ancient Bones",
+  // NOTE: "Ancient Bones", "Salvageable Scrap" and "Vile Brood Detected" were
+  // removed (Master Haven 1.79.0) — they are planet/moon ATTRIBUTES (toggles:
+  // Ancient Bones / Salvageable Scrap / Vile Brood), not materials.
   "Buried Technology",
-  "Salvageable Scrap",
   "Storm Crystals",
-  "Vile Brood Detected",
   "Whispering Eggs",
   // Cave & Underground Collectibles
   "Albumen Pearl",

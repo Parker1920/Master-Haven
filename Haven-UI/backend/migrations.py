@@ -7496,3 +7496,132 @@ def migration_1_95_0(conn):
         f"Migration 1.95.0: zeroed {flipped} implicit sub_admin override(s); "
         f"re-synced enabled_features for {resynced} profile(s)"
     )
+
+
+@register_migration("1.96.0", "Add Swarm/Trash Debris/High+Aggressive Sentinel Activity planet+moon attributes, systems.no_space_station flag, and migrate Ancient Bones/Salvageable Scrap/Vile Brood out of materials into their attribute flags")
+def migration_1_96_0(conn):
+    """Three coordinated changes (see Master Haven 1.79.0 changelog):
+
+    1. Four new boolean attribute columns on `planets` AND `moons`:
+         swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity
+       (default 0) — same shape as the existing vile_brood / water_world specials.
+
+    2. `systems.no_space_station` (default 0) — a positive "this system has no
+       space station" assertion. A NULL space_stations row has always been
+       ambiguous (no station vs not-yet-uploaded); this flag disambiguates and,
+       in services/completeness.py, grants full station credit + S+ exemption
+       just like an Abandoned-economy system.
+
+    3. Backfill: "Ancient Bones", "Salvageable Scrap", "Vile Brood [Detected]"
+       were duplicated as BOTH curated materials AND boolean attributes. They are
+       being removed from the materials catalog, so any existing planet/moon whose
+       `materials` cell carries one of those tokens has the matching attribute
+       flag set (preserving the information) and the token stripped from materials.
+       Affected systems are re-scored.
+
+    Idempotent: ALTERs are guarded; a re-run finds no matching materials tokens
+    (already stripped) and no-ops.
+    """
+    import json as _json  # noqa: F401  (kept for parity with sibling migrations)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # --- 1 + 2: schema ---------------------------------------------------
+    new_body_cols = [
+        ('swarm', 'INTEGER DEFAULT 0'),
+        ('trash_debris', 'INTEGER DEFAULT 0'),
+        ('high_sentinel_activity', 'INTEGER DEFAULT 0'),
+        ('aggressive_sentinel_activity', 'INTEGER DEFAULT 0'),
+    ]
+    for table in ('planets', 'moons'):
+        for col_name, col_type in new_body_cols:
+            try:
+                cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col_name} {col_type}')
+                logger.info(f"Migration 1.96.0: added {table}.{col_name}")
+            except sqlite3.OperationalError:
+                pass  # already exists
+    try:
+        cursor.execute('ALTER TABLE systems ADD COLUMN no_space_station INTEGER DEFAULT 0')
+        logger.info("Migration 1.96.0: added systems.no_space_station")
+    except sqlite3.OperationalError:
+        pass
+
+    # --- 3: migrate the 3 harvestables out of materials into their flags --
+    # Whole comma-token (case-insensitive) -> attribute column. Migration 1.93.0
+    # already normalized materials to canonical names, so the canonical forms are
+    # the common case; a couple of raw variants are matched defensively.
+    MAT_TO_FLAG = {
+        'ancient bones': 'ancient_bones',
+        'ancient bone': 'ancient_bones',
+        'salvageable scrap': 'salvageable_scrap',
+        'salvagable scrap': 'salvageable_scrap',
+        'salvage scrap': 'salvageable_scrap',
+        'vile brood detected': 'vile_brood',
+        'vile brood': 'vile_brood',
+    }
+
+    affected_system_ids = set()
+    for table in ('planets', 'moons'):
+        cursor.execute("PRAGMA table_info(%s)" % table)
+        cols = {row[1] for row in cursor.fetchall()}
+        if 'materials' not in cols:
+            continue
+        # planets link to systems directly; moons via their parent planet.
+        if table == 'planets':
+            cursor.execute(
+                "SELECT id, system_id, materials FROM planets "
+                "WHERE materials IS NOT NULL AND TRIM(materials) != ''")
+        else:
+            cursor.execute(
+                "SELECT m.id AS id, p.system_id AS system_id, m.materials AS materials "
+                "FROM moons m JOIN planets p ON p.id = m.planet_id "
+                "WHERE m.materials IS NOT NULL AND TRIM(m.materials) != ''")
+        rows = cursor.fetchall()
+        upd = conn.cursor()
+        changed = 0
+        for row in rows:
+            rid = row['id']
+            sys_id = row['system_id']
+            mats = row['materials'] or ''
+            kept = []
+            flags = set()
+            for tok in mats.split(','):
+                t = tok.strip()
+                if not t:
+                    continue
+                flag = MAT_TO_FLAG.get(t.lower())
+                if flag:
+                    flags.add(flag)
+                else:
+                    kept.append(t)
+            if not flags:
+                continue  # nothing to migrate on this row
+            set_clauses = ['materials = ?']
+            params = [', '.join(kept) if kept else None]
+            for flag in sorted(flags):
+                if flag in cols:
+                    set_clauses.append(f'{flag} = 1')
+            upd.execute(
+                f"UPDATE {table} SET {', '.join(set_clauses)} WHERE id = ?",
+                params + [rid],
+            )
+            changed += 1
+            if sys_id:
+                affected_system_ids.add(sys_id)
+        logger.info(f"Migration 1.96.0: moved harvestables out of materials on {changed} {table}")
+
+    # Re-score affected systems (stripping a material may change life-coverage).
+    if affected_system_ids:
+        try:
+            from services.completeness import update_completeness_score
+        except ImportError:
+            from completeness import update_completeness_score  # pragma: no cover
+        score_cur = conn.cursor()
+        rescored = 0
+        for sys_id in affected_system_ids:
+            try:
+                update_completeness_score(score_cur, sys_id)
+                rescored += 1
+            except Exception as e:  # noqa: BLE001 — one bad row shouldn't abort the migration
+                logger.warning(f"Migration 1.96.0: re-score failed for {sys_id}: {e}")
+        logger.info(f"Migration 1.96.0: re-scored {rescored} affected system(s)")

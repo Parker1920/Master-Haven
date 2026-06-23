@@ -1222,7 +1222,8 @@ async def approve_system(
                     game_version = COALESCE(?, game_version),
                     expedition_id = COALESCE(?, expedition_id),
                     event_id = COALESCE(?, event_id),
-                    game_mode = COALESCE(?, game_mode)
+                    game_mode = COALESCE(?, game_mode),
+                    no_space_station = ?
                 WHERE id = ?
             ''', (
                 system_data.get('name'),
@@ -1255,6 +1256,7 @@ async def approve_system(
                 wizard_expedition_id,
                 wizard_event_id,
                 new_game_mode,
+                1 if system_data.get('no_space_station') else 0,
                 system_id
             ))
             logger.info(f"Updated system {system_id}, preserving discovered_by='{original_discovered_by}', added contributor '{updater_username}'")
@@ -1295,8 +1297,8 @@ async def approve_system(
                     star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                     discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
                     contributors, created_at, game_mode, profile_id, source,
-                    game_version, expedition_id, event_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    game_version, expedition_id, event_id, no_space_station)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 system_id,
                 system_data.get('name'),
@@ -1333,6 +1335,7 @@ async def approve_system(
                 new_game_version,
                 new_expedition_id,
                 new_event_id,
+                1 if system_data.get('no_space_station') else 0,
             ))
 
         # Handle planets - for edits, merge by name; for new systems, insert all
@@ -1368,6 +1371,7 @@ async def approve_system(
                         has_rings = ?, is_dissonant = ?, is_infested = ?, extreme_weather = ?, water_world = ?, vile_brood = ?,
                         ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, is_gas_giant = ?, exotic_trophy = ?,
                         is_bubble = ?, is_floating_islands = ?,
+                        swarm = ?, trash_debris = ?, high_sentinel_activity = ?, aggressive_sentinel_activity = ?,
                         -- M-W1: Wonders Notes are now overwriteable. The
                         -- wizard always re-sends the existing value in edit
                         -- mode (originalSystem snapshot), so a blank means
@@ -1427,6 +1431,10 @@ async def approve_system(
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
                     1 if planet.get('is_floating_islands') else 0,
+                    1 if planet.get('swarm') else 0,
+                    1 if planet.get('trash_debris') else 0,
+                    1 if planet.get('high_sentinel_activity') else 0,
+                    1 if planet.get('aggressive_sentinel_activity') else 0,
                     # Wonders Page Notes — COALESCE protects existing values
                     # on edit when the submitter leaves them blank.
                     planet.get('estimated_age') or None,
@@ -1452,9 +1460,10 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                         is_bubble, is_floating_islands,
+                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     system_id,
                     planet_name,
@@ -1506,6 +1515,10 @@ async def approve_system(
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
                     1 if planet.get('is_floating_islands') else 0,
+                    1 if planet.get('swarm') else 0,
+                    1 if planet.get('trash_debris') else 0,
+                    1 if planet.get('high_sentinel_activity') else 0,
+                    1 if planet.get('aggressive_sentinel_activity') else 0,
                     # Wonders Page Notes (migration 1.76.0)
                     planet.get('estimated_age'),
                     planet.get('core_element'),
@@ -1529,9 +1542,10 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
+                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,
                     moon.get('name'),
@@ -1560,6 +1574,10 @@ async def approve_system(
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
+                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('trash_debris') else 0,
+                    1 if moon.get('high_sentinel_activity') else 0,
+                    1 if moon.get('aggressive_sentinel_activity') else 0,
                     moon.get('biome'),
                     moon.get('biome_subtype'),
                     moon.get('weather'),
@@ -1589,9 +1607,10 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
+                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     planet_id,  # Attach to last planet
                     moon.get('name'),
@@ -1620,6 +1639,10 @@ async def approve_system(
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
+                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('trash_debris') else 0,
+                    1 if moon.get('high_sentinel_activity') else 0,
+                    1 if moon.get('aggressive_sentinel_activity') else 0,
                     moon.get('biome'),
                     moon.get('biome_subtype'),
                     moon.get('weather'),
@@ -1658,6 +1681,10 @@ async def approve_system(
                 station.get('z') or 0,
                 trade_goods_json
             ))
+        elif is_edit and system_data.get('no_space_station'):
+            # Edited to "no station": clear any previously-recorded station so
+            # the no_space_station flag and the live data agree.
+            cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (system_id,))
 
         # Wizard v1: persist coauthors. coauthors[] lives in system_data JSON;
         # SEPARATE from primary submitter — leaderboard treats them distinctly.
@@ -2397,7 +2424,8 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             game_version = COALESCE(?, game_version),
                             expedition_id = COALESCE(?, expedition_id),
                             event_id = COALESCE(?, event_id),
-                            game_mode = COALESCE(?, game_mode)
+                            game_mode = COALESCE(?, game_mode),
+                            no_space_station = ?
                         WHERE id = ?
                     ''', (
                         system_data.get('name'),
@@ -2428,6 +2456,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         batch_expedition_id,
                         batch_event_id,
                         batch_game_mode,
+                        1 if system_data.get('no_space_station') else 0,
                         system_id
                     ))
 
@@ -2470,8 +2499,8 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             star_type, economy_type, economy_level, conflict_level, dominant_lifeform,
                             discovered_by, discovered_at, discord_tag, personal_discord_username, stellar_classification,
                             contributors, created_at, game_mode, profile_id, source,
-                            game_version, expedition_id, event_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            game_version, expedition_id, event_id, no_space_station)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         system_data.get('name'),
@@ -2506,6 +2535,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         batch_new_game_version,
                         batch_new_expedition_id,
                         batch_new_event_id,
+                        1 if system_data.get('no_space_station') else 0,
                     ))
 
                 # Insert planets
@@ -2526,9 +2556,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                             ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                             is_bubble, is_floating_islands,
+                            swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                             estimated_age, core_element, lore_notes, root_structure, nutrient_source
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         system_id,
                         planet.get('name'),
@@ -2580,6 +2611,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         planet.get('exotic_trophy'),
                         1 if planet.get('is_bubble') else 0,
                         1 if planet.get('is_floating_islands') else 0,
+                        1 if planet.get('swarm') else 0,
+                        1 if planet.get('trash_debris') else 0,
+                        1 if planet.get('high_sentinel_activity') else 0,
+                        1 if planet.get('aggressive_sentinel_activity') else 0,
                         # Wonders Page Notes (migration 1.76.0)
                         planet.get('estimated_age'),
                         planet.get('core_element'),
@@ -2595,9 +2630,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                                 has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                                 ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                                 is_bubble, is_floating_islands,
+                                swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                                 biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                                 estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             planet_id,
                             moon.get('name'),
@@ -2626,6 +2662,10 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             1 if moon.get('is_gas_giant') else 0,
                             1 if moon.get('is_bubble') else 0,
                             1 if moon.get('is_floating_islands') else 0,
+                            1 if moon.get('swarm') else 0,
+                            1 if moon.get('trash_debris') else 0,
+                            1 if moon.get('high_sentinel_activity') else 0,
+                            1 if moon.get('aggressive_sentinel_activity') else 0,
                             moon.get('biome'),
                             moon.get('biome_subtype'),
                             moon.get('weather'),

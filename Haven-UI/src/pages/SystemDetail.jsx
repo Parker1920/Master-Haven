@@ -629,7 +629,16 @@ export default function SystemDetail() {
       )}
 
       {/* SPACE STATION */}
-      {system.space_station && <SpaceStationCard station={system.space_station} />}
+      {system.space_station
+        ? <SpaceStationCard station={system.space_station} />
+        : system.no_space_station
+          ? (
+            <div className="haven-card p-3 text-sm flex items-center gap-2" style={{ color: 'var(--muted)' }}>
+              <span>🛸</span>
+              <span>No space station — this system has none.</span>
+            </div>
+          )
+          : null}
 
       {/* DISCOVERIES (linked to this system) */}
       {(system.discoveries || []).length > 0 && (
@@ -865,6 +874,10 @@ const FEATURE_FLAGS = [
   ['has_rings', 'Has Rings'],
   ['is_gas_giant', 'Gas Giant'],
   ['extreme_weather', 'Extreme Weather'],
+  ['swarm', 'Swarm'],
+  ['trash_debris', 'Trash Debris'],
+  ['high_sentinel_activity', 'High Sentinel Activity'],
+  ['aggressive_sentinel_activity', 'Aggressive Sentinel Activity'],
 ]
 
 function featureBadges(row) {

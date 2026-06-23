@@ -129,6 +129,9 @@ const EMPTY_SYSTEM = {
   discord_tag: null,
   planets: [],
   space_station: null,
+  // Definitive "this system has no space station" flag (1.79.0). Distinct from
+  // a null space_station, which just means "not documented yet".
+  no_space_station: false,
   // wizard v1 identity extras
   coauthors: [],
   expedition_id: null,
@@ -144,6 +147,7 @@ const PLANET_DEFAULTS = {
   extreme_weather: 0, water_world: 0, vile_brood: 0,
   ancient_bones: 0, salvageable_scrap: 0, storm_crystals: 0, gravitino_balls: 0,
   is_gas_giant: 0, is_bubble: 0, is_floating_islands: 0, exotic_trophy: '',
+  swarm: 0, trash_debris: 0, high_sentinel_activity: 0, aggressive_sentinel_activity: 0,
   // Wonders Page Notes — free-form narrative from NMS Log Exploration Guide.
   // Backend migration 1.76.0 adds matching columns on planets + moons.
   estimated_age: '', core_element: '', lore_notes: '',
@@ -587,17 +591,20 @@ export default function Wizard() {
     setSystem((s) => ({ ...s, planets }))
   }
 
-  // Station management
-  function toggleStation(checked) {
-    setHasStation(checked)
-    if (checked) {
+  // Station management — three mutually-exclusive states:
+  //   'has'     → the system has a station (fill in details)
+  //   'none'    → the system definitively has NO station (no_space_station=1)
+  //   'unknown' → not documented yet (both cleared) — the neutral default
+  function setStationMode(mode) {
+    if (mode === 'has') {
+      setHasStation(true)
       // Restore the originally-loaded station (edit mode) instead of replacing
       // its name/race/trade_goods/position with auto-generated defaults. Only
       // fall through to the generator when there's nothing to restore — new
       // submissions, or a station the user explicitly cleared after editing.
       if (originalStationRef.current) {
         const loaded = originalStationRef.current
-        setSystem((s) => ({ ...s, space_station: { ...loaded } }))
+        setSystem((s) => ({ ...s, space_station: { ...loaded }, no_space_station: false }))
         return
       }
       const position = generateStationPosition(system.planets || [])
@@ -610,9 +617,17 @@ export default function Wizard() {
           trade_goods: goods.map((g) => g.id),
           ...position,
         },
+        no_space_station: false,
       }))
+    } else if (mode === 'none') {
+      // Definitively no station — clear any station data and flag it so the
+      // grade/scoring treats it as complete (not "missing").
+      setHasStation(false)
+      setSystem((s) => ({ ...s, space_station: null, no_space_station: true }))
     } else {
-      setSystem((s) => ({ ...s, space_station: null }))
+      // 'unknown' — not documented yet.
+      setHasStation(false)
+      setSystem((s) => ({ ...s, space_station: null, no_space_station: false }))
     }
   }
   function setStationField(k, v) {
@@ -742,7 +757,7 @@ export default function Wizard() {
     const portalFilled = (system.glyph_code?.length === 12 ? 1 : 0) + (system.galaxy ? 1 : 0) + (system.reality ? 1 : 0) + (system.name ? 1 : 0)
     const attrsFilled = ['star_type', 'economy_type', 'dominant_lifeform'].filter((k) => system[k]).length
     const planetsFilled = (system.planets || []).length > 0 ? 1 : 0
-    const stationFilled = system.space_station ? 1 : 0
+    const stationFilled = (system.space_station || system.no_space_station) ? 1 : 0
     const identityFilled = (system.discord_tag ? 1 : 0) + (submitterDiscordUsername ? 1 : 0)
     const submitFilled = validationIssues.length === 0 ? 1 : 0
     return {
@@ -1453,8 +1468,7 @@ export default function Wizard() {
           {flow === 'advanced' && (
             <SectionStation
               system={system}
-              hasStation={hasStation}
-              toggleStation={toggleStation}
+              setStationMode={setStationMode}
               setStationField={setStationField}
               toggleTradeGood={toggleTradeGood}
               requiredOnly={requiredOnly}
@@ -2008,19 +2022,45 @@ function SectionPlanets({ system, addPlanet, editPlanet, updatePlanet, removePla
   )
 }
 
-function SectionStation({ system, hasStation, toggleStation, setStationField, toggleTradeGood, requiredOnly }) {
+function SectionStation({ system, setStationMode, setStationField, toggleTradeGood, requiredOnly }) {
+  // Tri-state derived from the system: a present station = 'has', the explicit
+  // no_space_station flag = 'none', otherwise 'unknown' (not documented yet).
+  const mode = system.space_station ? 'has' : (system.no_space_station ? 'none' : 'unknown')
   return (
     <Section id="station" title="04 · Space Station" accent="var(--app-accent-2)">
-      <label className="flex items-center gap-2 mb-3">
-        <input
-          type="checkbox"
-          className="w-4 h-4"
-          checked={hasStation}
-          onChange={(e) => toggleStation(e.target.checked)}
-        />
-        <span>🛸 Has Space Station</span>
-      </label>
-      {hasStation && system.space_station && (
+      <div className="flex flex-col gap-2 mb-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="station-mode"
+            className="w-4 h-4"
+            checked={mode === 'has'}
+            onChange={() => setStationMode('has')}
+          />
+          <span>🛸 Has a space station</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="station-mode"
+            className="w-4 h-4"
+            checked={mode === 'none'}
+            onChange={() => setStationMode('none')}
+          />
+          <span>🚫 No space station <span className="opacity-60 text-sm">(this system has none)</span></span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="station-mode"
+            className="w-4 h-4"
+            checked={mode === 'unknown'}
+            onChange={() => setStationMode('unknown')}
+          />
+          <span>❔ Not documented yet</span>
+        </label>
+      </div>
+      {mode === 'has' && system.space_station && (
         <div className="ml-6 p-3 rounded" style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--app-accent-2)' }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
             <div>

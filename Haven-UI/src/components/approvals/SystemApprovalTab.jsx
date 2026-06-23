@@ -1216,6 +1216,10 @@ export default function SystemApprovalTab({
                         <label className="flex items-center"><input type="checkbox" checked={!!body.is_dissonant} onChange={e => updateEditField(`${prefix}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
                         <label className="flex items-center"><input type="checkbox" checked={!!body.is_bubble} onChange={e => updateEditField(`${prefix}.is_bubble`, e.target.checked ? 1 : 0)} className={checkCls} />Bubble Planet</label>
                         <label className="flex items-center"><input type="checkbox" checked={!!body.is_floating_islands} onChange={e => updateEditField(`${prefix}.is_floating_islands`, e.target.checked ? 1 : 0)} className={checkCls} />Floating Islands</label>
+                        <label className="flex items-center"><input type="checkbox" checked={!!body.swarm} onChange={e => updateEditField(`${prefix}.swarm`, e.target.checked ? 1 : 0)} className={checkCls} />Swarm</label>
+                        <label className="flex items-center"><input type="checkbox" checked={!!body.trash_debris} onChange={e => updateEditField(`${prefix}.trash_debris`, e.target.checked ? 1 : 0)} className={checkCls} />Trash Debris</label>
+                        <label className="flex items-center"><input type="checkbox" checked={!!body.high_sentinel_activity} onChange={e => updateEditField(`${prefix}.high_sentinel_activity`, e.target.checked ? 1 : 0)} className={checkCls} />High Sentinel Activity</label>
+                        <label className="flex items-center"><input type="checkbox" checked={!!body.aggressive_sentinel_activity} onChange={e => updateEditField(`${prefix}.aggressive_sentinel_activity`, e.target.checked ? 1 : 0)} className={checkCls} />Aggressive Sentinel Activity</label>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <label className="block"><span className="text-gray-400 text-xs">Base Location:</span>
@@ -1280,7 +1284,7 @@ export default function SystemApprovalTab({
                         <span className="text-gray-400">Resources:</span> {body.materials || body.resources?.join(', ')}
                       </div>
                     )}
-                    {(body.ancient_bones || body.vile_brood || body.salvageable_scrap || body.storm_crystals || body.gravitino_balls || body.is_infested || body.is_dissonant || body.is_bubble || body.is_floating_islands) && (
+                    {(body.ancient_bones || body.vile_brood || body.salvageable_scrap || body.storm_crystals || body.gravitino_balls || body.is_infested || body.is_dissonant || body.is_bubble || body.is_floating_islands || body.swarm || body.trash_debris || body.high_sentinel_activity || body.aggressive_sentinel_activity) && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {body.ancient_bones ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-300">Ancient Bones</span> : null}
                         {body.vile_brood ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Vile Brood</span> : null}
@@ -1291,6 +1295,10 @@ export default function SystemApprovalTab({
                         {body.is_dissonant ? <span className="text-xs px-1.5 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
                         {body.is_bubble ? <span className="text-xs px-1.5 py-0.5 rounded bg-pink-800/60 text-pink-300">Bubble Planet</span> : null}
                         {body.is_floating_islands ? <span className="text-xs px-1.5 py-0.5 rounded bg-teal-800/60 text-teal-300">Floating Islands</span> : null}
+                        {body.swarm ? <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-800/60 text-yellow-300">Swarm</span> : null}
+                        {body.trash_debris ? <span className="text-xs px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-300">Trash Debris</span> : null}
+                        {body.high_sentinel_activity ? <span className="text-xs px-1.5 py-0.5 rounded bg-orange-800/60 text-orange-300">High Sentinels</span> : null}
+                        {body.aggressive_sentinel_activity ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/60 text-red-300">Aggressive Sentinels</span> : null}
                       </div>
                     )}
                     {body.base_location && (
@@ -1360,7 +1368,7 @@ export default function SystemApprovalTab({
                                         <div className="col-span-2">Resources: {moon.materials || moon.resources?.join(', ')}</div>
                                       )}
                                     </div>
-                                    {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant || moon.is_bubble || moon.is_floating_islands) && (
+                                    {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant || moon.is_bubble || moon.is_floating_islands || moon.swarm || moon.trash_debris || moon.high_sentinel_activity || moon.aggressive_sentinel_activity) && (
                                       <div className="mt-1 flex flex-wrap gap-1">
                                         {moon.ancient_bones ? <span className="text-[10px] px-1 py-0.5 rounded bg-amber-800/60 text-amber-300">Bones</span> : null}
                                         {moon.vile_brood ? <span className="text-[10px] px-1 py-0.5 rounded bg-red-800/60 text-red-300">Brood</span> : null}
@@ -1370,6 +1378,10 @@ export default function SystemApprovalTab({
                                         {moon.is_dissonant ? <span className="text-[10px] px-1 py-0.5 rounded bg-violet-800/60 text-violet-300">Dissonant</span> : null}
                                         {moon.is_bubble ? <span className="text-[10px] px-1 py-0.5 rounded bg-pink-800/60 text-pink-300">Bubble</span> : null}
                                         {moon.is_floating_islands ? <span className="text-[10px] px-1 py-0.5 rounded bg-teal-800/60 text-teal-300">Floating</span> : null}
+                                        {moon.swarm ? <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-800/60 text-yellow-300">Swarm</span> : null}
+                                        {moon.trash_debris ? <span className="text-[10px] px-1 py-0.5 rounded bg-stone-700/60 text-stone-300">Trash</span> : null}
+                                        {moon.high_sentinel_activity ? <span className="text-[10px] px-1 py-0.5 rounded bg-orange-800/60 text-orange-300">High Sent.</span> : null}
+                                        {moon.aggressive_sentinel_activity ? <span className="text-[10px] px-1 py-0.5 rounded bg-red-800/60 text-red-300">Aggro Sent.</span> : null}
                                       </div>
                                     )}
                                     {(moon.estimated_age || moon.core_element || moon.lore_notes || moon.root_structure || moon.nutrient_source) && (
@@ -1457,6 +1469,10 @@ export default function SystemApprovalTab({
                               <label className="flex items-center"><input type="checkbox" checked={!!moon.is_dissonant} onChange={e => updateEditField(`moons.${i}.is_dissonant`, e.target.checked ? 1 : 0)} className={checkCls} />Dissonant</label>
                               <label className="flex items-center"><input type="checkbox" checked={!!moon.is_bubble} onChange={e => updateEditField(`moons.${i}.is_bubble`, e.target.checked ? 1 : 0)} className={checkCls} />Bubble Planet</label>
                               <label className="flex items-center"><input type="checkbox" checked={!!moon.is_floating_islands} onChange={e => updateEditField(`moons.${i}.is_floating_islands`, e.target.checked ? 1 : 0)} className={checkCls} />Floating Islands</label>
+                              <label className="flex items-center"><input type="checkbox" checked={!!moon.swarm} onChange={e => updateEditField(`moons.${i}.swarm`, e.target.checked ? 1 : 0)} className={checkCls} />Swarm</label>
+                              <label className="flex items-center"><input type="checkbox" checked={!!moon.trash_debris} onChange={e => updateEditField(`moons.${i}.trash_debris`, e.target.checked ? 1 : 0)} className={checkCls} />Trash Debris</label>
+                              <label className="flex items-center"><input type="checkbox" checked={!!moon.high_sentinel_activity} onChange={e => updateEditField(`moons.${i}.high_sentinel_activity`, e.target.checked ? 1 : 0)} className={checkCls} />High Sentinel Activity</label>
+                              <label className="flex items-center"><input type="checkbox" checked={!!moon.aggressive_sentinel_activity} onChange={e => updateEditField(`moons.${i}.aggressive_sentinel_activity`, e.target.checked ? 1 : 0)} className={checkCls} />Aggressive Sentinel Activity</label>
                             </div>
                           </div>
                         ) : (
@@ -1492,7 +1508,7 @@ export default function SystemApprovalTab({
                                 <span className="text-gray-400">Resources:</span> {moon.materials || moon.resources?.join(', ')}
                               </div>
                             )}
-                            {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant || moon.is_bubble || moon.is_floating_islands) && (
+                            {(moon.ancient_bones || moon.vile_brood || moon.salvageable_scrap || moon.storm_crystals || moon.gravitino_balls || moon.is_infested || moon.is_dissonant || moon.is_bubble || moon.is_floating_islands || moon.swarm || moon.trash_debris || moon.high_sentinel_activity || moon.aggressive_sentinel_activity) && (
                               <div className="mt-1 flex flex-wrap gap-1">
                                 {moon.ancient_bones ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-800/60 text-amber-200 border border-amber-700/50">Ancient Bones</span> : null}
                                 {moon.vile_brood ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Vile Brood</span> : null}
@@ -1503,6 +1519,10 @@ export default function SystemApprovalTab({
                                 {moon.is_dissonant ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-violet-800/60 text-violet-200 border border-violet-700/50">Dissonant</span> : null}
                                 {moon.is_bubble ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-pink-800/60 text-pink-200 border border-pink-700/50">Bubble Planet</span> : null}
                                 {moon.is_floating_islands ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-teal-800/60 text-teal-200 border border-teal-700/50">Floating Islands</span> : null}
+                                {moon.swarm ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-800/60 text-yellow-200 border border-yellow-700/50">Swarm</span> : null}
+                                {moon.trash_debris ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-stone-700/60 text-stone-200 border border-stone-600/50">Trash Debris</span> : null}
+                                {moon.high_sentinel_activity ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-800/60 text-orange-200 border border-orange-700/50">High Sentinels</span> : null}
+                                {moon.aggressive_sentinel_activity ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-800/60 text-red-200 border border-red-700/50">Aggressive Sentinels</span> : null}
                               </div>
                             )}
                           </>
@@ -1515,7 +1535,7 @@ export default function SystemApprovalTab({
             })()}
 
             {/* Space Station */}
-            {selectedSubmission.system_data?.space_station && (
+            {selectedSubmission.system_data?.space_station ? (
               <div className="border-b pb-3">
                 <h4 className="font-semibold mb-2">Space Station</h4>
                 <div className="text-sm">
@@ -1524,7 +1544,12 @@ export default function SystemApprovalTab({
                   <p><strong>Position:</strong> ({selectedSubmission.system_data.space_station.x}, {selectedSubmission.system_data.space_station.y}, {selectedSubmission.system_data.space_station.z})</p>
                 </div>
               </div>
-            )}
+            ) : selectedSubmission.system_data?.no_space_station ? (
+              <div className="border-b pb-3">
+                <h4 className="font-semibold mb-2">Space Station</h4>
+                <p className="text-sm text-gray-400">🚫 Submitter marked this system as having no space station.</p>
+              </div>
+            ) : null}
 
             {/* Submission Metadata */}
             <div className="text-sm text-gray-600">

@@ -139,9 +139,10 @@ export default function useCompletenessScore(system) {
 
     // --- Space Station (5 pts) ---
     const station = system.space_station
+    const noStation = !!system.no_space_station
     let stationScore = 0
-    if (abandoned) {
-      stationScore = 5 // full credit — abandoned systems have no station
+    if (abandoned || noStation) {
+      stationScore = 5 // full credit — abandoned OR explicitly marked no station
     } else if (station) {
       stationScore = 3
       const tg = station.trade_goods
@@ -169,14 +170,14 @@ export default function useCompletenessScore(system) {
     // promote the displayed grade to S+ on the client.
     const everyPlanetHasWonder = planets.length > 0 && planets.every((p) => WONDER_FIELDS.some((f) => isFilled(p[f])))
     const hasBase = planets.some((p) => isFilled(p.base_location))
-    const stationRecorded = abandoned || !!station
+    const stationRecorded = abandoned || noStation || !!station
     const splus = {
       eligible: false, // never auto-promoted client-side; backend decides
       requirements: [
         { met: pct >= 85, label: 'Reach an S-grade score (85+)' },
         { met: everyPlanetHasWonder, label: 'Wonder notes on every planet' },
         { met: hasBase, label: 'Document at least one base' },
-        { met: stationRecorded, label: abandoned ? 'Station — N/A (abandoned)' : 'Record the space station' },
+        { met: stationRecorded, label: (abandoned || noStation) ? 'Station — N/A (no station)' : 'Record the space station' },
         { met: null, label: 'A discovery on every planet & moon (verified at approval)' },
       ],
     }
