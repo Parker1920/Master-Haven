@@ -7,6 +7,10 @@ import traceback
 import sys, os
 import json
 import logging
+import re
+import aiohttp
+import asyncio
+
 logger = logging.getLogger(__name__)    
     
     
@@ -177,7 +181,7 @@ class GalaxyModal(discord.ui.Modal):
         self.user_id = user_id
         self.api = api
         self.reality = reality
-        self.api_generated_name = api_generated_name  # Track it here
+        self.api_generated_name = api_generated_name
     
         self.galaxy_name = TextInput(
             label="Galaxy",
@@ -861,139 +865,101 @@ class HexKeypad(discord.ui.View):
         return embed
         
 # ---------------- CALLBACK FACTORY ---------
-        def make_callback(self, key, emoji):
-            async def callback(interaction: discord.Interaction):
-                if len(self.input_string) >= 12:
-                    return
-            
-                self.input_string += key
-                self.emoji_sequence.append(str(emoji))
-                await interaction.response.edit_message(
-                    embed=self.build_embed(),
-                    view=self
-                )
-            
-                if len(self.input_string) == 12:
-                    glyph = self.input_string
-                    self.emoji_sequence = self.emoji_sequence[:12]
-                    
-                    await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
-                    
-                    try:
-                        valid = await self.api.validate_glyph(glyph)
-                        if not valid.get("valid"):
-                            self.reset_state()
-                            await interaction.followup.send(
-                                "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
-                                ephemeral=True
-                            )
-                            return
-    
-                        api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
-    
-                        dup = await self.api.check_duplicate(glyph)
-                        if dup.get("exists"):
-                            existing_name = dup.get('system_name') or dup.get('name') or 'Unknown'
-                            await interaction.followup.send(
-                                f"⚠️ This system has already been logged: **{existing_name}**",
-                                ephemeral=True
-                            )
-                            self.reset_state()
-                            self.stop()
-                            return
-    
+    def make_callback(self, key, emoji):
+        async def callback(interaction: discord.Interaction):
+            if len(self.input_string) >= 12:
+                return
+        
+            self.input_string += key
+            self.emoji_sequence.append(str(emoji))
+            await interaction.response.edit_message(
+                embed=self.build_embed(),
+                view=self
+            )
+        
+            if len(self.input_string) == 12:
+                glyph = self.input_string
+                self.emoji_sequence = self.emoji_sequence[:12]
+                
+                await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
+                
+                try:
+                    # 1. Fetch data from validation endpoint
+                    valid = await self.api.validate_glyph(glyph)
+                    if not valid.get("valid"):
+                        self.reset_state()
                         await interaction.followup.send(
-                            f"🌐 **System Recognized by API:** `{api_generated_name}`\nSelect Reality:",
-                            view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
+                            "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
                             ephemeral=True
                         )
-                        self.stop()
-    
-                    except Exception as e:
-                        await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
-                        self.reset_state()
+                        return
 
-# ---------------- SYSTEM FLOW ----------------
-            if dup.get("exists"):
-                await interaction.followup.send(
-                    f"⚠️ System already exists: **{dup.get('system_name','Unknown')}**",
-                    ephemeral=True
-                )
-                self.stop()
-                return
+                    # Extract the actual API procedural/in-game name
+                    api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
 
-            await interaction.followup.send(
-                f"**Glyph:** `{glyph}`\nSelect Reality:",
-                view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
-                ephemeral=True
-            )
+                    # 2. Check for database duplicates
+                    dup = await self.api.check_duplicate(glyph)
+                    system_exists = dup.get("exists")
+                    system_name = dup.get("system_name") or api_generated_name
+                    system_id = dup.get("system_id")
 
-            self.stop()
-
-# ---------------- DISCOVERY FLOW -------------
-            if self.mode == "discovery":
-                system_exists = dup.get("exists")
-                system_name = dup.get("system_name")
-                system_id = dup.get("system_id")
-
-                msg = (
-                    f"⚠️ System already exists: **{system_name or 'Unknown'}**"
-                    if system_exists
-                    else "❌ System doesn't exist.\nCreating discovery..."
-                )
-
-                class ContinueView(discord.ui.View):
-                    def __init__(self, outer):
-                        super().__init__(timeout=60)
-                        self.outer = outer
-
-                    @discord.ui.button(label="Continue", style=discord.ButtonStyle.green)
-                    async def continue_btn(self, interaction2: discord.Interaction, button: discord.ui.Button):
-                        if interaction2.user.id != self.outer.owner_id:
-                            await interaction2.response.send_message("Not your session.", ephemeral=True)
-                            return
-
-                        modal = DiscoverySubmissionModal(
-                            glyph=glyph,
-                            user_id=interaction2.user.id,
-                            api=self.outer.api,
-                            discovery_type=self.outer.discovery_type,
-                            system_exists=system_exists,
-                            system_name=system_name,
-                            system_id=system_id,
-                            notes=None,
-                            reality=self.outer.reality
+                    # 3. Handle DISCOVERY Mode routing
+                    if self.mode == "discovery":
+                        msg = (
+                            f"⚠️ System already exists: **{system_name}**"
+                            if system_exists
+                            else "❌ System doesn't exist.\nCreating discovery..."
                         )
 
-                        await interaction2.response.send_modal(modal)
+                        class ContinueView(discord.ui.View):
+                            def __init__(self, outer):
+                                super().__init__(timeout=60)
+                                self.outer = outer
+
+                            @discord.ui.button(label="Continue", style=discord.ButtonStyle.green)
+                            async def continue_btn(self, interaction2: discord.Interaction, button: discord.ui.Button):
+                                if interaction2.user.id != self.outer.owner_id:
+                                    await interaction2.response.send_message("Not your session.", ephemeral=True)
+                                    return
+
+                                modal = DiscoverySubmissionModal(
+                                    glyph=glyph,
+                                    user_id=interaction2.user.id,
+                                    api=self.outer.api,
+                                    discovery_type=self.outer.discovery_type,
+                                    system_exists=system_exists,
+                                    system_name=system_name,
+                                    system_id=system_id,
+                                    notes=None,
+                                    reality=self.outer.reality
+                                )
+                                await interaction2.response.send_modal(modal)
+                                self.stop()
+
+                        view = ContinueView(self)
+                        await interaction.followup.send(msg, view=view, ephemeral=True)
                         self.stop()
+                        return
 
-                view = ContinueView(self)
+                    if system_exists:
+                        await interaction.followup.send(
+                            f"⚠️ This system has already been logged: **{system_name}**",
+                            ephemeral=True
+                        )
+                        self.reset_state()
+                        self.stop()
+                        return
 
-                if interaction.response.is_done():
-                    await interaction.followup.send(msg, view=view, ephemeral=True)
-                else:
-                    await interaction.response.send_message(msg, view=view, ephemeral=True)
+                    await interaction.followup.send(
+                        f"🌐 **System Recognized by API:** `{api_generated_name}`\nSelect Reality:",
+                        view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
+                        ephemeral=True
+                    )
+                    self.stop()
 
-                self.stop()
-                return
-
-# ---------------- SYSTEM FLOW ----------------
-            if dup.get("exists"):
-                await interaction.followup.send(
-                    f"⚠️ System already exists: **{dup.get('system_name','Unknown')}**",
-                    ephemeral=True
-                )
-                self.stop()
-                return
-
-            await interaction.followup.send(
-                f"**Glyph:** `{glyph}`\nSelect Reality:",
-                view=RealitySelectView(glyph, interaction.user.id, self.api),
-                ephemeral=True
-            )
-
-            self.stop()
+                except Exception as e:
+                    await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
+                    self.reset_state()
 
         return callback
 
@@ -1055,6 +1021,127 @@ glyph_emojis = {
     "E": discord.PartialEmoji(name="E", id=1487547811003105300),
     "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
 }
+
+#---------------MANUAL READER---------------
+TITLE_PATTERN = re.compile(r'^([^"\n]+)\s+"([^"]+)"')
+BODY_PATTERN = re.compile(r'^([^"\n]+)\s+"([^"]+)"\s*(.*)$', re.DOTALL)
+
+class HavenScraperCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.forum_channel_id = 1482814608745168916
+        self.api = HavenAPI() 
+
+    @commands.command(name="sync_forum")
+    @commands.has_permissions(administrator=True)
+    async def sync_forum(self, ctx: commands.Context):
+        """Command to manually trigger the forum scrape and API submission."""
+        channel = self.bot.get_channel(self.forum_channel_id)
+        
+        if not channel or not isinstance(channel, discord.ForumChannel):
+            await ctx.send("Target forum channel not found or invalid type.")
+            return
+
+        await ctx.send("Starting forum sync processing...")
+        success_count = 0
+        
+        threads = channel.threads + [t async for t in channel.archived_threads()]
+        
+        for thread in threads:
+            title_match = TITLE_PATTERN.search(thread.name)
+            if not title_match:
+                continue
+            
+            system_name = title_match.group(1).strip()
+            system_class = title_match.group(2).strip()
+
+            try:
+                starter_message = thread.starter_message or await thread.fetch_message(thread.id)
+            except discord.HTTPException:
+                continue
+
+            body_match = BODY_PATTERN.search(starter_message.content)
+            if not body_match:
+                continue
+            
+            planet_name = body_match.group(1).strip()
+            planet_biome = body_match.group(2).strip()
+            planet_desc = body_match.group(3).strip()
+            poster_username = starter_message.author.name
+            
+            payload = {
+                "submitted_by": poster_username,
+                "system_name": system_name,
+                "system_class": system_class,
+                "planets": [
+                    {
+                        "name": planet_name,
+                        "biome": planet_biome,
+                        "description": planet_desc
+                    }
+                ]
+            }
+
+            try:
+                await self.api.submit_system(payload)
+                success_count += 1
+            except Exception as e:
+                print(f"Failed to sync thread {thread.id} to Haven API: {e}")
+
+        await ctx.send(f"Sync complete! Successfully submitted {success_count} entries to Haven API.")
+
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread: discord.Thread):
+        """Automatically fires whenever a new thread (forum post) is created."""
+        if thread.parent_id != self.forum_channel_id:
+            return
+
+        await asyncio.sleep(2) 
+
+        title_match = TITLE_PATTERN.search(thread.name)
+        if not title_match:
+            print(f"Skipped thread {thread.id}: Title format invalid.")
+            return
+        
+        system_name = title_match.group(1).strip()
+        system_class = title_match.group(2).strip()
+
+        try:
+            starter_message = thread.starter_message or await thread.fetch_message(thread.id)
+        except discord.HTTPException as e:
+            print(f"Failed to fetch starter message for thread {thread.id}: {e}")
+            return
+
+        body_match = BODY_PATTERN.search(starter_message.content)
+        if not body_match:
+            print(f"Skipped thread {thread.id}: Body format invalid.")
+            return
+        
+        planet_name = body_match.group(1).strip()
+        planet_biome = body_match.group(2).strip()
+        planet_desc = body_match.group(3).strip()
+        poster_username = starter_message.author.name
+
+        payload = {
+            "submitted_by": poster_username,
+            "system_name": system_name,
+            "system_class": system_class,
+            "planets": [
+                {
+                    "name": planet_name,
+                    "biome": planet_biome,
+                    "description": planet_desc
+                }
+            ]
+        }
+
+        try:
+            await self.api.submit_system(payload)
+            print(f"Successfully auto-submitted new system: {system_name}")
+        except Exception as e:
+            print(f"Failed to auto-submit system {system_name}: {e}")
+
+
     
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
@@ -1067,4 +1154,5 @@ class HavenSubmission(commands.Cog):
     
     # -------------------- SETUP ----------------
 async def setup(bot):
-    await bot.add_cog(HavenSubmission(bot))   
+    await bot.add_cog(HavenSubmission(bot)) 
+    await bot.add_cog(HavenScraperCog(bot))  
