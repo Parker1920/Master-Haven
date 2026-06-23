@@ -1022,7 +1022,7 @@ glyph_emojis = {
     "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
 }
 
-#---------------MANUAL READER---------------
+
 #---------------MANUAL READER---------------
 import asyncio  
 import re
@@ -1040,26 +1040,23 @@ class HavenScraperCog(commands.Cog):
             match = re.search(pattern, text, re.IGNORECASE)
             return match.group(1).strip() if match else None
 
-        # Extract system data fields
+       
         system_name = extract_field(r"\*\*System Name:\*\*\s*(.*)", content)
         glyphs = extract_field(r"\*\*Glyphs:\*\*\s*(.*)", content)
-        system_class = extract_field(r"\*\*System class:\*\*\s*(.*)", content)
+        system_identifier = extract_field(r"\*\*System Identifyer:\*\*\s*(.*)", content)
         galaxy = extract_field(r"\*\*Galaxy:\*\*\s*(.*)", content)
         
-        # Validation for required fields ('r')
-        if not all([system_name, glyphs, system_class, galaxy]):
+        if not os.environ.get("HAVEN_API_KEY") or not all([system_name, glyphs, system_identifier, galaxy]):
             return None
 
-        # Ensure Glyphs contain valid Hex strings
         cleaned_glyphs = re.sub(r'[^0-9A-Fa-f]', '', glyphs)
         if not cleaned_glyphs:
             return None
 
-        # Gather optional fields
         payload = {
             "system_name": system_name,
             "glyph_code": cleaned_glyphs,
-            "system_class": system_class,
+            "system_class": system_identifier,
             "galaxy_name": galaxy,
             "region": extract_field(r"\*\*Region:\*\*\s*(.*)", content) or "Unknown",
             "distance_from_core": extract_field(r"\*\*Distance From Core:\*\*\s*(.*)", content) or "Unknown",
@@ -1069,6 +1066,7 @@ class HavenScraperCog(commands.Cog):
             "stardate": extract_field(r"\*\*Stardate:\*\*\s*(.*)", content) or "Unknown",
             "planets": []
         }
+
         if "**Planets / Moons**" in content:
             planets_section = content.split("**Planets / Moons**")[1]
             planet_blocks = re.split(r"\*\s+\*\*(.*?)\*\*", planets_section)
@@ -1084,7 +1082,7 @@ class HavenScraperCog(commands.Cog):
 
                     payload["planets"].append({
                         "name": p_name,
-                        "biome": extract_subfield(r"-\s*Biome:\s*(.*)", p_body),
+                        "biome": extract_subfield(r"-\s*Type:\s*(.*)", p_body), # Maps Type to biome endpoint
                         "weather": extract_subfield(r"\*\s*Weather:\s*(.*)", p_body),
                         "age": extract_subfield(r"\*\s*Age:\s*(.*)", p_body),
                         "atmosphere": extract_subfield(r"\*\s*Atmosphere:\s*(.*)", p_body),
@@ -1171,6 +1169,7 @@ class HavenScraperCog(commands.Cog):
                 await starter_message.add_reaction("❌")
             except:
                 pass
+
                    
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
