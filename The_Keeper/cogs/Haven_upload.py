@@ -862,56 +862,56 @@ class HexKeypad(discord.ui.View):
         
 # ---------------- CALLBACK FACTORY ---------
         def make_callback(self, key, emoji):
-        async def callback(interaction: discord.Interaction):
-            if len(self.input_string) >= 12:
-                return
-        
-            self.input_string += key
-            self.emoji_sequence.append(str(emoji))
-            await interaction.response.edit_message(
-                embed=self.build_embed(),
-                view=self
-            )
-        
-            if len(self.input_string) == 12:
-                glyph = self.input_string
-                self.emoji_sequence = self.emoji_sequence[:12]
-                
-                await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
-                
-                try:
-                    valid = await self.api.validate_glyph(glyph)
-                    if not valid.get("valid"):
-                        self.reset_state()
+            async def callback(interaction: discord.Interaction):
+                if len(self.input_string) >= 12:
+                    return
+            
+                self.input_string += key
+                self.emoji_sequence.append(str(emoji))
+                await interaction.response.edit_message(
+                    embed=self.build_embed(),
+                    view=self
+                )
+            
+                if len(self.input_string) == 12:
+                    glyph = self.input_string
+                    self.emoji_sequence = self.emoji_sequence[:12]
+                    
+                    await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
+                    
+                    try:
+                        valid = await self.api.validate_glyph(glyph)
+                        if not valid.get("valid"):
+                            self.reset_state()
+                            await interaction.followup.send(
+                                "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
+                                ephemeral=True
+                            )
+                            return
+    
+                        api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
+    
+                        dup = await self.api.check_duplicate(glyph)
+                        if dup.get("exists"):
+                            existing_name = dup.get('system_name') or dup.get('name') or 'Unknown'
+                            await interaction.followup.send(
+                                f"⚠️ This system has already been logged: **{existing_name}**",
+                                ephemeral=True
+                            )
+                            self.reset_state()
+                            self.stop()
+                            return
+    
                         await interaction.followup.send(
-                            "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
+                            f"🌐 **System Recognized by API:** `{api_generated_name}`\nSelect Reality:",
+                            view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
                             ephemeral=True
                         )
-                        return
-
-                    api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
-
-                    dup = await self.api.check_duplicate(glyph)
-                    if dup.get("exists"):
-                        existing_name = dup.get('system_name') or dup.get('name') or 'Unknown'
-                        await interaction.followup.send(
-                            f"⚠️ This system has already been logged: **{existing_name}**",
-                            ephemeral=True
-                        )
-                        self.reset_state()
                         self.stop()
-                        return
-
-                    await interaction.followup.send(
-                        f"🌐 **System Recognized by API:** `{api_generated_name}`\nSelect Reality:",
-                        view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
-                        ephemeral=True
-                    )
-                    self.stop()
-
-                except Exception as e:
-                    await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
-                    self.reset_state()
+    
+                    except Exception as e:
+                        await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
+                        self.reset_state()
 
 # ---------------- VALIDATION ----------------
             valid = await self.api.validate_glyph(glyph)
