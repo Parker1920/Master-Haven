@@ -162,7 +162,7 @@ async def process_message_xp(message):
 
     user_id = message.author.id
 
-    # Fallback to database query instead of reading from a volatile memory dictionary
+   
     user_role = "voyager"
     with get_conn() as conn:
         cur = conn.cursor()
