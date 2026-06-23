@@ -913,21 +913,6 @@ class HexKeypad(discord.ui.View):
                         await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
                         self.reset_state()
 
-# ---------------- VALIDATION ----------------
-            valid = await self.api.validate_glyph(glyph)
-            if not valid.get("valid"):
-                self.reset_state()
-                await interaction.followup.send(
-                    "❌ Invalid glyph code.",
-                    ephemeral=True
-                )
-                return
-
-
-            api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
-
-            dup = await self.api.check_duplicate(glyph)
-            
 # ---------------- SYSTEM FLOW ----------------
             if dup.get("exists"):
                 await interaction.followup.send(
