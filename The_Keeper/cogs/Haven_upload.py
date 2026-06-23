@@ -1033,68 +1033,88 @@ class HavenScraperCog(commands.Cog):
         self.forum_channel_id = 1482814608745168916
         self.api = HavenAPI() 
 
-    def parse_forum_template(self, content: str) -> dict:
-        """Parses the structured text markdown template into an API payload."""
-        
-        def extract_field(pattern, text):
-            match = re.search(pattern, text, re.IGNORECASE)
+    def parse_system_text(self, text: str) -> dict:
+        """Helper to extract system details from the main/starter text block."""
+        def extract_field(pattern, source_text):
+            match = re.search(pattern, source_text, re.IGNORECASE)
             return match.group(1).strip() if match else None
 
-       
-        system_name = extract_field(r"\*\*System Name:\*\*\s*(.*)", content)
-        glyphs = extract_field(r"\*\*Glyphs:\*\*\s*(.*)", content)
-        system_identifier = extract_field(r"\*\*System Identifyer:\*\*\s*(.*)", content)
-        galaxy = extract_field(r"\*\*Galaxy:\*\*\s*(.*)", content)
-        
-        if not os.environ.get("HAVEN_API_KEY") or not all([system_name, glyphs, system_identifier, galaxy]):
+        system_name = extract_field(r"System Name:\s*(.*)", text)
+        glyphs = extract_field(r"Glyphs:\s*(.*)", text)
+        system_class = extract_field(r"System class:\s*(.*)", text)
+        galaxy = extract_field(r"Galaxy:\s*(.*)", text)
+
+        if not all([system_name, glyphs, system_class, galaxy]):
             return None
 
         cleaned_glyphs = re.sub(r'[^0-9A-Fa-f]', '', glyphs)
         if not cleaned_glyphs:
             return None
 
-        payload = {
+        return {
             "system_name": system_name,
             "glyph_code": cleaned_glyphs,
-            "system_class": system_identifier,
+            "system_class": system_class,
             "galaxy_name": galaxy,
-            "region": extract_field(r"\*\*Region:\*\*\s*(.*)", content) or "Unknown",
-            "distance_from_core": extract_field(r"\*\*Distance From Core:\*\*\s*(.*)", content) or "Unknown",
-            "dominant_lifeform": extract_field(r"\*\*Primary lifeform:\*\*\s*(.*)", content) or "Unknown",
-            "economy": extract_field(r"\*\*Economy:\*\*\s*(.*)", content) or "Unknown",
-            "conflict_level": extract_field(r"\*\*Conflict Level:\*\*\s*(.*)", content) or "Unknown",
-            "stardate": extract_field(r"\*\*Stardate:\*\*\s*(.*)", content) or "Unknown",
+            "region": extract_field(r"Region:\s*(.*)", text) or "Unknown",
+            "distance_from_core": extract_field(r"Distance From Core:\s*(.*)", text) or "Unknown",
+            "dominant_lifeform": extract_field(r"Primary lifeform:\s*(.*)", text) or "Unknown",
+            "economy": extract_field(r"Economy:\s*(.*)", text) or "Unknown",
+            "conflict_level": extract_field(r"Conflict Level:\s*(.*)", text) or "Unknown",
+            "stardate": extract_field(r"Stardate:\s*(.*)", text) or "Unknown",
             "planets": []
         }
 
-        if "**Planets / Moons**" in content:
-            planets_section = content.split("**Planets / Moons**")[1]
-            planet_blocks = re.split(r"\*\s+\*\*(.*?)\*\*", planets_section)
-            
-            if len(planet_blocks) > 1:
-                for i in range(1, len(planet_blocks), 2):
-                    p_name = planet_blocks[i].strip()
-                    p_body = planet_blocks[i+1] if i+1 < len(planet_blocks) else ""
-                    
-                    def extract_subfield(sub_pattern, text):
-                        match = re.search(sub_pattern, text, re.IGNORECASE)
-                        return match.group(1).strip() if match else "Unknown"
+    def parse_planet_text(self, text: str) -> list:
+        """Helper to find and parse structured planet lists inside text segments."""
+        planets = []
+        planet_blocks = re.split(r"(?:\*\s+\*\*Planet Name\*\*|\bPlanet Name:)\s*(.*)", text)
+        
+        if len(planet_blocks) > 1:
+            for i in range(1, len(planet_blocks), 2):
+                p_name = planet_blocks[i].strip()
+                p_body = planet_blocks[i+1] if i+1 < len(planet_blocks) else ""
+                
+                def extract_subfield(sub_pattern, source_text):
+                    match = re.search(sub_pattern, source_text, re.IGNORECASE)
+                    return match.group(1).strip() if match else "Unknown"
 
-                    payload["planets"].append({
-                        "name": p_name,
-                        "biome": extract_subfield(r"-\s*Type:\s*(.*)", p_body), # Maps Type to biome endpoint
-                        "weather": extract_subfield(r"\*\s*Weather:\s*(.*)", p_body),
-                        "age": extract_subfield(r"\*\s*Age:\s*(.*)", p_body),
-                        "atmosphere": extract_subfield(r"\*\s*Atmosphere:\s*(.*)", p_body),
-                        "primary_core_element": extract_subfield(r"\*\s*Primary Core Element:\s*(.*)", p_body),
-                        "sentinels": extract_subfield(r"\*\s*Sentinels:\s*(.*)", p_body),
-                        "flora": extract_subfield(r"\*\s*Flora:\s*(.*)", p_body),
-                        "fauna": extract_subfield(r"\*\s*Fauna:\s*(.*)", p_body),
-                        "resources": extract_subfield(r"\*\s*Resources:\s*(.*)", p_body),
-                        "outposts": extract_subfield(r"\*\s*Outposts:\s*(.*)", p_body),
-                        "other_notes": extract_subfield(r"\*\s*Other Notes:\s*(.*)", p_body)
-                    })
+                planets.append({
+                    "name": p_name,
+                    "biome": extract_subfield(r"(?:-\s*Type:|\bType:)\s*(.*)", p_body),
+                    "weather": extract_subfield(r"(?:\*\s*Weather:|\bWeather:)\s*(.*)", p_body),
+                    "age": extract_subfield(r"(?:\*\s*Age:|\bAge:)\s*(.*)", p_body),
+                    "atmosphere": extract_subfield(r"(?:\*\s*Atmosphere:|\bAtmosphere:)\s*(.*)", p_body),
+                    "primary_core_element": extract_subfield(r"(?:\*\s*Primary Core Element:|\bPrimary Core Element:)\s*(.*)", p_body),
+                    "sentinels": extract_subfield(r"(?:\*\s*Sentinels:|\bSentinels:)\s*(.*)", p_body),
+                    "flora": extract_subfield(r"(?:\*\s*Flora:|\bFlora:)\s*(.*)", p_body),
+                    "fauna": extract_subfield(r"(?:\*\s*Fauna:|\bFauna:)\s*(.*)", p_body),
+                    "resources": extract_subfield(r"(?:\*\s*Resources:|\bResources:)\s*(.*)", p_body),
+                    "outposts": extract_subfield(r"(?:\*\s*Outposts:|\bOutposts:)\s*(.*)", p_body),
+                    "other_notes": extract_subfield(r"(?:\*\s*Other Notes:|\bOther Notes:)\s*(.*)", p_body)
+                })
+        return planets
 
+    async def build_full_payload(self, thread: discord.Thread, starter_message: discord.Message) -> dict:
+        """Combines system data from main post and scans comments for planet logs."""
+        payload = self.parse_system_text(starter_message.content)
+        if not payload:
+            return None
+
+        payload["planets"] = self.parse_planet_text(starter_message.content)
+
+        try:
+            async for message in thread.history(limit=50, oldest_first=True):
+                if message.id == starter_message.id:
+                    continue 
+                
+                discovered_planets = self.parse_planet_text(message.content)
+                if discovered_planets:
+                    payload["planets"].extend(discovered_planets)
+        except Exception as e:
+            print(f"Error parsing comment history in thread {thread.id}: {e}")
+
+        payload["submitted_by"] = starter_message.author.name
         return payload
 
     @commands.command(name="sync_forum")
@@ -1106,7 +1126,7 @@ class HavenScraperCog(commands.Cog):
             await ctx.send("Target forum channel not found or invalid type.")
             return
 
-        await ctx.send("Starting structural forum sync processing...")
+        await ctx.send("Starting forum map synchronization process...")
         success_count = 0
         
         threads = channel.threads + [t async for t in channel.archived_threads()]
@@ -1119,11 +1139,9 @@ class HavenScraperCog(commands.Cog):
             if any(r.me and r.emoji == "✅" for r in starter_message.reactions):
                 continue
 
-            payload = self.parse_forum_template(starter_message.content)
+            payload = await self.build_full_payload(thread, starter_message)
             if not payload:
                 continue
-
-            payload["submitted_by"] = starter_message.author.name
 
             try:
                 await self.api.submit_system(payload)
@@ -1136,15 +1154,35 @@ class HavenScraperCog(commands.Cog):
                 except:
                     pass
 
-        await ctx.send(f"Sync complete! Successfully submitted {success_count} structural logs to Haven API.")
+        await ctx.send(f"Sync complete! Successfully submitted {success_count} structured entries to the Haven Map API.")
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Listens to comments posted in existing forum threads to update planet data."""
+        if not isinstance(message.channel, discord.Thread):
+            return
+        if message.channel.parent_id != self.forum_channel_id:
+            return
+        if message.author.bot:
+            return
+
+        if "Planet Name" in message.content or "Type:" in message.content:
+            try:
+                starter_message = await message.channel.fetch_message(message.channel.id)
+                payload = await self.build_full_payload(message.channel, starter_message)
+                if payload:
+                    await self.api.submit_system(payload)
+                    await message.add_reaction("✅")
+            except Exception as e:
+                print(f"Failed processing planet comment in thread {message.channel.id}: {e}")
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
-        """Automatically fires and processes when a new structural post arrives."""
+        """Automatically fires when a new thread post arrives."""
         if thread.parent_id != self.forum_channel_id:
             return
 
-        await asyncio.sleep(3) 
+        await asyncio.sleep(4) 
 
         try:
             starter_message = thread.starter_message or await thread.fetch_message(thread.id)
@@ -1152,25 +1190,19 @@ class HavenScraperCog(commands.Cog):
             print(f"Failed to fetch live starter message {thread.id}: {e}")
             return
 
-        payload = self.parse_forum_template(starter_message.content)
+        payload = await self.build_full_payload(thread, starter_message)
         if not payload:
-            print(f"Live Thread {thread.id} skipped: Missing required fields or invalid hex glyphs.")
             return
-
-        payload["submitted_by"] = starter_message.author.name
 
         try:
             await self.api.submit_system(payload)
             await starter_message.add_reaction("✅")
-            print(f"Successfully auto-submitted structural log: {payload['system_name']}")
         except Exception as e:
             print(f"Failed to auto-submit live system {thread.id}: {e}")
             try:
                 await starter_message.add_reaction("❌")
             except:
                 pass
-
-                   
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
     def __init__(self, bot):
