@@ -235,7 +235,7 @@ async def process_discovery_xp(user_id, discovery_type, channel_id):
 
     await add_xp(user_id, primary_role, xp)
 
-    level, leveled_up, dm = add_global_xp(user_id, xp)
+    level, leveled_up, dm = await add_global_xp(user_id, xp)
 
     if leveled_up:
         member = bot.get_guild(member.guild.id).get_member(user_id) if 'member' in globals() else None
