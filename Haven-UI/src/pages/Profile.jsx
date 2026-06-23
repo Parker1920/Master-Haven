@@ -357,18 +357,18 @@ export default function Profile() {
                 <div className="space-y-1">
                   {submissions.systems.map(s => {
                     // Map completeness → grade letter + .grade-* utility class.
-                    // S+ (fully charted) sits on top of S(85+); then A(65-84),
+                    // X (fully charted) sits on top of S(85+); then A(65-84),
                     // B(40-64), C(0-39). Prefer the backend-computed
-                    // completeness_grade (carries S+); fall back to the score
+                    // completeness_grade (carries X); fall back to the score
                     // ladder + is_fully_charted flag when only those are present.
-                    const GRADE_CLASS = { 'S+': 'grade-splus', S: 'grade-s', A: 'grade-a', B: 'grade-b', C: 'grade-c' }
+                    const GRADE_CLASS = { X: 'grade-splus', S: 'grade-s', A: 'grade-a', B: 'grade-b', C: 'grade-c' }
                     let gradeLetter = null
                     let gradeClass = ''
                     if (s.completeness_grade) {
                       gradeLetter = s.completeness_grade
                       gradeClass = GRADE_CLASS[s.completeness_grade] || 'grade-c'
                     } else if (s.is_complete !== null && s.is_complete !== undefined) {
-                      if (s.is_complete >= 85 && s.is_fully_charted) { gradeLetter = 'S+'; gradeClass = 'grade-splus' }
+                      if (s.is_complete >= 85 && s.is_fully_charted) { gradeLetter = 'X'; gradeClass = 'grade-splus' }
                       else if (s.is_complete >= 85) { gradeLetter = 'S'; gradeClass = 'grade-s' }
                       else if (s.is_complete >= 65) { gradeLetter = 'A'; gradeClass = 'grade-a' }
                       else if (s.is_complete >= 40) { gradeLetter = 'B'; gradeClass = 'grade-b' }

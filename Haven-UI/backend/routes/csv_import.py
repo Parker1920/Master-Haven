@@ -290,7 +290,8 @@ SPECIAL_FEATURE_KEYWORDS = {
     'ringed': 'has_rings',
     'infested': 'is_infested',
     'gas giant': 'is_gas_giant',
-    'swarm': 'swarm',
+    'swarm debris': 'swarm_debris',
+    'swarm': 'swarm_debris',
     'trash debris': 'trash_debris',
     'trash/debris': 'trash_debris',
     'high sentinel activity': 'high_sentinel_activity',
@@ -681,7 +682,7 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                             materials, notes, planet_index,
                             has_rings, is_dissonant, is_infested, vile_brood,
                             ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant,
-                            swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity)
+                            swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity)
                         VALUES (?, ?, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         sys_id, planet['name'],
@@ -695,7 +696,7 @@ async def import_csv(file: UploadFile = File(...), column_mapping: Optional[str]
                         1 if planet.get('storm_crystals') else 0,
                         1 if planet.get('gravitino_balls') else 0,
                         1 if planet.get('is_gas_giant') else 0,
-                        1 if planet.get('swarm') else 0,
+                        1 if planet.get('swarm_debris') else 0,
                         1 if planet.get('trash_debris') else 0,
                         1 if planet.get('high_sentinel_activity') else 0,
                         1 if planet.get('aggressive_sentinel_activity') else 0,

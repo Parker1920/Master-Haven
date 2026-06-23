@@ -7,7 +7,7 @@ Used by approval workflow, system detail, and browse endpoints.
 
 import logging
 
-from constants import NO_LIFE_BIOMES, score_to_grade
+from constants import NO_LIFE_BIOMES, score_to_grade, get_discovery_type_slug
 
 logger = logging.getLogger('control.room')
 
@@ -50,22 +50,60 @@ def _life_descriptor_filled(val, val_text):
 WONDER_FIELDS = ('estimated_age', 'core_element', 'lore_notes', 'root_structure', 'nutrient_source')
 
 
-def check_splus_eligible(cursor, system_id) -> bool:
-    """Run the S+ "fully charted" checklist for a system.
+def _has_base_coords(body) -> bool:
+    """A planet/moon documents a base by carrying BOTH base lat & long."""
+    return body.get('base_latitude') is not None and body.get('base_longitude') is not None
 
-    S+ is NOT a score band — it sits on top of the S grade. The caller must
+
+def _has_base_discovery(cursor, planet_ids, moon_ids) -> bool:
+    """True if a base-type discovery is linked to any of these planets/moons.
+
+    A base can be logged as a full discovery (type 'base', which carries its own
+    lat/long) instead of via the planet/moon base lat/long fields — both paths
+    count toward the X "documented base" requirement. type_slug is the canonical
+    type column; fall back to deriving it from discovery_type for rows that
+    predate type_slug.
+    """
+    conds, params = [], []
+    if planet_ids:
+        conds.append(f"planet_id IN ({','.join('?' * len(planet_ids))})")
+        params.extend(planet_ids)
+    if moon_ids:
+        conds.append(f"moon_id IN ({','.join('?' * len(moon_ids))})")
+        params.extend(moon_ids)
+    if not conds:
+        return False
+    cursor.execute(
+        f"SELECT type_slug, discovery_type FROM discoveries WHERE ({' OR '.join(conds)})",
+        params,
+    )
+    for row in cursor.fetchall():
+        row = dict(row)
+        slug = row.get('type_slug') or get_discovery_type_slug(row.get('discovery_type') or '')
+        if slug == 'base':
+            return True
+    return False
+
+
+def check_splus_eligible(cursor, system_id) -> bool:
+    """Run the X ("fully charted") checklist for a system.
+
+    X is NOT a score band — it sits on top of the S grade. The caller must
     have already confirmed score >= 85 (constants.SPLUS_MIN_SCORE). A system is
     fully charted when ALL of these hold:
 
       1. The system has at least one planet.
       2. Every planet AND every moon has a discovery linked to it
          (discoveries.planet_id / discoveries.moon_id).
-      3. Every planet carries wonder information — at least one of the five
-         Wonders Page fields (see WONDER_FIELDS) is populated.
-      4. At least one base is documented (some planet has base_location).
+      3. At least ONE body (any planet OR moon) carries wonder information —
+         at least one of the five Wonders Page fields (see WONDER_FIELDS) is
+         populated. (Relaxed 2026-06-23 from "every planet".)
+      4. At least one base is documented. A base counts when ANY body carries
+         base lat/long, OR a base-type discovery is linked to a body, OR (legacy
+         back-compat) a body has a non-empty free-text base_location.
       5. The space station is recorded — required only for systems that
          actually have one. Abandoned / uncharted systems (economy_type
-         'None'/'Abandoned') are exempt.
+         'None'/'Abandoned') and systems flagged no_space_station are exempt.
 
     Returns True only when every applicable item passes. The live `discoveries`
     table holds approved discoveries (pending ones live in pending_discoveries),
@@ -76,38 +114,51 @@ def check_splus_eligible(cursor, system_id) -> bool:
     if not srow:
         return False
     srow = dict(srow)
-    # Station is exempt from the S+ checklist when the system is Abandoned OR has
+    # Station is exempt from the X checklist when the system is Abandoned OR has
     # been explicitly marked as having no space station (no_space_station flag).
     station_exempt = (
         srow.get('economy_type') in ('None', 'Abandoned')
         or bool(srow.get('no_space_station'))
     )
 
-    # 1 + 3 + 4: planets, wonder notes, base
+    base_cols = ('base_location', 'base_latitude', 'base_longitude')
+    wonder_cols = ', '.join(WONDER_FIELDS)
+
+    # planets: id + base + wonder fields
     cursor.execute(
-        'SELECT id, base_location, '
-        'estimated_age, core_element, lore_notes, root_structure, nutrient_source '
-        'FROM planets WHERE system_id = ?',
+        f"SELECT id, {', '.join(base_cols)}, {wonder_cols} FROM planets WHERE system_id = ?",
         (system_id,),
     )
     planets = [dict(r) for r in cursor.fetchall()]
     if not planets:
         return False
-
     planet_ids = [p['id'] for p in planets]
+    ph = ','.join('?' * len(planet_ids))
 
-    # 3. wonder info on every planet
-    for p in planets:
-        if not any(_is_filled(p.get(f)) for f in WONDER_FIELDS):
-            return False
+    # moons: id + base + wonder fields (so they count toward wonder + base too)
+    cursor.execute(
+        f"SELECT id, {', '.join(base_cols)}, {wonder_cols} FROM moons WHERE planet_id IN ({ph})",
+        planet_ids,
+    )
+    moons = [dict(r) for r in cursor.fetchall()]
+    moon_ids = [m['id'] for m in moons]
 
-    # 4. at least one documented base
-    if not any(_is_filled(p.get('base_location')) for p in planets):
+    bodies = planets + moons
+
+    # 3. wonder info on AT LEAST ONE body (planet or moon)
+    if not any(any(_is_filled(b.get(f)) for f in WONDER_FIELDS) for b in bodies):
+        return False
+
+    # 4. at least one documented base — base lat/long on any body, or a legacy
+    #    free-text base_location, or a base-type discovery.
+    base_documented = any(_has_base_coords(b) or _is_filled(b.get('base_location')) for b in bodies)
+    if not base_documented:
+        base_documented = _has_base_discovery(cursor, planet_ids, moon_ids)
+    if not base_documented:
         return False
 
     # 2a. a discovery linked to every planet (planet ids are globally unique,
     # so match on planet_id directly rather than relying on a stamped system_id)
-    ph = ','.join('?' * len(planet_ids))
     cursor.execute(
         f'SELECT DISTINCT planet_id FROM discoveries WHERE planet_id IN ({ph})',
         planet_ids,
@@ -117,8 +168,6 @@ def check_splus_eligible(cursor, system_id) -> bool:
         return False
 
     # 2b. a discovery linked to every moon
-    cursor.execute(f'SELECT id FROM moons WHERE planet_id IN ({ph})', planet_ids)
-    moon_ids = [row[0] for row in cursor.fetchall()]
     if moon_ids:
         mph = ','.join('?' * len(moon_ids))
         cursor.execute(
@@ -142,7 +191,7 @@ def calculate_completeness_score(cursor, system_id) -> dict:
     """Calculate a data completeness score (0-100) for a system.
 
     Returns a dict with: score, grade, is_fully_charted, breakdown (with
-    per-category details). `grade` is 'S+' when the score clears S AND the
+    per-category details). `grade` is 'X' when the score clears S AND the
     fully-charted checklist passes (see check_splus_eligible).
     """
     cursor.execute('SELECT * FROM systems WHERE id = ?', (system_id,))

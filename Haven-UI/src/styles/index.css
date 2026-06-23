@@ -315,16 +315,17 @@ details[open] .chev { transform: rotate(180deg); }
 .chev { transition: transform 200ms; }
 
 /* Completeness grade letter + bar tokens.
-   In-game scale: S+=Diamond Cyan, S=Gold, A=Purple, B=Blue, C=Green.
+   In-game scale: X=Platinum, S=Gold, A=Purple, B=Blue, C=Green.
    Mirror of TIER_COLORS in src/utils/gradeColors.js.
-   NOTE: `.grade-s+` is invalid CSS — the S+ tier uses `.grade-splus`/`.bar-splus`. */
-.grade-splus { color: #22d3ee; }
+   NOTE: the "fully charted" tier renders the letter X but keeps the internal
+   class token `.grade-splus`/`.bar-splus` (matches backend grade_splus). */
+.grade-splus { color: #E5E4E2; }
 .grade-s { color: #ffd700; }
 .grade-a { color: #c084fc; }
 .grade-b { color: #60a5fa; }
 .grade-c { color: #4ade80; }
 
-.bar-splus { background: #22d3ee; }
+.bar-splus { background: #E5E4E2; }
 .bar-s { background: #ffd700; }
 .bar-a { background: #c084fc; }
 .bar-b { background: #60a5fa; }

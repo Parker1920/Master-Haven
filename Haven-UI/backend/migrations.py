@@ -7498,12 +7498,12 @@ def migration_1_95_0(conn):
     )
 
 
-@register_migration("1.96.0", "Add Swarm/Trash Debris/High+Aggressive Sentinel Activity planet+moon attributes, systems.no_space_station flag, and migrate Ancient Bones/Salvageable Scrap/Vile Brood out of materials into their attribute flags")
+@register_migration("1.96.0", "Add Swarm Debris/Trash Debris/High+Aggressive Sentinel Activity planet+moon attributes, systems.no_space_station flag, and migrate Ancient Bones/Salvageable Scrap/Vile Brood out of materials into their attribute flags")
 def migration_1_96_0(conn):
     """Three coordinated changes (see Master Haven 1.79.0 changelog):
 
     1. Four new boolean attribute columns on `planets` AND `moons`:
-         swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity
+         swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity
        (default 0) — same shape as the existing vile_brood / water_world specials.
 
     2. `systems.no_space_station` (default 0) — a positive "this system has no
@@ -7528,7 +7528,7 @@ def migration_1_96_0(conn):
 
     # --- 1 + 2: schema ---------------------------------------------------
     new_body_cols = [
-        ('swarm', 'INTEGER DEFAULT 0'),
+        ('swarm_debris', 'INTEGER DEFAULT 0'),
         ('trash_debris', 'INTEGER DEFAULT 0'),
         ('high_sentinel_activity', 'INTEGER DEFAULT 0'),
         ('aggressive_sentinel_activity', 'INTEGER DEFAULT 0'),
@@ -7625,3 +7625,68 @@ def migration_1_96_0(conn):
             except Exception as e:  # noqa: BLE001 — one bad row shouldn't abort the migration
                 logger.warning(f"Migration 1.96.0: re-score failed for {sys_id}: {e}")
         logger.info(f"Migration 1.96.0: re-scored {rescored} affected system(s)")
+
+
+@register_migration("1.97.0", "Base lat/long on planets+moons (+moon base_location); re-score for the reworked X checklist (one-body wonder, base via coords/discovery)")
+def migration_1_97_0(conn):
+    """Adds the base-coordinate columns the reworked X ("fully charted")
+    checklist reads, then re-scores every system.
+
+    Two coordinated changes landed in services/completeness.check_splus_eligible
+    (Master Haven 1.80.0 grading rework):
+
+      - A base is now "documented" by base LAT/LONG on any planet/moon, OR a
+        base-type discovery, OR (legacy) a free-text base_location. This needs
+        `base_latitude`/`base_longitude` REAL columns on BOTH planets and moons.
+        Moons also gain `base_location` (the editor already collected a moon base
+        text but the column never existed, so it was silently dropped on save).
+      - The wonder-notes requirement relaxed from "every planet" to "at least one
+        planet OR moon".
+
+    Both flip `is_fully_charted` for some systems (net a loosening), so we re-run
+    the live scorer over all systems — the same idempotent repair 1.90.0/1.91.0
+    used (single source of truth: services.completeness.update_completeness_score,
+    which rewrites is_complete + is_fully_charted). Re-runs converge.
+
+    Idempotent: ALTERs are guarded; the score is a pure function of current data.
+    """
+    cursor = conn.cursor()
+
+    # --- schema: base coordinates (+ moon base_location) -----------------
+    new_cols = {
+        'planets': [('base_latitude', 'REAL'), ('base_longitude', 'REAL')],
+        'moons': [('base_location', 'TEXT'), ('base_latitude', 'REAL'), ('base_longitude', 'REAL')],
+    }
+    for table, cols in new_cols.items():
+        for col_name, col_type in cols:
+            try:
+                cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col_name} {col_type}')
+                logger.info(f"Migration 1.97.0: added {table}.{col_name}")
+            except sqlite3.OperationalError:
+                pass  # already exists
+
+    # --- re-score every system for the reworked X checklist --------------
+    # update_completeness_score reads rows as dicts → needs sqlite3.Row (mirrors 1.90/1.91).
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        from services.completeness import update_completeness_score
+        id_cursor = conn.cursor()
+        id_cursor.execute("SELECT id FROM systems")
+        system_ids = [row[0] for row in id_cursor.fetchall()]
+        score_cursor = conn.cursor()
+        logger.info(f"Migration 1.97.0: re-scoring {len(system_ids)} systems for the reworked X checklist...")
+        x_count = 0
+        for sys_id in system_ids:
+            try:
+                result = update_completeness_score(score_cursor, sys_id)
+                if result.get('is_fully_charted'):
+                    x_count += 1
+            except Exception as e:  # noqa: BLE001 — one bad row shouldn't abort the migration
+                logger.warning(f"Migration 1.97.0: re-score failed for {sys_id}: {e}")
+        logger.info(
+            f"Migration 1.97.0: re-scored {len(system_ids)} systems; "
+            f"{x_count} now qualify as X (fully charted)"
+        )
+    finally:
+        conn.row_factory = prev_factory

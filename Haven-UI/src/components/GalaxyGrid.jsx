@@ -135,10 +135,10 @@ export default function GalaxyGrid() {
 
 function GalaxyCard({ g, onClick, pinned, pinning }) {
   const total = g.system_count || 0
-  // S+ ("fully charted") is its own segment; grade_s is S-but-not-S+ from the
+  // X ("fully charted") is its own segment; grade_s is S-but-not-X from the
   // backend so the buckets are mutually exclusive and sum to the total.
   const segments = [
-    { cls: 'bar-splus', gcls: 'grade-splus', label: 'S+', count: g.grade_splus || 0 },
+    { cls: 'bar-splus', gcls: 'grade-splus', label: 'X', count: g.grade_splus || 0 },
     { cls: 'bar-s', gcls: 'grade-s', label: 'S', count: g.grade_s || 0 },
     { cls: 'bar-a', gcls: 'grade-a', label: 'A', count: g.grade_a || 0 },
     { cls: 'bar-b', gcls: 'grade-b', label: 'B', count: g.grade_b || 0 },

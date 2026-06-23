@@ -110,6 +110,7 @@ from db import (
     get_system_glyph, find_matching_system, find_matching_pending_system,
     build_mismatch_flags, merge_system_data,
     snapshot_child_name_maps, relink_discoveries_after_rebuild,
+    set_base_fields,
     PHOTOS_DIR, LOGS_DIR,
 )
 
@@ -1136,11 +1137,11 @@ def init_database():
     add_column_if_missing('moons', 'is_floating_islands', 'INTEGER DEFAULT 0')
     add_column_if_missing('moons', 'plant_resource', 'TEXT')
 
-    # Master Haven 1.79.0: new planet/moon attributes (Swarm, Trash Debris,
+    # Master Haven 1.79.0: new planet/moon attributes (Swarm Debris, Trash Debris,
     # High/Aggressive Sentinel Activity). Authoritative add is migration 1.96.0;
     # mirrored here as a fresh-DB safety net (same convention as the specials above).
     for _attr_table in ('planets', 'moons'):
-        add_column_if_missing(_attr_table, 'swarm', 'INTEGER DEFAULT 0')
+        add_column_if_missing(_attr_table, 'swarm_debris', 'INTEGER DEFAULT 0')
         add_column_if_missing(_attr_table, 'trash_debris', 'INTEGER DEFAULT 0')
         add_column_if_missing(_attr_table, 'high_sentinel_activity', 'INTEGER DEFAULT 0')
         add_column_if_missing(_attr_table, 'aggressive_sentinel_activity', 'INTEGER DEFAULT 0')
@@ -2978,7 +2979,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                     ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                     is_bubble, is_floating_islands,
-                    swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                    swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                     estimated_age, core_element, lore_notes, root_structure, nutrient_source
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3035,7 +3036,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('exotic_trophy'),
                 1 if planet.get('is_bubble') else 0,
                 1 if planet.get('is_floating_islands') else 0,
-                1 if planet.get('swarm') else 0,
+                1 if planet.get('swarm_debris') else 0,
                 1 if planet.get('trash_debris') else 0,
                 1 if planet.get('high_sentinel_activity') else 0,
                 1 if planet.get('aggressive_sentinel_activity') else 0,
@@ -3049,6 +3050,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('nutrient_source')
             ))
             planet_id = cursor.lastrowid
+            set_base_fields(cursor, 'planets', planet_id, planet)
 
             # Insert moons with ALL fields.
             # Column list now matches the approve_system / batch_approve paths
@@ -3062,7 +3064,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
-                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                        swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3094,7 +3096,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
-                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('swarm_debris') else 0,
                     1 if moon.get('trash_debris') else 0,
                     1 if moon.get('high_sentinel_activity') else 0,
                     1 if moon.get('aggressive_sentinel_activity') else 0,
@@ -3114,6 +3116,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     moon.get('root_structure'),
                     moon.get('nutrient_source')
                 ))
+                set_base_fields(cursor, 'moons', cursor.lastrowid, moon)
 
         # Insert space station if present
         if payload.get('space_station'):

@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from constants import BACKEND_DIR, HAVEN_UI_DIR, ACTIVITY_LOG_MAX
+from constants import BACKEND_DIR, HAVEN_UI_DIR, ACTIVITY_LOG_MAX, normalize_discovery_coords
 
 logger = logging.getLogger('control.room')
 
@@ -283,6 +283,33 @@ def relink_discoveries_after_rebuild(cursor, system_id, planet_old, moon_old):
                 (new_id, system_id, old_id))
             relinked += cursor.rowcount
     return relinked
+
+
+def set_base_fields(cursor, table: str, row_id, body: dict) -> None:
+    """Persist a planet/moon's base location + lat/long after its INSERT.
+
+    Base data (free-text `base_location` + `base_latitude`/`base_longitude`) is
+    manual-only (entered in the wizard) and is set via a small follow-up UPDATE
+    rather than threaded through every positional INSERT — there are several such
+    INSERTs and a miscounted placeholder would silently shift columns. Only
+    writes when at least one base field is present, so it's a no-op for extractor
+    / coordinate-less bodies. Coordinates are range-validated (lat [-90,90],
+    lng [-180,180]) via the shared discovery-coord normalizer.
+    """
+    if table not in ('planets', 'moons') or not row_id:
+        return
+    loc = body.get('base_location')
+    loc = loc if (loc is not None and str(loc).strip()) else None
+    lat, lng = normalize_discovery_coords(body.get('base_latitude'), body.get('base_longitude'))
+    if loc is None and lat is None and lng is None:
+        return
+    # COALESCE keeps a base_location already written by the INSERT (planets) when
+    # this call doesn't carry one; lat/lng are authoritative from the body.
+    cursor.execute(
+        f'UPDATE {table} SET base_location = COALESCE(?, base_location), '
+        'base_latitude = ?, base_longitude = ? WHERE id = ?',
+        (loc, lat, lng, row_id),
+    )
 
 
 def find_matching_system(cursor, glyph_code: str, galaxy: str, reality: str):

@@ -31,6 +31,7 @@ from db import (
     get_system_glyph,
     snapshot_child_name_maps,
     relink_discoveries_after_rebuild,
+    set_base_fields,
 )
 from glyph_decoder import (
     decode_glyph_to_coords,
@@ -1371,7 +1372,7 @@ async def approve_system(
                         has_rings = ?, is_dissonant = ?, is_infested = ?, extreme_weather = ?, water_world = ?, vile_brood = ?,
                         ancient_bones = ?, salvageable_scrap = ?, storm_crystals = ?, gravitino_balls = ?, is_gas_giant = ?, exotic_trophy = ?,
                         is_bubble = ?, is_floating_islands = ?,
-                        swarm = ?, trash_debris = ?, high_sentinel_activity = ?, aggressive_sentinel_activity = ?,
+                        swarm_debris = ?, trash_debris = ?, high_sentinel_activity = ?, aggressive_sentinel_activity = ?,
                         -- M-W1: Wonders Notes are now overwriteable. The
                         -- wizard always re-sends the existing value in edit
                         -- mode (originalSystem snapshot), so a blank means
@@ -1431,7 +1432,7 @@ async def approve_system(
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
                     1 if planet.get('is_floating_islands') else 0,
-                    1 if planet.get('swarm') else 0,
+                    1 if planet.get('swarm_debris') else 0,
                     1 if planet.get('trash_debris') else 0,
                     1 if planet.get('high_sentinel_activity') else 0,
                     1 if planet.get('aggressive_sentinel_activity') else 0,
@@ -1460,7 +1461,7 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                         is_bubble, is_floating_islands,
-                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                        swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1515,7 +1516,7 @@ async def approve_system(
                     planet.get('exotic_trophy'),
                     1 if planet.get('is_bubble') else 0,
                     1 if planet.get('is_floating_islands') else 0,
-                    1 if planet.get('swarm') else 0,
+                    1 if planet.get('swarm_debris') else 0,
                     1 if planet.get('trash_debris') else 0,
                     1 if planet.get('high_sentinel_activity') else 0,
                     1 if planet.get('aggressive_sentinel_activity') else 0,
@@ -1530,6 +1531,9 @@ async def approve_system(
                 if is_edit:
                     logger.info(f"Added new planet '{planet_name}' (ID: {planet_id}) to existing system")
 
+            # Persist base location + lat/long (manual-only; no-op without base data)
+            set_base_fields(cursor, 'planets', planet_id, planet)
+
             # For edits: clear existing moons on this planet before re-inserting
             # to prevent duplication when the same planet is resubmitted
             if is_edit and planet_name in existing_planets:
@@ -1542,7 +1546,7 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
-                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                        swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1574,7 +1578,7 @@ async def approve_system(
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
-                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('swarm_debris') else 0,
                     1 if moon.get('trash_debris') else 0,
                     1 if moon.get('high_sentinel_activity') else 0,
                     1 if moon.get('aggressive_sentinel_activity') else 0,
@@ -1593,6 +1597,7 @@ async def approve_system(
                     moon.get('root_structure'),
                     moon.get('nutrient_source'),
                 ))
+                set_base_fields(cursor, 'moons', cursor.lastrowid, moon)
 
         # Handle root-level moons (from Haven Extractor which sends moons as flat list)
         # These moons are sent with is_moon=true but stored at root level by extraction API
@@ -1607,7 +1612,7 @@ async def approve_system(
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
-                        swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                        swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1639,7 +1644,7 @@ async def approve_system(
                     1 if moon.get('is_gas_giant') else 0,
                     1 if moon.get('is_bubble') else 0,
                     1 if moon.get('is_floating_islands') else 0,
-                    1 if moon.get('swarm') else 0,
+                    1 if moon.get('swarm_debris') else 0,
                     1 if moon.get('trash_debris') else 0,
                     1 if moon.get('high_sentinel_activity') else 0,
                     1 if moon.get('aggressive_sentinel_activity') else 0,
@@ -2556,7 +2561,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood,
                             ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, is_gas_giant, exotic_trophy,
                             is_bubble, is_floating_islands,
-                            swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                            swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                             estimated_age, core_element, lore_notes, root_structure, nutrient_source
                         )
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2611,7 +2616,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         planet.get('exotic_trophy'),
                         1 if planet.get('is_bubble') else 0,
                         1 if planet.get('is_floating_islands') else 0,
-                        1 if planet.get('swarm') else 0,
+                        1 if planet.get('swarm_debris') else 0,
                         1 if planet.get('trash_debris') else 0,
                         1 if planet.get('high_sentinel_activity') else 0,
                         1 if planet.get('aggressive_sentinel_activity') else 0,
@@ -2623,6 +2628,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         planet.get('nutrient_source')
                     ))
                     planet_id = cursor.lastrowid
+                    set_base_fields(cursor, 'planets', planet_id, planet)
 
                     for moon in planet.get('moons', []):
                         cursor.execute('''
@@ -2630,7 +2636,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                                 has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                                 ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                                 is_bubble, is_floating_islands,
-                                swarm, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
+                                swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                                 biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                                 estimated_age, core_element, lore_notes, root_structure, nutrient_source)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2662,7 +2668,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             1 if moon.get('is_gas_giant') else 0,
                             1 if moon.get('is_bubble') else 0,
                             1 if moon.get('is_floating_islands') else 0,
-                            1 if moon.get('swarm') else 0,
+                            1 if moon.get('swarm_debris') else 0,
                             1 if moon.get('trash_debris') else 0,
                             1 if moon.get('high_sentinel_activity') else 0,
                             1 if moon.get('aggressive_sentinel_activity') else 0,
@@ -2681,6 +2687,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             moon.get('root_structure'),
                             moon.get('nutrient_source'),
                         ))
+                        set_base_fields(cursor, 'moons', cursor.lastrowid, moon)
 
                 # Insert space station if present
                 if system_data.get('space_station'):

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { uploadPhoto, getPhotoUrl } from '../utils/api'
 import Modal from './Modal'
 import SearchableSelect from './SearchableSelect'
+import LatLngInput from './LatLngInput'
 import HelpChip from './wizard/HelpChip'
 import {
   biomeAdjectives,
@@ -42,7 +43,7 @@ const SHARED_ATTRIBUTES = [
   { key: 'is_bubble', label: 'Bubble Planet', icon: '\u{1FAE7}' },
   { key: 'is_floating_islands', label: 'Floating Islands', icon: '\u{1F3DD}' },
   // Master Haven 1.79.0 additions
-  { key: 'swarm', label: 'Swarm', icon: '\u{1F41D}' },
+  { key: 'swarm_debris', label: 'Swarm Debris', icon: '\u{1F41D}' },
   { key: 'trash_debris', label: 'Trash Debris', icon: '\u{1F5D1}' },
   { key: 'high_sentinel_activity', label: 'High Sentinel Activity', icon: '\u{1F441}' },
   { key: 'aggressive_sentinel_activity', label: 'Aggressive Sentinel Activity', icon: '\u{1F534}' },
@@ -83,6 +84,13 @@ export default function CelestialBodyEditor({ type = 'planet', body, index, onCh
   function setField(k, v) {
     const updated = { ...data, [k]: v }
     onChange(index, updated)
+  }
+
+  // Multi-key setter — needed when one event updates >1 field (e.g. base
+  // lat+long together), since sequential setField calls would each spread the
+  // stale `data` prop and clobber each other.
+  function setFields(obj) {
+    onChange(index, { ...data, ...obj })
   }
 
   async function upload(e) {
@@ -166,12 +174,17 @@ export default function CelestialBodyEditor({ type = 'planet', body, index, onCh
             <SearchableSelect options={resourcesOptions} value={data.materials || ''} onChange={val => setField('materials', val)} placeholder="Search resources..." isMulti={true} />
           </div>
         </div>
-        {isPlanet && (
-          <div>
-            <label className="block text-sm">Base Location</label>
-            <input aria-label="Planet Base" placeholder="Base location" className="mt-1 p-1 rounded w-full" value={data.base_location || ''} onChange={e => setField('base_location', e.target.value)} />
+        <div>
+          <label className="block text-sm">Base Location <span className="muted text-xs">(optional)</span></label>
+          <input aria-label={`${label} Base`} placeholder="Base name / notes" className="mt-1 p-1 rounded w-full" value={data.base_location || ''} onChange={e => setField('base_location', e.target.value)} />
+          <div className="mt-2">
+            <LatLngInput
+              latitude={data.base_latitude}
+              longitude={data.base_longitude}
+              onChange={(lat, lng) => setFields({ base_latitude: lat, base_longitude: lng })}
+            />
           </div>
-        )}
+        </div>
         <div>
           <label className="block text-sm">Photo</label>
           <input aria-label={`${label} Photo`} type="file" onChange={upload} className="mt-1" />

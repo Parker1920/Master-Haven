@@ -10,7 +10,7 @@
 // (System Extra dropped `description` on 2026-06-19 — glyph_code +
 //  stellar_classification only, 5 pts each.)
 //
-// Grade thresholds match constants.py: S(85+) A(65+) B(40+) C(<40). S+ ("fully
+// Grade thresholds match constants.py: S(85+) A(65+) B(40+) C(<40). X ("fully
 // charted") is a checklist on top of S — the wizard can verify the parts it has
 // data for (wonder notes, base, station) but NOT the discovery-on-every-body
 // requirement, so it's surfaced as guidance (`splus`) rather than promoting the
@@ -163,20 +163,24 @@ export default function useCompletenessScore(system) {
     else if (pct >= 65) grade = 'A'
     else if (pct >= 40) grade = 'B'
 
-    // --- S+ guidance (checklist on top of S) ---
+    // --- X guidance (checklist on top of S) ---
     // The wizard can verify the parts it has data for; it CANNOT verify a
     // discovery on every planet AND moon (no linked discovery data here), so
     // that requirement is reported as "verified at approval" and we never
-    // promote the displayed grade to S+ on the client.
-    const everyPlanetHasWonder = planets.length > 0 && planets.every((p) => WONDER_FIELDS.some((f) => isFilled(p[f])))
-    const hasBase = planets.some((p) => isFilled(p.base_location))
+    // promote the displayed grade to X on the client.
+    // Bodies = planets + their moons (wonder + base can be satisfied by either).
+    const allBodies = planets.flatMap((p) => [p, ...(p.moons || [])])
+    const anyBodyHasWonder = allBodies.some((b) => WONDER_FIELDS.some((f) => isFilled(b[f])))
+    // base lat/long may arrive as raw strings ('' mid-typing) — require both to parse.
+    const hasBaseCoords = (b) => Number.isFinite(parseFloat(b.base_latitude)) && Number.isFinite(parseFloat(b.base_longitude))
+    const hasBase = allBodies.some((b) => hasBaseCoords(b) || isFilled(b.base_location))
     const stationRecorded = abandoned || noStation || !!station
     const splus = {
       eligible: false, // never auto-promoted client-side; backend decides
       requirements: [
         { met: pct >= 85, label: 'Reach an S-grade score (85+)' },
-        { met: everyPlanetHasWonder, label: 'Wonder notes on every planet' },
-        { met: hasBase, label: 'Document at least one base' },
+        { met: anyBodyHasWonder, label: 'Wonder notes on at least one planet/moon' },
+        { met: hasBase, label: 'Document a base (lat/long, or a base discovery)' },
         { met: stationRecorded, label: (abandoned || noStation) ? 'Station — N/A (no station)' : 'Record the space station' },
         { met: null, label: 'A discovery on every planet & moon (verified at approval)' },
       ],

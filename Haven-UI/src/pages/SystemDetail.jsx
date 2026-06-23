@@ -530,13 +530,13 @@ export default function SystemDetail() {
                 value={system.completeness_score != null ? `${system.completeness_score}%` : '—'}
                 secondary={
                   system.completeness_score == null ? null
-                  : grade === 'S+' ? 'grade S+'
+                  : grade === 'X' ? 'grade X'
                   : system.completeness_score >= 85 ? 'grade S'
                   : system.completeness_score >= 65 ? 'grade A'
                   : system.completeness_score >= 40 ? 'grade B' : 'grade C'
                 }
                 valueClass={
-                  grade === 'S+' ? 'grade-splus'
+                  grade === 'X' ? 'grade-splus'
                   : system.completeness_score >= 85 ? 'grade-s'
                   : system.completeness_score >= 65 ? 'grade-a'
                   : system.completeness_score >= 40 ? 'grade-b' : 'grade-c'
@@ -874,7 +874,7 @@ const FEATURE_FLAGS = [
   ['has_rings', 'Has Rings'],
   ['is_gas_giant', 'Gas Giant'],
   ['extreme_weather', 'Extreme Weather'],
-  ['swarm', 'Swarm'],
+  ['swarm_debris', 'Swarm Debris'],
   ['trash_debris', 'Trash Debris'],
   ['high_sentinel_activity', 'High Sentinel Activity'],
   ['aggressive_sentinel_activity', 'Aggressive Sentinel Activity'],
@@ -1006,8 +1006,15 @@ function PlanetCard({ p, index }) {
             </DetailRow>
           )}
 
-          {p.base_location && (
-            <DetailRow label="Base"><span className="mono">{p.base_location}</span></DetailRow>
+          {(p.base_location || formatCoords(p.base_latitude, p.base_longitude)) && (
+            <DetailRow label="Base">
+              <span className="mono">
+                {p.base_location}
+                {formatCoords(p.base_latitude, p.base_longitude) && (
+                  <span className="ml-1.5" style={{ color: 'var(--muted)' }}>📍 {formatCoords(p.base_latitude, p.base_longitude)}</span>
+                )}
+              </span>
+            </DetailRow>
           )}
 
           {p.notes && (
@@ -1114,7 +1121,9 @@ function MoonCard({ m, index }) {
               </span>
             </DetailRow>
           )}
-          {m.base_location && <DetailRow label="Base"><span className="mono">{m.base_location}</span></DetailRow>}
+          {(m.base_location || formatCoords(m.base_latitude, m.base_longitude)) && (
+            <DetailRow label="Base"><span className="mono">{m.base_location}{formatCoords(m.base_latitude, m.base_longitude) && <span className="ml-1.5" style={{ color: 'var(--muted)' }}>📍 {formatCoords(m.base_latitude, m.base_longitude)}</span>}</span></DetailRow>
+          )}
           {m.notes && (
             <DetailRow label="Notes">
               <span className="italic whitespace-pre-line" style={{ color: 'rgba(255,255,255,0.85)' }}>{m.notes}</span>

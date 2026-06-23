@@ -60,27 +60,32 @@ DEFAULT_PERSONAL_COLOR = '#c026d3'
 # Completeness Grading
 # ============================================================================
 
-# Score ranges for the four letter grades. S+ is intentionally absent here:
-# it is NOT a score band. S+ ("fully charted") is a checklist that sits ON TOP
-# of an S-grade score (>=85) — a system is S+ only when, in addition to scoring
-# S, it has a discovery on every body, wonder notes on every planet, a base,
-# and a recorded station (when applicable). That checklist lives in
+# Score ranges for the four letter grades. X is intentionally absent here:
+# it is NOT a score band. X ("fully charted") is a checklist that sits ON TOP
+# of an S-grade score (>=85) — a system is X only when, in addition to scoring
+# S, it has a discovery on every body, wonder notes on at least one body, a
+# documented base (base lat/long or a base discovery), and a recorded station
+# (when applicable). That checklist lives in
 # services/completeness.check_splus_eligible() and is materialized into the
 # systems.is_fully_charted column by update_completeness_score().
 GRADE_THRESHOLDS = {'S': (85, 100), 'A': (65, 84), 'B': (40, 64), 'C': (0, 39)}
 
-# S-grade baseline a system must clear before the S+ checklist is even run.
+# S-grade baseline a system must clear before the X checklist is even run.
 SPLUS_MIN_SCORE = 85
-GRADE_SPLUS = 'S+'
+# Displayed letter for the "fully charted" tier. It sits ON TOP of S (it is not
+# a score band). Rendered as NMS-style "X" in Platinum. Internal identifiers
+# (is_fully_charted, check_splus_eligible, grade_splus, SPLUS_MIN_SCORE) keep
+# the "splus" naming — only this user-facing letter changed (was 'S+').
+GRADE_SPLUS = 'X'
 
 
 def score_to_grade(score: int, is_fully_charted: bool = False) -> str:
     """Convert a completeness score (0-100) to a letter grade.
 
-    S+ ("fully charted") is NOT a score threshold — it's a checklist that sits
+    X ("fully charted") is NOT a score threshold — it's a checklist that sits
     on top of the S grade (see services/completeness.check_splus_eligible).
     Callers that already know the system's fully-charted flag (e.g. read it from
-    systems.is_fully_charted) pass is_fully_charted=True to surface S+; the
+    systems.is_fully_charted) pass is_fully_charted=True to surface X; the
     default keeps the pure score→letter behavior for the many callers that only
     have a number.
     """

@@ -6,12 +6,13 @@
 //     public/VH-Cartographer.html) which can't import JS modules.
 //
 // In-game scheme (per Parker): S = Gold, A = Purple, B = Blue, C = Green.
-// S+ ("fully charted") is a checklist tier that sits ON TOP of S — a system
-// that scores S AND has a discovery on every body, wonder notes on every
-// planet, a documented base, and a recorded station. It renders Diamond Cyan.
+// X ("fully charted") is a checklist tier that sits ON TOP of S — a system that
+// scores S AND has a discovery on every body, wonder notes on at least one
+// body, a documented base (base lat/long or a base discovery), and a recorded
+// station. It renders Platinum, NMS's "above-S" X-class tier. (Was 'S+'.)
 
 export const TIER_COLORS = {
-  'S+': '#22d3ee', // diamond cyan (fully charted)
+  X: '#E5E4E2', // platinum (fully charted)
   S: '#ffd700', // gold
   A: '#c084fc', // purple
   B: '#60a5fa', // blue
@@ -31,7 +32,7 @@ export const RICHNESS_COLORS = {
 // matches the poster StatTile convention; GRADE_BADGE_STYLE below mirrors it
 // in CSS `{ background, color }` form for JSX inline-style consumers.
 export const GRADE_BADGE = {
-  'S+': { bg: '#22d3ee', fg: '#083344' }, // diamond cyan on deep cyan
+  X: { bg: '#E5E4E2', fg: '#1f2937' }, // platinum on dark slate (fully charted)
   S: { bg: '#ffd700', fg: '#422006' }, // gold
   A: { bg: '#c084fc', fg: '#2e1065' }, // purple
   B: { bg: '#60a5fa', fg: '#082f49' }, // blue

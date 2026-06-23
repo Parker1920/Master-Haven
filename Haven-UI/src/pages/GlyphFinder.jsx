@@ -24,7 +24,7 @@ function starPill(starType) {
 
 function gradeClass(grade) {
   if (!grade) return 'grade-c'
-  if (grade === 'S+') return 'grade-splus'
+  if (grade === 'X') return 'grade-splus' // fully-charted tier keeps the splus token
   return `grade-${grade.toLowerCase()}`
 }
 

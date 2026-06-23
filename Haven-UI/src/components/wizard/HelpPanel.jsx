@@ -151,7 +151,7 @@ you propose a name; admins approve it; subsequent submissions inherit it. This k
 • Planet Life (15) — fauna, flora, resources (biome-aware)
 • Space Station (5)
 
-S+ ("fully charted") is a bonus tier on top of S: the system scores S AND has a discovery on every planet & moon, wonder notes on every planet, a documented base, and a recorded space station (abandoned systems are exempt from the station requirement).
+X ("fully charted") is a bonus tier on top of S: the system scores S AND has a discovery on every planet & moon, wonder notes on at least one planet or moon, a documented base (base lat/long on any body, or a base discovery), and a recorded space station (abandoned / no-station systems are exempt from the station requirement).
 
 Hover the grade letter in the sidebar to see your category breakdown and how many points to the next grade. The "Boost your grade" panel below shows the top 4 fields you could fill to climb fastest.`,
       },

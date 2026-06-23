@@ -142,12 +142,13 @@ const EMPTY_SYSTEM = {
 const PLANET_DEFAULTS = {
   name: '', biome: '', weather: '', sentinel: 'None',
   fauna: 'N/A', flora: 'N/A', materials: '', base_location: '',
+  base_latitude: '', base_longitude: '',
   photo: '', notes: '', moons: [],
   has_rings: 0, is_dissonant: 0, is_infested: 0,
   extreme_weather: 0, water_world: 0, vile_brood: 0,
   ancient_bones: 0, salvageable_scrap: 0, storm_crystals: 0, gravitino_balls: 0,
   is_gas_giant: 0, is_bubble: 0, is_floating_islands: 0, exotic_trophy: '',
-  swarm: 0, trash_debris: 0, high_sentinel_activity: 0, aggressive_sentinel_activity: 0,
+  swarm_debris: 0, trash_debris: 0, high_sentinel_activity: 0, aggressive_sentinel_activity: 0,
   // Wonders Page Notes — free-form narrative from NMS Log Exploration Guide.
   // Backend migration 1.76.0 adds matching columns on planets + moons.
   estimated_age: '', core_element: '', lore_notes: '',

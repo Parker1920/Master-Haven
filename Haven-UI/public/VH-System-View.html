@@ -518,9 +518,9 @@
             return '#ffb44c';
         }
 
-        // In-game scale: S+=Diamond Cyan, S=Gold, A=Purple, B=Blue, C=Green
+        // In-game scale: X=Platinum, S=Gold, A=Purple, B=Blue, C=Green
         // (mirror of TIER_COLORS in src/utils/gradeColors.js).
-        const TIER_COLORS = { 'S+': '#22d3ee', S: '#ffd700', A: '#c084fc', B: '#60a5fa', C: '#4ade80' };
+        const TIER_COLORS = { X: '#E5E4E2', S: '#ffd700', A: '#c084fc', B: '#60a5fa', C: '#4ade80' };
         const RICHNESS_COLORS = { extraordinary: '#ffd700', rare: '#c084fc', common: '#4ade80' };
         // Metadata keys that carry a C/B/A/S class or a richness rank.
         const CLASS_META_KEYS = new Set(['ship_class', 'tool_class']);
@@ -704,7 +704,7 @@
             if (data.is_bubble)                   specials.push({ l: 'Bubble planet', c: 't-p' });
             if (data.is_floating_islands)         specials.push({ l: 'Floating islands', c: 't-t' });
             if (data.is_gas_giant)                specials.push({ l: 'Gas giant',     c: 't-x' });
-            if (data.swarm)                       specials.push({ l: 'Swarm',        c: 't-a' });
+            if (data.swarm_debris)                       specials.push({ l: 'Swarm Debris',        c: 't-a' });
             if (data.trash_debris)                specials.push({ l: 'Trash debris', c: 't-x' });
             if (data.high_sentinel_activity)      specials.push({ l: 'High sentinels', c: 't-a' });
             if (data.aggressive_sentinel_activity) specials.push({ l: 'Aggressive sentinels', c: 't-r' });
@@ -1461,7 +1461,7 @@
                 if (data.is_gas_giant)                      specials.push({ l: 'Gas giant',       c: 't-x' });
                 if (data.water_world)                       specials.push({ l: 'Water world',     c: 't-b' });
                 if (data.has_rings)                         specials.push({ l: 'Has rings',       c: 't-b' });
-                if (data.swarm)                             specials.push({ l: 'Swarm',           c: 't-a' });
+                if (data.swarm_debris)                             specials.push({ l: 'Swarm Debris',           c: 't-a' });
                 if (data.trash_debris)                      specials.push({ l: 'Trash debris',    c: 't-x' });
                 if (data.high_sentinel_activity)            specials.push({ l: 'High sentinels',  c: 't-a' });
                 if (data.aggressive_sentinel_activity)      specials.push({ l: 'Aggressive sentinels', c: 't-r' });
