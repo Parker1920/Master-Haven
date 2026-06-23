@@ -7726,3 +7726,35 @@ def migration_1_98_0(conn):
         logger.info(f"Migration 1.98.0: re-scored {len(system_ids)} systems (moon-weighted)")
     finally:
         conn.row_factory = prev_factory
+
+
+@register_migration("1.99.0", "Re-score systems so conflict_level 'None' counts as filled on non-abandoned systems")
+def migration_1_99_0(conn):
+    """Re-score every system after the System Core fix that lets a conflict_level
+    of 'None' count as filled on NON-abandoned systems. A peaceful system that
+    still has a station/economy can genuinely have no conflict; previously only
+    the abandoned branch let 'None' through, so picking "None" scored as missing
+    data and capped the grade. The live scorer already applies the fix — this
+    rewrites the cached `is_complete`/`is_fully_charted` so the systems list /
+    map / search / posters (which read the cached column) agree with the live
+    detail page. Idempotent: it just re-runs the single-source live scorer
+    (services.completeness.update_completeness_score; mirrors 1.97/1.98).
+    """
+    # update_completeness_score reads rows as dicts → needs sqlite3.Row (mirrors 1.90/1.91/1.97/1.98).
+    prev_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        from services.completeness import update_completeness_score
+        id_cursor = conn.cursor()
+        id_cursor.execute("SELECT id FROM systems")
+        system_ids = [row[0] for row in id_cursor.fetchall()]
+        score_cursor = conn.cursor()
+        logger.info(f"Migration 1.99.0: re-scoring {len(system_ids)} systems for conflict_level 'None' credit...")
+        for sys_id in system_ids:
+            try:
+                update_completeness_score(score_cursor, sys_id)
+            except Exception as e:  # noqa: BLE001 — one bad row shouldn't abort the migration
+                logger.warning(f"Migration 1.99.0: re-score failed for {sys_id}: {e}")
+        logger.info(f"Migration 1.99.0: re-scored {len(system_ids)} systems (conflict 'None' credit)")
+    finally:
+        conn.row_factory = prev_factory

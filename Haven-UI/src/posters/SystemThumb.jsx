@@ -12,6 +12,8 @@ import { fetchTagColorsForPoster, getTagColorFromAPI, getDisplayTagName } from '
 import StatTile from '../components/shared/StatTile'
 import { glyphImageSrc } from '../utils/glyphAssets'
 import { GRADE_BADGE } from '../utils/gradeColors'
+import { biomeTintHex } from '../data/biomeCategoryMappings'
+import { STAR_HEX } from '../utils/starColors'
 
 // ============================================================================
 // System Thumbnail — 600×400 landscape card.
@@ -39,31 +41,6 @@ import { GRADE_BADGE } from '../utils/gradeColors'
 // poster view, not the scaled-down card view). Aspect stays 3:2.
 const W = 720
 const H = 480
-
-const STAR_COLORS = {
-  Yellow: '#facc15',
-  Blue: '#60a5fa',
-  Red: '#ef4444',
-  Green: '#34d399',
-  Purple: '#a855f7',
-}
-
-const BIOME_TINTS = {
-  Lush: '#34d399',
-  Frozen: '#60a5fa',
-  Scorched: '#f97316',
-  Barren: '#a8a29e',
-  Toxic: '#84cc16',
-  Radioactive: '#a3e635',
-  Exotic: '#a855f7',
-  Marsh: '#06b6d4',
-  Volcanic: '#ef4444',
-  Infested: '#84cc16',
-  Desolate: '#a8a29e',
-  Airless: '#94a3b8',
-  Dead: '#6b7280',
-  'Gas Giant': '#fbbf24',
-}
 
 // Grade tile colors single-sourced from gradeColors.js (S+ / S / A / B / C).
 const GRADE_BG = GRADE_BADGE
@@ -104,7 +81,7 @@ export default function SystemThumb({ routeKey }) {
     )
   }
 
-  const starColor = STAR_COLORS[data.star_type] || STAR_COLORS.Yellow
+  const starColor = STAR_HEX[data.star_type] || STAR_HEX.Yellow
   const planets = (data.planets || []).filter((p) => !p.is_moon)
   const moonsByPlanet = (data.planets || []).reduce((acc, p) => acc + (p.moons?.length ?? 0), 0)
   const hasStation = !!(data.space_station)
@@ -240,7 +217,7 @@ function OrbitalDiagram({ star, planets, moons, hasStation }) {
   // Render a 240x240 orbital system.
   // - Star at center, glow + solid core
   // - Real planet count, even angular spacing around concentric orbits
-  // - Biome tint via BIOME_TINTS (lookup on planet.biome)
+  // - Biome tint via biomeTintHex (adjective -> parent category -> hex)
   // - Smaller moon dots offset from their planet
   // - Space station: purple diamond marker on the outer ring
   const SIZE = 240
@@ -282,7 +259,7 @@ function OrbitalDiagram({ star, planets, moons, hasStation }) {
         const r = orbitR(i)
         const px = CX + r * Math.cos(angle)
         const py = CY + r * Math.sin(angle)
-        const tint = BIOME_TINTS[p.biome] || POSTER_COLORS.primary
+        const tint = biomeTintHex(p.biome) || POSTER_COLORS.primary
         const planetRow = moons.find((m) => m.id === p.id) || p
         const planetMoons = planetRow.moons || []
         return (

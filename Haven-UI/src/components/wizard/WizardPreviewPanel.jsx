@@ -1,5 +1,7 @@
 import React from 'react'
 import { TIER_COLORS } from '../../utils/gradeColors'
+import { biomeTintHex } from '../../data/biomeCategoryMappings'
+import { STAR_HEX } from '../../utils/starColors'
 
 // Wizard v1 live preview panel (mockup aside#preview-panel 6005-6110).
 // Sticky right column on desktop. Shows the system as a "system disk":
@@ -8,21 +10,13 @@ import { TIER_COLORS } from '../../utils/gradeColors'
 //
 // All visual updates are pure functions of the `system` prop — no animation,
 // no data fetching. Renders fine even when the system is half-filled.
-const STAR_COLORS = {
-  Yellow: '#fbbf24',
-  Red: '#ef4444',
-  Green: '#22c55e',
-  Blue: '#3b82f6',
-  Purple: '#a855f7',
-}
-
 export default function WizardPreviewPanel({ system, gradeInfo }) {
   const planets = system?.planets || []
   const planetCount = planets.length
   const moonCount = planets.reduce((acc, p) => acc + (p.moons?.length || 0), 0)
   const hasStation = !!system?.space_station
   const coauthorCount = (system?.coauthors || []).length
-  const starColor = STAR_COLORS[system?.star_type] || '#64748b'
+  const starColor = STAR_HEX[system?.star_type] || '#64748b'
   const grade = gradeInfo?.grade || '—'
   const percent = gradeInfo?.percent ?? null
 
@@ -153,7 +147,7 @@ function SystemDiskSVG({ starColor, planets, hasStation, stationRadius }) {
           const a = angleFor(i)
           const px = cx + Math.cos(a) * r
           const py = cy + Math.sin(a) * r
-          const planetColor = p.is_gas_giant ? '#fb923c' : (p.is_bubble ? '#a855f7' : 'var(--app-primary)')
+          const planetColor = p.is_gas_giant ? '#fb923c' : (p.is_bubble ? '#a855f7' : (biomeTintHex(p.biome) || 'var(--app-primary)'))
           const size = p.is_gas_giant ? 5.5 : 4
           return (
             <g key={i}>

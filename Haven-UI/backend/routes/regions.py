@@ -575,6 +575,13 @@ async def api_get_region(rx: int, ry: int, rz: int,
     """Get region info including custom name if set and any pending submissions."""
     session_data = get_session(session)
 
+    # Normalize reality the same way every region WRITE path does (e.g.
+    # "RealityMode.Normal" -> "Normal"). This is the only region read that used
+    # the raw param; without it a region named under the normalized value would
+    # never be found here, so the Wizard's "already named" badge silently failed
+    # and re-prompted the user to name an already-named region.
+    reality = normalize_reality(reality)
+
     conn = None
     try:
         db_path = get_db_path()

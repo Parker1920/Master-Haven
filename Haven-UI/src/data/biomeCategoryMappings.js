@@ -325,6 +325,31 @@ export const BIOME_COLORS = {
   'Unknown': 'bg-gray-600'
 };
 
+// Hex equivalents of BIOME_COLORS, keyed on the 17 parent categories, for the
+// inline-style / SVG / canvas tints used by the live previews + posters (which
+// can't use Tailwind classes). Always route an adjective through
+// getBiomeCategory() first — use biomeTintHex() below.
+export const BIOME_CATEGORY_HEX = {
+  'Lush': '#22c55e',
+  'Frozen': '#22d3ee',
+  'Toxic': '#84cc16',
+  'Scorched': '#f97316',
+  'Radioactive': '#facc15',
+  'Barren': '#d97706',
+  'Dead': '#6b7280',
+  'Marsh': '#14b8a6',
+  'Volcanic': '#dc2626',
+  'Exotic': '#a855f7',
+  'Mega Exotic': '#ec4899',
+  'Chromatic Red': '#ef4444',
+  'Chromatic Green': '#10b981',
+  'Chromatic Blue': '#3b82f6',
+  'Infested': '#be123c',
+  'Waterworld': '#0ea5e9',
+  'Gas Giant': '#818cf8',
+  'Unknown': '#6b7280',
+};
+
 /**
  * Get the parent biome category for a given biome adjective
  * @param {string} biomeAdjective - The biome descriptor (e.g., "Paradise", "Icy", "Toxic")
@@ -382,4 +407,18 @@ export function aggregateBiomesByCategory(rawBiomeDistribution) {
   }
 
   return categoryDistribution;
+}
+
+/**
+ * Resolve a biome ADJECTIVE (e.g. "Paradise", "Icy", "Crimson") to a hex tint
+ * by mapping it to its parent category first. Returns null for unknown/empty so
+ * callers can supply their own fallback (e.g. moon grey / poster primary).
+ * @param {string} biomeAdjective
+ * @returns {string|null}
+ */
+export function biomeTintHex(biomeAdjective) {
+  if (!biomeAdjective) return null;
+  const category = getBiomeCategory(biomeAdjective);
+  if (category === 'Unknown') return null;
+  return BIOME_CATEGORY_HEX[category] || null;
 }

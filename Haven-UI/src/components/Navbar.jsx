@@ -168,8 +168,8 @@ export default function Navbar() {
   const showDbStatsTopLevel = !showAnalyticsDropdown
 
   // Shared styles
-  const navLink = 'px-3 py-1 hover:underline whitespace-nowrap'
-  const dropdownTrigger = 'px-3 py-1 hover:underline whitespace-nowrap flex items-center gap-1 cursor-pointer select-none'
+  const navLink = 'px-2 py-1 hover:underline whitespace-nowrap'
+  const dropdownTrigger = 'px-2 py-1 hover:underline whitespace-nowrap flex items-center gap-1 cursor-pointer select-none'
   const dropdownPanel = 'absolute top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg py-1 min-w-[180px] z-50'
   const dropdownItem = 'block w-full text-left px-4 py-2 hover:bg-gray-700 whitespace-nowrap'
 
@@ -182,7 +182,7 @@ export default function Navbar() {
 
   return (
     <header className="p-4 shadow" style={{ background: 'linear-gradient(90deg, var(--app-card), rgba(255,255,255,0.02))' }}>
-      <div className="container mx-auto" role="navigation" aria-label="Main navigation">
+      <div className="w-full" role="navigation" aria-label="Main navigation">
         <div className="flex items-center justify-between">
           {/* Logo + user info */}
           <div className="flex items-center space-x-4">
@@ -223,7 +223,7 @@ export default function Navbar() {
           {/* ================================================================ */}
           {/* Desktop Navigation — rendered from NAV_LINKS + NAV_GROUPS        */}
           {/* ================================================================ */}
-          <nav className="hidden lg:flex items-center space-x-1" aria-label="Primary" ref={dropdownRef}>
+          <nav className="hidden lg:flex flex-1 min-w-0 flex-wrap items-center justify-end gap-1" aria-label="Primary" ref={dropdownRef}>
             {/* Top-level links */}
             {NAV_LINKS.filter(l => l.visible).map(link => (
               link.href ? (

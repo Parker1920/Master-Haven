@@ -408,7 +408,10 @@ export default function Wizard() {
       })
       .catch(() => setRegionInfo(null))
       .finally(() => setRegionLoading(false))
-  }, [system.region_x, system.region_y, system.region_z, system.reality, system.galaxy])
+    // glyph_code is read inside (the namegen system-name suggestion). Without
+    // it in the deps, changing the glyph within the same region voxel (same
+    // rx/ry/rz) wouldn't refresh the suggested name.
+  }, [system.region_x, system.region_y, system.region_z, system.reality, system.galaxy, system.glyph_code])
 
   // Same-name soft warning (mockup v11CheckSameName 9937). Debounced. Skipped
   // while editing the system that already owns this name (so we don't warn the
@@ -800,7 +803,14 @@ export default function Wizard() {
     // actual submission to commit time, attached to the user's identity).
     // wiz-region-input may not exist if region info hasn't loaded yet —
     // sectionAnchor 'portal' is the fallback.
-    if (system.region_x != null && system.region_y != null && regionInfo && !regionInfo.custom_name && !regionInfo.pending_name) {
+    // Require a proposed name when the region is NOT confirmed already-named.
+    // This includes the case where regionInfo is null (a failed/in-flight
+    // lookup) — previously that silently waived the rule and let an unnamed
+    // region through. Scoped to new submissions; an edit shouldn't be blocked
+    // by a transient region lookup. If the region turns out to already be
+    // named, the backend ignores the proposed name.
+    const regionConfirmedNamed = regionInfo && (regionInfo.custom_name || regionInfo.pending_name)
+    if (!isEditMode && system.region_x != null && system.region_y != null && !regionConfirmedNamed) {
       if (!proposedRegionName.trim()) {
         push('region', 'Region name proposal is required', 'wiz-region-input', 'portal')
       } else if (!isAdmin && !submitterDiscordUsername.trim()) {

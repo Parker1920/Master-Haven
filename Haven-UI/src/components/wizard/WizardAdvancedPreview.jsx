@@ -2,6 +2,8 @@ import React, { useMemo } from 'react'
 import OrbitalDiagram from '../shared/OrbitalDiagram'
 import StatTile, { GRADE_BG, gradeFromScore } from '../shared/StatTile'
 import { glyphImageSrc } from '../../utils/glyphAssets'
+import { biomeTintHex } from '../../data/biomeCategoryMappings'
+import { STAR_HEX } from '../../utils/starColors'
 
 // Wizard advanced-flow live preview. Replaces the portrait sticky panel in
 // the advanced flow with a full landscape banner.
@@ -13,13 +15,6 @@ import { glyphImageSrc } from '../../utils/glyphAssets'
 //   - Stat grid expanded to economy / conflict / lifeform / planets / moons
 //   - Stellar class + game version + expedition shown as supporting meta
 //   - Planet biome thumbnail strip + special-feature badge row at bottom
-
-const BIOME_TINTS = {
-  Lush: '#34d399', Frozen: '#60a5fa', Scorched: '#f97316', Barren: '#a8a29e',
-  Toxic: '#84cc16', Radioactive: '#a3e635', Exotic: '#a855f7', Marsh: '#06b6d4',
-  Volcanic: '#ef4444', Infested: '#84cc16', Desolate: '#a8a29e', Airless: '#94a3b8',
-  Dead: '#6b7280', 'Gas Giant': '#fbbf24',
-}
 
 // Aggregate per-planet boolean flags into a deduped list of badge labels.
 const FEATURE_FLAGS = [
@@ -36,7 +31,6 @@ const FEATURE_FLAGS = [
 ]
 
 const STAR_TEXT_FG = { Yellow: '#422006' }
-const STAR_HEX = { Yellow: '#facc15', Blue: '#60a5fa', Red: '#ef4444', Green: '#34d399', Purple: '#a855f7' }
 
 export default function WizardAdvancedPreview({ system, gradeInfo }) {
   const planets = (system?.planets || []).filter((p) => !p.is_moon)
@@ -182,7 +176,7 @@ export default function WizardAdvancedPreview({ system, gradeInfo }) {
                     title={`${p.name || `P${i + 1}`}${p.biome ? ' · ' + p.biome : ''}`}
                     className="w-5 h-5 lg:w-6 lg:h-6 rounded-md flex items-center justify-center text-[9px] font-bold"
                     style={{
-                      background: BIOME_TINTS[p.biome] || 'rgba(255,255,255,0.10)',
+                      background: biomeTintHex(p.biome) || 'rgba(255,255,255,0.10)',
                       color: '#0a0e27',
                     }}
                   >

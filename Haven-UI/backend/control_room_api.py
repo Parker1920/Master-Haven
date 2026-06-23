@@ -101,7 +101,7 @@ from constants import (
     RESTRICTABLE_FIELDS,
     GALAXIES_DATA, GALAXY_NAMES, GALAXY_BY_INDEX, GALAXY_BY_NAME,
     validate_galaxy, validate_reality,
-    get_discovery_type_slug, normalize_discord_username,
+    get_discovery_type_slug, normalize_discord_username, normalize_reality,
 )
 
 from db import (
@@ -3158,7 +3158,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             rx = payload.get('region_x')
             ry = payload.get('region_y')
             rz = payload.get('region_z')
-            r_reality = payload.get('reality', 'Normal') or 'Normal'
+            r_reality = normalize_reality(payload.get('reality'))
             r_galaxy = payload.get('galaxy', 'Euclid') or 'Euclid'
             try:
                 cursor.execute('''

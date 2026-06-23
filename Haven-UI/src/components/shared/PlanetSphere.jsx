@@ -1,4 +1,5 @@
 import React from 'react'
+import { biomeTintHex } from '../../data/biomeCategoryMappings'
 
 // Parametric planet/moon illustration. Renders a stylized sphere whose
 // look is a function of the body's properties — biome color, atmospheric
@@ -13,26 +14,6 @@ import React from 'react'
 // <MoonCard> when no photo is attached. Same component is reused for
 // moons by passing is_moon=true (renders smaller, no moon dots of its
 // own, no rings).
-
-const BIOME_TINT = {
-  Lush: '#34d399',
-  Frozen: '#60a5fa',
-  Scorched: '#f97316',
-  Barren: '#a8a29e',
-  Toxic: '#84cc16',
-  Radioactive: '#a3e635',
-  Exotic: '#a855f7',
-  Marsh: '#06b6d4',
-  Volcanic: '#ef4444',
-  Infested: '#84cc16',
-  Desolate: '#a8a29e',
-  Airless: '#94a3b8',
-  Dead: '#6b7280',
-  'Gas Giant': '#fbbf24',
-  Tropical: '#22c55e',
-  Lifeless: '#9ca3af',
-  Glitched: '#a855f7',
-}
 
 export default function PlanetSphere({
   size = 200,
@@ -51,7 +32,7 @@ export default function PlanetSphere({
   index = null,
   badge = null,  // small badge label e.g. "P1" / "M1"
 }) {
-  const tint = BIOME_TINT[biome] || (isMoon ? '#94a3b8' : 'rgba(255,255,255,0.30)')
+  const tint = biomeTintHex(biome) || (isMoon ? '#94a3b8' : 'rgba(255,255,255,0.30)')
   const cx = size / 2
   const cy = size / 2
   // Sphere radius. Gas giants render larger; moons smaller.
@@ -275,4 +256,3 @@ export default function PlanetSphere({
   )
 }
 
-export { BIOME_TINT }

@@ -74,8 +74,11 @@ export default function useCompletenessScore(system) {
     SYS_CORE_FIELDS.forEach(({ key, label }) => {
       const val = system[key]
       const isEcoOrConflict = ['economy_type', 'economy_level', 'conflict_level'].includes(key)
-      // dominant_lifeform: "None" and "Abandoned" are both legitimate answers.
-      const allowNone = key === 'dominant_lifeform'
+      // dominant_lifeform: "None"/"Abandoned" are both legitimate answers.
+      // conflict_level: "None" is a legitimate answer too (a peaceful system
+      // with a station can genuinely have no conflict), so it counts even when
+      // the system isn't abandoned — mirrors the backend completeness.py.
+      const allowNone = key === 'dominant_lifeform' || key === 'conflict_level'
       const filled = (isEcoOrConflict && abandoned) || isFilled(val, { allowNone })
       if (filled) coreFilled += 1
       else gaps.push({ delta: Math.round(35 / SYS_CORE_FIELDS.length), text: `Add ${label}` })

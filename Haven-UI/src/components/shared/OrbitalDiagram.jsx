@@ -1,4 +1,6 @@
 import React from 'react'
+import { biomeTintHex } from '../../data/biomeCategoryMappings'
+import { STAR_HEX } from '../../utils/starColors'
 
 // Shared orbital-system diagram. Consumed by:
 //   - src/posters/SystemThumb.jsx       (system_thumb cached PNG poster)
@@ -12,31 +14,6 @@ import React from 'react'
 // All visuals are pure functions of props — no fetch, no animation. Render
 // at whatever pixel size the parent gives via the `size` prop.
 
-const STAR_COLORS = {
-  Yellow: '#facc15',
-  Blue: '#60a5fa',
-  Red: '#ef4444',
-  Green: '#34d399',
-  Purple: '#a855f7',
-}
-
-const BIOME_TINTS = {
-  Lush: '#34d399',
-  Frozen: '#60a5fa',
-  Scorched: '#f97316',
-  Barren: '#a8a29e',
-  Toxic: '#84cc16',
-  Radioactive: '#a3e635',
-  Exotic: '#a855f7',
-  Marsh: '#06b6d4',
-  Volcanic: '#ef4444',
-  Infested: '#84cc16',
-  Desolate: '#a8a29e',
-  Airless: '#94a3b8',
-  Dead: '#6b7280',
-  'Gas Giant': '#fbbf24',
-}
-
 export default function OrbitalDiagram({
   size = 240,
   starType,
@@ -48,7 +25,7 @@ export default function OrbitalDiagram({
 }) {
   const cx = size / 2
   const cy = size / 2
-  const star = STAR_COLORS[starType] || '#64748b'
+  const star = STAR_HEX[starType] || '#64748b'
 
   // Only count planets (not moons) for the orbit count.
   const planetRows = planets.filter((p) => !p.is_moon)
@@ -82,7 +59,7 @@ export default function OrbitalDiagram({
         const r = orbitR(i)
         const px = cx + r * Math.cos(angle)
         const py = cy + r * Math.sin(angle)
-        const tint = BIOME_TINTS[p.biome] || '#00C2B3'
+        const tint = biomeTintHex(p.biome) || '#00C2B3'
         const planetSize = size * 0.025
         // Moons live on the planet row itself
         const moons = p.moons || []
@@ -116,4 +93,3 @@ export default function OrbitalDiagram({
   )
 }
 
-export { STAR_COLORS, BIOME_TINTS }

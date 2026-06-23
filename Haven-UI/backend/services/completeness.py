@@ -345,6 +345,13 @@ def calculate_completeness_score(cursor, system_id) -> dict:
         elif f == 'dominant_lifeform' and _is_filled(val, allow_none_sentinel=True):
             sys_core_filled += 1
             sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})
+        # conflict_level: "None" is a legitimate answer — a peaceful system that
+        # still has a station/economy can genuinely have no conflict. Count it as
+        # filled on non-abandoned systems too; previously only the abandoned
+        # branch let 'None' through, so picking "None" scored as missing data.
+        elif f == 'conflict_level' and _is_filled(val, allow_none_sentinel=True):
+            sys_core_filled += 1
+            sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})
         elif _is_filled(val):
             sys_core_filled += 1
             sys_core_details.append({'name': FIELD_LABELS[f], 'value': str(val), 'status': 'filled'})
