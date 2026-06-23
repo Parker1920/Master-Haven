@@ -25,6 +25,7 @@ from . import __version__, auth_claim, auth_dev
 from .config import get_settings
 from .routes import (
     admin,
+    atlas,
     auth,
     beats,
     civilizations,
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     for module in (
         auth,
         admin,
+        atlas,
         beats,
         civilizations,
         comments,
@@ -158,6 +160,51 @@ def create_app() -> FastAPI:
         log.info("serving SPA from %s", dist_dir)
     else:
         log.warning("frontend dist not found at %s — backend only", dist_dir)
+
+    # ---- Haven atlas sync scheduler (Phase: unified archive) ---------
+    # Background thread that refreshes the cached "live from the atlas"
+    # civ figures from the main Haven control-room API. Started on
+    # startup (not at import) so tests / alembic don't spin it up.
+    @app.on_event("startup")
+    def _start_haven_sync() -> None:
+        if not settings.haven_sync_enabled:
+            log.info("haven atlas sync disabled (HAVEN_SYNC_ENABLED=0)")
+            return
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            from apscheduler.schedulers.background import BackgroundScheduler
+
+            from .services.haven_sync import sync_haven_atlas
+
+            interval = max(1, settings.haven_sync_interval_min)
+            sched = BackgroundScheduler(daemon=True)
+            sched.add_job(
+                sync_haven_atlas,
+                "interval",
+                minutes=interval,
+                # First run ~15s after boot so data lands without waiting
+                # a whole interval, but doesn't block startup if Haven is slow.
+                next_run_time=datetime.now(timezone.utc) + timedelta(seconds=15),
+                id="haven_atlas_sync",
+                max_instances=1,
+                coalesce=True,
+            )
+            sched.start()
+            app.state.haven_scheduler = sched
+            log.info(
+                "haven atlas sync scheduled every %d min (base=%s)",
+                interval,
+                settings.haven_api_base,
+            )
+        except Exception:  # noqa: BLE001 — never let the scheduler block boot
+            log.exception("failed to start haven atlas sync scheduler")
+
+    @app.on_event("shutdown")
+    def _stop_haven_sync() -> None:
+        sched = getattr(app.state, "haven_scheduler", None)
+        if sched is not None:
+            sched.shutdown(wait=False)
 
     log.info(
         "archive %s up — env=%s db=%s media=%s",

@@ -140,6 +140,10 @@ from services.restrictions import (
 )
 
 from services.events import resolve_submission_event_id
+from services.discoveries import (
+    _sanitize_discoveries_draft,
+    _promote_draft_discoveries,
+)
 
 app = FastAPI()
 logger = logging.getLogger('control.room')
@@ -2704,6 +2708,21 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             if conn_check:
                 conn_check.close()
 
+    # Co-submitted discoveries (Wizard) ride on the payload as `discoveries_draft`
+    # — the SAME centralized path the pending queue uses. Validate the shape now
+    # (400 on violation, mirroring /api/submit_system) and pop it so it isn't
+    # double-stored inside the system_data JSON blob. It's promoted to live
+    # `discoveries` further down, inside the same transaction that inserts the
+    # system's planets/moons, via _promote_draft_discoveries (resolved by name).
+    # Placed AFTER the untagged-edit early-return above so that path keeps the
+    # draft inside its queued edit_data instead of having it stripped here.
+    discoveries_draft_clean, _draft_err = _sanitize_discoveries_draft(
+        payload.get('discoveries_draft')
+    )
+    if _draft_err:
+        raise HTTPException(status_code=400, detail=_draft_err)
+    payload.pop('discoveries_draft', None)
+
     # NOTE: INTENTIONAL DESIGN - partners creating new systems are auto-tagged with their
     # community discord tag to ensure proper attribution.
     if not is_super and not system_id and partner_tag:
@@ -3246,6 +3265,51 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         except Exception as mirror_err:
             logger.warning(f"Failed to write tracking mirror row for system {sys_id}: {mirror_err}")
 
+        # Promote co-submitted discoveries (the SAME helper the pending-approval
+        # path uses) now that the planets/moons exist with ids. Resolves each
+        # draft's planet/moon link BY NAME, so a trusted user's wizard save
+        # links its discoveries exactly like a member's approved submission —
+        # one path, no second /api/submit_discovery round-trip. Runs in the same
+        # transaction (before commit) and before completeness so the new
+        # discoveries count toward the S+ checklist.
+        _promoted_discoveries = 0
+        if discoveries_draft_clean:
+            _draft_submission = {
+                'id': None,
+                'discoveries_draft': discoveries_draft_clean,
+                'discord_tag': payload.get('discord_tag'),
+                'submitter_profile_id': session_data.get('profile_id'),
+                # discovered_by attribution mirrors the system's editor_username
+                'personal_discord_username': editor_username,
+                'submitted_by': editor_username,
+                'source': 'manual',
+                'event_id': resolved_event_id,
+                'submission_date': datetime.now(timezone.utc).isoformat(),
+                'submitter_account_id': session_data.get('partner_id') or session_data.get('sub_admin_id'),
+                'submitter_account_type': session_data.get('user_type'),
+            }
+            try:
+                _promoted_discoveries, _missing_links = _promote_draft_discoveries(
+                    cursor, sys_id, _draft_submission,
+                    session_data.get('username') or editor_username,
+                    current_user_type=session_data.get('user_type'),
+                    current_account_id=(
+                        session_data.get('partner_id')
+                        or session_data.get('sub_admin_id')
+                        or session_data.get('profile_id')
+                    ),
+                )
+                if _promoted_discoveries or _missing_links:
+                    logger.info(
+                        f"Direct save '{name}' (system {sys_id}): promoted "
+                        f"{_promoted_discoveries} co-submitted discoveries "
+                        f"({_missing_links} with unresolved planet/moon link)"
+                    )
+            except Exception as draft_err:
+                logger.warning(
+                    f"Direct save '{name}' (system {sys_id}): discovery promotion failed: {draft_err}"
+                )
+
         # Calculate and store completeness score
         update_completeness_score(cursor, sys_id)
         conn.commit()
@@ -3300,7 +3364,8 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
         except Exception as feed_err:
             logger.warning(f"Failed to add activity feed entry: {feed_err}")
 
-        return {'status': 'ok', 'saved': payload, 'system_id': sys_id}
+        return {'status': 'ok', 'saved': payload, 'system_id': sys_id,
+                'discoveries_promoted': _promoted_discoveries}
 
     except Exception as e:
         logger.error(f'Error saving system to database: {e}')

@@ -27,6 +27,7 @@ from ..audit import log_audit
 from ..deps import get_db, require_admin, require_historian_or_higher
 from ..notifications import notify_watchers
 from ..models.schemas import (
+    AtlasCivStats,
     Author,
     CivStats,
     CivilizationDetail,
@@ -39,6 +40,7 @@ from ..models.schemas import (
     RevisionEntry,
 )
 from ..revisions import record_revision
+from ..services.haven_sync import lookup_atlas_stats
 
 router = APIRouter(prefix="/api/v1/civilizations", tags=["civilizations"])
 
@@ -358,6 +360,33 @@ def civilization_coverage(
         data=items,
         meta=Meta(total=len(items), extra={"civ": slug}),
     )
+
+
+# ---------------------------------------------------------------------
+# GET /api/v1/civilizations/{slug}/atlas
+# ---------------------------------------------------------------------
+@router.get("/{slug}/atlas", response_model=Envelope[AtlasCivStats])
+def civilization_atlas(slug: str, db: Session = Depends(get_db)):
+    """
+    Live figures for this civ from the main Haven atlas (systems,
+    discoveries, contributors, manual/extractor split) — the "Live data"
+    infobox tab. Matched by the civ's `haven_tag`, falling back to a
+    normalized slug/name match against the synced communities.
+
+    Returns {matched: false} (still 200) when no Haven community ties to
+    this civ, so the infobox can show "not linked to the atlas yet".
+    """
+    row = db.execute(
+        text(
+            "SELECT slug, name, haven_tag FROM civilization "
+            "WHERE slug = :s AND deleted_at IS NULL"
+        ),
+        {"s": slug},
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="civilization not found")
+    stats = lookup_atlas_stats(db, row.slug, row.name, row.haven_tag)
+    return Envelope(data=AtlasCivStats(**stats))
 
 
 # ---------------------------------------------------------------------

@@ -17,27 +17,44 @@
    --ta-accent-green  #2E7D32  status: ready
    --ta-accent-red    #A03030  status: returned
                                                                        */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap');
+
+/* -----------------------------------------------------------------
+   Re-skinned to the Haven canonical design system (teal/purple void)
+   from the original navy/gold newsroom palette. Token NAMES are kept
+   identical so every `var(--ta-*)` reference re-skins at once:
+   - accent-blue is repurposed as Haven teal (the link/active color)
+   - accent-gold stays gold (inquisition treatment, also Haven's accent)
+   - new font tokens: Cinzel display / Inter body / Spectral reading
+   ----------------------------------------------------------------- */
 :root {
-  --ta-bg: #050324;
-  --ta-surface: #0d0a30;
-  --ta-surface-2: #1d1148;
-  --ta-text: #f6fbfc;
-  --ta-text-dim: #a8b5c8;
-  --ta-text-faint: #8a98b0;
-  --ta-border: rgba(255, 255, 255, 0.08);
-  --ta-border-strong: rgba(255, 255, 255, 0.18);
-  --ta-accent-gold: #FAC775;
-  --ta-accent-blue: #3f82c1;
-  --ta-accent-green: #2E7D32;
-  --ta-accent-red: #A03030;
+  --ta-bg: #0A0E1A;            /* Haven void */
+  --ta-surface: #141a2e;       /* raised surface (cards, masthead) */
+  --ta-surface-2: #1a2138;
+  --ta-text: #f3f6fd;
+  --ta-text-dim: #8a97b8;
+  --ta-text-faint: #6b7794;
+  --ta-border: rgba(0, 194, 179, 0.14);
+  --ta-border-strong: rgba(0, 194, 179, 0.30);
+  --ta-accent-gold: #ffb547;   /* inquisitions */
+  --ta-accent-blue: #00C2B3;   /* links + active — now Haven teal */
+  --ta-accent-teal: #00C2B3;
+  --ta-accent-teal-light: #5EE7DF;
+  --ta-accent-purple: #A78BFA; /* civ accent */
+  --ta-accent-green: #34d399;  /* status: ready */
+  --ta-accent-red: #f87171;    /* status: returned */
+  --ta-font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --ta-font-display: 'Cinzel', Georgia, serif;
+  --ta-font-read: 'Spectral', Georgia, serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html { -webkit-text-size-adjust: 100%; color-scheme: dark; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--ta-bg);
+  font-family: var(--ta-font-body);
+  background:
+    radial-gradient(ellipse at 50% 0%, #1a1f3a 0%, var(--ta-bg) 46%, #05060d 100%) fixed;
   color: var(--ta-text);
   line-height: 1.5;
   min-height: 100vh;
@@ -88,13 +105,13 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-mobile-icon-btn:active { background: var(--ta-bg); }
 .ta-mobile-page-title {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--ta-font-display);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-size: 14px;
 }
 .ta-logo-mark {
   width: 26px; height: 26px;
-  background: linear-gradient(135deg, var(--ta-accent-blue) 0%, #1D9E75 100%);
+  background: linear-gradient(135deg, var(--ta-accent-teal) 0%, var(--ta-accent-purple) 100%);
   border-radius: 5px; display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 10px; font-weight: 600; flex-shrink: 0;
 }
@@ -126,7 +143,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-nav-link:hover { background: var(--ta-bg); color: var(--ta-text); }
 .ta-nav-link.active { color: var(--ta-text); font-weight: 500; }
-.ta-logo-text { font-family: Georgia, serif; font-weight: 500; }
+.ta-logo-text { font-family: var(--ta-font-display); font-weight: 600; letter-spacing: 0.04em; }
 .ta-user-pill {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 12px 5px 4px; background: var(--ta-surface-2);
@@ -180,7 +197,7 @@ button { font-family: inherit; cursor: pointer; }
   text-align: center;
 }
 .ta-masthead-name {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--ta-font-display);
   font-size: 28px; font-weight: 500;
   letter-spacing: -0.3px; margin-bottom: 4px;
 }
@@ -196,7 +213,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-masthead-meta-item { display: flex; flex-direction: column; align-items: center; gap: 1px; }
 .ta-masthead-meta-num {
-  font-family: Georgia, serif; font-size: 14px;
+  font-family: var(--ta-font-read); font-size: 14px;
   font-weight: 500; color: var(--ta-text);
 }
 .ta-masthead-meta-label {
@@ -295,7 +312,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-hero-story:active { background: var(--ta-surface); }
 .ta-hero-headline {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 22px; font-weight: 500;
   line-height: 1.2; margin-bottom: 8px;
 }
@@ -322,7 +339,7 @@ button { font-family: inherit; cursor: pointer; }
   border-bottom: 1px solid var(--ta-border);
 }
 .ta-section-name {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 12px; font-weight: 500;
   text-transform: uppercase; letter-spacing: 1.5px;
   color: var(--ta-text);
@@ -354,7 +371,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-story-card:active { background: var(--ta-surface-2); }
 .ta-story-headline {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 16px; font-weight: 500;
   line-height: 1.35; margin-bottom: 6px;
 }
@@ -381,13 +398,13 @@ button { font-family: inherit; cursor: pointer; }
 .ta-inq-card:last-child { margin-bottom: 0; }
 .ta-inq-card:active { background: var(--ta-surface-2); }
 .ta-inq-numeral {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 10px; color: var(--ta-accent-blue);
   font-weight: 600; letter-spacing: 1.5px;
   margin-bottom: 4px;
 }
 .ta-inq-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 16px; font-weight: 500;
   margin-bottom: 6px; line-height: 1.3;
 }
@@ -406,7 +423,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ===== CIV CARDS + GRID ============================================= */
 .ta-civ-index-header { padding: 18px 16px 12px; }
-.ta-civ-index-title { font-family: Georgia, serif; font-size: 24px; font-weight: 500; }
+.ta-civ-index-title { font-family: var(--ta-font-read); font-size: 24px; font-weight: 500; }
 .ta-civ-index-sub { font-size: 12px; color: var(--ta-text-dim); margin-top: 3px; }
 .ta-civ-grid {
   display: grid; grid-template-columns: 1fr;
@@ -431,7 +448,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-civ-card-body { padding: 12px 14px; }
 .ta-civ-card-name {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 17px; font-weight: 500;
   margin-bottom: 4px; line-height: 1.3;
   display: flex; align-items: baseline; gap: 6px;
@@ -469,7 +486,7 @@ button { font-family: inherit; cursor: pointer; }
   color: rgba(255,255,255,0.7); margin-bottom: 6px; font-weight: 500;
 }
 .ta-civ-hero-name {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 24px; font-weight: 500; margin-bottom: 5px; line-height: 1.2;
 }
 .ta-civ-hero-tagline {
@@ -490,7 +507,7 @@ button { font-family: inherit; cursor: pointer; }
 .ta-civ-stat { text-align: center; padding: 4px; }
 .ta-civ-stat-num {
   font-size: 18px; font-weight: 500;
-  font-family: Georgia, serif; line-height: 1.1;
+  font-family: var(--ta-font-read); line-height: 1.1;
 }
 .ta-civ-stat-label {
   font-size: 9px; color: var(--ta-text-dim);
@@ -522,7 +539,7 @@ button { font-family: inherit; cursor: pointer; }
   margin-bottom: 6px;
 }
 .ta-coverage-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 15px; font-weight: 500;
   margin-bottom: 4px; line-height: 1.4;
 }
@@ -541,7 +558,7 @@ button { font-family: inherit; cursor: pointer; }
   margin-bottom: 14px; display: inline-flex; align-items: center; gap: 4px;
 }
 .ta-story-reader h1 {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 26px; font-weight: 500;
   line-height: 1.2; margin-bottom: 12px;
 }
@@ -549,7 +566,7 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 16px; color: var(--ta-text-dim);
   line-height: 1.5; font-style: italic;
   margin-bottom: 18px;
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
 }
 .ta-story-reader-byline {
   display: flex; align-items: center; gap: 10px;
@@ -562,7 +579,7 @@ button { font-family: inherit; cursor: pointer; }
 .ta-story-reader-byline-name { font-size: 13px; font-weight: 500; }
 .ta-story-reader-byline-meta { font-size: 11px; color: var(--ta-text-faint); }
 .ta-prose {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 15px; line-height: 1.7; color: var(--ta-text);
 }
 .ta-prose p { margin-bottom: 14px; }
@@ -583,7 +600,7 @@ button { font-family: inherit; cursor: pointer; }
   text-align: center;
 }
 .ta-inq-reader-numeral {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 36px; font-weight: 500;
   color: var(--ta-accent-gold);
   letter-spacing: 5px; margin-bottom: 4px;
@@ -597,7 +614,7 @@ button { font-family: inherit; cursor: pointer; }
   margin: 0 auto 14px;
 }
 .ta-inq-reader-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 24px; font-weight: 500; line-height: 1.25; margin-bottom: 14px;
 }
 .ta-inq-reader-subtitle {
@@ -611,7 +628,7 @@ button { font-family: inherit; cursor: pointer; }
   color: #fff; padding: 22px 18px;
 }
 .ta-dash-greet-text {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 20px; font-weight: 500; margin-bottom: 4px;
 }
 .ta-dash-greet-sub { font-size: 12px; color: var(--ta-text-dim); line-height: 1.5; }
@@ -620,7 +637,7 @@ button { font-family: inherit; cursor: pointer; }
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
 }
 .ta-dash-impact-cell { text-align: center; padding: 4px; }
-.ta-dash-impact-num { font-size: 18px; font-weight: 500; color: var(--ta-text); font-family: Georgia, serif; }
+.ta-dash-impact-num { font-size: 18px; font-weight: 500; color: var(--ta-text); font-family: var(--ta-font-read); }
 .ta-dash-impact-label {
   font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
   color: var(--ta-text-dim); line-height: 1.2;
@@ -670,7 +687,7 @@ button { font-family: inherit; cursor: pointer; }
 /* ===== DRAFTS LIST ================================================== */
 .ta-drafts-page { padding: 18px 16px 8px; }
 .ta-drafts-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 28px; font-weight: 500;
   margin-bottom: 4px;
 }
@@ -707,7 +724,7 @@ button { font-family: inherit; cursor: pointer; }
   flex-wrap: wrap;
 }
 .ta-draft-headline {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 17px; font-weight: 500; line-height: 1.25;
   margin-bottom: 4px;
 }
@@ -779,11 +796,11 @@ button { font-family: inherit; cursor: pointer; }
   margin-bottom: 10px;
 }
 .ta-draft-editor-headline {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 22px; font-weight: 500; line-height: 1.25;
 }
-.ta-draft-editor-deck { font-family: Georgia, serif; font-style: italic; color: var(--ta-text-dim); }
-.ta-draft-editor-body { font-family: Georgia, serif; font-size: 15px; line-height: 1.7; min-height: 280px; resize: vertical; }
+.ta-draft-editor-deck { font-family: var(--ta-font-read); font-style: italic; color: var(--ta-text-dim); }
+.ta-draft-editor-body { font-family: var(--ta-font-read); font-size: 15px; line-height: 1.7; min-height: 280px; resize: vertical; }
 .ta-draft-comments {
   margin-top: 24px;
   border-top: 1px solid var(--ta-border);
@@ -958,7 +975,7 @@ button { font-family: inherit; cursor: pointer; }
   max-width: 480px; margin: 0 auto;
 }
 .ta-notfound-code {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--ta-font-display);
   font-size: 72px; font-weight: 500;
   color: var(--ta-text-faint);
   line-height: 1; margin-bottom: 8px;
@@ -970,7 +987,7 @@ button { font-family: inherit; cursor: pointer; }
   margin-bottom: 18px;
 }
 .ta-notfound-title {
-  font-family: Georgia, serif; font-size: 22px;
+  font-family: var(--ta-font-read); font-size: 22px;
   font-weight: 500; margin-bottom: 10px;
 }
 .ta-notfound-body {
@@ -1126,7 +1143,7 @@ button { font-family: inherit; cursor: pointer; }
   text-align: center;
 }
 .ta-profile-name {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 24px; font-weight: 500; margin-top: 14px; margin-bottom: 4px;
 }
 .ta-profile-meta { font-size: 12px; opacity: 0.85; margin-bottom: 12px; }
@@ -1139,7 +1156,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-profile-stat-num {
   font-size: 20px; font-weight: 500; color: var(--ta-text);
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
 }
 .ta-profile-stat-label {
   font-size: 9px; color: var(--ta-text-dim);
@@ -1178,7 +1195,7 @@ button { font-family: inherit; cursor: pointer; }
   border-bottom: 1px solid var(--ta-border);
 }
 .ta-timeline-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 28px; font-weight: 500;
   margin-bottom: 6px;
 }
@@ -1304,7 +1321,7 @@ button { font-family: inherit; cursor: pointer; }
   color: #fff;
 }
 .ta-timeline-event-title {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-weight: 500;
   font-size: 11px;
   line-height: 1.25;
@@ -1482,7 +1499,7 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ta-text);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
-.ta-modal h3 { font-family: Georgia, serif; font-size: 20px; margin-bottom: 12px; }
+.ta-modal h3 { font-family: var(--ta-font-read); font-size: 20px; margin-bottom: 12px; }
 
 /* Index list layouts */
 .ta-people-grid {
@@ -1517,7 +1534,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .ta-event-row:hover { background: var(--ta-surface-2); }
 .ta-event-year {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 22px;
   color: var(--ta-accent-gold);
   font-weight: 500;
@@ -1737,7 +1754,7 @@ button { font-family: inherit; cursor: pointer; }
   border-bottom: 1px solid var(--ta-border);
 }
 .ta-profile-name {
-  font-family: Georgia, serif;
+  font-family: var(--ta-font-read);
   font-size: 30px;
   margin-top: 4px;
   font-weight: 500;

@@ -189,7 +189,9 @@ export default function Wizard() {
   const [submitError, setSubmitError] = useState(null)
 
   // Discoveries — owned by the wizard so DiscoveryInlineList stays controlled.
-  // Submitted to /api/submit_discovery one at a time after the system save returns.
+  // Co-submitted on the system payload as `discoveries_draft` (resolved to
+  // planet/moon links BY NAME by the backend); never a separate per-discovery
+  // POST. One route for both trusted and member submissions.
   const [discoveries, setDiscoveries] = useState([])
   // Edit mode only: live discoveries already linked to this system. Each row
   // has an Edit button that opens the shared discovery submit modal in edit
@@ -858,8 +860,8 @@ export default function Wizard() {
       }
     }
 
-    // Photo + evidence — same shape submitDiscoveries() builds for the
-    // admin path so the success-screen pipeline stays uniform.
+    // Photo + evidence — first photo is the primary photo_url, the rest plus
+    // any external URLs become the comma-joined evidence list.
     const photos = (d.photos || []).filter((p) => p.path)
     const photoUrl = photos[0]?.path || null
     const externalUrls = (d.evidence_urls || '')
@@ -892,64 +894,16 @@ export default function Wizard() {
     }
   }
 
-  // Submit any inline discoveries one at a time after the system save returns
-  // (admin direct path, where we have a real system_id immediately). The
-  // public pending path takes a different route — discoveries ride along on
-  // the pending_systems row via discoveries_draft and get promoted at
-  // approval time by the backend (see _promote_draft_discoveries).
-  async function submitDiscoveries(systemId, defaultDiscordTag) {
-    if (!systemId || !discoveries.length) return { ok: 0, failed: 0 }
-    let ok = 0
-    let failed = 0
-    for (const d of discoveries) {
-      if (!d.discovery_type || !d.discovery_name?.trim()) {
-        // Skip incomplete entries silently — they show as drafts in the UI.
-        continue
-      }
-      const photos = (d.photos || []).filter((p) => p.path)
-      const photoUrl = photos[0]?.path || null
-      const evidenceUrls = (d.evidence_urls || '')
-        .split('\n').map((s) => s.trim()).filter(Boolean)
-      const allEvidence = [...photos.slice(1).map((p) => p.path), ...evidenceUrls]
-      // Only pass through numeric DB ids — the wizard's synthetic picker
-      // ids ("planet-0", "P1::M1::0") are not valid planets.id / moons.id
-      // values and SQLite's loose type affinity would let them land as
-      // strings inside INTEGER columns, breaking the LEFT JOIN on the
-      // discoveries browse page. New-system admin saves where these are
-      // synthetic end up with a NULL link (same as public-path drafts
-      // whose planet_name doesn't resolve at approval time).
-      const _numericOrNull = (v) => {
-        if (v == null) return null
-        const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? parseInt(v, 10) : NaN)
-        return Number.isFinite(n) ? n : null
-      }
-      const body = {
-        discovery_name: d.discovery_name.trim(),
-        discovery_type: d.discovery_type,
-        description: d.description?.trim() || null,
-        system_id: systemId,
-        planet_id: _numericOrNull(d.planet_id),
-        moon_id: _numericOrNull(d.moon_id),
-        location_type: d.location_type || 'planet',
-        location_name: d.location_name?.trim() || null,
-        discord_username: submitterDiscordUsername.trim() || personalDiscordUsername.trim() || (user?.username || ''),
-        discord_tag: defaultDiscordTag || null,
-        photo_url: photoUrl,
-        evidence_urls: allEvidence.length ? allEvidence.join(',') : null,
-        type_metadata: d.type_metadata && Object.keys(d.type_metadata).length ? d.type_metadata : null,
-        profile_id: profileId || null,
-        game_version: d.game_version || null,
-        submit_for_record: !!d.submit_for_record,
-      }
-      try {
-        await axios.post('/api/submit_discovery', body)
-        ok += 1
-      } catch {
-        failed += 1
-      }
-    }
-    return { ok, failed }
-  }
+  // NOTE: the wizard no longer has a separate discovery-submission route.
+  // Co-submitted discoveries ride on the system payload as `discoveries_draft`
+  // (built in doSubmit via buildDiscoveryDraftEntry) for BOTH trusted and
+  // member submissions, and the backend promotes them by NAME when the
+  // planets/moons get ids (save_system for trusted, approve_system on
+  // approval for members). The old per-discovery `submitDiscoveries` →
+  // /api/submit_discovery loop was removed — it sent a synthetic planet id
+  // that got nulled, silently unlinking every co-submitted discovery.
+  // The standalone /api/submit_discovery endpoint still exists for submitting
+  // a discovery against an EXISTING system outside the wizard (DiscoverySubmitModal).
 
   async function doSubmit(overrideConflicts = null) {
     if (validationIssues.length > 0) return
@@ -982,25 +936,50 @@ export default function Wizard() {
       // Snapshot what the user just submitted so the success screen can
       // re-render the exact preview card they saw at submit time.
       const submittedSnapshot = { ...system }
+
+      // ONE upload route for co-submitted discoveries. Build the
+      // discoveries_draft once and attach it to the payload for BOTH the
+      // trusted (save_system) and member (submit_system) paths. Each entry
+      // references its planet/moon BY NAME; the backend resolves the link when
+      // the planets/moons get ids — save_system promotes immediately (trusted),
+      // approve_system promotes on approval (member). There is no longer a
+      // second per-discovery /api/submit_discovery round-trip for admins (that
+      // route sent a synthetic id that got nulled, so links were silently lost).
+      //
+      // Built here, before the profile-lookup early-returns, so the draft
+      // survives the profile-claim modal resubmit paths (handleProfileUse /
+      // handleProfileCreatedContinue stash this exact payload).
+      const draftReady = discoveries
+        .filter((d) => d.discovery_type && d.discovery_name?.trim())
+        .slice(0, 20)
+        .map((d) => buildDiscoveryDraftEntry(d, system))
+      if (draftReady.length) {
+        payload.discoveries_draft = draftReady
+      }
+
       if (isAdmin) {
         const r = await axios.post('/api/save_system', payload)
         if (r.data.status === 'pending_approval') {
+          // Untagged-edit approval path — the whole payload (incl.
+          // discoveries_draft) is queued and promotes when approved.
           setSubmitResult({
             status: 'pending',
             submission_id: r.data.request_id,
             system_name: system.name,
+            submitted_discoveries: draftReady.length,
             submitted_system: submittedSnapshot,
             wizard_flow: flow,
           })
         } else {
-          // Admin direct save — submit discoveries against the new system_id
-          const discResult = await submitDiscoveries(r.data.system_id, payload.discord_tag)
+          // Trusted direct save — the system AND its discoveries went live in
+          // one transaction. The backend promoted the drafts (resolving links
+          // by name) and reports how many it inserted.
           setSubmitResult({
             status: 'saved',
             system_id: r.data.system_id,
             system_name: r.data.saved?.name || system.name,
-            discoveries_ok: discResult.ok,
-            discoveries_failed: discResult.failed,
+            discoveries_ok: r.data.discoveries_promoted ?? draftReady.length,
+            discoveries_failed: 0,
             submitted_system: submittedSnapshot,
             wizard_flow: flow,
           })
@@ -1008,21 +987,8 @@ export default function Wizard() {
         clearWizardDraft()
         markFormClean()
       } else {
-        // Public path.
-        // CRITICAL: build discoveries_draft FIRST and attach to payload before
-        // the profile-lookup branch. v1.64.0 added the draft logic but built
-        // it AFTER the lookup return points (lines below the early returns to
-        // setPendingSubmitPayload(payload)), so any user pushed into the
-        // profile-claim modal had their draft silently dropped on resubmit
-        // via handleProfileUse / handleProfileCreatedContinue. Attaching it
-        // here means the stashed payload carries it through all paths.
-        const draftReady = discoveries
-          .filter((d) => d.discovery_type && d.discovery_name?.trim())
-          .slice(0, 20)
-          .map((d) => buildDiscoveryDraftEntry(d, system))
-        if (draftReady.length) {
-          payload.discoveries_draft = draftReady
-        }
+        // Public path. discoveries_draft is already on the payload (built
+        // above), so it rides the pending row and promotes on approval.
 
         // Profile-lookup gate
         const lookupName = submitterDiscordUsername.trim() || personalDiscordUsername.trim()

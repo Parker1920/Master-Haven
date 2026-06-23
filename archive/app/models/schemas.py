@@ -82,6 +82,45 @@ class CivilizationDetail(CivilizationSummary):
     ended_year: Optional[int] = None
 
 
+# ---------------------------------------------------------------------
+# Live atlas data (synced from the main Haven control-room API)
+# ---------------------------------------------------------------------
+class AtlasCivStats(BaseModel):
+    """Per-civilization live figures, cached from Haven. `matched` is
+    False when no Haven community could be tied to this civ."""
+    matched: bool = False
+    haven_tag: Optional[str] = None
+    display_name: Optional[str] = None
+    total_systems: int = 0
+    total_discoveries: int = 0
+    unique_contributors: int = 0
+    manual_systems: int = 0
+    extractor_systems: int = 0
+    synced_at: Optional[str] = None
+
+
+class AtlasSummary(BaseModel):
+    """Global atlas totals for the masthead/home live strip."""
+    total_systems: int = 0
+    total_discoveries: int = 0
+    total_communities: int = 0
+    total_contributors: int = 0
+    synced_at: Optional[str] = None
+
+
+class SyncRunStatus(BaseModel):
+    """Last sync attempt + current sync configuration."""
+    source: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    ok: Optional[bool] = None
+    communities_synced: Optional[int] = None
+    error: Optional[str] = None
+    enabled: bool = True
+    interval_minutes: int = 30
+    api_base: Optional[str] = None
+
+
 # Coverage = combined stories + inquisitions list for one civ
 class CoverageItem(BaseModel):
     # 'story' or 'inquisition' so the frontend can route to the right page

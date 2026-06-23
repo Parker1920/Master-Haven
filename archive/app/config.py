@@ -52,6 +52,17 @@ class Settings:
     # claim (closes the public race condition in auth_claim).
     admin_username: str
 
+    # -- Haven atlas sync ---------------------------------------------
+    # Base URL of the main Haven control-room API. On the Pi the archive
+    # container shares the docker_default network with Haven, so the
+    # internal service name resolves: http://haven:8005. For local dev
+    # against prod data, set HAVEN_API_BASE=https://havenmap.online.
+    haven_api_base: str
+    # Master switch for the background sync job + scheduler.
+    haven_sync_enabled: bool
+    # How often (minutes) the scheduler pulls fresh atlas figures.
+    haven_sync_interval_min: int
+
     @property
     def is_dev(self) -> bool:
         return self.env.lower() == "dev"
@@ -87,6 +98,10 @@ def _load() -> Settings:
         discord_vh_guild_id=os.environ.get("DISCORD_VH_GUILD_ID", ""),
         discord_archivist_guild_id=os.environ.get("DISCORD_ARCHIVIST_GUILD_ID", ""),
         admin_username=os.environ.get("ADMIN_USERNAME", "ekimo").strip().lower(),
+        haven_api_base=os.environ.get("HAVEN_API_BASE", "http://haven:8005").strip().rstrip("/"),
+        haven_sync_enabled=os.environ.get("HAVEN_SYNC_ENABLED", "1").strip().lower()
+        in ("1", "true", "yes", "on"),
+        haven_sync_interval_min=int(os.environ.get("HAVEN_SYNC_INTERVAL_MIN", "30") or "30"),
     )
 
 

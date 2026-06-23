@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0A0E1A">
+<title>Haven Archive — the multiverse, catalogued & chronicled</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   HAVEN ARCHIVE — wiki prototype v0.3
+   v0.2 was a Fandom-killer *encyclopedia*. The real Travelers
+   Archive is also a NEWSROOM, a civ-HISTORY engine, and a
+   collaborative RESEARCH JOURNAL. v0.3 re-grafts those pillars:
+     · Newsroom (stories on beats + masthead)
+     · Inquisitions (long-form historical investigations)
+     · Timeline (civ-lane history scrub)
+     · Drafting pipeline + roles (reader→diplomat→historian→admin)
+     · Watchlist + notifications
+   ...onto the v0.2 wiki shell (namespaces, live-atlas infobox,
+   source badges, no-markup editing).
+   Single self-contained file. All content is SAMPLE.
+   ============================================================ */
+
+:root {
+  --void:#0A0E1A; --void-deep:#05060d; --void-lift:#1a1f3a;
+  --teal:#00C2B3; --teal-light:#5EE7DF; --purple:#A78BFA; --gold:#ffb547;
+  --paper:rgba(20,26,46,0.55); --paper-edge:rgba(0,194,179,0.18);
+  --rail:rgba(10,14,26,0.6);
+  --ink:#dfe5f2; --ink-strong:#f3f6fd; --ink-dim:#8a97b8;
+  --src-primary:#34d399; --src-secondary:#60a5fa; --src-attested:#fbbf24; --src-rot:#f87171; --disputed:#ff3860;
+  /* namespace accents */
+  --ns-civ:#A78BFA; --ns-traveler:#5EE7DF; --ns-system:#ffb547; --ns-planet:#34d399;
+  --ns-creature:#7dd3fc; --ns-ship:#60a5fa; --ns-tool:#c084fc; --ns-base:#fbbf24;
+  --ns-event:#fb7185; --ns-lore:#a78bfa; --ns-guide:#2dd4bf; --ns-mechanic:#818cf8; --ns-item:#facc15;
+  /* status colors */
+  --st-active:#34d399; --st-dormant:#fbbf24; --st-archived:#8a97b8;
+  /* draft status */
+  --d-draft:#8a97b8; --d-review:#fbbf24; --d-returned:#f87171; --d-ready:#34d399; --d-published:#5EE7DF;
+  --f-display:'Cinzel',serif; --f-body:'Inter',system-ui,sans-serif; --f-mono:'JetBrains Mono',monospace; --f-read:'Spectral',Georgia,serif;
+  --radius:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;scroll-padding-top:80px;}
+body{
+  background:radial-gradient(ellipse at 50% 0%,var(--void-lift) 0%,var(--void) 46%,var(--void-deep) 100%) fixed;
+  color:var(--ink);font-family:var(--f-body);line-height:1.7;-webkit-font-smoothing:antialiased;min-height:100vh;
+}
+a{color:var(--teal-light);text-decoration:none;cursor:pointer;}
+a:hover{text-decoration:underline;text-underline-offset:3px;}
+img{max-width:100%;}
+
+/* ---------------- TOP BAR ---------------- */
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;
+  padding:11px 22px;background:rgba(8,11,22,0.85);backdrop-filter:blur(14px);border-bottom:1px solid rgba(0,194,179,0.16);}
+.wordmark{font-family:var(--f-display);font-weight:700;font-size:15px;letter-spacing:0.15em;color:var(--teal);
+  text-transform:uppercase;white-space:nowrap;text-shadow:0 0 18px rgba(0,194,179,0.35);cursor:pointer;}
+.wordmark span{color:var(--ink-dim);font-weight:500;}
+.gsearch{flex:1;max-width:480px;display:flex;align-items:center;gap:9px;background:rgba(10,14,26,0.7);
+  border:1px solid rgba(0,194,179,0.22);border-radius:10px;padding:0 13px;transition:border-color .15s;}
+.gsearch:focus-within{border-color:var(--teal);}
+.gsearch .ico{color:var(--teal);}
+.gsearch input{flex:1;background:none;border:0;outline:none;color:var(--ink-strong);font-family:var(--f-body);font-size:13px;padding:10px 0;}
+.gsearch input::placeholder{color:var(--ink-dim);}
+.tspacer{flex:1;}
+.compare-toggle{display:flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-dim);cursor:pointer;user-select:none;white-space:nowrap;}
+.switch{width:36px;height:20px;border-radius:11px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);position:relative;transition:all .2s;}
+.switch::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--ink-dim);transition:all .2s;}
+body.teaching .switch{background:rgba(255,181,71,0.22);border-color:var(--gold);}
+body.teaching .switch::after{left:18px;background:var(--gold);box-shadow:0 0 10px rgba(255,181,71,.6);}
+body.teaching .compare-toggle{color:var(--gold);}
+.iconbtn{position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:9px;
+  background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:var(--ink-dim);cursor:pointer;font-size:16px;}
+.iconbtn:hover{color:var(--ink-strong);border-color:var(--teal);}
+.iconbtn .badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;border-radius:8px;background:var(--gold);
+  color:var(--void-deep);font-family:var(--f-mono);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+.userchip{display:flex;align-items:center;gap:8px;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.4);
+  color:var(--purple);border-radius:9px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.userchip:hover{background:rgba(167,139,250,0.2);}
+.userchip .av{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-mono);font-size:10px;font-weight:700;color:var(--void-deep);}
+.userchip .role{font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;opacity:.8;}
+
+/* dropdown (notifs + role) */
+.popmenu{position:absolute;top:48px;right:18px;width:320px;max-height:70vh;overflow-y:auto;background:var(--void-deep);
+  border:1px solid rgba(0,194,179,0.25);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,0.55);z-index:50;padding:8px;display:none;}
+.popmenu.open{display:block;}
+.popmenu h6{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);padding:8px 10px 6px;}
+.notif{display:flex;gap:10px;padding:10px;border-radius:9px;cursor:pointer;}
+.notif:hover{background:rgba(255,255,255,0.04);}
+.notif.unread{background:rgba(0,194,179,0.06);}
+.notif .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);margin-top:6px;flex-shrink:0;}
+.notif.read .dot{background:transparent;border:1px solid var(--ink-dim);}
+.notif .t{font-size:12.5px;color:var(--ink-strong);font-weight:500;}
+.notif .b{font-size:11.5px;color:var(--ink-dim);}
+.notif .w{font-family:var(--f-mono);font-size:9.5px;color:var(--ink-dim);margin-top:2px;}
+.rolepick{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink);}
+.rolepick:hover{background:rgba(255,255,255,0.04);}
+.rolepick.sel{background:rgba(167,139,250,0.12);color:var(--ink-strong);}
+.rolepick .desc{font-size:11px;color:var(--ink-dim);}
+.rolepick .ck{color:var(--purple);}
+
+/* ---------------- APP SHELL ---------------- */
+.shell{display:grid;grid-template-columns:222px minmax(0,1fr);max-width:1500px;margin:0 auto;}
+.sidenav{position:sticky;top:53px;height:calc(100vh - 53px);overflow-y:auto;padding:18px 14px 40px;border-right:1px solid rgba(0,194,179,0.1);}
+.sidenav h5{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);margin:16px 8px 7px;}
+.sidenav h5:first-child{margin-top:0;}
+.navlink{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:8px;color:var(--ink-dim);font-size:13px;cursor:pointer;transition:all .12s;border-left:2px solid transparent;}
+.navlink:hover{background:rgba(255,255,255,0.04);color:var(--ink);text-decoration:none;}
+.navlink.active{background:rgba(0,194,179,0.1);color:var(--teal-light);}
+.navlink .g{width:18px;text-align:center;font-size:13px;}
+.navlink .ct{margin-left:auto;font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);}
+.navcreate{margin:4px 8px 0;display:block;text-align:center;background:var(--teal);color:var(--void-deep);border-radius:9px;padding:10px;font-weight:700;font-size:13px;cursor:pointer;}
+.navcreate:hover{filter:brightness(1.12);text-decoration:none;}
+.main{min-width:0;padding:24px 30px 90px;}
+
+/* shared bits */
+.sechead{font-family:var(--f-display);font-weight:600;font-size:20px;color:var(--ink-strong);margin:34px 0 16px;display:flex;align-items:center;gap:12px;}
+.sechead .rule{flex:1;height:1px;background:rgba(0,194,179,0.16);}
+.sechead .more{font-family:var(--f-body);font-size:12px;font-weight:500;}
+.sample-ribbon{display:inline-flex;align-items:center;gap:7px;font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--purple);background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);border-radius:6px;padding:4px 9px;}
+.btn{display:inline-flex;align-items:center;gap:7px;font-family:var(--f-body);font-weight:600;font-size:12.5px;
+  border-radius:8px;padding:8px 14px;cursor:pointer;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:var(--ink);}
+.btn:hover{border-color:var(--teal);text-decoration:none;color:var(--ink-strong);}
+.btn.primary{background:var(--teal);color:var(--void-deep);border-color:var(--teal);}
+.btn.primary:hover{filter:brightness(1.12);}
+.btn.gold{background:rgba(255,181,71,0.14);border-color:var(--gold);color:var(--gold);}
+.pillrow{display:flex;flex-wrap:wrap;gap:7px;}
+
+/* ---------------- HOME ---------------- */
+.hero{text-align:center;padding:26px 20px 6px;}
+.hero h1{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,4.6vw,48px);color:var(--ink-strong);letter-spacing:.02em;line-height:1.06;margin-bottom:12px;}
+.hero h1 .accent{color:var(--teal);}
+.hero p{color:var(--ink-dim);font-size:15.5px;max-width:640px;margin:0 auto 20px;}
+.hero-search{max-width:560px;margin:0 auto;display:flex;align-items:center;gap:10px;background:rgba(10,14,26,0.8);
+  border:1px solid var(--teal);border-radius:12px;padding:0 16px;box-shadow:0 0 30px rgba(0,194,179,0.12);}
+.hero-search .ico{color:var(--teal);font-size:18px;}
+.hero-search input{flex:1;background:none;border:0;outline:none;color:var(--ink-strong);font-size:15px;padding:15px 0;}
+.hero-search input::placeholder{color:var(--ink-dim);}
+.statstrip{display:flex;justify-content:center;flex-wrap:wrap;gap:28px;margin:22px 0 6px;}
+.stat{text-align:center;}
+.stat .n{font-family:var(--f-mono);font-size:24px;font-weight:700;color:var(--teal-light);}
+.stat .l{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);margin-top:2px;}
+
+/* namespace portal */
+.portal{display:grid;grid-template-columns:repeat(auto-fill,minmax(208px,1fr));gap:13px;}
+.pcard{background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);padding:16px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden;}
+.pcard:hover{transform:translateY(-3px);border-color:var(--accent,var(--teal));text-decoration:none;}
+.pcard::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 0%,var(--accent) 0%,transparent 55%);opacity:.10;}
+.pcard .g{font-size:24px;color:var(--accent);}
+.pcard .t{font-family:var(--f-display);font-weight:600;font-size:15px;color:var(--ink-strong);margin:9px 0 3px;position:relative;}
+.pcard .c{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);position:relative;}
+
+/* ---------------- NEWSROOM ---------------- */
+.masthead{text-align:center;padding:20px 16px 14px;border-bottom:1px solid rgba(0,194,179,0.16);margin-bottom:4px;}
+.masthead .name{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,4vw,40px);color:var(--ink-strong);letter-spacing:.04em;}
+.masthead .tag{font-family:var(--f-read);font-style:italic;color:var(--ink-dim);font-size:15px;margin-top:4px;}
+.masthead .meta{display:flex;justify-content:center;gap:24px;margin-top:12px;}
+.masthead .meta b{font-family:var(--f-mono);color:var(--teal-light);font-size:15px;}
+.masthead .meta span{font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);margin-left:5px;}
+.beatnav{display:flex;gap:6px;overflow-x:auto;padding:12px 2px 14px;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:22px;}
+.beat-tab{font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim);
+  background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:18px;padding:6px 14px;cursor:pointer;white-space:nowrap;}
+.beat-tab:hover{color:var(--ink);text-decoration:none;}
+.beat-tab.active{color:var(--teal-light);border-color:var(--teal);background:rgba(0,194,179,0.12);}
+.beat-tab.gold.active{color:var(--gold);border-color:var(--gold);background:rgba(255,181,71,0.12);}
+
+/* story cards */
+.story-hero{display:grid;grid-template-columns:1.5fr 1fr;gap:0;background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);overflow:hidden;cursor:pointer;margin-bottom:8px;}
+.story-hero:hover{border-color:var(--teal);text-decoration:none;}
+.story-hero .poster{min-height:200px;display:flex;align-items:center;justify-content:center;font-size:64px;background:linear-gradient(135deg,rgba(0,194,179,0.22),rgba(167,139,250,0.16));color:var(--teal-light);}
+.story-hero .body{padding:26px 28px;}
+.story-kicker{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);display:flex;gap:8px;align-items:center;}
+.story-hero h3{font-family:var(--f-display);font-weight:600;font-size:26px;color:var(--ink-strong);line-height:1.15;margin:10px 0 10px;}
+.story-hero p{color:var(--ink-dim);font-size:14.5px;font-family:var(--f-read);}
+.byline{display:flex;align-items:center;gap:9px;margin-top:16px;font-size:12.5px;color:var(--ink-dim);}
+.byline .av{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:11px;font-weight:700;color:var(--void-deep);}
+.byline b{color:var(--ink);font-weight:600;}
+.story-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:13px;}
+.scard{background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;padding:16px 18px 18px;cursor:pointer;transition:all .15s;}
+.scard:hover{transform:translateY(-3px);border-color:var(--teal);text-decoration:none;}
+.scard .kick{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);}
+.scard h4{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--ink-strong);line-height:1.2;margin:7px 0 6px;}
+.scard p{font-size:13px;color:var(--ink-dim);font-family:var(--f-read);}
+.civtag{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;border-radius:5px;padding:2px 7px;
+  background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.3);color:var(--purple);}
+
+/* inquisition shelf */
+.inq-shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:13px;}
+.inq-card{background:linear-gradient(180deg,rgba(255,181,71,0.07),rgba(20,26,46,0.4));border:1px solid rgba(255,181,71,0.3);
+  border-radius:var(--radius);padding:18px 20px;cursor:pointer;transition:all .15s;}
+.inq-card:hover{transform:translateY(-3px);border-color:var(--gold);text-decoration:none;}
+.inq-numeral{font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);}
+.inq-card h3{font-family:var(--f-display);font-weight:600;font-size:19px;color:var(--ink-strong);margin:8px 0 8px;line-height:1.2;}
+.inq-card h3 .sub{color:var(--ink-dim);font-weight:400;font-size:15px;}
+.inq-meta{font-size:12px;color:var(--ink-dim);font-family:var(--f-mono);}
+.inq-progress{display:flex;align-items:center;gap:10px;margin-top:14px;}
+.inq-progress span{font-family:var(--f-mono);font-size:11px;color:var(--gold);min-width:30px;}
+.inq-bar{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,0.08);overflow:hidden;}
+.inq-fill{height:100%;background:linear-gradient(90deg,var(--gold),#ffd089);}
+.inq-state{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  border-radius:5px;padding:2px 8px;background:rgba(255,181,71,0.12);border:1px solid rgba(255,181,71,0.3);color:var(--gold);}
+.inq-state.closed{background:rgba(94,231,223,0.1);border-color:rgba(94,231,223,0.3);color:var(--teal-light);}
+
+/* ---------------- READERS (story / inquisition) ---------------- */
+.read-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:28px;align-items:start;}
+.reader{background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);padding:30px 40px 40px;}
+.reader .breadcrumb{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);margin-bottom:14px;}
+.reader .breadcrumb a{color:var(--ink-dim);}.reader .breadcrumb a:hover{color:var(--teal-light);}
+.reader h1{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,3.6vw,38px);color:var(--ink-strong);line-height:1.12;margin:8px 0 8px;}
+.reader .deck{font-family:var(--f-read);font-style:italic;font-size:17px;color:var(--ink-dim);margin-bottom:16px;}
+.reader .readbody{font-family:var(--f-read);font-size:16.5px;line-height:1.75;color:var(--ink);max-width:68ch;}
+.reader .readbody p{margin-bottom:16px;}
+.reader .readbody h2{font-family:var(--f-display);font-weight:600;font-size:21px;color:var(--teal-light);margin:26px 0 10px;}
+.reader blockquote{border-left:3px solid var(--purple);background:rgba(167,139,250,0.06);padding:12px 18px;margin:18px 0;font-style:italic;}
+
+/* ---------------- TIMELINE ---------------- */
+.tl-header{margin-bottom:14px;}
+.tl-header h1{font-family:var(--f-display);font-weight:700;font-size:30px;color:var(--ink-strong);}
+.tl-header p{color:var(--ink-dim);font-size:14px;max-width:70ch;}
+.tl-canvas{overflow-x:auto;border:1px solid rgba(0,194,179,0.16);border-radius:var(--radius);background:var(--rail);padding-bottom:6px;}
+.tl-track{position:relative;}
+.tl-labelcol{position:sticky;left:0;top:0;z-index:3;}
+.tl-label{position:absolute;display:flex;align-items:center;padding-left:12px;height:64px;width:120px;
+  font-family:var(--f-mono);font-size:11px;color:var(--ink);border-left:3px solid var(--accent);
+  background:linear-gradient(90deg,var(--void-deep) 70%,transparent);}
+.tl-band{position:absolute;border-top:1px dashed rgba(255,255,255,0.05);}
+.tl-axis{position:absolute;height:1px;background:rgba(0,194,179,0.25);}
+.tl-year{position:absolute;font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);transform:translateX(-50%);}
+.tl-year::before{content:'';position:absolute;top:-9px;left:50%;width:1px;height:7px;background:rgba(255,255,255,0.12);}
+.tl-event{position:absolute;display:block;border-radius:8px;padding:7px 9px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-left:3px solid var(--accent);cursor:pointer;overflow:hidden;}
+.tl-event:hover{border-color:var(--teal);text-decoration:none;z-index:4;box-shadow:0 6px 20px rgba(0,0,0,0.4);}
+.tl-kind{display:inline-block;font-family:var(--f-mono);font-size:8px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--void-deep);border-radius:3px;padding:1px 5px;background:var(--accent);}
+.tl-event.marker{background:linear-gradient(135deg,rgba(0,0,0,0.3),rgba(0,194,179,0.08));}
+.tl-etitle{font-size:11.5px;color:var(--ink-strong);font-weight:600;margin-top:5px;line-height:1.25;}
+.tl-emeta{font-family:var(--f-mono);font-size:9px;color:var(--ink-dim);margin-top:2px;}
+.tl-helper{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);text-align:center;margin-top:10px;}
+
+/* mini timeline (home + civ page) */
+.tlmini{display:flex;flex-direction:column;gap:0;}
+.tlmini-row{display:flex;gap:12px;padding:11px 0;border-bottom:1px dashed rgba(255,255,255,0.06);cursor:pointer;}
+.tlmini-row:hover{text-decoration:none;}
+.tlmini-row:hover .tlmini-title{color:var(--teal-light);}
+.tlmini-year{font-family:var(--f-mono);font-size:12px;color:var(--ink-dim);min-width:48px;}
+.tlmini-dot{width:8px;height:8px;border-radius:50%;margin-top:7px;flex-shrink:0;background:var(--accent);}
+.tlmini-kind{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
+.tlmini-title{font-size:13.5px;color:var(--ink-strong);}
+
+/* ---------------- BROWSE ---------------- */
+.browse-head{display:flex;align-items:center;gap:14px;margin-bottom:6px;}
+.browse-head .g{font-size:30px;color:var(--accent,var(--teal));}
+.browse-head h2{font-family:var(--f-display);font-weight:700;font-size:30px;color:var(--ink-strong);}
+.browse-sub{color:var(--ink-dim);margin-bottom:18px;}
+.filterbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;}
+.chip{font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;color:var(--ink-dim);background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:6px 13px;cursor:pointer;transition:all .12s;text-transform:uppercase;}
+.chip:hover{color:var(--ink);}
+.chip.active{color:var(--teal-light);border-color:var(--teal);background:rgba(0,194,179,0.12);}
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;}
+.acard{background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;overflow:hidden;cursor:pointer;transition:all .15s;}
+.acard:hover{transform:translateY(-3px);border-color:var(--accent,var(--teal));text-decoration:none;}
+.acard .poster{height:84px;display:flex;align-items:center;justify-content:center;font-size:34px;}
+.acard .body{padding:13px 15px 15px;}
+.acard .ns{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+.acard h4{font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--ink-strong);margin:4px 0 5px;}
+.acard p{font-size:12.5px;color:var(--ink-dim);line-height:1.4;}
+.statuspill{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;border-radius:5px;padding:2px 7px;}
+.statuspill.active{color:var(--st-active);background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);}
+.statuspill.dormant{color:var(--st-dormant);background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);}
+.statuspill.archived{color:var(--st-archived);background:rgba(138,151,184,0.12);border:1px solid rgba(138,151,184,0.3);}
+
+/* ---------------- ARTICLE ---------------- */
+.art-layout{display:grid;grid-template-columns:200px minmax(0,1fr) 300px;gap:28px;align-items:start;}
+.toc{position:sticky;top:74px;font-size:13px;}
+.toc h4{font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-bottom:10px;padding-left:12px;}
+.toc a{display:block;color:var(--ink-dim);padding:5px 12px;border-left:2px solid transparent;}
+.toc a:hover{color:var(--ink);text-decoration:none;}
+.toc a.active{color:var(--teal-light);border-left-color:var(--teal);}
+.toc .contrib-cta{margin-top:20px;padding:13px;background:rgba(0,194,179,0.06);border:1px solid rgba(0,194,179,0.2);border-radius:12px;}
+.toc .contrib-cta p{font-size:12px;color:var(--ink-dim);margin-bottom:9px;}
+.btn-edit{width:100%;text-align:center;background:var(--teal);color:var(--void-deep);border:0;border-radius:8px;padding:8px;font-family:var(--f-body);font-weight:700;font-size:12.5px;cursor:pointer;}
+.btn-edit:hover{filter:brightness(1.12);}
+.article{background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);padding:30px 40px 44px;backdrop-filter:blur(10px);min-width:0;}
+.breadcrumb{font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;color:var(--ink-dim);margin-bottom:14px;}
+.breadcrumb a{color:var(--ink-dim);}.breadcrumb a:hover{color:var(--teal-light);}.breadcrumb .sep{opacity:.5;margin:0 6px;}
+.entity-pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent,var(--purple));margin:14px 0 8px;}
+.entity-pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent,var(--purple));}
+/* civ brand hero */
+.civ-hero{border-radius:var(--radius);padding:26px 28px;margin-bottom:18px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,var(--c1,#534AB7),var(--c2,#1D9E75));}
+.civ-hero::after{content:'';position:absolute;inset:0;background:rgba(5,6,13,0.34);}
+.civ-hero>*{position:relative;}
+.civ-hero .eyebrow{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.8);}
+.civ-hero h1{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,3.6vw,38px);color:#fff;margin:6px 0 8px;}
+.civ-hero .tagline{color:rgba(255,255,255,0.92);font-size:14px;font-family:var(--f-read);}
+.civ-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(0,194,179,0.12);border:1px solid var(--paper-edge);border-radius:12px;overflow:hidden;margin-bottom:20px;}
+.civ-stat{background:var(--void);padding:14px;text-align:center;}
+.civ-stat .n{font-family:var(--f-mono);font-size:22px;font-weight:700;color:var(--teal-light);}
+.civ-stat .l{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim);margin-top:3px;}
+.article h1.title{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,4vw,42px);line-height:1.1;color:var(--ink-strong);margin-bottom:10px;}
+.article .subtitle{font-size:16px;color:var(--ink-dim);font-style:italic;margin-bottom:14px;}
+.synced{display:flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);border-top:1px solid rgba(255,255,255,0.07);border-bottom:1px solid rgba(255,255,255,0.07);padding:9px 0;margin-bottom:24px;}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 0 rgba(255,181,71,0.6);animation:pulse 2.4s infinite;flex-shrink:0;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,181,71,.55);}70%{box-shadow:0 0 0 8px rgba(255,181,71,0);}100%{box-shadow:0 0 0 0 rgba(255,181,71,0);}}
+.synced b{color:var(--gold);font-weight:500;}
+.article h2{font-family:var(--f-display);font-weight:600;font-size:23px;color:var(--teal-light);margin:34px 0 12px;padding-bottom:7px;border-bottom:1px solid rgba(0,194,179,0.18);scroll-margin-top:80px;}
+.article h3{font-weight:700;font-size:17px;color:var(--ink-strong);margin:22px 0 9px;scroll-margin-top:80px;}
+.article p{max-width:70ch;margin-bottom:15px;}
+.article p.lead{font-size:17.5px;color:var(--ink-strong);line-height:1.65;}
+.src{display:inline-flex;align-items:center;vertical-align:super;font-family:var(--f-mono);font-size:9px;font-weight:700;width:16px;height:16px;border-radius:4px;justify-content:center;cursor:help;margin-left:2px;position:relative;line-height:1;}
+.src.primary{background:rgba(52,211,153,0.18);color:var(--src-primary);border:1px solid var(--src-primary);}
+.src.secondary{background:rgba(96,165,250,0.18);color:var(--src-secondary);border:1px solid var(--src-secondary);}
+.src.attested{background:rgba(251,191,36,0.18);color:var(--src-attested);border:1px solid var(--src-attested);}
+.src.rot{background:rgba(248,113,113,0.18);color:var(--src-rot);border:1px solid var(--src-rot);}
+.src .tip{visibility:hidden;opacity:0;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);width:210px;background:var(--void-deep);border:1px solid rgba(255,255,255,0.14);border-radius:8px;padding:9px 11px;font-family:var(--f-body);font-weight:400;font-size:11px;line-height:1.45;color:var(--ink);text-align:left;vertical-align:baseline;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:30;transition:opacity .15s;}
+.src:hover .tip{visibility:visible;opacity:1;}.src .tip b{color:var(--ink-strong);}
+.cdate .c{color:var(--ink-dim);font-style:italic;}
+.disputed-flag{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:10px;letter-spacing:.04em;color:var(--disputed);background:rgba(255,56,96,0.1);border:1px solid rgba(255,56,96,0.3);border-radius:5px;padding:1px 7px;margin-left:6px;vertical-align:middle;text-transform:uppercase;}
+.xref{color:var(--teal-light);border-bottom:1px dotted rgba(94,231,223,0.5);}
+.article blockquote{border-left:3px solid var(--purple);background:rgba(167,139,250,0.06);padding:12px 18px;margin:18px 0;max-width:70ch;font-style:italic;color:var(--ink);}
+.article ul.bullets{max-width:70ch;margin:0 0 15px 20px;}
+.article ul.bullets li{margin-bottom:6px;}
+.datatable{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px;max-width:70ch;}
+.datatable th,.datatable td{text-align:left;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,0.08);}
+.datatable th{font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);background:rgba(0,194,179,0.06);}
+.datatable td:first-child{color:var(--ink-strong);font-weight:500;}
+/* coverage list (civ page) */
+.coverage-list{display:flex;flex-direction:column;gap:0;}
+.coverage-item{display:block;padding:13px 0;border-bottom:1px solid rgba(255,255,255,0.07);cursor:pointer;}
+.coverage-item:hover{text-decoration:none;}
+.coverage-item:hover .cov-title{color:var(--teal-light);}
+.cov-date{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.04em;}
+.cov-title{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--ink-strong);margin:4px 0 4px;}
+.cov-deck{font-size:13px;color:var(--ink-dim);font-family:var(--f-read);}
+
+/* infobox */
+.infobox{position:sticky;top:74px;background:var(--rail);border:1px solid rgba(0,194,179,0.22);border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(10px);}
+.infobox-head{background:linear-gradient(135deg,rgba(0,194,179,0.16),rgba(167,139,250,0.12));padding:0 0 14px;border-bottom:1px solid rgba(0,194,179,0.2);}
+.infobox-head .poster{height:96px;display:flex;align-items:center;justify-content:center;font-size:44px;color:var(--ink-strong);}
+.infobox-head .name{font-family:var(--f-display);font-weight:600;font-size:18px;color:var(--ink-strong);padding:0 18px;}
+.infobox-head .live{display:inline-flex;align-items:center;gap:6px;margin:6px 18px 0;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);}
+.ib-tabs{display:flex;border-bottom:1px solid rgba(255,255,255,0.08);}
+.ib-tab{flex:1;padding:10px 6px;text-align:center;font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-dim);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
+.ib-tab:hover{color:var(--ink);}.ib-tab.active{color:var(--teal-light);border-bottom-color:var(--teal);}
+.ib-panel{display:none;padding:14px 18px 16px;}.ib-panel.active{display:block;}
+.ib-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,0.06);}
+.ib-row:last-child{border-bottom:0;}
+.ib-k{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);text-transform:uppercase;}
+.ib-v{font-size:13px;color:var(--ink-strong);text-align:right;font-weight:500;}
+.ib-v.num{font-family:var(--f-mono);color:var(--teal-light);}
+.ib-v.live-val{color:var(--gold);}
+.ib-foot{padding:10px 18px;font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;gap:7px;}
+.ib-foot .pulse{width:6px;height:6px;}
+.src-list{list-style:none;}
+.src-list li{display:flex;gap:9px;padding:9px 0;border-bottom:1px dashed rgba(255,255,255,0.06);font-size:12px;line-height:1.4;}
+.src-list li:last-child{border-bottom:0;}.src-list .badge{flex-shrink:0;margin-top:1px;}
+.watchbtn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin:0 0 0;padding:9px;
+  font-family:var(--f-body);font-weight:600;font-size:12.5px;border-radius:0;border:0;border-top:1px solid rgba(255,255,255,0.07);
+  background:rgba(255,255,255,0.03);color:var(--ink-dim);cursor:pointer;}
+.watchbtn:hover{color:var(--ink-strong);background:rgba(255,255,255,0.06);}
+.watchbtn.on{color:var(--gold);}
+
+/* teaching annotation + ghost ads */
+.annot{display:none;}
+body.teaching .annot{display:block;margin:10px 0 22px;background:rgba(255,181,71,0.07);border:1px solid rgba(255,181,71,0.3);border-left:3px solid var(--gold);border-radius:8px;padding:11px 14px;font-size:12.5px;line-height:1.55;color:var(--ink);max-width:70ch;}
+.annot .lbl{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:4px;}
+.annot s{color:var(--src-rot);} .annot b{color:var(--ink-strong);}
+.adghost{display:none;border:1.5px dashed var(--src-rot);border-radius:10px;color:var(--src-rot);font-family:var(--f-mono);font-size:11px;letter-spacing:.05em;text-align:center;align-items:center;justify-content:center;text-transform:uppercase;background:repeating-linear-gradient(45deg,rgba(248,113,113,0.05) 0 10px,transparent 10px 20px);}
+body.teaching .adghost{display:flex;}
+.adghost.inline{height:110px;margin:20px 0;}
+.adghost.sky{height:500px;margin-top:14px;}
+
+/* ---------------- DRAFTS / DASHBOARD / COMPOSE ---------------- */
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.page-head h2{font-family:var(--f-display);font-weight:700;font-size:28px;color:var(--ink-strong);}
+.page-head p{color:var(--ink-dim);font-size:13.5px;max-width:60ch;}
+.toggle{display:inline-flex;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:3px;margin-bottom:16px;}
+.toggle button{font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim);background:none;border:0;border-radius:6px;padding:7px 16px;cursor:pointer;}
+.toggle button.active{background:rgba(0,194,179,0.14);color:var(--teal-light);}
+.draftrow{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;margin-bottom:9px;cursor:pointer;transition:all .12s;}
+.draftrow:hover{border-color:var(--teal);text-decoration:none;}
+.draftrow .doctype{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim);border:1px solid rgba(255,255,255,0.12);border-radius:5px;padding:3px 7px;flex-shrink:0;}
+.draftrow .meat{flex:1;min-width:0;}
+.draftrow h4{font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--ink-strong);}
+.draftrow .sub{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);margin-top:3px;}
+.dpill{font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;border-radius:5px;padding:3px 8px;flex-shrink:0;}
+.dpill.draft{color:var(--d-draft);background:rgba(138,151,184,0.12);border:1px solid rgba(138,151,184,0.3);}
+.dpill.in_review{color:var(--d-review);background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);}
+.dpill.returned{color:var(--d-returned);background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);}
+.dpill.ready{color:var(--d-ready);background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);}
+.dpill.published{color:var(--d-published);background:rgba(94,231,223,0.12);border:1px solid rgba(94,231,223,0.3);}
+.avstack{display:flex;}
+.avstack .av{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:10px;font-weight:700;color:var(--void-deep);margin-left:-7px;border:2px solid var(--void);}
+.avstack .av:first-child{margin-left:0;}
+
+.dash-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:start;}
+.dash-card{background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);padding:18px 20px;}
+.dash-card h3{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--ink-strong);margin-bottom:4px;display:flex;align-items:center;gap:8px;}
+.dash-card .csub{font-size:12px;color:var(--ink-dim);margin-bottom:14px;}
+.queue-row{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.07);cursor:pointer;}
+.queue-row:last-child{border-bottom:0;}
+.queue-row:hover .qt{color:var(--teal-light);}
+.qt{font-size:13.5px;color:var(--ink-strong);font-weight:500;}
+.qm{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);}
+.watchitem{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed rgba(255,255,255,0.07);}
+.watchitem:last-child{border-bottom:0;}
+.watchitem .g{width:22px;text-align:center;color:var(--accent);}
+
+/* draft editor */
+.editor-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:start;}
+.editor-main{background:var(--paper);border:1px solid var(--paper-edge);border-radius:var(--radius);padding:24px 28px;}
+.editor-toolbar{display:flex;gap:6px;flex-wrap:wrap;padding:8px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:9px;margin-bottom:14px;}
+.tbtn{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 11px;cursor:pointer;}
+.tbtn:hover{color:var(--ink-strong);border-color:var(--teal);}
+.editor-input{width:100%;background:rgba(0,0,0,0.25);border:1px solid rgba(0,194,179,0.18);border-radius:8px;padding:12px 14px;color:var(--ink-strong);font-family:var(--f-read);font-size:16px;resize:vertical;line-height:1.7;}
+.editor-input.title{font-family:var(--f-display);font-size:24px;font-weight:600;margin-bottom:10px;}
+.editor-input:focus{outline:none;border-color:var(--teal);}
+.side-card{background:var(--rail);border:1px solid rgba(0,194,179,0.2);border-radius:12px;padding:15px 16px;margin-bottom:14px;}
+.side-card h5{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:10px;}
+.comment{padding:11px 0;border-bottom:1px dashed rgba(255,255,255,0.07);}
+.comment:last-child{border-bottom:0;}
+.comment .who{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);font-weight:600;}
+.comment .av{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:10px;font-weight:700;color:var(--void-deep);}
+.comment .quoted{font-family:var(--f-read);font-style:italic;font-size:12px;color:var(--ink-dim);border-left:2px solid var(--purple);padding-left:9px;margin:5px 0;}
+.comment .ctext{font-size:13px;color:var(--ink);margin-top:4px;}
+.comment .cw{font-family:var(--f-mono);font-size:9.5px;color:var(--ink-dim);margin-top:3px;}
+
+/* create */
+.create-wrap{max-width:720px;margin:0 auto;}
+.create-wrap h2{font-family:var(--f-display);font-weight:700;font-size:30px;color:var(--ink-strong);margin-bottom:6px;}
+.create-wrap .lead{color:var(--ink-dim);margin-bottom:24px;}
+.field{margin-bottom:18px;}
+.field label{display:block;font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:6px;}
+.field input,.field textarea,.field select{width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(0,194,179,0.25);border-radius:8px;padding:11px 13px;color:var(--ink-strong);font-family:var(--f-body);font-size:14px;resize:vertical;}
+.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--teal);}
+.nsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
+.nspick{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:10px 12px;cursor:pointer;font-size:13px;color:var(--ink);transition:all .12s;}
+.nspick:hover{border-color:var(--accent);}
+.nspick.sel{border-color:var(--accent);background:rgba(0,194,179,0.08);color:var(--ink-strong);}
+.nspick .g{color:var(--accent);}
+.markup-note{margin-top:6px;font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);line-height:1.4;}
+.markup-note s{color:var(--src-rot);} .markup-note b{color:var(--src-primary);}
+.save{margin-top:8px;width:100%;background:var(--teal);color:var(--void-deep);border:0;border-radius:9px;padding:13px;font-weight:700;font-size:14px;cursor:pointer;}
+.save:hover{filter:brightness(1.12);}
+.auth-note{margin-top:14px;font-size:12px;color:var(--ink-dim);display:flex;gap:8px;align-items:center;}
+.auth-note .purple{color:var(--purple);}
+.lockcard{background:var(--paper);border:1px solid rgba(255,181,71,0.3);border-radius:var(--radius);padding:24px 26px;text-align:center;max-width:560px;margin:30px auto;}
+.lockcard .big{font-size:34px;}
+.lockcard h3{font-family:var(--f-display);font-weight:600;font-size:20px;color:var(--ink-strong);margin:10px 0 8px;}
+.lockcard p{color:var(--ink-dim);font-size:13.5px;}
+
+/* search */
+.search-head{font-family:var(--f-display);font-weight:600;font-size:24px;color:var(--ink-strong);margin-bottom:4px;}
+.search-sub{color:var(--ink-dim);font-family:var(--f-mono);font-size:12px;margin-bottom:20px;}
+.sresult{display:flex;gap:14px;padding:14px;border:1px solid rgba(255,255,255,0.07);border-radius:12px;margin-bottom:10px;cursor:pointer;transition:all .12s;}
+.sresult:hover{border-color:var(--teal);background:rgba(0,194,179,0.04);text-decoration:none;}
+.sresult .poster{width:52px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;}
+.sresult .ns{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;}
+.sresult h4{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--ink-strong);margin:3px 0;}
+.sresult p{font-size:13px;color:var(--ink-dim);}
+.emptystate{text-align:center;padding:60px 20px;color:var(--ink-dim);}
+.emptystate .big{font-size:44px;margin-bottom:14px;}
+.recent{background:var(--rail);border:1px solid rgba(0,194,179,0.16);border-radius:var(--radius);padding:16px 18px;}
+.recent h4{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:12px;}
+.rc-item{display:flex;gap:10px;padding:9px 0;border-bottom:1px dashed rgba(255,255,255,0.06);font-size:13px;}
+.rc-item:last-child{border-bottom:0;}
+.rc-dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex-shrink:0;}
+.rc-meta{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);margin-top:2px;}
+
+.footer{border-top:1px solid rgba(0,194,179,0.14);padding:24px;text-align:center;font-family:var(--f-mono);font-size:11px;letter-spacing:.05em;color:var(--ink-dim);}
+.footer b{color:var(--teal);}
+
+/* edit slide-over */
+.editpanel{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);background:rgba(10,13,24,0.97);border-left:1px solid rgba(0,194,179,0.3);backdrop-filter:blur(16px);z-index:60;padding:24px 26px;overflow-y:auto;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:-20px 0 60px rgba(0,0,0,0.5);}
+.editpanel.open{transform:translateX(0);}
+.editpanel h3{font-family:var(--f-display);font-weight:600;font-size:20px;color:var(--ink-strong);}
+.editpanel .close{position:absolute;top:20px;right:22px;background:none;border:0;color:var(--ink-dim);font-size:22px;cursor:pointer;line-height:1;}
+.editpanel .close:hover{color:var(--ink-strong);}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:55;opacity:0;pointer-events:none;transition:opacity .25s;}
+.scrim.open{opacity:1;pointer-events:auto;}
+
+/* responsive */
+@media(max-width:1150px){
+  .art-layout{grid-template-columns:minmax(0,1fr) 290px;}.toc{display:none;}
+  .read-layout,.editor-layout,.dash-grid{grid-template-columns:1fr;}
+  .story-hero{grid-template-columns:1fr;}.story-hero .poster{min-height:130px;}
+}
+@media(max-width:860px){
+  .shell{grid-template-columns:1fr;}.sidenav{display:none;}
+  .art-layout{grid-template-columns:1fr;}.infobox{position:static;}
+  .article,.reader{padding:22px 18px 32px;}.main{padding:16px 14px 70px;}
+  .gsearch{display:none;}.compare-toggle span{display:none;}
+  .civ-stats{grid-template-columns:repeat(2,1fr);}
+  .adghost.sky{display:none!important;}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wordmark" onclick="go('#/')">Haven&nbsp;Archive <span>· catalogued &amp; chronicled</span></div>
+  <div class="gsearch">
+    <span class="ico">⌕</span>
+    <input id="gsearch" placeholder="Search stories, civs, systems, history…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')go('#/search?q='+encodeURIComponent(this.value))">
+  </div>
+  <div class="tspacer"></div>
+  <div class="compare-toggle" onclick="document.body.classList.toggle('teaching')">
+    <span>Compare to Fandom</span><div class="switch"></div>
+  </div>
+  <div class="iconbtn" onclick="togglePop('notif')" title="Notifications">🔔<span class="badge" id="notif-badge">3</span></div>
+  <div class="userchip" onclick="togglePop('role')"><span class="av" id="me-av"></span><span id="me-name"></span> <span class="role" id="me-role"></span></div>
+</header>
+
+<!-- notification dropdown -->
+<div class="popmenu" id="pop-notif">
+  <h6>Notifications</h6>
+  <div id="notif-list"></div>
+</div>
+<!-- role switcher (prototype helper, like the archive's dev panel) -->
+<div class="popmenu" id="pop-role" style="width:280px;">
+  <h6>Preview as role <span style="color:var(--ink-dim);text-transform:none;letter-spacing:0;">· prototype helper</span></h6>
+  <div id="role-list"></div>
+</div>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav"></nav>
+  <div class="main" id="app"></div>
+</div>
+
+<div class="footer">
+  <b>0 ads</b> · self-hosted on the Haven Pi · community-owned under share-alike · facts synced from the atlas · history written by the people who lived it · <b>yours, not a corporation's</b>
+</div>
+
+<!-- edit slide-over -->
+<div class="scrim" id="scrim" onclick="closeEdit()"></div>
+<div class="editpanel" id="editpanel">
+  <button class="close" onclick="closeEdit()">×</button>
+  <h3 id="edit-title">Edit page</h3>
+  <p style="font-size:12.5px;color:var(--ink-dim);margin:4px 0 0;">Fill the fields. No wiki markup — the Archive formats it for you.</p>
+  <div class="field" style="margin-top:18px;"><label>Section</label>
+    <select><option>Overview</option><option>History</option><option>Add a new section…</option></select></div>
+  <div class="field"><label>Body text</label>
+    <textarea rows="5">Edit the prose here.</textarea>
+    <div class="markup-note">On Fandom you'd type <s>'''bold''' [[Link]] {{Template}}</s> — here you just <b>select text and click Bold, or @-mention an entity</b>.</div></div>
+  <div class="field"><label>Source for this claim</label>
+    <input type="text" placeholder="Paste a Discord/forum link, or mark as community-attested"></div>
+  <div class="field"><label>Source quality</label>
+    <select><option>🟢 Primary — direct record / atlas data</option><option>🔵 Secondary — summarized</option><option>🟡 Community-attested</option></select></div>
+  <button class="save">Submit for review</button>
+  <div class="auth-note">✓ Signed in as <span class="purple" id="edit-user">@stars</span> · edits credited to your Discord, reviewed before going live.</div>
+</div>
+
+<script>
+/* ============================================================
+   1. DATA MODEL  (all SAMPLE / illustrative)
+   ============================================================ */
+
+/* Namespaces — the wiki "catalogue" axis. Native archive entities
+   (civ/traveler/place/event) + the in-game atlas catalogue. */
+const NS = {
+  civ:      {label:'Civilizations',  g:'⬡', accent:'var(--ns-civ)',      blurb:'Federations, empires, and traveler nations — with full histories.', synced:false},
+  traveler: {label:'Travelers',      g:'✦', accent:'var(--ns-traveler)', blurb:'The explorers, diplomats, and historians themselves.', synced:false},
+  system:   {label:'Star Systems',   g:'✦', accent:'var(--ns-system)',   blurb:'Catalogued systems across all 256 galaxies.', synced:true},
+  planet:   {label:'Planets',        g:'◉', accent:'var(--ns-planet)',   blurb:'Worlds, their biomes, weather, and resources.', synced:true},
+  creature: {label:'Fauna',          g:'⬡', accent:'var(--ns-creature)', blurb:'Documented creatures and their behaviors.', synced:false},
+  ship:     {label:'Starships',      g:'➤', accent:'var(--ns-ship)',     blurb:'Notable ships, classes, and where to find them.', synced:false},
+  tool:     {label:'Multi-Tools',    g:'⚘', accent:'var(--ns-tool)',     blurb:'Tool finds, archetypes, and stats.', synced:false},
+  base:     {label:'Bases & Builds', g:'⌂', accent:'var(--ns-base)',     blurb:'Player bases, megabuilds, and blueprints.', synced:false},
+  event:    {label:'Events',         g:'❉', accent:'var(--ns-event)',    blurb:'Expeditions, festivals, and community milestones.', synced:false},
+  lore:     {label:'Lore & Story',   g:'✧', accent:'var(--ns-lore)',     blurb:'Atlas, Sentinels, Travellers — the deep story.', synced:false},
+  guide:    {label:'Guides',         g:'❖', accent:'var(--ns-guide)',    blurb:'How-to articles written by the community.', synced:false},
+  mechanic: {label:'Game Mechanics', g:'⚙', accent:'var(--ns-mechanic)', blurb:'Crafting, combat, economy, and systems.', synced:false},
+  item:     {label:'Items & Resources',g:'◆',accent:'var(--ns-item)',    blurb:'Elements, products, tech, and tradeables.', synced:true},
+};
+const NS_COUNT = {civ:412,traveler:1180,system:13742,planet:32909,creature:6300,ship:2840,tool:1190,base:980,event:64,lore:148,guide:236,mechanic:310,item:1520};
+
+/* Newsroom beats */
+const BEATS = {
+  conflicts: {label:'Conflicts', blurb:'Wars, raids, and territorial disputes across the multiverse.'},
+  diplomacy: {label:'Diplomacy', blurb:'Treaties, alliances, and the politics between federations.'},
+  events:    {label:'Events',    blurb:'Expeditions, festivals, and community gatherings.'},
+  civupdates:{label:'Civ Updates', blurb:'Foundings, leadership changes, expansions, and dissolutions.'},
+  projects:  {label:'Projects',  blurb:'Megabuilds, cartography drives, and collaborative undertakings.'},
+};
+
+/* Roles — Discord-synced in the real archive. base_role + editor/admin. */
+const ROLES = {
+  reader:    {label:'Reader',    desc:'Read everything. Watch pages. Comment.'},
+  diplomat:  {label:'Diplomat',  desc:'File briefs & features on your civ.'},
+  historian: {label:'Historian', desc:'Everything diplomats can, plus open inquisitions.'},
+};
+/* current viewer — the role switcher mutates this (prototype helper) */
+let ME = {handle:'stars', name:'Stars', role:'historian', editor:true, admin:false, civ:'aeon-concord', av:'S', avColor:'var(--teal)'};
+const canFile    = () => ME.admin || ME.role==='diplomat' || ME.role==='historian';
+const canInquire = () => ME.admin || ME.role==='historian';
+const canReview  = () => ME.admin || ME.editor;
+
+/* Civilizations — rich records (lifecycle + brand + coverage) */
+const CIVS = {
+  'aeon-concord': {slug:'aeon-concord', name:'The Aeon Concord', status:'active', galaxy:'Euclid',
+    founded:'Year 1 · 2017', foundedYear:2017, ended:null, endedYear:null,
+    tagline:'Open-border cartographers with a shared discovery archive.', c1:'#6C5CE7', c2:'#00C2B3',
+    description:'A loosely federated civilization operating across the outer arms of Euclid. Authority rotates among regional stewards — a structure adopted after watching command-driven groups fracture.',
+    live:[['Member systems','204'],['Catalogued planets','631'],['Regions held','3'],['Active contributors','28']],
+    overview:[['Type','Federation'],['Government','Rotating stewards'],['Galaxy','Euclid']],
+    sources:[['primary','Atlas territory records — live.'],['secondary','Federation charter (community thread).'],['attested','Founding date — member recollection.'],['rot','Original announcement — link dead, flagged.']]},
+  'verdant-coalition': {slug:'verdant-coalition', name:'The Verdant Coalition', status:'dormant', galaxy:'Euclid',
+    founded:'2019', foundedYear:2019, ended:'2023', endedYear:2023,
+    tagline:'A garden-world alliance that quietly went dormant after the Withering.', c1:'#1D9E75', c2:'#A3D977',
+    description:'Once the second-largest federation in the survey corridor, the Coalition stopped publishing after a leadership dispute now known as the Withering. Its systems remain catalogued; its banner has not flown in three cycles.',
+    live:[['Member systems','61'],['Catalogued planets','188'],['Last activity','2023']],
+    overview:[['Type','Alliance'],['Government','Council'],['Galaxy','Euclid']],
+    sources:[['secondary','Coalition history thread.'],['attested','Dormancy date — community.'],['rot','Coalition forum — offline.']]},
+  'iron-pact': {slug:'iron-pact', name:'The Iron Pact', status:'archived', galaxy:'Hilbert Dimension',
+    founded:'2018', foundedYear:2018, ended:'2021', endedYear:2021,
+    tagline:'A militarized bloc dissolved after the Treaty of Lumen.', c1:'#c0392b', c2:'#f39c12',
+    description:'The Iron Pact controlled three contested regions before its dissolution at the Treaty of Lumen ended the longest territorial conflict in archive memory. Documented here so the history is not lost.',
+    live:[['Peak systems','140'],['Regions held','3'],['Dissolved','2021']],
+    overview:[['Type','Military bloc'],['Government','High command'],['Galaxy','Hilbert Dimension']],
+    sources:[['primary','Treaty of Lumen — full text.'],['secondary','War recaps (multiple threads).'],['attested','Dissolution — eyewitness accounts.']]},
+};
+
+/* Newsroom stories */
+const STORIES = [
+  {slug:'treaty-of-lumen-anniversary', doctype:'feature', headline:'Five cycles after the Treaty of Lumen, the border still holds',
+   deck:'The longest territorial conflict in archive memory ended at Lumen Array. We revisit the steward who brokered it.',
+   beat:'diplomacy', civs:['aeon-concord','iron-pact'], author:{name:'Stars',av:'S',color:'var(--teal)'}, published:'2026-06-18', readMinutes:11,
+   body:`<p>When the Iron Pact dissolved at the Treaty of Lumen, few expected the border to outlast the federations that drew it.</p>
+     <h2>A line drawn in trade</h2><p>The Concord's open-border doctrine made the demilitarized corridor profitable rather than contested — and profit, it turns out, is a sturdier wall than any fleet.</p>
+     <blockquote>"We did not negotiate a peace. We negotiated a trade route that happened to require one."</blockquote>
+     <p>The steward who brokered it still logs systems in the corridor today, under a banner that no longer needs defending.</p>`},
+  {slug:'concord-survey-corridor-200', doctype:'brief', headline:'Aeon Concord crosses 200 catalogued systems in the Survey Corridor',
+   deck:'The milestone makes the corridor the densest mapped region in the outer arm.',
+   beat:'civupdates', civs:['aeon-concord'], author:{name:'Jaina',av:'J',color:'var(--purple)'}, published:'2026-06-15', readMinutes:null,
+   body:`<p>The Aeon Concord logged its 200th catalogued system this cycle, all within the Survey Corridor — now the densest mapped region in the outer arm.</p><p>Lead cartographer Stars credited the milestone to "boring consistency: name the region first, tag the civ, attach a source."</p>`},
+  {slug:'verdant-withering-explainer', doctype:'feature', headline:'What the Withering really was',
+   deck:'The Verdant Coalition went dark in 2023. Three accounts, one dispute, and the cost of losing your own records.',
+   beat:'civupdates', civs:['verdant-coalition'], author:{name:'Lucca',av:'L',color:'var(--gold)'}, published:'2026-06-10', readMinutes:9,
+   body:`<p>The Verdant Coalition did not collapse in a battle. It collapsed in a forum thread nobody backed up.</p>
+     <h2>Three accounts</h2><p>Surviving members tell three versions of the Withering — and because the Coalition's own forum went offline, none can be sourced past "I was there."</p>
+     <p>It is the clearest argument the archive makes for itself: a federation that does not own its records does not own its history.</p>`},
+  {slug:'unification-festival-returns', doctype:'brief', headline:'The Unification Festival returns this cycle, hosted by the Concord',
+   deck:'Cross-federation cartography drive opens to all travelers, regardless of banner.',
+   beat:'events', civs:['aeon-concord'], author:{name:'Watcher',av:'W',color:'var(--src-secondary)'}, published:'2026-06-08', readMinutes:null,
+   body:`<p>The Unification Festival returns this cycle, hosted by the Aeon Concord and — for the first time — open to every traveler regardless of banner.</p><p>Entries are logged through the standard discovery flow and count toward the festival leaderboard automatically.</p>`},
+  {slug:'iron-pact-archive-complete', doctype:'brief', headline:'The Iron Pact dossier is now complete',
+   deck:'Five years after dissolution, the archived federation has full coverage.',
+   beat:'projects', civs:['iron-pact'], author:{name:'Todd',av:'T',color:'var(--ns-creature)'}, published:'2026-06-03', readMinutes:null,
+   body:`<p>The Iron Pact — dissolved in 2021 — now has complete coverage in the archive, from founding through the Treaty of Lumen.</p><p>"Archived doesn't mean forgotten," the historian team noted. "It means finished."</p>`},
+  {slug:'lumen-raid-report', doctype:'brief', headline:'Raiders hit the Lumen Array trade hub; Concord convoys reroute',
+   deck:'No casualties reported; the steward council calls an emergency session.',
+   beat:'conflicts', civs:['aeon-concord'], author:{name:'Jade',av:'J',color:'var(--ns-planet)'}, published:'2026-05-28', readMinutes:null,
+   body:`<p>Raiders struck the Lumen Array trade hub this cycle. No casualties were reported, but Concord convoys are rerouting through the southern corridor while the steward council meets in emergency session.</p>`},
+];
+
+/* Inquisitions — long-form historical investigations */
+const INQUISITIONS = [
+  {id:47, slug:'origins-of-the-concord', numeral:'XLVII', title:'The True Origins of the Aeon Concord',
+   subtitle:'Founding-era records, reconciled', deck:'Three founding dates circulate in community memory. We chase each to its source.',
+   state:'in_progress', progress:65, sources:14, started:'2026-04-02', civs:['aeon-concord'],
+   authors:[{name:'Stars',av:'S',color:'var(--teal)'},{name:'Lucca',av:'L',color:'var(--gold)'}],
+   body:`<p>The Aeon Concord's founding is dated, variously, to Year 1, to "the Pathfinder era," and to a specific 2017 thread that no longer resolves. This inquisition reconciles the three.</p>
+     <h2>The Pathfinder claim</h2><p>The earliest written reference predates the federation's name by two cycles, suggesting the Concord existed as a discovery-sharing pact long before it declared itself a civilization.</p>`},
+  {id:48, slug:'who-broke-the-coalition', numeral:'XLVIII', title:'Who Broke the Verdant Coalition?',
+   subtitle:'The Withering, sourced', deck:'A federation that lost its own forum cannot defend its own version of events. We try anyway.',
+   state:'in_progress', progress:30, sources:6, started:'2026-05-20', civs:['verdant-coalition'],
+   authors:[{name:'Lucca',av:'L',color:'var(--gold)'}],
+   body:`<p>The Withering ended the Verdant Coalition in 2023. With the Coalition's forum offline, every account is now community-attested at best.</p>`},
+  {id:46, slug:'treaty-of-lumen', numeral:'XLVI', title:'The Treaty of Lumen, Line by Line',
+   subtitle:'A closed inquisition', deck:'The full text, the negotiators, and the trade route that became a border.',
+   state:'closed', progress:100, sources:22, started:'2025-11-10', closed:'2026-02-14', civs:['aeon-concord','iron-pact'],
+   authors:[{name:'Stars',av:'S',color:'var(--teal)'},{name:'Todd',av:'T',color:'var(--ns-creature)'}],
+   body:`<p>Closed and canonical: the Treaty of Lumen ended the Iron Pact's territorial conflict and drew the corridor that still holds today.</p>`},
+];
+
+/* Encyclopedia entities (non-civ) — the wiki article DB */
+function sb(type,tip){const m={primary:'P',secondary:'S',attested:'C',rot:'!'};return `<span class="src ${type}">${m[type]}<span class="tip">${tip}</span></span>`;}
+function L(slug,text){return `<a class="xref" onclick="go('#/wiki/${slug}')">${text}</a>`;}
+const DB = [
+  {slug:'stars-cartographer', ns:'traveler', title:'Stars', subtitle:'Lead cartographer of the Aeon Concord and a founding Archivist historian.',
+   editor:'todd', edited:'2 days ago',
+   infobox:{live:[['Systems logged','1,902'],['Planets logged','4,540'],['Regions mapped','61']],
+            overview:[['Role','Cartographer / Historian'],['Affiliation',L('aeon-concord','Aeon Concord')],['Platform','PC']]},
+   sources:[['primary','Atlas contribution records — live.'],['attested','Role described by community.']],
+   sections:[{id:'overview',title:'Overview',h:`<p class="lead">Stars is a cartographer credited with mapping large stretches of the ${L('euclid','Euclid')} outer arms, and one of the most prolific contributors to the shared discovery archive.${sb('primary','<b>Primary.</b> Contribution totals are live from the atlas.')}</p>`},
+     {id:'work',title:'Notable work',h:`<p>Best known for the survey that became the backbone of the ${L('aeon-concord','Aeon Concord')}'s territory map, and as lead author of ${L('','Inquisition XLVII')}.${sb('secondary','<b>Secondary.</b>')}</p>`}]},
+  {slug:'lumen-array', ns:'system', title:'Lumen Array', subtitle:'A six-planet trade-hub system on the edge of Concord territory.',
+   editor:'jaina', edited:'4 hours ago',
+   infobox:{live:[['Planets','6'],['Moons','2'],['Star class','Yellow (F)'],['Economy','Trading · High']],
+            overview:[['Galaxy','Euclid'],['Region','Survey Corridor'],['Civilization',L('aeon-concord','Aeon Concord')],['Discovered by',L('stars-cartographer','Stars')]]},
+   sources:[['primary','Atlas system record — live.'],['secondary','Trade data, community thread.']],
+   sections:[{id:'overview',title:'Overview',h:`<p class="lead">Lumen Array anchors the eastern edge of ${L('aeon-concord','Concord')} space and lent its name to the ${L('','Treaty of Lumen')}.${sb('primary','<b>Primary.</b> Live atlas record.')}</p>`},
+     {id:'planets',title:'Planets',h:`<table class="datatable"><tr><th>Planet</th><th>Biome</th><th>Notable</th></tr><tr><td>${L('verdance','Verdance')}</td><td>Lush</td><td>Concord garden world</td></tr><tr><td>Cinder III</td><td>Scorched</td><td>Activated indium</td></tr></table>`}]},
+  {slug:'verdance', ns:'planet', title:'Verdance', subtitle:'A lush garden world in the Lumen Array system, the Concord’s heartland.',
+   editor:'jade', edited:'1 day ago',
+   infobox:{live:[['Biome','Lush'],['Weather','Mild'],['Sentinels','Low'],['Fauna species','14']],
+            overview:[['System',L('lumen-array','Lumen Array')],['Resources','Star Bulb, Faecium'],['Bases','3 registered']]},
+   sources:[['primary','Atlas planet record — live.'],['attested','Heartland status — community lore.']],
+   sections:[{id:'overview',title:'Overview',h:`<p class="lead">Verdance is regarded as the heartland of the ${L('aeon-concord','Aeon Concord')}.${sb('primary','<b>Primary.</b> Live atlas record.')}</p>`}]},
+  {slug:'euclid', ns:'lore', title:'Euclid Galaxy', subtitle:'The first and most populated galaxy — home to most Haven civilizations.',
+   editor:'lucca', edited:'5 days ago',
+   infobox:{live:[['Catalogued systems','11,400+'],['Civilizations','120+']], overview:[['Index','1 of 256'],['Type','Spiral']]},
+   sources:[['primary','Atlas galaxy record — live.']],
+   sections:[{id:'overview',title:'Overview',h:`<p class="lead">Euclid is the starting galaxy and by far the most documented, home to the ${L('aeon-concord','Aeon Concord')} and most of Haven's catalogued systems.${sb('primary','<b>Primary.</b> Live atlas record.')}</p>`}]},
+  {slug:'unification-festival', ns:'event', title:'The Unification Festival', subtitle:'An annual community gathering celebrating cross-federation cartography.',
+   editor:'watcher', edited:'2 weeks ago',
+   infobox:{overview:[['Type','Festival'],['Frequency','Annual'],['Host',L('aeon-concord','Aeon Concord')]]},
+   sources:[['secondary','Event recaps — community threads.']],
+   sections:[{id:'overview',title:'Overview',h:`<p class="lead">The Unification Festival brings federations together each cycle to share discovery logs.${sb('secondary','<b>Secondary.</b>')}</p>`}]},
+];
+
+/* Drafts — the upload pipeline */
+const DRAFTS = [
+  {id:51, doctype:'feature', headline:'The cartographers who never left the corridor', deck:'A profile of the Concord’s longest-serving surveyors.',
+   beat:'civupdates', status:'in_review', author:{name:'Stars',av:'S',color:'var(--teal)'}, coauthors:[{name:'Jaina',av:'J',color:'var(--purple)'}], civs:['aeon-concord'], edited:'1 hour ago',
+   comments:[{author:{name:'Lucca',av:'L',color:'var(--gold)'}, quoted:'the densest mapped region in the outer arm', body:'Source this against the live atlas count — it changed last cycle.', when:'40 min ago'}]},
+  {id:52, doctype:'brief', headline:'(working title) Southern corridor reroute holds', deck:'', beat:'conflicts', status:'draft',
+   author:{name:'Stars',av:'S',color:'var(--teal)'}, coauthors:[], civs:['aeon-concord'], edited:'today', comments:[]},
+  {id:53, doctype:'inquisition', headline:'Who broke the Verdant Coalition?', deck:'Draft of Inquisition XLVIII', beat:null, status:'returned',
+   author:{name:'Lucca',av:'L',color:'var(--gold)'}, coauthors:[], civs:['verdant-coalition'], edited:'yesterday',
+   comments:[{author:{name:'Stars',av:'S',color:'var(--teal)'}, quoted:'', body:'Returned — needs at least one primary source before it can go to ready. The forum-offline problem is real but we can cite the surviving DMs.', when:'yesterday'}]},
+  {id:50, doctype:'feature', headline:'Five cycles after the Treaty of Lumen', deck:'', beat:'diplomacy', status:'published',
+   author:{name:'Stars',av:'S',color:'var(--teal)'}, coauthors:[], civs:['aeon-concord','iron-pact'], edited:'4 days ago', comments:[]},
+];
+
+/* Notifications */
+let NOTIFS = [
+  {type:'comment_mention', t:'Lucca commented on your draft', b:'"Source this against the live atlas count…"', link:'#/draft/51', unread:true, when:'40 min ago'},
+  {type:'draft_returned', t:'Inquisition XLVIII was returned', b:'Needs a primary source before it can go to ready.', link:'#/draft/53', unread:true, when:'yesterday'},
+  {type:'watchlist_update', t:'The Verdant Coalition was edited', b:'Lucca updated the dormancy section.', link:'#/wiki/verdant-coalition', unread:true, when:'yesterday'},
+  {type:'draft_marked_ready', t:'Your brief is ready to publish', b:'Southern corridor reroute holds — approved by an editor.', link:'#/draft/52', unread:false, when:'2 days ago'},
+];
+
+/* Watchlist (type:slug) */
+let WATCH = new Set(['civ:aeon-concord','civ:verdant-coalition','inquisition:47']);
+
+/* ============================================================
+   2. HELPERS
+   ============================================================ */
+const bySlug = s => DB.find(a=>a.slug===s);
+const inNs   = ns => DB.filter(a=>a.ns===ns);
+const civsList = () => Object.values(CIVS);
+const storyBySlug = s => STORIES.find(x=>x.slug===s);
+const inqById = id => INQUISITIONS.find(x=>String(x.id)===String(id)||x.slug===id);
+const draftById = id => DRAFTS.find(d=>String(d.id)===String(id));
+function go(hash){ location.hash = hash; }
+function posterStyle(ns){ const a=NS[ns].accent; return `background:linear-gradient(135deg,${a.replace('var(','rgba(').replace(')',', 0.22)')} 0%, rgba(10,14,26,0.4) 100%);color:${a};`; }
+function fmtDate(d){ if(!d) return ''; try{ return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch{return d;} }
+function av(a){ return `<span class="av" style="background:${a.color||'var(--teal)'}">${a.av||(a.name||'?')[0]}</span>`; }
+function civCoverage(slug){
+  const s = STORIES.filter(x=>x.civs.includes(slug)).map(x=>({kind:'story',...x,date:x.published}));
+  const i = INQUISITIONS.filter(x=>x.civs.includes(slug)).map(x=>({kind:'inquisition',...x,date:x.started,headline:x.title}));
+  return [...s,...i].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+}
+/* timeline entries: civ foundings/endings + stories + inquisitions */
+function timelineEntries(){
+  const out=[];
+  civsList().forEach(c=>{
+    if(c.foundedYear) out.push({kind:'civ-founded',year:c.foundedYear,date:`${c.foundedYear}-01-01`,title:`${c.name.replace(/^The /,'')} founded`,civs:[c.slug],href:`#/wiki/${c.slug}`});
+    if(c.endedYear) out.push({kind:'civ-ended',year:c.endedYear,date:`${c.endedYear}-06-01`,title:`${c.name.replace(/^The /,'')} ${c.status==='archived'?'dissolved':'went dormant'}`,civs:[c.slug],href:`#/wiki/${c.slug}`});
+  });
+  STORIES.forEach(s=>out.push({kind:'story',year:new Date(s.published).getFullYear(),date:s.published,title:s.headline,civs:s.civs,href:`#/story/${s.slug}`}));
+  INQUISITIONS.forEach(i=>out.push({kind:'inquisition',year:new Date(i.started).getFullYear(),date:i.started,title:`Inq ${i.numeral}: ${i.title}`,civs:i.civs,href:`#/inquisition/${i.id}`}));
+  return out;
+}
+
+/* ============================================================
+   3. CHROME: sidenav, role chip, notifications
+   ============================================================ */
+function renderChrome(){
+  document.getElementById('me-av').textContent = ME.av;
+  document.getElementById('me-av').style.background = ME.avColor;
+  document.getElementById('me-name').textContent = '@'+ME.handle;
+  document.getElementById('me-role').textContent = ME.admin?'admin':(ME.editor?ROLES[ME.role].label+' · editor':ROLES[ME.role].label);
+  document.getElementById('edit-user').textContent = '@'+ME.handle;
+  const unread = NOTIFS.filter(n=>n.unread).length;
+  const badge=document.getElementById('notif-badge'); badge.textContent=unread; badge.style.display=unread?'flex':'none';
+  document.getElementById('notif-list').innerHTML = NOTIFS.map(n=>`
+    <div class="notif ${n.unread?'unread':'read'}" onclick="go('${n.link}');closePops()">
+      <span class="dot"></span><div><div class="t">${n.t}</div><div class="b">${n.b}</div><div class="w">${n.when}</div></div></div>`).join('');
+  document.getElementById('role-list').innerHTML = Object.entries(ROLES).map(([k,v])=>`
+    <div class="rolepick ${ME.role===k?'sel':''}" onclick="setRole('${k}')">
+      <div><div>${v.label}</div><div class="desc">${v.desc}</div></div>${ME.role===k?'<span class="ck">✓</span>':''}</div>`).join('')
+    + `<div class="rolepick ${ME.admin?'sel':''}" onclick="toggleAdmin()"><div><div>Admin / Editor</div><div class="desc">Review &amp; publish anyone’s drafts.</div></div>${ME.admin?'<span class="ck">✓</span>':''}</div>`;
+}
+function setRole(r){ ME.role=r; ME.editor=(r==='historian'); renderChrome(); closePops(); router(); }
+function toggleAdmin(){ ME.admin=!ME.admin; ME.editor=ME.admin||ME.role==='historian'; renderChrome(); closePops(); router(); }
+function togglePop(which){
+  const el=document.getElementById('pop-'+which); const open=el.classList.contains('open');
+  closePops(); if(!open) el.classList.add('open');
+}
+function closePops(){ document.querySelectorAll('.popmenu').forEach(p=>p.classList.remove('open')); }
+document.addEventListener('click',e=>{ if(!e.target.closest('.popmenu')&&!e.target.closest('.iconbtn')&&!e.target.closest('.userchip')) closePops(); });
+
+function renderSidenav(active){
+  const cat = Object.entries(NS).map(([k,v])=>`
+    <div class="navlink ${active==='browse:'+k?'active':''}" onclick="go('#/browse/${k}')">
+      <span class="g" style="color:${v.accent}">${v.g}</span> ${v.label}<span class="ct">${NS_COUNT[k].toLocaleString()}</span></div>`).join('');
+  document.getElementById('sidenav').innerHTML = `
+    <div class="navcreate" onclick="go('#/create')">＋ Create a page</div>
+    <h5>Newsroom</h5>
+    <div class="navlink ${active==='news'?'active':''}" onclick="go('#/news')"><span class="g" style="color:var(--gold)">❉</span> Front page</div>
+    <div class="navlink ${active==='inquisitions'?'active':''}" onclick="go('#/inquisitions')"><span class="g" style="color:var(--gold)">✧</span> Inquisitions</div>
+    <div class="navlink ${active==='timeline'?'active':''}" onclick="go('#/timeline')"><span class="g" style="color:var(--teal)">⟿</span> Timeline</div>
+    <h5>You</h5>
+    <div class="navlink ${active==='dashboard'?'active':''}" onclick="go('#/dashboard')"><span class="g">▤</span> Dashboard</div>
+    <div class="navlink ${active==='drafts'?'active':''}" onclick="go('#/drafts')"><span class="g">✎</span> Drafts</div>
+    <div class="navlink ${active==='watchlist'?'active':''}" onclick="go('#/watchlist')"><span class="g">★</span> Watchlist</div>
+    <h5>Explore</h5>
+    <div class="navlink ${active==='home'?'active':''}" onclick="go('#/')"><span class="g">⌂</span> Home</div>
+    <div class="navlink ${active==='recent'?'active':''}" onclick="go('#/recent')"><span class="g">↻</span> Recent changes</div>
+    <div class="navlink" onclick="randomArticle()"><span class="g">⚄</span> Random page</div>
+    <h5>Catalogue</h5>${cat}
+    <h5>Community</h5>
+    <div class="navlink"><span class="g">⌗</span> Discord</div>
+    <div class="navlink"><span class="g">❖</span> Style guide</div>`;
+}
+
+/* ============================================================
+   4. VIEWS
+   ============================================================ */
+function renderHome(){
+  const total = Object.values(NS_COUNT).reduce((a,b)=>a+b,0);
+  const hero = STORIES.find(s=>s.doctype==='feature');
+  const briefs = STORIES.filter(s=>s.doctype==='brief').slice(0,3);
+  const inqs = INQUISITIONS.filter(i=>i.state==='in_progress');
+  const tl = timelineEntries().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+  const portal = Object.entries(NS).map(([k,v])=>`
+    <div class="pcard" style="--accent:${v.accent}" onclick="go('#/browse/${k}')">
+      <div class="g">${v.g}</div><div class="t">${v.label}</div><div class="c">${NS_COUNT[k].toLocaleString()} pages</div></div>`).join('');
+  document.getElementById('app').innerHTML = `
+    <div class="hero">
+      <span class="sample-ribbon">⬡ Sample content · illustrative prototype for layout review</span>
+      <h1 style="margin-top:14px;">Everything in the <span class="accent">Haven</span> multiverse —<br>catalogued, and <span class="accent">chronicled</span>.</h1>
+      <p>A wiki for civilizations, travelers, systems and lore — <b>and</b> a living newsroom and historical record for the communities who built them. No ads. No markup to learn.</p>
+      <div class="hero-search"><span class="ico">⌕</span>
+        <input placeholder="Search ${total.toLocaleString()} catalogue pages + the newsroom…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')go('#/search?q='+encodeURIComponent(this.value))"></div>
+    </div>
+    <div class="statstrip">
+      <div class="stat"><div class="n">${total.toLocaleString()}</div><div class="l">Catalogue pages</div></div>
+      <div class="stat"><div class="n">${STORIES.length}</div><div class="l">Stories</div></div>
+      <div class="stat"><div class="n">${INQUISITIONS.length}</div><div class="l">Inquisitions</div></div>
+      <div class="stat"><div class="n">${civsList().length}</div><div class="l">Civilizations</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">Ads</div></div>
+    </div>
+
+    <div class="sechead">From the Newsroom <span class="rule"></span><a class="more" onclick="go('#/news')">Front page →</a></div>
+    ${hero?storyHero(hero):''}
+    <div class="story-grid" style="margin-top:8px;">${briefs.map(storyCard).join('')}</div>
+
+    <div class="sechead">Active inquisitions <span class="rule"></span><a class="more" onclick="go('#/inquisitions')">All inquisitions →</a></div>
+    <div class="inq-shelf">${inqs.map(inqCard).join('')}</div>
+
+    <div class="sechead">Recent civ history <span class="rule"></span><a class="more" onclick="go('#/timeline')">Full timeline →</a></div>
+    <div class="tlmini">${tl.map(miniRow).join('')}</div>
+
+    <div class="sechead">Browse the catalogue <span class="rule"></span></div>
+    <div class="portal">${portal}</div>`;
+}
+
+/* ---- newsroom ---- */
+function storyHero(s){
+  const civtags = s.civs.map(c=>`<span class="civtag">${(CIVS[c]||{name:c}).name.replace(/^The /,'')}</span>`).join(' ');
+  return `<a class="story-hero" onclick="go('#/story/${s.slug}')">
+    <div class="poster">${s.doctype==='feature'?'❉':'◆'}</div>
+    <div class="body">
+      <div class="story-kicker"><span>${s.doctype==='feature'?'Feature':'Brief'} · ${BEATS[s.beat]?BEATS[s.beat].label:s.beat}</span> ${civtags}</div>
+      <h3>${s.headline}</h3><p>${s.deck||''}</p>
+      <div class="byline">${av(s.author)}<span>By <b>${s.author.name}</b> · ${fmtDate(s.published)}${s.readMinutes?` · ${s.readMinutes} min read`:''}</span></div>
+    </div></a>`;
+}
+function storyCard(s){
+  return `<a class="scard" onclick="go('#/story/${s.slug}')">
+    <div class="kick">${s.doctype==='feature'?'Feature':'Brief'} · ${BEATS[s.beat]?BEATS[s.beat].label:s.beat}</div>
+    <h4>${s.headline}</h4><p>${s.deck||''}</p>
+    <div class="byline" style="margin-top:11px;">${av(s.author)}<span>${s.author.name} · ${fmtDate(s.published)}</span></div></a>`;
+}
+function inqCard(i){
+  return `<a class="inq-card" onclick="go('#/inquisition/${i.id}')">
+    <div class="inq-numeral">Inquisition ${i.numeral} · <span class="inq-state ${i.state==='closed'?'closed':''}">${i.state.replace('_',' ')}</span></div>
+    <h3>${i.title}${i.subtitle?` <span class="sub">· ${i.subtitle}</span>`:''}</h3>
+    <div class="inq-meta">By ${i.authors.map(a=>a.name).join(', ')} · ${i.authors.length} historian${i.authors.length!==1?'s':''} · ${i.sources} sources</div>
+    ${i.progress<100?`<div class="inq-progress"><span>${i.progress}%</span><div class="inq-bar"><div class="inq-fill" style="width:${i.progress}%"></div></div></div>`:''}</a>`;
+}
+function miniRow(e){
+  const accent = e.civs[0]&&CIVS[e.civs[0]]?CIVS[e.civs[0]].c1:'var(--teal)';
+  const kindLabel = e.kind.replace('civ-','').replace('-',' ');
+  return `<a class="tlmini-row" style="--accent:${accent}" onclick="go('${e.href}')">
+    <span class="tlmini-year">${e.year||''}</span><span class="tlmini-dot"></span>
+    <div><span class="tlmini-kind">${kindLabel}</span><div class="tlmini-title">${e.title}</div></div></a>`;
+}
+
+function renderNews(beat){
+  const list = beat?STORIES.filter(s=>s.beat===beat):STORIES;
+  const features=list.filter(s=>s.doctype==='feature'), briefs=list.filter(s=>s.doctype==='brief');
+  const hero=features[0]||briefs[0]||null;
+  const restF=features.filter(s=>s!==hero), restB=briefs.filter(s=>s!==hero);
+  const beatTabs = Object.entries(BEATS).map(([k,v])=>`<a class="beat-tab ${beat===k?'active':''}" onclick="go('#/news/${k}')">${v.label}</a>`).join('');
+  document.getElementById('app').innerHTML = `
+    <div class="masthead">
+      <div class="name">The Travelers Archive</div>
+      <div class="tag">A record of the No Man's Sky multiverse</div>
+      <div class="meta"><div><b>${STORIES.length}</b><span>stories</span></div><div><b>${INQUISITIONS.length}</b><span>inquisitions</span></div><div><b>${civsList().length}</b><span>civs</span></div></div>
+    </div>
+    <div class="beatnav">
+      <a class="beat-tab ${!beat?'active':''}" onclick="go('#/news')">Front page</a>
+      ${beatTabs}
+      <a class="beat-tab gold" onclick="go('#/inquisitions')">Inquisitions</a>
+    </div>
+    ${beat?`<p style="color:var(--ink-dim);font-size:13.5px;margin:-8px 0 18px;">${BEATS[beat].blurb}</p>`:''}
+    ${canFile()?`<div class="pillrow" style="margin-bottom:18px;"><a class="btn primary" onclick="go('#/compose/brief')">＋ Start a brief</a><a class="btn" onclick="go('#/compose/feature')">＋ Start a feature</a>${canInquire()?`<a class="btn gold" onclick="go('#/compose/inquisition')">✧ Begin an inquisition</a>`:''}</div>`:''}
+    ${list.length===0?`<div class="emptystate"><div class="big">❉</div><p>No stories on this beat yet.${canFile()?' Be the first to file one.':''}</p></div>`:`
+      ${hero?storyHero(hero):''}
+      ${restB.length?`<div class="sechead">Latest briefs <span class="rule"></span></div><div class="story-grid">${restB.map(storyCard).join('')}</div>`:''}
+      ${restF.length?`<div class="sechead">Recent features <span class="rule"></span></div><div class="story-grid">${restF.map(storyCard).join('')}</div>`:''}
+    `}`;
+}
+
+function renderStory(slug){
+  const s = storyBySlug(slug); if(!s) return render404();
+  const civtags = s.civs.map(c=>{const civ=CIVS[c]||{name:c,slug:c};return `<a class="civtag" onclick="go('#/wiki/${civ.slug}')">${civ.name.replace(/^The /,'')}</a>`;}).join(' ');
+  document.getElementById('app').innerHTML = `
+  <div class="read-layout">
+    <div class="reader">
+      <div class="breadcrumb"><a onclick="go('#/news')">Newsroom</a> <span style="opacity:.5">›</span> <a onclick="go('#/news/${s.beat}')">${BEATS[s.beat]?BEATS[s.beat].label:s.beat}</a></div>
+      <span class="sample-ribbon">⬡ Sample story</span>
+      <div class="story-kicker" style="margin-top:14px;"><span>${s.doctype==='feature'?'Feature':'Brief'} · ${BEATS[s.beat]?BEATS[s.beat].label:s.beat}</span> ${civtags}</div>
+      <h1>${s.headline}</h1>
+      ${s.deck?`<div class="deck">${s.deck}</div>`:''}
+      <div class="byline" style="margin-bottom:22px;">${av(s.author)}<span>By <b>${s.author.name}</b> · ${fmtDate(s.published)}${s.readMinutes?` · ${s.readMinutes} min read`:''}</span></div>
+      <div class="annot"><span class="lbl">⌖ Newsroom — the pillar v0.2 dropped</span> The wiki mockup had no way to <b>publish news</b>. Stories are dated, bylined, beat-filed, and civ-tagged — so they also feed the civ pages and the timeline automatically.</div>
+      <div class="readbody">${s.body}</div>
+    </div>
+    <aside>
+      <div class="side-card"><h5>Civilizations covered</h5>
+        ${s.civs.map(c=>{const civ=CIVS[c]||{name:c,slug:c};return `<a class="watchitem" style="--accent:${civ.c1||'var(--purple)'}" onclick="go('#/wiki/${civ.slug}')"><span class="g">⬡</span><span style="color:var(--ink-strong)">${civ.name}</span></a>`;}).join('')}</div>
+      <div class="side-card"><h5>More on this beat</h5>
+        ${STORIES.filter(x=>x.beat===s.beat&&x.slug!==s.slug).slice(0,3).map(x=>`<a class="queue-row" onclick="go('#/story/${x.slug}')"><div><div class="qt">${x.headline}</div><div class="qm">${fmtDate(x.published)}</div></div></a>`).join('')||'<p style="font-size:12px;color:var(--ink-dim)">Nothing else yet.</p>'}</div>
+    </aside>
+  </div>`;
+}
+
+function renderInquisitions(){
+  const inqs = INQUISITIONS;
+  document.getElementById('app').innerHTML = `
+    <div class="page-head"><div>
+      <h2>Inquisitions</h2><p>${inqs.length} long-form historical investigations by the Archivists. Sourced, numbered, and built over weeks.</p></div>
+      ${canInquire()?`<a class="btn gold" onclick="go('#/compose/inquisition')">✧ Begin an inquisition</a>`:''}</div>
+    <div class="inq-shelf">${inqs.map(inqCard).join('')}</div>`;
+}
+function renderInquisition(id){
+  const i = inqById(id); if(!i) return render404();
+  const civtags = i.civs.map(c=>{const civ=CIVS[c]||{name:c,slug:c};return `<a class="civtag" onclick="go('#/wiki/${civ.slug}')">${civ.name.replace(/^The /,'')}</a>`;}).join(' ');
+  const watching = WATCH.has('inquisition:'+i.id);
+  document.getElementById('app').innerHTML = `
+  <div class="read-layout">
+    <div class="reader">
+      <div class="breadcrumb"><a onclick="go('#/inquisitions')">Inquisitions</a></div>
+      <div class="inq-numeral" style="margin-top:8px;">Inquisition ${i.numeral} · <span class="inq-state ${i.state==='closed'?'closed':''}">${i.state.replace('_',' ')}</span></div>
+      <h1>${i.title}</h1>
+      ${i.subtitle?`<div class="deck">${i.subtitle}</div>`:''}
+      <div class="byline" style="margin-bottom:14px;">${i.authors.map(av).join('')}<span style="margin-left:4px;">By <b>${i.authors.map(a=>a.name).join(' & ')}</b> · started ${fmtDate(i.started)}${i.closed?` · closed ${fmtDate(i.closed)}`:''}</span></div>
+      ${i.progress<100?`<div class="inq-progress" style="max-width:340px;margin-bottom:18px;"><span>${i.progress}%</span><div class="inq-bar"><div class="inq-fill" style="width:${i.progress}%"></div></div></div>`:''}
+      <div class="annot"><span class="lbl">⌖ Inquisitions — the flagship v0.2 dropped</span> The signature Archive format: a numbered, sourced, multi-author historical investigation that builds over weeks. Not a wiki article, not a news brief — its own thing.</div>
+      <div class="readbody">${i.body}</div>
+    </div>
+    <aside>
+      <div class="infobox">
+        <div class="infobox-head"><div class="poster" style="background:linear-gradient(135deg,rgba(255,181,71,0.25),rgba(10,14,26,0.4));color:var(--gold)">✧</div>
+          <div class="name">Inquisition ${i.numeral}</div></div>
+        <div class="ib-panel active">
+          <div class="ib-row"><span class="ib-k">State</span><span class="ib-v">${i.state.replace('_',' ')}</span></div>
+          <div class="ib-row"><span class="ib-k">Progress</span><span class="ib-v num">${i.progress}%</span></div>
+          <div class="ib-row"><span class="ib-k">Sources</span><span class="ib-v num">${i.sources}</span></div>
+          <div class="ib-row"><span class="ib-k">Historians</span><span class="ib-v">${i.authors.length}</span></div>
+          <div class="ib-row"><span class="ib-k">Subjects</span><span class="ib-v">${civtags||'—'}</span></div>
+        </div>
+        <button class="watchbtn ${watching?'on':''}" onclick="toggleWatch('inquisition:${i.id}')">${watching?'★ Watching':'☆ Watch this inquisition'}</button>
+      </div>
+    </aside>
+  </div>`;
+}
+
+/* ---- timeline ---- */
+function renderTimeline(){
+  const entries = timelineEntries();
+  const years = entries.map(e=>e.year).filter(Boolean);
+  const startYear = Math.min(2017,...years), endYear = Math.max(2026,...years);
+  const LABEL_W=120, YEAR_W=200, LANE_H=64, LANE_Y=20, AXIS_B=34, CARD_W=150;
+  const span = endYear-startYear+1;
+  const totalW = LABEL_W + span*YEAR_W;
+  const usedSlugs = new Set(); entries.forEach(e=>e.civs.forEach(c=>usedSlugs.add(c)));
+  const lanes = civsList().filter(c=>usedSlugs.has(c.slug)).map(c=>({slug:c.slug,name:c.name,color:c.c1}));
+  const trackH = LANE_Y + lanes.length*LANE_H + AXIS_B + 20;
+  const laneIdx = slug => lanes.findIndex(l=>l.slug===slug);
+  const dateToX = (d,y)=>{ let f=0; if(d){const dt=new Date(d); if(!isNaN(dt))f=(dt.getFullYear()-startYear)+dt.getMonth()/12;} if(!f&&y)f=y-startYear; return LABEL_W+f*YEAR_W; };
+  let events='';
+  entries.forEach((e,idx)=>{ (e.civs.length?e.civs:[]).forEach(cs=>{ const li=laneIdx(cs); if(li<0)return;
+    const x=dateToX(e.date,e.year), y=LANE_Y+li*LANE_H, marker=e.kind.startsWith('civ-');
+    events+=`<a class="tl-event ${marker?'marker':''}" style="left:${x}px;top:${y}px;width:${CARD_W}px;--accent:${lanes[li].color}" onclick="go('${e.href}')" title="${e.title}">
+      <span class="tl-kind">${e.kind.replace('civ-','')}</span><div class="tl-etitle">${e.title}</div><div class="tl-emeta">${fmtDate(e.date)}</div></a>`; }); });
+  document.getElementById('app').innerHTML = `
+    <div class="tl-header"><h1>Master timeline</h1>
+      <p>Every dated entry across the archive — civ foundings &amp; endings, stories, and inquisitions. Lanes group by civilization; scroll horizontally.</p></div>
+    <div class="annot" style="display:block;margin-bottom:14px;${document.body.classList.contains('teaching')?'':'display:none'}"><span class="lbl">⌖ Civ-history tracking — the pillar v0.2 dropped</span> A wiki gives you one civ page. This gives you the whole multiverse's history at a glance, with each civ's life as a lane — foundings, dissolutions, and every story filed against them.</div>
+    <div class="tl-canvas"><div class="tl-track" style="width:${totalW}px;height:${trackH}px;">
+      <div class="tl-labelcol" style="width:${LABEL_W}px;height:${trackH}px;">
+        ${lanes.map((l,i)=>`<div class="tl-label" style="top:${LANE_Y+i*LANE_H}px;--accent:${l.color}">${l.name.replace(/^The /,'')}</div>`).join('')}</div>
+      ${lanes.map((_,i)=>`<div class="tl-band" style="top:${LANE_Y+i*LANE_H}px;left:${LABEL_W}px;width:${totalW-LABEL_W}px;"></div>`).join('')}
+      <div class="tl-axis" style="left:${LABEL_W}px;width:${totalW-LABEL_W}px;bottom:${AXIS_B}px;"></div>
+      ${Array.from({length:span},(_,i)=>`<div class="tl-year" style="left:${LABEL_W+i*YEAR_W}px;bottom:${AXIS_B-22}px;">${startYear+i}</div>`).join('')}
+      ${events}
+    </div></div>
+    <div class="tl-helper">← scroll horizontally → · tap any card to open · lanes group events by civilization</div>`;
+}
+
+/* ---- browse ---- */
+function renderBrowse(ns){
+  const v=NS[ns]; if(!v)return renderHome();
+  let items;
+  if(ns==='civ'){ items = civsList().map(c=>({slug:c.slug,ns:'civ',title:c.name,subtitle:c.tagline,status:c.status})); }
+  else { items = inNs(ns).map(a=>({slug:a.slug,ns:a.ns,title:a.title,subtitle:a.subtitle})); }
+  const cards = items.length? items.map(acard).join('') :
+    `<div class="emptystate" style="grid-column:1/-1"><div class="big">${v.g}</div><p>No sample pages in <strong>${v.label}</strong> yet — but the namespace is live.</p>
+      <p style="margin-top:10px"><a class="xref" onclick="go('#/create')">＋ Be the first to add one</a></p></div>`;
+  document.getElementById('app').innerHTML = `
+    <div class="browse-head"><span class="g" style="color:${v.accent}">${v.g}</span><h2>${v.label}</h2></div>
+    <p class="browse-sub">${v.blurb} ${v.synced?'· <span style="color:var(--gold);font-family:var(--f-mono);font-size:12px">⚡ live-synced from the atlas</span>':''} · <span style="font-family:var(--f-mono);font-size:12px">${NS_COUNT[ns].toLocaleString()} pages (sample shown)</span></p>
+    <div class="filterbar"><span class="chip active">All</span><span class="chip">Recently edited</span><span class="chip">Most linked</span><span class="chip">Needs sources</span>
+      ${ns==='civ'?'<span class="chip">Active</span><span class="chip">Dormant</span><span class="chip">Archived</span>':''}
+      <span class="chip" style="margin-left:auto" onclick="go('#/create')">＋ New ${v.label.replace(/s$/,'')}</span></div>
+    <div class="cardgrid" style="--accent:${v.accent}">${cards}</div>`;
+}
+function acard(a){
+  const statusPill = a.status?`<span class="statuspill ${a.status}">${a.status}</span>`:'';
+  return `<div class="acard" style="--accent:${NS[a.ns].accent}" onclick="go('#/wiki/${a.slug}')">
+    <div class="poster" style="${posterStyle(a.ns)}">${NS[a.ns].g}</div>
+    <div class="body"><div class="ns" style="color:${NS[a.ns].accent};display:flex;justify-content:space-between;align-items:center;gap:8px;">${NS[a.ns].label} ${statusPill}</div>
+      <h4>${a.title}</h4><p>${a.subtitle||''}</p></div></div>`;
+}
+
+/* ---- article (civ special-cased) ---- */
+function renderArticle(slug){
+  if(CIVS[slug]) return renderCivPage(slug);
+  const a=bySlug(slug); if(!a)return render404();
+  const v=NS[a.ns];
+  const toc=a.sections.map((s,i)=>`<a href="#${s.id}" class="${i===0?'active':''}">${s.title}</a>`).join('');
+  const body=a.sections.map(s=>`<section id="${s.id}"><h2>${s.title}</h2>${s.h}</section>`).join(`<div class="adghost inline">Fandom would inject an in-content ad here</div>`);
+  const ib=a.infobox||{};
+  const liveRows=(ib.live||[]).map(([k,val])=>`<div class="ib-row"><span class="ib-k">${k}</span><span class="ib-v num live-val">${val}</span></div>`).join('');
+  const ovRows=(ib.overview||[]).map(([k,val])=>`<div class="ib-row"><span class="ib-k">${k}</span><span class="ib-v">${val}</span></div>`).join('');
+  const srcRows=(a.sources||[]).map(([t,txt])=>`<li><span class="src ${t} badge">${({primary:'P',secondary:'S',attested:'C',rot:'!'})[t]}</span><span>${txt}</span></li>`).join('');
+  const hasLive=(ib.live||[]).length>0;
+  const watching=WATCH.has(a.ns+':'+a.slug);
+  document.getElementById('app').innerHTML=`
+  <div class="art-layout">
+    <nav class="toc"><h4>On this page</h4>${toc}
+      <div class="contrib-cta"><p>Anyone in the Discord can improve this page. No markup to learn.</p>
+        <button class="btn-edit" onclick="openEdit('${a.title}')">✎ Edit this page</button></div></nav>
+    <main class="article" style="--accent:${v.accent}">
+      <div class="breadcrumb"><a onclick="go('#/')">Archive</a><span class="sep">›</span><a onclick="go('#/browse/${a.ns}')">${v.label}</a><span class="sep">›</span>${a.title}</div>
+      <span class="sample-ribbon">⬡ Sample article</span>
+      <div class="entity-pill"><span class="dot"></span> ${v.label}</div>
+      <h1 class="title">${a.title}</h1><p class="subtitle">${a.subtitle}</p>
+      <div class="synced"><span class="pulse"></span><span>${hasLive?'Infobox figures <b>synced live from the Haven atlas</b> · last refreshed 3 min ago · ':''}prose last edited by @${a.editor} ${a.edited}</span></div>
+      <div class="annot"><span class="lbl">⚠ Fandom problem — fixed</span> On Fandom these numbers are hand-typed and rot on every patch. Here the infobox pulls from the live atlas, and every claim carries a <b>source-quality badge</b>.</div>
+      ${body}
+    </main>
+    <aside>
+      <div class="infobox">
+        <div class="infobox-head"><div class="poster" style="${posterStyle(a.ns)}">${v.g}</div><div class="name">${a.title}</div>${hasLive?'<div class="live"><span class="pulse"></span> Live from the atlas</div>':''}</div>
+        <div class="ib-tabs">${hasLive?'<div class="ib-tab active" onclick="ibTab(event,\'live\')">Live data</div>':''}<div class="ib-tab ${hasLive?'':'active'}" onclick="ibTab(event,'overview')">Overview</div><div class="ib-tab" onclick="ibTab(event,'sources')">Sources</div></div>
+        ${hasLive?`<div class="ib-panel active" id="ib-live">${liveRows}</div>`:''}
+        <div class="ib-panel ${hasLive?'':'active'}" id="ib-overview">${ovRows||'<p style="font-size:12px;color:var(--ink-dim)">No overview fields yet.</p>'}</div>
+        <div class="ib-panel" id="ib-sources"><ul class="src-list">${srcRows||'<li><span style="font-size:12px;color:var(--ink-dim)">No sources cited yet.</span></li>'}</ul></div>
+        <button class="watchbtn ${watching?'on':''}" onclick="toggleWatch('${a.ns}:${a.slug}')">${watching?'★ Watching':'☆ Watch this page'}</button>
+        <div class="ib-foot"><span class="pulse"></span> ${hasLive?'Synced 3 min ago · ':''}zero ads</div>
+      </div>
+      <div class="adghost sky">Fandom:<br>300×600<br>sticky<br>skyscraper</div>
+    </aside>
+  </div>`;
+  setupScrollSpy();
+}
+
+function renderCivPage(slug){
+  const c=CIVS[slug];
+  const coverage=civCoverage(slug);
+  const tl=timelineEntries().filter(e=>e.civs.includes(slug)).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const watching=WATCH.has('civ:'+slug);
+  const liveRows=(c.live||[]).map(([k,val])=>`<div class="ib-row"><span class="ib-k">${k}</span><span class="ib-v num live-val">${val}</span></div>`).join('');
+  const ovRows=(c.overview||[]).map(([k,val])=>`<div class="ib-row"><span class="ib-k">${k}</span><span class="ib-v">${val}</span></div>`).join('');
+  const srcRows=(c.sources||[]).map(([t,txt])=>`<li><span class="src ${t} badge">${({primary:'P',secondary:'S',attested:'C',rot:'!'})[t]}</span><span>${txt}</span></li>`).join('');
+  const years = c.endedYear?`${c.foundedYear}–${c.endedYear}`:`${c.foundedYear}–present`;
+  document.getElementById('app').innerHTML=`
+  <div class="art-layout">
+    <nav class="toc"><h4>On this page</h4>
+      <a href="#overview" class="active">Overview</a><a href="#coverage">Coverage</a><a href="#history">History</a>
+      <div class="contrib-cta"><p>Anyone in the Discord can improve this page.</p><button class="btn-edit" onclick="openEdit('${c.name}')">✎ Edit this page</button></div></nav>
+    <main class="article" style="--accent:var(--ns-civ)">
+      <div class="breadcrumb"><a onclick="go('#/')">Archive</a><span class="sep">›</span><a onclick="go('#/browse/civ')">Civilizations</a><span class="sep">›</span>${c.name}</div>
+      <div class="civ-hero" style="--c1:${c.c1};--c2:${c.c2}">
+        <div class="eyebrow">Civilization · <span class="statuspill ${c.status}" style="background:rgba(0,0,0,0.25);border-color:rgba(255,255,255,0.3);color:#fff">${c.status}</span></div>
+        <h1>${c.name}</h1>
+        <div class="tagline">${c.galaxy} · ${years} · ${c.tagline}</div>
+      </div>
+      <div class="civ-stats">
+        <div class="civ-stat"><div class="n">${coverage.length}</div><div class="l">Coverage entries</div></div>
+        <div class="civ-stat"><div class="n">${coverage.filter(x=>x.kind==='inquisition').length}</div><div class="l">Inquisitions</div></div>
+        <div class="civ-stat"><div class="n">${(c.live&&c.live[0])?c.live[0][1]:'—'}</div><div class="l">${(c.live&&c.live[0])?c.live[0][0]:''}</div></div>
+        <div class="civ-stat"><div class="n">${c.endedYear?c.endedYear-c.foundedYear:(2026-c.foundedYear)}</div><div class="l">Years</div></div>
+      </div>
+      <section id="overview"><h2>Overview</h2>
+        <p class="lead">${c.description}${sb('primary','<b>Primary.</b> Live atlas territory record.')}</p>
+        <div class="annot"><span class="lbl">⌖ Civ history — the pillar v0.2 dropped</span> A wiki civ page is just an infobox. Here a civ is a <b>living dossier</b>: its lifecycle (active/dormant/archived), every story &amp; inquisition tagged to it (Coverage), and its own slice of the timeline (History).</div>
+      </section>
+      <section id="coverage"><h2>Coverage · ${coverage.length} entries</h2>
+        ${coverage.length?`<div class="coverage-list">${coverage.map(coverageRow).join('')}</div>`:'<p style="color:var(--ink-dim);font-size:13px">No coverage yet.</p>'}</section>
+      <section id="history"><h2>History</h2>
+        <div class="tlmini">${tl.map(miniRow).join('')||'<p style="color:var(--ink-dim);font-size:13px">No dated events yet.</p>'}</div>
+        <p style="margin-top:12px"><a class="xref" onclick="go('#/timeline')">See this civ on the master timeline →</a></p></section>
+    </main>
+    <aside>
+      <div class="infobox">
+        <div class="infobox-head"><div class="poster" style="background:linear-gradient(135deg,${c.c1},${c.c2});color:#fff">⬡</div>
+          <div class="name">${c.name}</div><div class="live"><span class="pulse"></span> Live from the atlas</div></div>
+        <div class="ib-tabs"><div class="ib-tab active" onclick="ibTab(event,'live')">Live data</div><div class="ib-tab" onclick="ibTab(event,'overview')">Overview</div><div class="ib-tab" onclick="ibTab(event,'sources')">Sources</div></div>
+        <div class="ib-panel active" id="ib-live">${liveRows}<div class="ib-row"><span class="ib-k">Status</span><span class="ib-v">${c.status}</span></div></div>
+        <div class="ib-panel" id="ib-overview">${ovRows}<div class="ib-row"><span class="ib-k">Founded</span><span class="ib-v">${c.founded}</span></div>${c.ended?`<div class="ib-row"><span class="ib-k">Ended</span><span class="ib-v">${c.ended}</span></div>`:''}</div>
+        <div class="ib-panel" id="ib-sources"><ul class="src-list">${srcRows}</ul></div>
+        <button class="watchbtn ${watching?'on':''}" onclick="toggleWatch('civ:${slug}')">${watching?'★ Watching':'☆ Watch this civ'}</button>
+        <div class="ib-foot"><span class="pulse"></span> Synced 3 min ago · zero ads</div>
+      </div>
+    </aside>
+  </div>`;
+  setupScrollSpy();
+}
+function coverageRow(item){
+  const href=item.kind==='story'?`#/story/${item.slug}`:`#/inquisition/${item.id}`;
+  const meta=item.kind==='story'?`${fmtDate(item.date)} · brief/feature · ${BEATS[item.beat]?BEATS[item.beat].label:item.beat}`:`${fmtDate(item.date)} · inquisition ${item.numeral} · ${item.state.replace('_',' ')}`;
+  return `<a class="coverage-item" onclick="go('${href}')"><div class="cov-date">${meta}</div><div class="cov-title">${item.headline}</div>${item.deck?`<div class="cov-deck">${item.deck}</div>`:''}</a>`;
+}
+
+/* ---- drafts / dashboard / compose / draft editor ---- */
+function renderDrafts(){
+  const mine=DRAFTS.filter(d=>d.status!=='published');
+  document.getElementById('app').innerHTML=`
+    <div class="page-head"><div><h2>Drafts</h2><p>Work in progress. Visible to the team. Not yet published. This is how news &amp; history actually get <b>uploaded</b> — the pipeline v0.2 flattened into one button.</p></div>
+      <div class="pillrow">${canFile()?`<a class="btn primary" onclick="go('#/compose/brief')">＋ New brief</a><a class="btn" onclick="go('#/compose/feature')">＋ New feature</a>`:''}${canInquire()?`<a class="btn gold" onclick="go('#/compose/inquisition')">✧ Begin inquisition</a>`:''}</div></div>
+    <div class="toggle"><button class="active">Personal</button><button>Team</button></div>
+    <div class="draft-list">${mine.map(draftRow).join('')}</div>
+    ${canReview()?`<div class="sechead">Review queue <span class="rule"></span></div><p style="color:var(--ink-dim);font-size:13px;margin-bottom:12px;">You're an editor — these are waiting on your review.</p>
+      <div class="draft-list">${DRAFTS.filter(d=>d.status==='in_review').map(draftRow).join('')||'<p style="color:var(--ink-dim);font-size:13px">Queue is clear.</p>'}</div>`:''}`;
+}
+function draftRow(d){
+  const allAv=[d.author,...d.coauthors];
+  return `<a class="draftrow" onclick="go('#/draft/${d.id}')">
+    <span class="doctype">${d.doctype}</span>
+    <div class="meat"><h4>${d.headline||'(untitled)'}</h4><div class="sub">${d.civs.map(c=>(CIVS[c]||{name:c}).name.replace(/^The /,'')).join(', ')||'no civ'} · edited ${d.edited}${d.comments.length?` · ${d.comments.length} comment${d.comments.length!==1?'s':''}`:''}</div></div>
+    <div class="avstack">${allAv.map(av).join('')}</div>
+    <span class="dpill ${d.status}">${d.status.replace('_',' ')}</span></a>`;
+}
+function renderDraft(id){
+  const d=draftById(id); if(!d)return render404();
+  const allAv=[d.author,...d.coauthors];
+  document.getElementById('app').innerHTML=`
+  <div class="editor-layout">
+    <div class="editor-main">
+      <a class="xref" onclick="go('#/drafts')" style="font-size:12px">← Back to drafts</a>
+      <div style="display:flex;align-items:center;gap:8px;margin:10px 0 14px;"><span class="doctype" style="font-family:var(--f-mono);font-size:9px;text-transform:uppercase;border:1px solid rgba(255,255,255,0.12);border-radius:5px;padding:3px 7px;color:var(--ink-dim)">${d.doctype}</span><span class="dpill ${d.status}">${d.status.replace('_',' ')}</span></div>
+      <div class="editor-toolbar"><span class="tbtn"><b>B</b></span><span class="tbtn"><i>I</i></span><span class="tbtn">H2</span><span class="tbtn">❝ Quote</span><span class="tbtn">@ Mention</span><span class="tbtn">⌗ Link</span><span class="tbtn">▣ Source</span>
+        <span style="margin-left:auto;font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);align-self:center;">no markup — select &amp; click</span></div>
+      <input class="editor-input title" value="${d.headline||''}" placeholder="Headline">
+      <textarea class="editor-input" rows="12" placeholder="Write the piece…">${d.doctype==='inquisition'?'The inquisition body builds here over weeks, with sources attached as you go.':'Draft body. Select any phrase to format it, or @-mention a civ/person/system to link it.'}</textarea>
+      <div class="annot"><span class="lbl">⌖ Drafting pipeline — flattened in v0.2</span> v0.2 had a single "Submit for review". The real flow has <b>states</b> (draft → in&nbsp;review → returned/ready → published), <b>co-authors</b>, and <b>inline comments</b> from editors — shown on the right.</div>
+      <div class="pillrow" style="margin-top:16px;">
+        ${d.status==='draft'?'<button class="btn primary">Submit for review</button>':''}
+        ${d.status==='returned'?'<button class="btn primary">Resubmit</button>':''}
+        ${d.status==='in_review'&&canReview()?'<button class="btn primary">Mark ready</button><button class="btn">Return with notes</button>':''}
+        ${d.status==='ready'&&canReview()?'<button class="btn primary">Publish</button>':''}
+        <button class="btn">Save</button></div>
+    </div>
+    <aside>
+      <div class="side-card"><h5>Routing</h5>
+        <div class="ib-row"><span class="ib-k">Beat</span><span class="ib-v">${d.beat?BEATS[d.beat].label:'—'}</span></div>
+        <div class="ib-row"><span class="ib-k">Civs</span><span class="ib-v">${d.civs.map(c=>(CIVS[c]||{name:c}).name.replace(/^The /,'')).join(', ')||'—'}</span></div>
+        <div class="ib-row" style="border:0"><span class="ib-k">Edited</span><span class="ib-v">${d.edited}</span></div></div>
+      <div class="side-card"><h5>Authors</h5>
+        ${allAv.map((a,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">${av(a)}<span style="font-size:13px;color:var(--ink)">${a.name}${i===0?' · author':' · co-author'}</span></div>`).join('')}
+        <button class="btn" style="width:100%;margin-top:4px;font-size:11.5px;">＋ Add co-author</button></div>
+      <div class="side-card"><h5>Comments (${d.comments.length})</h5>
+        ${d.comments.length?d.comments.map(c=>`<div class="comment"><div class="who">${av(c.author)}${c.author.name}</div>${c.quoted?`<div class="quoted">"${c.quoted}"</div>`:''}<div class="ctext">${c.body}</div><div class="cw">${c.when}</div></div>`).join(''):'<p style="font-size:12px;color:var(--ink-dim)">No comments yet.</p>'}
+        <textarea class="editor-input" rows="2" placeholder="Leave a comment…" style="margin-top:10px;font-family:var(--f-body);font-size:13px;"></textarea></div>
+    </aside>
+  </div>`;
+}
+function renderCompose(doctype){
+  if(!canFile()) return renderLock('Filing requires a team role','Readers can browse everything, but only diplomats and historians can file stories. Use the role switcher (top-right) to preview as a historian.');
+  if(doctype==='inquisition'&&!canInquire()) return renderLock('Inquisitions are historian-led','Only historians (or admins) can open an inquisition. Switch role to historian to preview.');
+  const titles={brief:'New brief',feature:'New feature',inquisition:'Begin an inquisition'};
+  const blurbs={brief:'A short news item. ~150 words, single beat, one or two civs.',feature:'A long-form piece. Multi-section, several civs, often months in the making.',inquisition:'A historian-led investigation. Builds over weeks with sources and evolving findings.'};
+  document.getElementById('app').innerHTML=`
+    <div class="create-wrap">
+      <a class="xref" onclick="go('#/drafts')" style="font-size:12px">← Back to drafts</a>
+      <h2 style="margin-top:10px;">${titles[doctype]||'New '+doctype}</h2>
+      <p class="lead">${blurbs[doctype]||''}</p>
+      <div class="field"><label>Working headline (optional)</label><input placeholder="Headline"></div>
+      <div class="field"><label>Tagged civilizations</label>
+        <div class="pillrow">${civsList().map(c=>`<span class="civtag" style="cursor:pointer;padding:6px 11px;">${c.name.replace(/^The /,'')}</span>`).join('')}</div></div>
+      ${doctype!=='inquisition'?`<div class="field"><label>Beat</label><select>${Object.entries(BEATS).map(([k,v])=>`<option>${v.label}</option>`).join('')}</select></div>`:''}
+      <button class="save" onclick="go('#/draft/51')">Create ${doctype}</button>
+      <div class="auth-note">✓ Signed in as <span class="purple">@${ME.handle}</span> · ${ROLES[ME.role].label}. Your draft hits the queue with this routing already set.</div>
+    </div>`;
+}
+function renderLock(title,msg){
+  document.getElementById('app').innerHTML=`<div class="lockcard"><div class="big">🔒</div><h3>${title}</h3><p>${msg}</p>
+    <div class="pillrow" style="justify-content:center;margin-top:16px;"><a class="btn" onclick="togglePop('role')">Switch role</a><a class="btn" onclick="go('#/news')">Back to newsroom</a></div></div>`;
+}
+
+function renderDashboard(){
+  const mine=DRAFTS.filter(d=>d.author.name===ME.name||d.coauthors.some(c=>c.name===ME.name));
+  const queue=DRAFTS.filter(d=>d.status==='in_review');
+  document.getElementById('app').innerHTML=`
+    <div class="page-head"><div><h2>Dashboard</h2><p>Your work across the Archive — drafts, what's waiting on you, what you're watching.</p></div></div>
+    <div class="dash-grid">
+      <div>
+        <div class="dash-card" style="margin-bottom:18px;"><h3>✎ My drafts</h3><div class="csub">${mine.length} in progress</div>
+          ${mine.map(d=>`<a class="queue-row" onclick="go('#/draft/${d.id}')"><div style="flex:1"><div class="qt">${d.headline||'(untitled)'}</div><div class="qm">${d.doctype} · edited ${d.edited}</div></div><span class="dpill ${d.status}">${d.status.replace('_',' ')}</span></a>`).join('')||'<p style="font-size:12px;color:var(--ink-dim)">No drafts yet.</p>'}</div>
+        ${canReview()?`<div class="dash-card"><h3>⚖ Review queue</h3><div class="csub">Drafts waiting on an editor</div>
+          ${queue.map(d=>`<a class="queue-row" onclick="go('#/draft/${d.id}')"><div style="flex:1"><div class="qt">${d.headline}</div><div class="qm">by ${d.author.name} · ${d.edited}</div></div><span class="dpill in_review">in review</span></a>`).join('')||'<p style="font-size:12px;color:var(--ink-dim)">Queue is clear.</p>'}</div>`:''}
+      </div>
+      <div>
+        <div class="dash-card" style="margin-bottom:18px;"><h3>🔔 Notifications</h3><div class="csub">${NOTIFS.filter(n=>n.unread).length} unread</div>
+          ${NOTIFS.map(n=>`<a class="queue-row" onclick="go('${n.link}')"><div style="flex:1"><div class="qt">${n.t}</div><div class="qm">${n.when}</div></div>${n.unread?'<span class="rc-dot" style="background:var(--teal)"></span>':''}</a>`).join('')}</div>
+        <div class="dash-card"><h3>★ Watchlist</h3><div class="csub">${WATCH.size} watched</div>${renderWatchItems()}</div>
+      </div>
+    </div>`;
+}
+function renderWatchItems(){
+  if(WATCH.size===0)return '<p style="font-size:12px;color:var(--ink-dim)">Nothing watched yet. Hit ☆ Watch on any page.</p>';
+  return [...WATCH].map(w=>{const [type,id]=w.split(':');
+    if(type==='civ'){const c=CIVS[id];return c?`<a class="watchitem" style="--accent:${c.c1}" onclick="go('#/wiki/${id}')"><span class="g">⬡</span><span style="color:var(--ink-strong);flex:1">${c.name}</span><span class="statuspill ${c.status}">${c.status}</span></a>`:'';}
+    if(type==='inquisition'){const i=inqById(id);return i?`<a class="watchitem" style="--accent:var(--gold)" onclick="go('#/inquisition/${id}')"><span class="g">✧</span><span style="color:var(--ink-strong);flex:1">Inq ${i.numeral}: ${i.title}</span></a>`:'';}
+    const a=bySlug(id);return a?`<a class="watchitem" style="--accent:${NS[a.ns].accent}" onclick="go('#/wiki/${id}')"><span class="g">${NS[a.ns].g}</span><span style="color:var(--ink-strong)">${a.title}</span></a>`:'';
+  }).join('');
+}
+function renderWatchlist(){
+  document.getElementById('app').innerHTML=`
+    <div class="page-head"><div><h2>Watchlist</h2><p>Pages and inquisitions you follow. You'll be notified when they change — the way Fandom never tells you.</p></div></div>
+    <div class="dash-card" style="max-width:640px;">${renderWatchItems()}</div>`;
+}
+function toggleWatch(key){ if(WATCH.has(key))WATCH.delete(key); else WATCH.add(key); router(); }
+
+/* ---- search / recent / create / 404 ---- */
+function renderSearch(q){
+  q=(q||'').trim().toLowerCase();
+  const artHits=q?DB.filter(a=>(a.title+' '+a.subtitle+' '+NS[a.ns].label).toLowerCase().includes(q)).map(a=>({kind:'page',ns:a.ns,slug:a.slug,title:a.title,sub:a.subtitle})):[];
+  const civHits=q?civsList().filter(c=>(c.name+' '+c.tagline).toLowerCase().includes(q)).map(c=>({kind:'page',ns:'civ',slug:c.slug,title:c.name,sub:c.tagline})):[];
+  const storyHits=q?STORIES.filter(s=>(s.headline+' '+(s.deck||'')).toLowerCase().includes(q)).map(s=>({kind:'story',slug:s.slug,title:s.headline,sub:s.deck})):[];
+  const inqHits=q?INQUISITIONS.filter(i=>(i.title+' '+(i.subtitle||'')).toLowerCase().includes(q)).map(i=>({kind:'inq',id:i.id,title:`Inquisition ${i.numeral}: ${i.title}`,sub:i.deck})):[];
+  const all=[...civHits,...artHits,...storyHits,...inqHits];
+  const row=h=>{
+    if(h.kind==='story')return `<div class="sresult" onclick="go('#/story/${h.slug}')"><div class="poster" style="background:linear-gradient(135deg,rgba(255,181,71,0.2),rgba(10,14,26,0.4));color:var(--gold)">❉</div><div><div class="ns" style="color:var(--gold)">Newsroom · Story</div><h4>${h.title}</h4><p>${h.sub||''}</p></div></div>`;
+    if(h.kind==='inq')return `<div class="sresult" onclick="go('#/inquisition/${h.id}')"><div class="poster" style="background:linear-gradient(135deg,rgba(255,181,71,0.2),rgba(10,14,26,0.4));color:var(--gold)">✧</div><div><div class="ns" style="color:var(--gold)">Inquisition</div><h4>${h.title}</h4><p>${h.sub||''}</p></div></div>`;
+    return `<div class="sresult" onclick="go('#/wiki/${h.slug}')"><div class="poster" style="${posterStyle(h.ns)}">${NS[h.ns].g}</div><div><div class="ns" style="color:${NS[h.ns].accent}">${NS[h.ns].label}</div><h4>${h.title}</h4><p>${h.sub||''}</p></div></div>`;
+  };
+  document.getElementById('app').innerHTML=`
+    <div class="search-head">${q?`Results for "${q}"`:'Search the Archive'}</div>
+    <div class="search-sub">${q?`${all.length} match${all.length===1?'':'es'} across the catalogue, newsroom &amp; inquisitions`:'Type above, or in the top bar.'}</div>
+    ${q&&!all.length?`<div class="emptystate"><div class="big">⌕</div><p>Nothing yet for "${q}".</p><p style="margin-top:10px"><a class="xref" onclick="go('#/create')">＋ Create this page</a></p></div>`:all.map(row).join('')}`;
+}
+function renderRecent(){
+  const rows=[...DB.map(a=>({slug:a.slug,ns:a.ns,title:a.title,editor:a.editor,edited:a.edited})),
+    ...civsList().map(c=>({slug:c.slug,ns:'civ',title:c.name,editor:'lucca',edited:'recently'}))];
+  document.getElementById('app').innerHTML=`
+    <div class="browse-head"><span class="g">↻</span><h2>Recent changes</h2></div>
+    <p class="browse-sub">Every edit across the catalogue, newest first. (Sample feed.)</p>
+    <div class="recent" style="max-width:680px">${rows.map(r=>`<div class="rc-item" onclick="go('#/wiki/${r.slug}')" style="cursor:pointer"><span class="rc-dot" style="background:${NS[r.ns].accent}"></span><div><a class="xref" onclick="event.stopPropagation();go('#/wiki/${r.slug}')">${r.title}</a><div class="rc-meta">${NS[r.ns].label} · @${r.editor} · ${r.edited}</div></div></div>`).join('')}</div>`;
+}
+function renderCreate(){
+  const picks=Object.entries(NS).map(([k,v])=>`<div class="nspick" style="--accent:${v.accent}" onclick="pickNs(this)"><span class="g">${v.g}</span> ${v.label}</div>`).join('');
+  document.getElementById('app').innerHTML=`
+    <div class="create-wrap"><h2>Create a page</h2>
+      <p class="lead">The Archive holds anything the community wants to document. Pick what you're adding — or, to file <b>news</b> or open an <b>inquisition</b>, head to <a class="xref" onclick="go('#/drafts')">Drafts</a>.</p>
+      <div class="field"><label>What are you documenting?</label><div class="nsgrid">${picks}<div class="nspick" style="--accent:var(--purple)" onclick="pickNs(this)"><span class="g">＋</span> Propose new…</div></div></div>
+      <div class="field"><label>Page title</label><input placeholder="e.g. The Aeon Concord"></div>
+      <div class="field"><label>One-line summary</label><input placeholder="Shows in search and cards"></div>
+      <div class="field"><label>Body</label><textarea rows="5" placeholder="Write in plain language. Select text to format — no '''wiki markup'''."></textarea>
+        <div class="markup-note">Fandom: <s>learn '''markup''', {{templates}}, [[links]]</s> — Haven: <b>type, select, format. @-mention to link any page.</b></div></div>
+      <div class="field"><label>Source quality (required)</label><select><option>🟢 Primary — I logged this directly / atlas data</option><option>🔵 Secondary — summarized</option><option>🟡 Community-attested</option></select></div>
+      <button class="save">Submit for review</button>
+      <div class="auth-note">✓ Signed in as <span class="purple">@${ME.handle}</span> · enters the review queue, credited to your Discord.</div></div>`;
+}
+function pickNs(el){document.querySelectorAll('.nspick').forEach(n=>n.classList.remove('sel'));el.classList.add('sel');}
+function render404(){document.getElementById('app').innerHTML=`<div class="emptystate"><div class="big">✧</div><p>This page hasn't been written yet.</p><p style="margin-top:10px"><a class="xref" onclick="go('#/create')">＋ Create it</a> · <a class="xref" onclick="go('#/')">Back to home</a></p></div>`;}
+
+/* ============================================================
+   5. INTERACTIONS
+   ============================================================ */
+function ibTab(e,id){const box=e.currentTarget.closest('.infobox');box.querySelectorAll('.ib-tab').forEach(t=>t.classList.remove('active'));box.querySelectorAll('.ib-panel').forEach(p=>p.classList.remove('active'));e.currentTarget.classList.add('active');box.querySelector('#ib-'+id).classList.add('active');}
+function openEdit(title){document.getElementById('edit-title').textContent='Edit: '+title;document.getElementById('editpanel').classList.add('open');document.getElementById('scrim').classList.add('open');}
+function closeEdit(){document.getElementById('editpanel').classList.remove('open');document.getElementById('scrim').classList.remove('open');}
+function randomArticle(){const a=DB[Math.floor(Math.random()*DB.length)];go('#/wiki/'+a.slug);}
+let searchDebounce;
+function onSearchInput(val){clearTimeout(searchDebounce);searchDebounce=setTimeout(()=>{if(val.trim().length>=2)go('#/search?q='+encodeURIComponent(val));},350);}
+function setupScrollSpy(){const links=[...document.querySelectorAll('.toc a[href^="#"]')];const targets=links.map(a=>document.getElementById(a.getAttribute('href').slice(1))).filter(Boolean);const spy=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){links.forEach(l=>l.classList.remove('active'));const m=links.find(l=>l.getAttribute('href')==='#'+en.target.id);if(m)m.classList.add('active');}});},{rootMargin:'-70px 0px -75% 0px'});targets.forEach(t=>spy.observe(t));}
+
+/* ============================================================
+   6. ROUTER
+   ============================================================ */
+function router(){
+  const h=location.hash||'#/'; closeEdit(); closePops(); window.scrollTo(0,0);
+  let active='home';
+  if(h.startsWith('#/wiki/')){renderArticle(h.slice(7));active='article';}
+  else if(h.startsWith('#/browse/')){const ns=h.slice(9);renderBrowse(ns);active='browse:'+ns;}
+  else if(h.startsWith('#/news/')){renderNews(h.slice(7));active='news';}
+  else if(h==='#/news'){renderNews(null);active='news';}
+  else if(h.startsWith('#/story/')){renderStory(h.slice(8));active='news';}
+  else if(h==='#/inquisitions'){renderInquisitions();active='inquisitions';}
+  else if(h.startsWith('#/inquisition/')){renderInquisition(h.slice(14));active='inquisitions';}
+  else if(h==='#/timeline'){renderTimeline();active='timeline';}
+  else if(h==='#/dashboard'){renderDashboard();active='dashboard';}
+  else if(h==='#/drafts'){renderDrafts();active='drafts';}
+  else if(h.startsWith('#/draft/')){renderDraft(h.slice(8));active='drafts';}
+  else if(h.startsWith('#/compose/')){renderCompose(h.slice(10));active='drafts';}
+  else if(h==='#/watchlist'){renderWatchlist();active='watchlist';}
+  else if(h.startsWith('#/search')){const q=decodeURIComponent((h.split('q=')[1]||''));renderSearch(q);const gs=document.getElementById('gsearch');if(gs&&document.activeElement!==gs)gs.value=q;active='search';}
+  else if(h==='#/recent'){renderRecent();active='recent';}
+  else if(h==='#/create'){renderCreate();active='create';}
+  else{renderHome();active='home';}
+  renderSidenav(active);
+}
+window.addEventListener('hashchange',router);
+renderChrome();
+router();
+</script>
+</body>
+</html>

@@ -57,6 +57,12 @@ services:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
       DISCORD_VH_GUILD_ID: "${DISCORD_VH_GUILD_ID:-}"
       DISCORD_ARCHIVIST_GUILD_ID: "${DISCORD_ARCHIVIST_GUILD_ID:-}"
+      # -- Haven atlas sync (live civ stats from the main Haven API) ----
+      # Internal Docker service name — works because this stack joins
+      # docker_default (the `shared` network above) where Haven lives.
+      HAVEN_API_BASE: "${HAVEN_API_BASE:-http://haven:8005}"
+      HAVEN_SYNC_ENABLED: "${HAVEN_SYNC_ENABLED:-1}"
+      HAVEN_SYNC_INTERVAL_MIN: "${HAVEN_SYNC_INTERVAL_MIN:-30}"
 
 networks:
   # Default network for this compose stack (archive_default).
