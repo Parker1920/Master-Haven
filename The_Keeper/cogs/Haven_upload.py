@@ -289,9 +289,9 @@ class SystemSubmissionModal(discord.ui.Modal):
         
         self.system_name = TextInput(
             label="System Name", 
-            placeholder="Leave blank to use official API name", 
+            placeholder="Enter the official system name", 
             max_length=50, 
-            required=False
+            required=True
         )
         self.add_item(self.system_name)
     
