@@ -2,6 +2,8 @@ from cogs.Data.xpdata import *
 import time
 import discord
 from discord.ext import commands
+import re
+import aiohttp
 
 _message_cache = set()
 
@@ -42,7 +44,7 @@ def get_level_from_xp(xp: int):
     return level
         
 def add_global_xp(user_id, amount):
-    xp, level, dm = get_global(user_id)
+    xp, level, dm = await get_global(user_id)
 
     xp += amount
     leveled_up = False
