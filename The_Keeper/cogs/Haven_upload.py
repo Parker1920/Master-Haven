@@ -189,9 +189,9 @@ class GalaxyModal(discord.ui.Modal):
         await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
 
     
-#-------------------- LEVEL MODAL --------------
+#-------------------- LEVEL SELECT VIEW --------------
 class LevelSelectView(discord.ui.View):
-     def __init__(self, glyph_code, user_id, api, galaxy, reality):
+    def __init__(self, glyph_code, user_id, api, galaxy, reality):
         super().__init__(timeout=180)
         self.glyph_code = glyph_code
         self.user_id = user_id
@@ -211,7 +211,7 @@ class LevelSelectView(discord.ui.View):
         self.race_dropdown = Select(
             placeholder="Select Race",
             options=[discord.SelectOption(label=s, value=s) for s in ["Vy'keen", "Korvax", "Gek", "None"]],
-           custom_id="race_select"
+            custom_id="race_select"
         )
         self.race_dropdown.callback = self.race_callback
         self.add_item(self.race_dropdown)
@@ -236,33 +236,34 @@ class LevelSelectView(discord.ui.View):
         submit_btn.callback = self.submit_callback
         self.add_item(submit_btn)
     
-        async def star_callback(self, interaction: discord.Interaction):
-            self.values["star_type"] = self.star_dropdown.values[0]
-            await interaction.response.defer()
-                
-        async def race_callback(self, interaction: discord.Interaction):
-            self.values["race"] = self.race_dropdown.values[0]
-            await interaction.response.defer()
-                
-        async def econ_callback(self, interaction: discord.Interaction):
-            self.values["economy_lvl"] = self.econ_dropdown.values[0]
-            await interaction.response.defer()
-                
-        async def conflict_callback(self, interaction: discord.Interaction):
-            self.values["conflict_lvl"] = self.conflict_dropdown.values[0]
-            await interaction.response.defer()
-                
-        async def submit_callback(self, interaction: discord.Interaction):
-                missing = [k for k in ["star_type","race","economy_lvl","conflict_lvl"] if k not in self.values]
-                if missing:
-                    await interaction.response.send_message(f"Please select all fields: {', '.join(missing)}", ephemeral=True)
-                    return
-                await interaction.response.send_modal(
-                    SystemSubmissionModal(
-                        self.glyph_code, self.user_id, self.api,
-                        self.galaxy, self.reality, self.values
-                    )
-                )
+    async def star_callback(self, interaction: discord.Interaction):
+        self.values["star_type"] = self.star_dropdown.values[0]
+        await interaction.response.defer()
+            
+    async def race_callback(self, interaction: discord.Interaction):
+        self.values["race"] = self.race_dropdown.values[0]
+        await interaction.response.defer()
+            
+    async def econ_callback(self, interaction: discord.Interaction):
+        self.values["economy_lvl"] = self.econ_dropdown.values[0]
+        await interaction.response.defer()
+            
+    async def conflict_callback(self, interaction: discord.Interaction):
+        self.values["conflict_lvl"] = self.conflict_dropdown.values[0]
+        await interaction.response.defer()
+            
+    async def submit_callback(self, interaction: discord.Interaction):
+        missing = [k for k in ["star_type","race","economy_lvl","conflict_lvl"] if k not in self.values]
+        if missing:
+            await interaction.response.send_message(f"Please select all fields: {', '.join(missing)}", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            SystemSubmissionModal(
+                self.glyph_code, self.user_id, self.api,
+                self.galaxy, self.reality, self.values
+            )
+        )
+
   
     
 # -------------------- SYSTEM MODAL -----------
