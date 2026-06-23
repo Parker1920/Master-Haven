@@ -1023,8 +1023,9 @@ glyph_emojis = {
 }
 
 #---------------MANUAL READER---------------
-TITLE_PATTERN = re.compile(r'^([^"\n]+)\s+"([^"]+)"')
-BODY_PATTERN = re.compile(r'^([^"\n]+)\s+"([^"]+)"\s*(.*)$', re.DOTALL)
+#---------------MANUAL READER---------------
+import asyncio  
+import re
 
 class HavenScraperCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -1032,135 +1033,145 @@ class HavenScraperCog(commands.Cog):
         self.forum_channel_id = 1482814608745168916
         self.api = HavenAPI() 
 
+    def parse_forum_template(self, content: str) -> dict:
+        """Parses the structured text markdown template into an API payload."""
+        
+        def extract_field(pattern, text):
+            match = re.search(pattern, text, re.IGNORECASE)
+            return match.group(1).strip() if match else None
+
+        # Extract system data fields
+        system_name = extract_field(r"\*\*System Name:\*\*\s*(.*)", content)
+        glyphs = extract_field(r"\*\*Glyphs:\*\*\s*(.*)", content)
+        system_class = extract_field(r"\*\*System class:\*\*\s*(.*)", content)
+        galaxy = extract_field(r"\*\*Galaxy:\*\*\s*(.*)", content)
+        
+        # Validation for required fields ('r')
+        if not all([system_name, glyphs, system_class, galaxy]):
+            return None
+
+        # Ensure Glyphs contain valid Hex strings
+        cleaned_glyphs = re.sub(r'[^0-9A-Fa-f]', '', glyphs)
+        if not cleaned_glyphs:
+            return None
+
+        # Gather optional fields
+        payload = {
+            "system_name": system_name,
+            "glyph_code": cleaned_glyphs,
+            "system_class": system_class,
+            "galaxy_name": galaxy,
+            "region": extract_field(r"\*\*Region:\*\*\s*(.*)", content) or "Unknown",
+            "distance_from_core": extract_field(r"\*\*Distance From Core:\*\*\s*(.*)", content) or "Unknown",
+            "dominant_lifeform": extract_field(r"\*\*Primary lifeform:\*\*\s*(.*)", content) or "Unknown",
+            "economy": extract_field(r"\*\*Economy:\*\*\s*(.*)", content) or "Unknown",
+            "conflict_level": extract_field(r"\*\*Conflict Level:\*\*\s*(.*)", content) or "Unknown",
+            "stardate": extract_field(r"\*\*Stardate:\*\*\s*(.*)", content) or "Unknown",
+            "planets": []
+        }
+        if "**Planets / Moons**" in content:
+            planets_section = content.split("**Planets / Moons**")[1]
+            planet_blocks = re.split(r"\*\s+\*\*(.*?)\*\*", planets_section)
+            
+            if len(planet_blocks) > 1:
+                for i in range(1, len(planet_blocks), 2):
+                    p_name = planet_blocks[i].strip()
+                    p_body = planet_blocks[i+1] if i+1 < len(planet_blocks) else ""
+                    
+                    def extract_subfield(sub_pattern, text):
+                        match = re.search(sub_pattern, text, re.IGNORECASE)
+                        return match.group(1).strip() if match else "Unknown"
+
+                    payload["planets"].append({
+                        "name": p_name,
+                        "biome": extract_subfield(r"-\s*Biome:\s*(.*)", p_body),
+                        "weather": extract_subfield(r"\*\s*Weather:\s*(.*)", p_body),
+                        "age": extract_subfield(r"\*\s*Age:\s*(.*)", p_body),
+                        "atmosphere": extract_subfield(r"\*\s*Atmosphere:\s*(.*)", p_body),
+                        "primary_core_element": extract_subfield(r"\*\s*Primary Core Element:\s*(.*)", p_body),
+                        "sentinels": extract_subfield(r"\*\s*Sentinels:\s*(.*)", p_body),
+                        "flora": extract_subfield(r"\*\s*Flora:\s*(.*)", p_body),
+                        "fauna": extract_subfield(r"\*\s*Fauna:\s*(.*)", p_body),
+                        "resources": extract_subfield(r"\*\s*Resources:\s*(.*)", p_body),
+                        "outposts": extract_subfield(r"\*\s*Outposts:\s*(.*)", p_body),
+                        "other_notes": extract_subfield(r"\*\s*Other Notes:\s*(.*)", p_body)
+                    })
+
+        return payload
+
     @commands.command(name="sync_forum")
     @commands.has_permissions(administrator=True)
     async def sync_forum(self, ctx: commands.Context):
-        """Command to manually trigger the forum scrape and API submission."""
+        """Command to manually trigger a sync of all existing historical posts."""
         channel = self.bot.get_channel(self.forum_channel_id)
-        
         if not channel or not isinstance(channel, discord.ForumChannel):
             await ctx.send("Target forum channel not found or invalid type.")
             return
 
-        await ctx.send("Starting forum sync processing...")
+        await ctx.send("Starting structural forum sync processing...")
         success_count = 0
         
         threads = channel.threads + [t async for t in channel.archived_threads()]
-        
         for thread in threads:
-            title_match = TITLE_PATTERN.search(thread.name)
-            if not title_match:
-                continue
-            
-            system_name = title_match.group(1).strip()
-            system_class = title_match.group(2).strip()
-
             try:
                 starter_message = thread.starter_message or await thread.fetch_message(thread.id)
             except discord.HTTPException:
                 continue
 
-            # Optional: Skip if the bot has already reacted to this post in the past
             if any(r.me and r.emoji == "✅" for r in starter_message.reactions):
                 continue
 
-            body_match = BODY_PATTERN.search(starter_message.content)
-            if not body_match:
+            payload = self.parse_forum_template(starter_message.content)
+            if not payload:
                 continue
-            
-            planet_name = body_match.group(1).strip()
-            planet_biome = body_match.group(2).strip()
-            planet_desc = body_match.group(3).strip()
-            poster_username = starter_message.author.name
-            
-            payload = {
-                "submitted_by": poster_username,
-                "system_name": system_name,
-                "system_class": system_class,
-                "planets": [
-                    {
-                        "name": planet_name,
-                        "biome": planet_biome,
-                        "description": planet_desc
-                    }
-                ]
-            }
+
+            payload["submitted_by"] = starter_message.author.name
 
             try:
                 await self.api.submit_system(payload)
                 success_count += 1
-                
-                # --- ADDED: React to the starter message on success ---
                 await starter_message.add_reaction("✅")
-                
             except Exception as e:
-                print(f"Failed to sync thread {thread.id} to Haven API: {e}")
-                # Optional: Add a failure emoji if the API call breaks
+                print(f"Failed to sync thread {thread.id}: {e}")
                 try:
                     await starter_message.add_reaction("❌")
                 except:
                     pass
 
-        await ctx.send(f"Sync complete! Successfully submitted {success_count} entries to Haven API.")
+        await ctx.send(f"Sync complete! Successfully submitted {success_count} structural logs to Haven API.")
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
-        """Automatically fires whenever a new thread (forum post) is created."""
+        """Automatically fires and processes when a new structural post arrives."""
         if thread.parent_id != self.forum_channel_id:
             return
 
-        await asyncio.sleep(2) 
-
-        title_match = TITLE_PATTERN.search(thread.name)
-        if not title_match:
-            print(f"Skipped thread {thread.id}: Title format invalid.")
-            return
-        
-        system_name = title_match.group(1).strip()
-        system_class = title_match.group(2).strip()
+        await asyncio.sleep(3) 
 
         try:
             starter_message = thread.starter_message or await thread.fetch_message(thread.id)
         except discord.HTTPException as e:
-            print(f"Failed to fetch starter message for thread {thread.id}: {e}")
+            print(f"Failed to fetch live starter message {thread.id}: {e}")
             return
 
-        body_match = BODY_PATTERN.search(starter_message.content)
-        if not body_match:
-            print(f"Skipped thread {thread.id}: Body format invalid.")
+        payload = self.parse_forum_template(starter_message.content)
+        if not payload:
+            print(f"Live Thread {thread.id} skipped: Missing required fields or invalid hex glyphs.")
             return
-        
-        planet_name = body_match.group(1).strip()
-        planet_biome = body_match.group(2).strip()
-        planet_desc = body_match.group(3).strip()
-        poster_username = starter_message.author.name
 
-        payload = {
-            "submitted_by": poster_username,
-            "system_name": system_name,
-            "system_class": system_class,
-            "planets": [
-                {
-                    "name": planet_name,
-                    "biome": planet_biome,
-                    "description": planet_desc
-                }
-            ]
-        }
+        payload["submitted_by"] = starter_message.author.name
 
         try:
             await self.api.submit_system(payload)
-            print(f"Successfully submitted new system: {system_name}")
-            
             await starter_message.add_reaction("✅")
-            
+            print(f"Successfully auto-submitted structural log: {payload['system_name']}")
         except Exception as e:
-            print(f"Failed to auto-submit system {system_name}: {e}")
+            print(f"Failed to auto-submit live system {thread.id}: {e}")
             try:
                 await starter_message.add_reaction("❌")
             except:
                 pass
-    
+                   
     # -------------------- COG ----------------
 class HavenSubmission(commands.Cog):
     def __init__(self, bot):
