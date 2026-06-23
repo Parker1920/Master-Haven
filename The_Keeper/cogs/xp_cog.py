@@ -29,7 +29,6 @@ class DepartmentButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         user_id = interaction.user.id
 
-     
         if user_id in _role_locks:
             return await interaction.response.send_message(
                 "You already selected a department.",
@@ -79,36 +78,29 @@ class XpCog(commands.Cog):
         if len(_message_cache) > 5000:
             _message_cache.clear()
 
+        # Safely await the asynchronous calculation
         gained = await process_message_xp(message)        
-
         return gained
 
 
-# ---------------- USER CACHE ----------------
-users = {}
-
-def get_user(user_id):
-    if user_id not in users:
-        users[user_id] = {
-            "primary_role": None,
-            "last": {}
-        }
-    return users[user_id]
-
-
-# ---------------- PRIMARY ROLE ----------------
+# ---------------- PRIMARY ROLE (DATABASE INTERFACES) ----------------
 async def set_primary_role(member, role_name, bot):
     if not member:
         return
 
     role_name = role_name.lower()
-    user = get_user(member.id)
-
-    user["primary_role"] = role_name
     guild = member.guild
 
-    roles_to_remove = []
+    # 1. Update the persistent SQLite database so it stays saved across restarts
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO users (user_id, primary_role) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET primary_role = excluded.primary_role",
+            (member.id, role_name)
+        )
+        await db.commit()
 
+    # 2. Swap Discord Server Roles
+    roles_to_remove = []
     for rid in PRIMARY_ROLE_MAP.values():
         role = guild.get_role(rid)
         if role and role in member.roles:
@@ -139,8 +131,14 @@ def xp_needed(level):
     return 100 + (level * 50)
 
 
+# Patched to fully handle async operations without blocking or unpacking failures
 async def add_global_xp(user_id, amount):
-    xp, level, dm = await get_global(user_id)
+    # Properly await async database queries
+    global_row = await get_global(user_id)
+    if global_row:
+        xp, level, dm = global_row
+    else:
+        xp, level, dm = 0, 1, 0
 
     xp += amount
     leveled_up = False
@@ -153,7 +151,7 @@ async def add_global_xp(user_id, amount):
         if level == 7:
             dm = 1
 
-    save_global(user_id, xp, level, dm)
+    await save_global(user_id, xp, level, dm)
     return level, leveled_up, bool(dm)
 
 
@@ -163,22 +161,24 @@ async def process_message_xp(message):
         return 0
 
     user_id = message.author.id
-    user = get_user(user_id)
 
-    role = user.get("primary_role")
-    if not role:
-        return 0
+    # Fallback to database query instead of reading from a volatile memory dictionary
+    user_role = "voyager"
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT primary_role FROM users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        if row and row[0]:
+            user_role = row[0]
 
     cooldown = get_cfg("xp.primary_cooldown", 5)
-
-    if not check_cooldown(user_id, role, cooldown):
+    if not check_cooldown(user_id, user_role, cooldown):
         return 0
 
     xp = get_cfg("xp.primary_per_message", 1)
 
-    await add_xp(user_id, role, xp)
-
-    level, leveled_up, dm = await add_global_xp(user_id, xp)
+    await add_xp(user_id, user_role, xp)
+    await add_global_xp(user_id, xp)
 
     return xp
 
