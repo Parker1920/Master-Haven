@@ -131,13 +131,14 @@ def generate_system_name(glyph_code: str, community_tag: str, levels_data: dict)
     
 # -------------------- REALITY MODAL-----------
 class RealitySelectView(discord.ui.View):
-    def __init__(self, glyph_code, user_id, api):
+    def __init__(self, glyph_code, user_id, api, api_generated_name):
         super().__init__(timeout=60)
         self.glyph_code = glyph_code
         self.user_id = user_id
         self.api = api
+        self.api_generated_name = api_generated_name 
         self.selected_reality = None
-    
+        
         options = [
             discord.SelectOption(label="Normal", value="Normal"),
             discord.SelectOption(label="Permadeath", value="Permadeath")
@@ -162,17 +163,21 @@ class RealitySelectView(discord.ui.View):
         if not self.selected_reality:
             await interaction.response.send_message("Please select a reality before continuing.", ephemeral=True)
             return
-        await interaction.response.send_modal(GalaxyModal(self.glyph_code, self.user_id, self.api, self.selected_reality))
-    
-    # -------------------- GALAXY MODAL ----------------
-# -------------------- GALAXY MODAL ----------------
+      
+        await interaction.response.send_modal(
+            GalaxyModal(self.glyph_code, self.user_id, self.api, self.selected_reality, self.api_generated_name)
+        )
+
+        
+# -------------------- GALAXY MODAL -----------
 class GalaxyModal(discord.ui.Modal):
-    def __init__(self, glyph_code, user_id, api, reality):
+    def __init__(self, glyph_code, user_id, api, reality, api_generated_name):
         super().__init__(title="Galaxy Submission")
         self.glyph_code = glyph_code
         self.user_id = user_id
         self.api = api
         self.reality = reality
+        self.api_generated_name = api_generated_name  # Track it here
     
         self.galaxy_name = TextInput(
             label="Galaxy",
@@ -183,13 +188,11 @@ class GalaxyModal(discord.ui.Modal):
         self.add_item(self.galaxy_name)
     
     async def on_submit(self, interaction: discord.Interaction):
-
         galaxy = self.galaxy_name.value
-        view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality)
+        view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality, self.api_generated_name)
         await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
 
-    
-#-------------------- LEVEL SELECT VIEW --------------
+#-------------------- LEVEL SELECT VIEW ------
 class LevelSelectView(discord.ui.View):
     def __init__(self, glyph_code, user_id, api, galaxy, reality):
         super().__init__(timeout=180)
@@ -260,7 +263,7 @@ class LevelSelectView(discord.ui.View):
         await interaction.response.send_modal(
             SystemSubmissionModal(
                 self.glyph_code, self.user_id, self.api,
-                self.galaxy, self.reality, self.values
+                self.galaxy, self.reality, self.values, self.api_generated_name
             )
         )
 
@@ -268,7 +271,7 @@ class LevelSelectView(discord.ui.View):
     
 # -------------------- SYSTEM MODAL -----------
 class SystemSubmissionModal(discord.ui.Modal):
-    def __init__(self, glyph_code, user_id, api, galaxy, reality, levels):
+    def __init__(self, glyph_code, user_id, api, galaxy, reality, levels, api_generated_name):
         super().__init__(title="Submit System Log")
         self.glyph_code = glyph_code
         self.user_id = user_id
@@ -276,10 +279,12 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.galaxy = galaxy
         self.reality = reality
         self.levels = levels
+        self.api_generated_name = api_generated_name 
     
+        
         self.system_name = TextInput(
             label="System Name", 
-            placeholder="Leave blank to autogenerate", 
+            placeholder="Leave blank to use official API name", 
             max_length=50, 
             required=False
         )
@@ -294,21 +299,14 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.add_item(self.community_tag)
     
     async def on_submit(self, interaction: discord.Interaction):
-       
         provided_name = self.system_name.value.strip()
         
-        if not provided_name:
-            generated_name = generate_system_name(
-                glyph_code=self.glyph_code,
-                community_tag=self.community_tag.value,
-                levels_data=self.levels
-            )
-        else:
-            generated_name = provided_name
+      
+        final_system_name = provided_name if provided_name else self.api_generated_name
 
         system_payload = {
             "glyph_code": self.glyph_code,
-            "system_name": generated_name,
+            "system_name": final_system_name,
             "discord_tag": self.community_tag.value,
             "galaxy_name": self.galaxy,
             "reality": self.reality,
@@ -321,11 +319,12 @@ class SystemSubmissionModal(discord.ui.Modal):
         
         view = PlanetPromptView(self.user_id, self.api, system_payload)
         await interaction.response.send_message(
-            f"Captured details for **{generated_name}**!\n"
+            f"Captured details for **{final_system_name}**!\n"
             "Would you like to add planets to this system before final submission?", 
             view=view, 
             ephemeral=True
         )
+
 
 class PlanetPromptView(discord.ui.View):
     def __init__(self, user_id, api, system_payload):
@@ -343,7 +342,7 @@ class PlanetPromptView(discord.ui.View):
 
     @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Open up the planet input modal
+
         await interaction.response.send_modal(PlanetInputModal(self))
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
@@ -703,7 +702,7 @@ class DiscoveryConfirmView(discord.ui.View):
 
             system_result, system_id = await self.get_system()
             
-            # ---------------- DISCOVERY SUBMISSION -----
+# ---------------- DISCOVERY SUBMISSION -----
             payload = {
                 "system_id": system_id,
                 "discovery_name": discovery_name,
@@ -877,7 +876,6 @@ class HexKeypad(discord.ui.View):
                 glyph = self.input_string
                 self.emoji_sequence = self.emoji_sequence[:12]
 
-            # ---------------- ONLY PROCEED WHEN COMPLETE ----------------
             if len(self.input_string) != 12:
                 return
 
@@ -894,9 +892,29 @@ class HexKeypad(discord.ui.View):
                 )
                 return
 
-            dup = await self.api.check_duplicate(glyph)
 
-            # ---------------- DISCOVERY FLOW ----------------
+            api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
+
+            dup = await self.api.check_duplicate(glyph)
+            
+# ---------------- SYSTEM FLOW ----------------
+            if dup.get("exists"):
+                await interaction.followup.send(
+                    f"⚠️ System already exists: **{dup.get('system_name','Unknown')}**",
+                    ephemeral=True
+                )
+                self.stop()
+                return
+
+            await interaction.followup.send(
+                f"**Glyph:** `{glyph}`\nSelect Reality:",
+                view=RealitySelectView(glyph, interaction.user.id, self.api, api_generated_name),
+                ephemeral=True
+            )
+
+            self.stop()
+
+# ---------------- DISCOVERY FLOW -------------
             if self.mode == "discovery":
                 system_exists = dup.get("exists")
                 system_name = dup.get("system_name")
@@ -944,7 +962,7 @@ class HexKeypad(discord.ui.View):
                 self.stop()
                 return
 
-            # ---------------- SYSTEM FLOW ----------------
+# ---------------- SYSTEM FLOW ----------------
             if dup.get("exists"):
                 await interaction.followup.send(
                     f"⚠️ System already exists: **{dup.get('system_name','Unknown')}**",
@@ -1002,7 +1020,7 @@ class HexKeypad(discord.ui.View):
         except:
             await interaction.message.edit(embed=self.build_embed(), view=self)
                 
-    # ---------------- Hex Glyph Emojis ----------------
+# ---------------- Hex Glyph Emojis ----------------
 glyph_emojis = {
     "0": discord.PartialEmoji(name="0", id=1487546589269463211),
     "1": discord.PartialEmoji(name="1", id=1487546881692405843),
