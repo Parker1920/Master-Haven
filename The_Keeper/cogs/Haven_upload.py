@@ -109,6 +109,25 @@ class HavenAPI:
                     raise Exception(f"Discovery submission failed: {data}")
     
                 return data
+        
+#----------------------NAMEGEN------------------
+def generate_system_name(glyph_code: str, community_tag: str, levels_data: dict) -> str:
+    """
+    Autogenerates a standard Haven system name using:
+    [Civ Tag] [Star/Economy Type Class] [Truncated Glyph Index Identifier]
+    """
+    
+    civ = community_tag.strip().upper() if community_tag else "HAVEN"
+    
+    
+    unique_suffix = glyph_code[-4:].upper()
+    
+    star_type = levels_data.get("star_type", "F").strip().upper()
+    conflict = levels_data.get("conflict_lvl", "1")
+    
+    class_indicator = f"{star_type[0]}{conflict}" if star_type else "G4"
+    
+    return f"[{civ}] {class_indicator}-{unique_suffix}"
     
 # -------------------- REALITY MODAL-----------
 class RealitySelectView(discord.ui.View):
@@ -163,9 +182,38 @@ class GalaxyModal(discord.ui.Modal):
         self.add_item(self.galaxy_name)
     
     async def on_submit(self, interaction: discord.Interaction):
-        galaxy = self.galaxy_name.value
-        view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality)
-        await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
+    provided_name = self.system_name.value.strip()
+    
+    if not provided_name:
+        generated_name = generate_system_name(
+            glyph_code=self.glyph_code,
+            community_tag=self.community_tag.value,
+            levels_data=self.levels
+        )
+    else:
+        generated_name = provided_name
+
+    system_payload = {
+        "glyph_code": self.glyph_code,
+        "system_name": generated_name, 
+        "discord_tag": self.community_tag.value,
+        "galaxy_name": self.galaxy,
+        "reality": self.reality,
+        "dominant_lifeform": self.levels.get("race", "Unknown"),
+        "conflict_level": self.levels.get("conflict_lvl", "Unknown"),
+        "economy_type": self.levels.get("star_type", "Unknown"),
+        "economy_strength": self.levels.get("economy_lvl", "1"),
+        "user_id": self.user_id
+    }
+    
+    view = PlanetPromptView(self.user_id, self.api, system_payload)
+    await interaction.response.send_message(
+        f"Captured details for **{generated_name}**!\n"
+        "Would you like to add planets to this system before final submission?", 
+        view=view, 
+        ephemeral=True
+    )
+
     
 #-------------------- LEVEL MODAL --------------
 class LevelSelectView(discord.ui.View):
