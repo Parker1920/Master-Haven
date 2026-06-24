@@ -1,4 +1,3 @@
-# -------------------- cogs/exchange.py ----------
 import os
 import math
 from typing import Any, Dict, Optional
@@ -11,18 +10,6 @@ class ExchangeAPIError(Exception):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"API {status_code}: {detail}")
-        
-        async def list_nations(self) -> list:
-        return await self._request("GET", "/api/nations") 
-
-    async def join_nation(
-        self, discord_user_id: str, nation_id: int
-    ) -> Dict[str, Any]:
-        return await self._request(
-            "POST",
-            f"/api/nations/{nation_id}/join",
-            discord_user_id=discord_user_id,
-        )
 
 
 class ExchangeAPIClient:
@@ -60,7 +47,8 @@ class ExchangeAPIClient:
 
     # --- Formatting Helpers ---
     @staticmethod
-    def format_tc(amount: int) -> str: return f"{amount:,} TC"
+    def format_tc(amount: int) -> str: 
+        return f"{amount:,} TC"
     
     @staticmethod
     def format_wallet_short(address: str) -> str:
@@ -70,6 +58,18 @@ class ExchangeAPIClient:
     async def get_wallet(self, discord_user_id: str) -> Dict[str, Any]:
         return await self._request("GET", "/api/wallet", discord_user_id=discord_user_id)
 
+    async def list_nations(self) -> list:
+        # Fixed: Moved to ExchangeAPIClient and fixed indentation block
+        return await self._request("GET", "/api/nations") 
+
+    async def join_nation(self, discord_user_id: str, nation_id: int) -> Dict[str, Any]:
+        # Fixed: Moved to ExchangeAPIClient and fixed indentation block
+        return await self._request(
+            "POST",
+            f"/api/nations/{nation_id}/join",
+            discord_user_id=discord_user_id,
+        )
+
 
 class ExchangeCog(commands.Cog):
     def __init__(self, bot):
@@ -78,12 +78,12 @@ class ExchangeCog(commands.Cog):
         base_url = os.getenv("EXCHANGE_BASE_URL", "https://travelers-exchange.online")
         api_key = os.getenv("EXCHANGE_API")
         
-    
         self.client = ExchangeAPIClient(base_url=base_url, api_key=api_key)
 
     async def cog_unload(self):
         """Runs automatically if the cog is reloaded or bot shuts down."""
         await self.client.close()
+
 
 async def setup(bot):
     await bot.add_cog(ExchangeCog(bot))
