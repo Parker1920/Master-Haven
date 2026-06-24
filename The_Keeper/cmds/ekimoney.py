@@ -1,11 +1,13 @@
-from discord import Embed, Interaction
+import os
+import discord
+from discord import app_commands
+from discord.ext import commands
 from discord.app_commands import CommandTree
 from cogs.exchange import ExchangeAPIClient, ExchangeAPIError
 
-
 exchange = ExchangeAPIClient(
     base_url="https://travelers-exchange.online",
-    api_key=os.getenv"ECHANGE_API"
+    api_key=os.getenv("ECHANGE_API")
 )
 
 class NationCog(commands.Cog):
@@ -14,7 +16,7 @@ class NationCog(commands.Cog):
 
     nation_group = app_commands.Group(name="nation", description="Manage your national alignment")
 
-    @nation_group.command(name="list", description="List all available nations.")
+    @nation_group.command(name="bank", description="List all available nations.")
     async def nation_list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
@@ -66,7 +68,6 @@ class NationCog(commands.Cog):
         api = exchange_cog.client
 
         try:
-            # Call the join_nation API endpoint[span_3](start_span)[span_3](end_span)
             data = await api.join_nation(discord_user_id=str(interaction.user.id), nation_id=nation_id)
             
             nation_name = data.get("nation_name", f"Nation #{nation_id}")
