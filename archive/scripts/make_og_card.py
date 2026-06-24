@@ -1,5 +1,5 @@
 """
-Generate the static Open Graph / Twitter share card for the Travelers
+Generate the static Open Graph / Twitter share card for the Haven
 Archive (1200x630 PNG).
 
 The card is STATIC — it doesn't change per request — so this is a
@@ -15,7 +15,7 @@ TTF (DejaVu Serif — install fonts-dejavu-core if missing).
 
 Design (matches the site masthead):
   - cosmic navy background #050324 with a faint starfield
-  - teal->green "TA" tile (the navbar mark) + "Travelers Archive"
+  - teal->green "HA" tile (the navbar mark) + "Haven Archive"
     serif wordmark
   - dim tagline, wrapped
   - teal/violet/gold accent dots + the domain
@@ -47,16 +47,26 @@ DOMAIN = "haven-archive.online"
 
 
 # ---- font loading ----------------------------------------------------
+# DejaVu first (the Pi build environment), then Windows (Georgia/Arial)
+# and macOS fallbacks so the card can be regenerated on any dev machine.
 SERIF_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "C:/Windows/Fonts/georgiab.ttf",
+    "C:/Windows/Fonts/georgia.ttf",
+    "/Library/Fonts/Georgia.ttf",
 ]
 SERIF_REG_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "C:/Windows/Fonts/georgia.ttf",
+    "/Library/Fonts/Georgia.ttf",
 ]
 SANS_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/Library/Fonts/Arial.ttf",
 ]
 
 
@@ -91,10 +101,10 @@ def _rounded_gradient_tile(size: int, radius: int) -> Image.Image:
     # "TA" centered
     d = ImageDraw.Draw(tile)
     f = _font(SANS_CANDIDATES, int(size * 0.42))
-    tw = d.textbbox((0, 0), "TA", font=f)
+    tw = d.textbbox((0, 0), "HA", font=f)
     cx = (size - (tw[2] - tw[0])) / 2 - tw[0]
     cy = (size - (tw[3] - tw[1])) / 2 - tw[1]
-    d.text((cx, cy), "TA", font=f, fill=(255, 255, 255))
+    d.text((cx, cy), "HA", font=f, fill=(255, 255, 255))
     return tile
 
 
@@ -150,7 +160,7 @@ def make(out_path: Path) -> None:
 
     # wordmark
     wf = _font(SERIF_CANDIDATES, 78)
-    d.text((text_x, tile_y - 6), "Travelers Archive", font=wf, fill=TEXT)
+    d.text((text_x, tile_y - 6), "Haven Archive", font=wf, fill=TEXT)
 
     # thin rule under wordmark
     rule_y = tile_y + 92

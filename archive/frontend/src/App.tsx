@@ -87,8 +87,8 @@ export function App() {
       {/* Desktop nav */}
       <nav className="ta-nav-desktop">
         <a href="#/" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="ta-logo-mark">TA</span>
-          <span className="ta-logo-text">Travelers Archive</span>
+          <span className="ta-logo-mark">HA</span>
+          <span className="ta-logo-text">Haven Archive</span>
         </a>
         <div className="ta-nav-spacer" />
         <SearchBar />
@@ -111,8 +111,8 @@ export function App() {
       <header className="ta-mobile-bar">
         <div className="ta-mobile-bar-left">
           <button className="ta-mobile-icon-btn" onClick={() => setDrawerOpen(true)} aria-label="Menu">≡</button>
-          <span className="ta-logo-mark">TA</span>
-          <span className="ta-mobile-page-title">{PAGE_TITLES[route.name] || "Travelers Archive"}</span>
+          <span className="ta-logo-mark">HA</span>
+          <span className="ta-mobile-page-title">{PAGE_TITLES[route.name] || "Haven Archive"}</span>
         </div>
         <div className="ta-mobile-bar-right">
           <NotificationBell />

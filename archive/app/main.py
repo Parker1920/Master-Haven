@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="Travelers Archive",
+        title="Haven Archive",
         version=__version__,
         description=(
             "A No Man's Sky community archive: news room, civilizations "

@@ -84,7 +84,7 @@ export function Newsroom({ beat }: Props) {
   return (
     <>
       <div className="ta-home-hero">
-        <h1 className="ta-home-hero-name">The Travelers Archive</h1>
+        <h1 className="ta-home-hero-name">The Haven Archive</h1>
         <div className="ta-home-hero-tag">No Man's Sky, catalogued &amp; chronicled by the people who found it</div>
         <div className="ta-home-stats">
           <HomeStat n={catCount} label="catalogue pages" />
