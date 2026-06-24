@@ -55,6 +55,10 @@ export type Route =
   | { name: "watchlist"; query?: string }
   | { name: "login"; query?: string }
   | { name: "admin"; query?: string }
+  | { name: "catalogue"; query?: string }
+  | { name: "browse"; slug: string; query?: string }
+  | { name: "article"; slug: string; query?: string }
+  | { name: "newArticle"; query?: string }
   | { name: "notfound"; query?: string };
 
 export function parseHash(): Route {
@@ -98,6 +102,12 @@ export function parseHash(): Route {
     case "watchlist": return { name: "watchlist", query };
     case "login": return { name: "login", query };
     case "admin": return { name: "admin", query };
+    case "catalogue": return { name: "catalogue", query };
+    case "browse":
+      return parts[1] ? { name: "browse", slug: parts[1], query } : { name: "notfound", query };
+    case "wiki":
+      return parts[1] ? { name: "article", slug: parts[1], query } : { name: "notfound", query };
+    case "new-article": return { name: "newArticle", query };
     case "draft":
       return parts[1] ? { name: "draft", id: parts[1], query } : { name: "notfound", query };
     case "compose":

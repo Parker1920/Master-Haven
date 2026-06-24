@@ -146,7 +146,7 @@ export function Timeline() {
       <div className="ta-timeline-header">
         <h1 className="ta-timeline-title">Master timeline</h1>
         <p className="ta-timeline-sub">
-          Every dated entry across the archive — stories, inquisitions, civ
+          Every dated entry across the archive — events, stories, inquisitions, civ
           foundings + endings. Scroll horizontally; lanes group by civilization.
         </p>
       </div>
@@ -246,6 +246,7 @@ export function Timeline() {
 function hrefFor(e: TimelineEntry): string {
   switch (e.kind) {
     case "story": return `#/story/${e.id}`;
+    case "event": return e.slug ? `#/wiki/${e.slug}` : "#";
     case "inquisition": return `#/inquisition/${e.id}`;
     case "civ-founded":
     case "civ-ended":

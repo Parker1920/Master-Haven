@@ -25,6 +25,7 @@ from . import __version__, auth_claim, auth_dev
 from .config import get_settings
 from .routes import (
     admin,
+    articles,
     atlas,
     auth,
     beats,
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     for module in (
         auth,
         admin,
+        articles,
         atlas,
         beats,
         civilizations,

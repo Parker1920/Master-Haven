@@ -223,7 +223,7 @@ export default function Navbar() {
           {/* ================================================================ */}
           {/* Desktop Navigation — rendered from NAV_LINKS + NAV_GROUPS        */}
           {/* ================================================================ */}
-          <nav className="hidden lg:flex flex-1 min-w-0 flex-wrap items-center justify-end gap-1" aria-label="Primary" ref={dropdownRef}>
+          <nav className="hidden lg:flex flex-1 min-w-0 flex-wrap items-center justify-center gap-1" aria-label="Primary" ref={dropdownRef}>
             {/* Top-level links */}
             {NAV_LINKS.filter(l => l.visible).map(link => (
               link.href ? (

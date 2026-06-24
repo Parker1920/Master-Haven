@@ -573,3 +573,83 @@ class MediaUploadResponse(BaseModel):
     height: Optional[int] = None
     alt_text: Optional[str] = None
     created_at: str
+
+
+# =====================================================================
+# Catalogue articles — the wiki half of the merged Archive
+# =====================================================================
+# A single generic, namespaced entity backing every authored namespace
+# (traveler, creature, ship, tool, base, event, lore, guide, mechanic,
+# item). Civilizations are NOT articles — they keep their richer
+# CivilizationDetail above. Infobox rows + sources ride on the row as
+# JSON so the catalogue stays self-contained.
+
+class InfoboxRow(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
+    value: str = Field("", max_length=400)
+
+
+class ArticleSource(BaseModel):
+    quality: str = Field("community", pattern="^(primary|secondary|community|rotted)$")
+    text: str = Field(..., min_length=1, max_length=400)
+    url: Optional[str] = Field(None, max_length=2000)
+
+
+class ArticleSummary(BaseModel):
+    namespace: str
+    slug: str
+    title: str
+    subtitle: Optional[str] = None
+    civ_slug: Optional[str] = None
+    updated_at: Optional[str] = None
+    facets: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ArticleDetail(ArticleSummary):
+    body: str = ""
+    infobox: list[InfoboxRow] = Field(default_factory=list)
+    sources: list[ArticleSource] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    editor: Optional[Author] = None
+    facets: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ArticleWrite(BaseModel):
+    namespace: str = Field(..., min_length=1, max_length=40)
+    slug: str = Field(..., pattern="^[a-z0-9][a-z0-9-]{0,79}$")
+    title: str = Field(..., min_length=1, max_length=200)
+    subtitle: Optional[str] = None
+    body: Optional[str] = ""
+    infobox: list[InfoboxRow] = Field(default_factory=list)
+    sources: list[ArticleSource] = Field(default_factory=list)
+    civ_slug: Optional[str] = None
+    facets: Optional[dict[str, list[str]]] = None
+
+
+class ArticlePatch(BaseModel):
+    """All fields optional — slug is immutable (delete+create to rename)."""
+    namespace: Optional[str] = Field(None, min_length=1, max_length=40)
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    body: Optional[str] = None
+    infobox: Optional[list[InfoboxRow]] = None
+    sources: Optional[list[ArticleSource]] = None
+    civ_slug: Optional[str] = None
+    facets: Optional[dict[str, list[str]]] = None
+
+
+class NamespaceCount(BaseModel):
+    namespace: str
+    count: int
+
+
+class FacetDef(BaseModel):
+    key: str
+    label: str
+    control: str
+    options: list[str] = Field(default_factory=list)
+
+
+class FacetSchema(BaseModel):
+    namespace: str
+    facets: list[FacetDef] = Field(default_factory=list)

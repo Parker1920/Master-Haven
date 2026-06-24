@@ -92,12 +92,9 @@ export function Drawer({ open, onClose }: Props) {
 
         <DrawerSection title="Browse">
           <DrawerLink href="#/" onClose={onClose}>Newsroom</DrawerLink>
-          <DrawerLink href="#/beats" onClose={onClose}>Beats</DrawerLink>
+          <DrawerLink href="#/catalogue" onClose={onClose}>Catalogue</DrawerLink>
           <DrawerLink href="#/civs" onClose={onClose}>Civilizations</DrawerLink>
           <DrawerLink href="#/inquisitions" onClose={onClose}>Inquisitions</DrawerLink>
-          <DrawerLink href="#/people" onClose={onClose}>People</DrawerLink>
-          <DrawerLink href="#/places" onClose={onClose}>Places</DrawerLink>
-          <DrawerLink href="#/events" onClose={onClose}>Events</DrawerLink>
           <DrawerLink href="#/timeline" onClose={onClose}>Timeline</DrawerLink>
           <DrawerLink href="#/search" onClose={onClose}>Search</DrawerLink>
         </DrawerSection>

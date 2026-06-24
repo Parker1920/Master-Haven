@@ -7,13 +7,14 @@
  *   - the toast overlay, and the DevPanel only in Vite dev mode
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { apiRaw, MeUser } from "./api/client";
 import { Toast } from "./components/Toast";
 import { DevPanel } from "./components/DevPanel";
 import { Drawer } from "./components/Drawer";
 import { SearchBar } from "./components/SearchBar";
 import { NotificationBell } from "./components/NotificationBell";
-import { useAuth } from "./hooks/useAuth";
+import { useAuth, logoutClient } from "./hooks/useAuth";
 import { useRoute } from "./router";
 import { Civs } from "./pages/Civs";
 import { CivPage } from "./pages/CivPage";
@@ -40,6 +41,10 @@ import { Places } from "./pages/Places";
 import { PlacePage } from "./pages/PlacePage";
 import { Search } from "./pages/Search";
 import { Watchlist } from "./pages/Watchlist";
+import { Catalogue } from "./pages/Catalogue";
+import { Browse } from "./pages/Browse";
+import { Article } from "./pages/Article";
+import { ArticleNew } from "./pages/ArticleNew";
 
 const PAGE_TITLES: Record<string, string> = {
   home: "Newsroom",
@@ -65,6 +70,10 @@ const PAGE_TITLES: Record<string, string> = {
   admin: "Admin",
   search: "Search",
   watchlist: "Watchlist",
+  catalogue: "Catalogue",
+  browse: "Catalogue",
+  article: "Article",
+  newArticle: "New page",
   notfound: "Not found",
 };
 
@@ -84,24 +93,13 @@ export function App() {
         <div className="ta-nav-spacer" />
         <SearchBar />
         <NavLink to="/" active={route.name === "home" || route.name === "beat"}>Newsroom</NavLink>
+        <NavLink to="/catalogue" active={route.name === "catalogue" || route.name === "browse" || route.name === "article" || route.name === "newArticle"}>Catalogue</NavLink>
         <NavLink to="/civs" active={route.name === "civs" || route.name === "civ"}>Civilizations</NavLink>
         <NavLink to="/inquisitions" active={route.name === "inquisitions" || route.name === "inquisition"}>Inquisitions</NavLink>
-        <NavLink to="/people" active={route.name === "people" || route.name === "person"}>People</NavLink>
-        <NavLink to="/places" active={route.name === "places" || route.name === "place"}>Places</NavLink>
-        <NavLink to="/events" active={route.name === "events" || route.name === "event"}>Events</NavLink>
         <NavLink to="/timeline" active={route.name === "timeline"}>Timeline</NavLink>
-        <NavLink to="/dashboard" active={route.name === "dashboard"}>Dashboard</NavLink>
-        <NavLink to="/drafts" active={route.name === "drafts" || route.name === "draft" || route.name === "compose"}>Drafts</NavLink>
-        {user && <NavLink to="/watchlist" active={route.name === "watchlist"}>Watch</NavLink>}
-        {user?.is_admin && (
-          <NavLink to="/admin" active={route.name === "admin"}>Admin</NavLink>
-        )}
         <NotificationBell />
         {user ? (
-          <a href={`#/profile/${user.discord_username}`} className="ta-user-pill">
-            <Avatar author={user} />
-            <span>{user.display_name}</span>
-          </a>
+          <UserMenu user={user} route={route} />
         ) : (
           <a href="#/login" className="ta-btn ta-btn-primary" style={{ padding: "5px 14px" }}>
             Sign in
@@ -163,6 +161,39 @@ function NavLink({ to, active, children }: { to: string; active: boolean; childr
   return <a href={"#" + to} className={`ta-nav-link${active ? " active" : ""}`}>{children}</a>;
 }
 
+function UserMenu({ user, route }: { user: MeUser; route: ReturnType<typeof useRoute> }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOpen(false); }, [route]);
+  const canDraft = user.base_role !== "reader" || user.is_admin;
+  const signOut = async () => {
+    try { await apiRaw("/auth/logout", { method: "POST" }); } catch { /* ignore */ }
+    logoutClient();
+    window.location.hash = "#/";
+  };
+  return (
+    <div className="ta-usermenu">
+      <button className="ta-user-pill ta-usermenu-trigger" onClick={() => setOpen((o) => !o)}>
+        <Avatar author={user} />
+        <span>{user.display_name}</span>
+        <span className="ta-usermenu-caret">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="ta-usermenu-scrim" onClick={() => setOpen(false)} />
+          <div className="ta-usermenu-pop">
+            <a href={`#/profile/${user.discord_username}`} className="ta-usermenu-item">My profile</a>
+            <a href="#/dashboard" className="ta-usermenu-item">Dashboard</a>
+            {canDraft && <a href="#/drafts" className="ta-usermenu-item">Drafts</a>}
+            <a href="#/watchlist" className="ta-usermenu-item">Watchlist</a>
+            {user.is_admin && <a href="#/admin" className="ta-usermenu-item">Admin</a>}
+            <button className="ta-usermenu-item ta-usermenu-signout" onClick={signOut}>Sign out</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BottomNavLink({ to, label, active }: { to: string; label: string; active: boolean }) {
   return (
     <a href={"#" + to} className={`ta-bottom-nav-item${active ? " active" : ""}`}>{label}</a>
@@ -193,6 +224,10 @@ function PageFor({ route }: { route: ReturnType<typeof useRoute> }) {
     case "compose": return <Compose doctype={route.doctype} />;
     case "search": return <Search />;
     case "watchlist": return <Watchlist />;
+    case "catalogue": return <Catalogue />;
+    case "browse": return <Browse namespace={route.slug} />;
+    case "article": return <Article slug={route.slug} />;
+    case "newArticle": return <ArticleNew />;
     case "login": return <Login />;
     case "admin": return <Admin />;
     case "notfound":

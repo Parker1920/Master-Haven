@@ -528,3 +528,78 @@ export interface CivilizationWrite {
   color_primary?: string;
   color_secondary?: string;
 }
+
+// ---------------------------------------------------------------------
+// Catalogue articles — the wiki half of the merged Archive
+// ---------------------------------------------------------------------
+export interface InfoboxRow {
+  label: string;
+  value: string;
+}
+
+export interface ArticleSource {
+  quality: SourceQuality;
+  text: string;
+  url?: string | null;
+}
+
+export interface ArticleSummary {
+  namespace: string;
+  slug: string;
+  title: string;
+  subtitle?: string | null;
+  civ_slug?: string | null;
+  updated_at?: string | null;
+  facets?: Record<string, string[]>;
+}
+
+export interface ArticleDetail extends ArticleSummary {
+  body: string;
+  infobox: InfoboxRow[];
+  sources: ArticleSource[];
+  created_at?: string | null;
+  editor?: Author | null;
+  facets: Record<string, string[]>;
+}
+
+export interface ArticleWrite {
+  namespace: string;
+  slug: string;
+  title: string;
+  subtitle?: string | null;
+  body?: string;
+  infobox?: InfoboxRow[];
+  sources?: ArticleSource[];
+  civ_slug?: string | null;
+  facets?: Record<string, string[]>;
+}
+
+export interface ArticlePatch {
+  namespace?: string;
+  title?: string;
+  subtitle?: string | null;
+  body?: string;
+  infobox?: InfoboxRow[];
+  sources?: ArticleSource[];
+  civ_slug?: string | null;
+  facets?: Record<string, string[]>;
+}
+
+export interface NamespaceCount {
+  namespace: string;
+  count: number;
+}
+
+export type FacetControlType = "single" | "multi" | "boolean" | "date";
+
+export interface FacetDef {
+  key: string;
+  label: string;
+  control: FacetControlType;
+  options: string[];
+}
+
+export interface FacetSchema {
+  namespace: string;
+  facets: FacetDef[];
+}

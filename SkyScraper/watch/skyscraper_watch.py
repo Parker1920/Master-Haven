@@ -30,6 +30,14 @@ the WEBHOOK_URL line, use suffixed keys (WEBHOOK_URL_2, WEBHOOK_URL_DEV…),
 and/or comma-separate URLs on one line. Each is alerted independently, so
 one dead webhook won't stop the rest. If none set, changes are logged only.
 
+Auto-publish (optional): if DISCORD_BOT_TOKEN is set in config.env and a
+webhook posts into an Announcement channel, the message is automatically
+crossposted — the API equivalent of the "Publish" button — so every server
+that FOLLOWS the announcement channel receives it with no manual step. The
+bot only needs to be in the announcement channel's OWN server with the
+Manage Messages permission; nothing is needed in the following servers, and
+the bot never has to run/stay online (the watcher makes a one-shot REST call).
+
 ETARC forum mirror (optional): if DISCOURSE_USER_API_KEY + DISCOURSE_TOPIC_ID
 are set in config.env, the SAME change announcement is also posted as a reply
 to that Discourse thread (forums.atlas-65.com). Get the key with --authorize.
@@ -56,6 +64,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "state.json")
 LOG_FILE   = os.path.join(HERE, "watch.log")
 UA = "Mozilla/5.0 (skyscraper-watch; +havenmap.online)"
+# Discord's bot-token REST API sits behind Cloudflare, which 403s (error 40333,
+# "internal network error") any request with a browser-shaped User-Agent. Bot calls
+# MUST use the documented `DiscordBot (url, version)` form — proven: the crosspost
+# POST 40333'd with UA above and returned 204 with this one. Only used for bot auth.
+BOT_UA = "DiscordBot (https://havenmap.online, 1.0)"
 SITE = "https://project-skyscraper.com"
 SITE2 = "theskyscraperarchitect-ywvhk.wordpress.com"
 BSKY_ACTOR = "skyscraper-prj.bsky.social"
@@ -555,6 +568,10 @@ def diff(old, new):
 
 
 def send_discord(webhook, changes):
+    """Post the change embed via webhook. Returns (status, message) where `message`
+    is the created message object (a dict carrying 'id' + 'channel_id') when Discord
+    returns one, else None. We append ?wait=true so Discord echoes that object back —
+    its id/channel_id are what crosspost_message() needs to auto-publish afterward."""
     when = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M UTC")
     desc = "\n\n".join(changes)
     if len(desc) > 3900:
@@ -568,8 +585,35 @@ def send_discord(webhook, changes):
             "footer": {"text": f"skyscraper_watch • {when}"},
         }],
     }
-    req = urllib.request.Request(webhook, data=json.dumps(payload).encode("utf-8"),
+    sep = "&" if "?" in webhook else "?"
+    url = f"{webhook}{sep}wait=true"
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers={"Content-Type": "application/json", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        status = r.status
+        body = r.read().decode("utf-8", "replace")
+    try:
+        message = json.loads(body) if body.strip() else None
+    except ValueError:
+        message = None
+    return status, message
+
+
+def crosspost_message(bot_token, channel_id, message_id):
+    """Publish (crosspost) a message in an Announcement channel so every server that
+    FOLLOWS it receives a copy — the automated equivalent of clicking 'Publish'.
+
+    Requires a Bot token whose bot is a member of the announcement channel's OWN server
+    with the Manage Messages permission there (the message author is the webhook, not the
+    bot, so Manage Messages — not merely Send Messages — is required). No bot is needed in
+    the following servers, and the bot doesn't have to be online; this is a one-shot REST
+    call. Returns the HTTP status; lets urllib raise HTTPError on 4xx/5xx so the caller can
+    log the not-an-announcement-channel (400) / missing-perms (403) / rate-limit (429) case
+    without aborting the alert itself."""
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}/crosspost"
+    req = urllib.request.Request(url, data=b"", method="POST",
+                                 headers={"Authorization": f"Bot {bot_token}",
+                                          "Content-Type": "application/json", "User-Agent": BOT_UA})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.status
 
@@ -679,6 +723,7 @@ def main():
     d_key = load_setting("DISCOURSE_USER_API_KEY")
     d_topic = load_setting("DISCOURSE_TOPIC_ID")
     d_base = load_setting("DISCOURSE_BASE") or DISCOURSE_BASE_DEFAULT
+    bot_token = load_setting("DISCORD_BOT_TOKEN")  # set → auto-publish announcement-channel posts
 
     if "--test" in sys.argv:
         if not webhooks and not d_key:
@@ -686,8 +731,20 @@ def main():
         msg = ["✅ Test alert — skyscraper_watch is wired up and can reach this channel."]
         for i, w in enumerate(webhooks, 1):
             try:
-                st = send_discord(w, msg)
+                st, posted = send_discord(w, msg)
                 log(f"--test: webhook {i}/{len(webhooks)} -> HTTP {st}")
+                if bot_token and posted and posted.get("id") and posted.get("channel_id"):
+                    try:
+                        cst = crosspost_message(bot_token, posted["channel_id"], posted["id"])
+                        log(f"--test: crosspost webhook {i} (channel {posted['channel_id']}) -> HTTP {cst}")
+                    except urllib.error.HTTPError as e:
+                        detail = e.read().decode("utf-8", "replace")[:200]
+                        log(f"--test: crosspost webhook {i} -> HTTP {e.code} {detail} "
+                            f"(not an announcement channel, or bot lacks Manage Messages there)")
+                    except Exception as e:
+                        log(f"--test: crosspost webhook {i} ERROR: {e}")
+                elif bot_token:
+                    log(f"--test: crosspost webhook {i} skipped — no message id returned")
             except Exception as e:
                 log(f"--test: webhook {i}/{len(webhooks)} ERROR: {e}")
         if d_topic:
@@ -761,8 +818,18 @@ def main():
     if webhooks:
         for i, w in enumerate(webhooks, 1):
             try:
-                st = send_discord(w, changes)
+                st, posted = send_discord(w, changes)
                 log(f"Discord webhook {i}/{len(webhooks)} POST -> HTTP {st}")
+                if bot_token and posted and posted.get("id") and posted.get("channel_id"):
+                    try:
+                        cst = crosspost_message(bot_token, posted["channel_id"], posted["id"])
+                        log(f"Crosspost webhook {i}/{len(webhooks)} (channel {posted['channel_id']}) -> HTTP {cst}")
+                    except urllib.error.HTTPError as e:
+                        detail = e.read().decode("utf-8", "replace")[:200]
+                        log(f"Crosspost webhook {i} not published -> HTTP {e.code} {detail} "
+                            f"(not an announcement channel, or bot lacks Manage Messages there)")
+                    except Exception as e:
+                        log(f"Crosspost webhook {i} ERROR: {e}")
             except Exception as e:
                 log(f"ERROR sending webhook {i}/{len(webhooks)}: {e}")
     else:

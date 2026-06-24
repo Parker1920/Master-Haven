@@ -1,26 +1,40 @@
-/** Newsroom (home) — masthead, hero, brief grid, features, inquisitions. */
+/**
+ * Home — a hybrid "archive front page" that weaves the catalogue (wiki)
+ * and the newsroom into one surface:
+ *   - hero with live stats
+ *   - left spine: the grouped catalogue navigator (always present)
+ *   - blended feed: Featured · Recently catalogued · Newsroom · Inquisitions
+ *
+ * When rendered for a /beat/{slug} route it falls back to a focused
+ * newsroom-beat list.
+ */
+
 import { useEffect, useState } from "react";
 import {
   api,
+  ArticleSummary,
   CivilizationSummary,
   InquisitionSummary,
+  NamespaceCount,
   StorySummary,
 } from "../api/client";
+import { CataloguePortal } from "../components/CataloguePortal";
 import { InquisitionCard } from "../components/InquisitionCard";
-import { Loading } from "../components/Loading";
 import { StoryCard } from "../components/StoryCard";
-import { KNOWN_BEATS } from "../components/UserSearch";
+import { ArticleCard } from "../components/ArticleCard";
+import { Loading } from "../components/Loading";
+import { NS_BY_KEY } from "../data/namespaces";
 import { useAuth } from "../hooks/useAuth";
 
-interface Props {
-  beat?: string;
-}
+interface Props { beat?: string; }
 
 export function Newsroom({ beat }: Props) {
   const { user } = useAuth();
   const [stories, setStories] = useState<StorySummary[] | null>(null);
   const [inquisitions, setInquisitions] = useState<InquisitionSummary[] | null>(null);
   const [civs, setCivs] = useState<CivilizationSummary[] | null>(null);
+  const [recent, setRecent] = useState<ArticleSummary[]>([]);
+  const [catCount, setCatCount] = useState<number | null>(null);
   const canCompose = !!user && (user.base_role === "diplomat" || user.base_role === "historian" || user.is_admin);
 
   useEffect(() => {
@@ -28,124 +42,143 @@ export function Newsroom({ beat }: Props) {
     Promise.all([
       api<StorySummary[]>("/stories", { query: { beat }, signal: ac.signal }),
       api<InquisitionSummary[]>("/inquisitions", { signal: ac.signal }),
-      api<CivilizationSummary[]>("/civilizations", { signal: ac.signal }),
-    ]).then(([s, i, c]) => {
-      setStories(s);
-      setInquisitions(i);
-      setCivs(c);
+      api<CivilizationSummary[]>("/civilizations", { query: { page_size: 500 }, signal: ac.signal }),
+      api<ArticleSummary[]>("/articles", { query: { page_size: 60 }, signal: ac.signal }),
+      api<NamespaceCount[]>("/articles/namespaces", { signal: ac.signal }),
+    ]).then(([s, i, c, a, ns]) => {
+      setStories(s); setInquisitions(i); setCivs(c);
+      const sorted = [...a].sort((x, y) => (y.updated_at ?? "").localeCompare(x.updated_at ?? ""));
+      setRecent(sorted.slice(0, 6));
+      setCatCount(ns.filter((r) => NS_BY_KEY[r.namespace]?.kind === "article").reduce((n, r) => n + r.count, 0));
     }).catch((err) => {
       if (err?.name === "AbortError") return;
-      // We don't want to leave the page in a permanent loading state
-      // on network failure — but we also shouldn't silently empty
-      // everything. Show a toast so the user knows.
-      setStories([]);
-      setInquisitions([]);
-      setCivs([]);
-      // showToast injected via dynamic import so SSR doesn't break;
-      // simple notification here:
-      console.error("Newsroom fetch failed", err);
+      setStories([]); setInquisitions([]); setCivs([]);
     });
     return () => ac.abort();
   }, [beat]);
 
-  const briefs = (stories ?? []).filter((s) => s.doctype === "brief");
-  const features = (stories ?? []).filter((s) => s.doctype === "feature");
+  // Focused beat view.
+  if (beat) {
+    return (
+      <div className="ta-home-beat">
+        <a href="#/" className="ta-back-link">← Home</a>
+        <h2 className="ta-cat-head-title" style={{ marginTop: 10, textTransform: "capitalize" }}>{beat} · Newsroom</h2>
+        {stories === null ? <Loading /> : stories.length === 0 ? (
+          <div className="ta-empty">No stories on the {beat} beat yet.</div>
+        ) : (
+          <div className="ta-story-grid" style={{ marginTop: 16 }}>
+            {stories.map((s) => <StoryCard key={s.id} story={s} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const all = stories ?? [];
+  const features = all.filter((s) => s.doctype === "feature");
+  const briefs = all.filter((s) => s.doctype === "brief");
   const hero = features[0] ?? briefs[0] ?? null;
-  const otherFeatures = features.slice(hero?.doctype === "feature" ? 1 : 0);
-  const otherBriefs = briefs.filter((b) => b.id !== hero?.id);
+  const otherStories = all.filter((s) => s.id !== hero?.id);
+  const loading = stories === null;
 
   return (
     <>
-      <div className="ta-masthead">
-        <h1 className="ta-masthead-name">Travelers Archive</h1>
-        <div className="ta-masthead-tag">A record of the No Man's Sky multiverse</div>
-        <div className="ta-masthead-meta">
-          <Stat n={stories === null ? "…" : stories.length} label="stories" />
-          <Stat n={inquisitions === null ? "…" : inquisitions.length} label="inquisitions" />
-          <Stat n={civs === null ? "…" : civs.length} label="civs" />
+      <div className="ta-home-hero">
+        <h1 className="ta-home-hero-name">The Travelers Archive</h1>
+        <div className="ta-home-hero-tag">No Man's Sky, catalogued &amp; chronicled by the people who found it</div>
+        <div className="ta-home-stats">
+          <HomeStat n={catCount} label="catalogue pages" />
+          <HomeStat n={civs?.length} label="civilizations" />
+          <HomeStat n={stories?.length} label="stories" />
+          <HomeStat n={inquisitions?.length} label="inquisitions" />
         </div>
       </div>
 
-      <BeatNav active={beat ?? null} />
+      <div className="ta-home-grid">
+        <div className="ta-home-spine">
+          <div className="ta-home-spine-head">Browse the catalogue</div>
+          <CataloguePortal variant="spine" />
+          <a href="#/catalogue" className="ta-home-spine-all">All categories →</a>
+        </div>
 
-      {stories === null ? (
-        <Loading label="Loading newsroom…" />
-      ) : stories.length === 0 ? (
-        <div className="ta-empty">
-          {beat
-            ? <>No stories yet on the <b>{beat}</b> beat. Be the first to file one.</>
-            : "No stories yet. The archive is waiting."}
-          {canCompose && (
-            <div className="ta-empty-cta-row">
-              <a href="#/compose/brief" className="ta-btn ta-btn-primary">+ Start a brief</a>
-              <a href="#/compose/feature" className="ta-btn">+ Start a feature</a>
-            </div>
+        <div className="ta-home-feed">
+          {loading ? <Loading label="Loading the archive…" /> : (
+            <>
+              {hero ? (
+                <FeedSection title="Featured">
+                  <StoryCard story={hero} hero />
+                </FeedSection>
+              ) : recent[0] ? (
+                <FeedSection title="Featured page">
+                  <FeaturedArticle a={recent[0]} />
+                </FeedSection>
+              ) : null}
+
+              {recent.length > 0 && (
+                <FeedSection title="Recently catalogued" more={{ href: "#/catalogue", label: "Browse all" }}>
+                  <div className="ta-cat-grid">
+                    {recent.map((a) => <ArticleCard key={a.slug} a={a} />)}
+                  </div>
+                </FeedSection>
+              )}
+
+              {otherStories.length > 0 ? (
+                <FeedSection title="From the Newsroom">
+                  <div className="ta-story-grid">{otherStories.slice(0, 4).map((s) => <StoryCard key={s.id} story={s} />)}</div>
+                </FeedSection>
+              ) : (
+                <FeedSection title="From the Newsroom">
+                  <div className="ta-home-quiet">
+                    The newsroom is quiet right now.
+                    {canCompose && <> <a className="ta-cat-link" href="#/compose/brief">File a brief</a> or <a className="ta-cat-link" href="#/compose/feature">start a feature</a>.</>}
+                  </div>
+                </FeedSection>
+              )}
+
+              {inquisitions && inquisitions.length > 0 && (
+                <FeedSection title="Active Inquisitions" more={{ href: "#/inquisitions", label: "All inquisitions" }}>
+                  <div className="ta-inq-shelf">{inquisitions.map((i) => <InquisitionCard key={i.id} inq={i} />)}</div>
+                </FeedSection>
+              )}
+            </>
           )}
         </div>
-      ) : (
-        <>
-          {hero && <StoryCard story={hero} hero />}
-
-          {otherBriefs.length > 0 && (
-            <>
-              <div className="ta-section-divider">
-                <div className="ta-section-name">Latest briefs</div>
-                <div className="ta-section-sub">Today's reports from across the multiverse</div>
-              </div>
-              <div className="ta-story-grid">
-                {otherBriefs.map((s) => <StoryCard key={s.id} story={s} />)}
-              </div>
-            </>
-          )}
-
-          {otherFeatures.length > 0 && (
-            <>
-              <div className="ta-section-divider">
-                <div className="ta-section-name">Recent features</div>
-                <div className="ta-section-sub">Long-form reporting</div>
-              </div>
-              <div className="ta-story-grid">
-                {otherFeatures.map((s) => <StoryCard key={s.id} story={s} />)}
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {inquisitions && inquisitions.length > 0 && (
-        <>
-          <div className="ta-section-divider">
-            <div className="ta-section-name">Active inquisitions</div>
-            <div className="ta-section-sub">Long-form historical investigations by the Archivists</div>
-          </div>
-          <div className="ta-inq-shelf">
-            {inquisitions.map((i) => <InquisitionCard key={i.id} inq={i} />)}
-          </div>
-        </>
-      )}
+      </div>
     </>
   );
 }
 
-function Stat({ n, label }: { n: number | string; label: string }) {
+function HomeStat({ n, label }: { n: number | null | undefined; label: string }) {
   return (
-    <div className="ta-masthead-meta-item">
-      <span className="ta-masthead-meta-num">{n}</span>
-      <span className="ta-masthead-meta-label">{label}</span>
+    <div className="ta-home-stat">
+      <span className="ta-home-stat-n">{n == null ? "…" : n}</span>
+      <span className="ta-home-stat-l">{label}</span>
     </div>
   );
 }
 
-function BeatNav({ active }: { active: string | null }) {
+function FeedSection({ title, more, children }: { title: string; more?: { href: string; label: string }; children: React.ReactNode }) {
   return (
-    <div className="ta-beat-nav">
-      <div className="ta-beat-nav-inner">
-        <a href="#/" className={`ta-beat-tab${active === null ? " active" : ""}`}>Front page</a>
-        {KNOWN_BEATS.map((b) => (
-          <a key={b} href={`#/beat/${b}`} className={`ta-beat-tab${active === b ? " active" : ""}`}>{b}</a>
-        ))}
-        <a href="#/inquisitions" className="ta-beat-tab">Inquisitions</a>
+    <section className="ta-home-section">
+      <div className="ta-home-section-head">
+        <h2 className="ta-home-section-title">{title}</h2>
+        {more && <a className="ta-home-section-more" href={more.href}>{more.label} →</a>}
       </div>
-    </div>
+      {children}
+    </section>
+  );
+}
+
+function FeaturedArticle({ a }: { a: ArticleSummary }) {
+  const def = NS_BY_KEY[a.namespace];
+  return (
+    <a href={`#/wiki/${a.slug}`} className="ta-home-featured" style={{ "--cat-accent": def?.accent } as React.CSSProperties}>
+      <div className="ta-home-featured-glyph">{def?.glyph ?? "✦"}</div>
+      <div>
+        <div className="ta-home-featured-ns">{def?.label ?? a.namespace}</div>
+        <div className="ta-home-featured-title">{a.title}</div>
+        {a.subtitle && <div className="ta-home-featured-sub">{a.subtitle}</div>}
+      </div>
+    </a>
   );
 }

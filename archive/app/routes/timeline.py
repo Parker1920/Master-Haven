@@ -65,20 +65,25 @@ def list_timeline(
 ):
     entries: list[TimelineEntry] = []
 
-    # --- historical events ---
+    # --- catalogue events (namespace='event' articles carrying a date facet) ---
+    # The unified Events live in the catalogue; those tagged with a date
+    # surface on the timeline and link to their wiki page.
     rows = db.execute(
         text(
-            "SELECT slug, title, event_date, event_year "
-            "FROM event WHERE deleted_at IS NULL"
+            "SELECT a.slug, a.title, a.civ_slug, af.value AS date_val "
+            "FROM article a "
+            "JOIN article_facet af ON af.article_id = a.id AND af.key = 'date' "
+            "WHERE a.namespace = 'event' AND a.deleted_at IS NULL"
         )
     ).fetchall()
     for r in rows:
         entries.append(TimelineEntry(
             kind="event",
-            date=r.event_date or (str(r.event_year) if r.event_year else ""),
-            year=r.event_year,
+            date=r.date_val or "",
+            year=_year_of(r.date_val),
             title=r.title,
             slug=r.slug,
+            civs=[r.civ_slug] if r.civ_slug else [],
         ))
 
     # --- story publication dates (batch-fetched civ tags) ---
