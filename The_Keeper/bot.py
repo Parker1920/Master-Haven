@@ -159,12 +159,14 @@ bot.PRIMARY_ROLES = PRIMARY_ROLES
 bot.XP_ENABLED_CHANNELS = XP_ENABLED_CHANNELS
 bot.role_welcome_messages = role_welcome_messages
 from cogs.Data.xpdata import init_db, CONFIG, add_xp, check_cooldown, get_conn
+from setup import is_command_allowed
 
 # -------------------- COGS --------------------
 COGS = [
     "cogs.personality",
     "cogs.xp_system",
     "cogs.xp_cog",
+    "cogs.exchange",
     "cogs.reaction",
     "cogs.Haven_stats",
     "cogs.featured",
@@ -178,10 +180,9 @@ COGS = [
     "cmds.list",
     "cmds.slash",
     "cmds.voyager",    
+    "cmds.ekimoney"
     "setup",
 ]
-
-from setup import is_command_allowed
 
 # ---------------- PREFIX COMMANDS (!)
 @bot.check
@@ -322,8 +323,6 @@ async def on_command_error(ctx, error):
         "Something went wrong. The Witness has been notified."
     )
 
-
-# -------------------- RUN --------------------
 # -------------------- RUN --------------------
 async def main():    
 
