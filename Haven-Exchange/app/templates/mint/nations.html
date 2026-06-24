@@ -8,9 +8,7 @@
     <p class="page-subtitle">World Mint admin: rename or re-tag any nation</p>
 </div>
 
-<div class="btn-group mb-xl">
-    <a href="/mint" class="btn btn-secondary">Back to Mint Dashboard</a>
-</div>
+{% include "_partials/mint_console_nav.html" %}
 
 {% if request.query_params.get('success') %}
 <div class="alert alert-success mb-md">{{ request.query_params.get('success') | replace('+', ' ') }}</div>

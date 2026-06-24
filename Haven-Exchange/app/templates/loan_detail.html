@@ -6,7 +6,7 @@
 <div class="page-header">
     <h1>Loan #{{ loan.id }}</h1>
     <p class="page-subtitle">{{ bank_name }} &mdash;
-        <span class="badge badge-{{ 'confirmed' if loan.status == 'closed' else ('pending' if loan.status == 'active' else 'error') }}">
+        <span class="badge badge-{{ 'confirmed' if loan.status == 'closed' else ('transfer' if loan.status == 'active' else 'burn') }}">
             {{ loan.status }}
         </span>
     </p>

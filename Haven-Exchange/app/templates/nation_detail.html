@@ -13,6 +13,33 @@
     </p>
 </div>
 
+{# Contextual "this is your nation" management bar — gives members/leaders a path back to their own tools #}
+{% if is_leader %}
+<div class="card mb-xl" style="border-left: 4px solid var(--accent);">
+    <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
+        <div>
+            <strong>This is your nation.</strong>
+            <span class="text-muted">{% if nation.status == 'approved' %}Manage its treasury, members, and settings.{% else %}It&rsquo;s still {{ nation.status }} — management tools unlock once approved.{% endif %}</span>
+        </div>
+        {% if nation.status == 'approved' %}
+        <div class="btn-group">
+            <a href="/nation/treasury" class="btn btn-primary btn-sm">Treasury</a>
+            <a href="/nation/distribute" class="btn btn-secondary btn-sm">Distribute</a>
+            <a href="/nation/members" class="btn btn-secondary btn-sm">Members</a>
+            <a href="/nation/settings" class="btn btn-secondary btn-sm">Settings</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% elif user and user.nation_id == nation.id %}
+<div class="card mb-xl">
+    <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
+        <div><strong>You&rsquo;re a member of {{ nation.name }}.</strong></div>
+        <a href="/dashboard" class="btn btn-secondary btn-sm">Go to your dashboard</a>
+    </div>
+</div>
+{% endif %}
+
 <div class="two-col mb-xl">
     <div class="card">
         <div class="card-header">

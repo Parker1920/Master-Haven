@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Confirm Purchase — Travelers Exchange{% endblock %}
+{% block title %}Confirm Buy — Travelers Exchange{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>Confirm Purchase</h1>
-    <p class="page-subtitle">Review your purchase before confirming</p>
+    <h1>Confirm Buy</h1>
+    <p class="page-subtitle">Review before confirming</p>
 </div>
 
 <div class="card" style="max-width: 600px;">
@@ -55,8 +55,8 @@
 
         <div style="display: flex; gap: var(--space-md);">
             {% if balance_after >= 0 %}
-            <form method="POST" action="/market/{{ shop.id }}/buy/{{ listing.id }}" data-confirm="Purchase {{ listing.title }} for {{ listing.price }} {{ settings.CURRENCY_SHORT }}?">
-                <button type="submit" class="btn btn-primary">Confirm Purchase</button>
+            <form method="POST" action="/market/{{ shop.id }}/buy/{{ listing.id }}" data-confirm="Buy {{ listing.title }} for {{ listing.price }} {{ settings.CURRENCY_SHORT }}?">
+                <button type="submit" class="btn btn-primary">Confirm Buy</button>
             </form>
             {% else %}
             <button type="button" class="btn btn-primary" disabled>Insufficient Balance</button>

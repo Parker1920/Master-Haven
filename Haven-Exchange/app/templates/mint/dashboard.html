@@ -16,6 +16,8 @@
     {% endif %}
 </div>
 
+{% include "_partials/mint_console_nav.html" %}
+
 <!-- Stats -->
 <div class="stats-grid">
     <div class="stat-card">
@@ -38,16 +40,6 @@
         <div class="stat-value">{{ active_users_30d | format_number }}</div>
         <div class="stat-label">Active (30 days)</div>
     </div>
-</div>
-
-<!-- Admin Tools -->
-<div class="btn-group mb-xl">
-    <a href="/mint/nations" class="btn btn-secondary">Nation Directory (Edit Names / Tags)</a>
-    <a href="/mint/shops/pending" class="btn btn-secondary">
-        Pending Shops{% if pending_shops_count and pending_shops_count > 0 %} ({{ pending_shops_count }}){% endif %}
-    </a>
-    <a href="/mint/settings" class="btn btn-secondary">Mint Settings</a>
-    <a href="/mint/stats" class="btn btn-secondary">Detailed Stats</a>
 </div>
 
 <!-- Pending Nations -->
@@ -147,6 +139,9 @@
         </form>
     </div>
     <div class="card-body">
+        <p class="text-muted" style="margin-bottom: var(--space-md); font-size: 0.8125rem;">
+            Workflow: <strong>Calculate</strong> generates this month&rsquo;s amounts &rarr; <strong>Approve</strong> locks each amount &rarr; <strong>Execute</strong> mints it to the nation&rsquo;s treasury. GDP &amp; allocations also recalculate automatically every 24h.
+        </p>
         {% if pending_allocations %}
         <h4 style="margin-bottom: var(--space-md); color: var(--warning);">Pending Approval</h4>
         <div class="table-wrapper mb-lg" style="border: none; border-radius: 0;">
@@ -286,10 +281,6 @@
     <div class="card">
         <div class="card-header">
             <h3>Recent Mint Transactions</h3>
-            <div class="btn-group">
-                <a href="/mint/settings" class="btn btn-sm btn-secondary">Settings</a>
-                <a href="/mint/stats" class="btn btn-sm btn-secondary">Detailed Stats</a>
-            </div>
         </div>
         <div class="card-body">
             {% if recent_mints %}

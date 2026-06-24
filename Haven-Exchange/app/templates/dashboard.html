@@ -110,20 +110,62 @@
 </div>
 {% endif %}
 
-<!-- Quick Actions — primary CTA elevated, secondary actions grouped below -->
-<div class="mb-md" style="display: flex; justify-content: center;">
-    <a href="/send" class="btn btn-primary btn-lg">Send {{ settings.CURRENCY_SHORT }}</a>
+<!-- "What can I do now?" — waiting cue for members with no coin yet -->
+{% if nation and user.balance == 0 %}
+<div class="card mb-lg" style="border-left: 4px solid var(--info);">
+    <div class="card-body">
+        <h3 style="margin: 0 0 var(--space-sm); display:flex; align-items:center; gap:var(--space-xs);">
+            <span style="font-size:1.25em;">&#9203;</span> Waiting on your first coin
+        </h3>
+        <p class="text-muted" style="margin-bottom: var(--space-md);">
+            Your balance is 0 {{ settings.CURRENCY_SHORT }}. Coin reaches members two ways: your nation leader
+            distributes it from the <a href="/nations/{{ nation.id }}">{{ nation.name }}</a> treasury, and you earn
+            it in-game by submitting your discoveries (rewarded automatically by Keeper). Once you receive coin you
+            can spend it with the actions below.
+        </p>
+        <a href="/nations/{{ nation.id }}" class="btn btn-sm btn-secondary">View {{ nation.name }}</a>
+    </div>
 </div>
-<div class="btn-group mb-xl" style="justify-content: center;">
-    <a href="/history" class="btn btn-secondary btn-sm">Full History</a>
-    <a href="/loans/mine" class="btn btn-secondary btn-sm">My Loans</a>
-    <a href="/wallet/{{ user.wallet_address }}" class="btn btn-secondary btn-sm">Public Wallet</a>
-    {% if user_shop %}
-        <a href="/shop/manage" class="btn btn-secondary btn-sm">Manage Shop</a>
-    {% elif user_nation and user_nation.status == 'approved' %}
-        <a href="/shop/create" class="btn btn-secondary btn-sm">Open a Shop</a>
-    {% endif %}
-    <a href="/exchange" class="btn btn-secondary btn-sm">Exchange</a>
+{% endif %}
+
+<!-- Quick actions — role-aware launchpad -->
+<div class="card mb-xl">
+    <div class="card-header"><h3>Quick actions</h3></div>
+    <div class="card-body">
+        <div class="quick-actions-grid">
+            <a href="/send" class="quick-action">
+                <span class="quick-action-title">Send {{ settings.CURRENCY_SHORT }}</span>
+                <span class="quick-action-sub">Transfer coin to any wallet</span>
+            </a>
+            <a href="/market" class="quick-action">
+                <span class="quick-action-title">Browse Market</span>
+                <span class="quick-action-sub">Buy goods &amp; services from members</span>
+            </a>
+            <a href="/exchange" class="quick-action">
+                <span class="quick-action-title">Stock Market</span>
+                <span class="quick-action-sub">Invest in nations &amp; businesses</span>
+            </a>
+            <a href="/loans/mine" class="quick-action">
+                <span class="quick-action-title">Loans</span>
+                <span class="quick-action-sub">Borrow from a bank or treasury</span>
+            </a>
+            {% if user_shop %}
+            <a href="/shop/manage" class="quick-action">
+                <span class="quick-action-title">Manage Shop</span>
+                <span class="quick-action-sub">Listings, sales &amp; revenue</span>
+            </a>
+            {% elif user_nation and user_nation.status == 'approved' %}
+            <a href="/shop/create" class="quick-action">
+                <span class="quick-action-title">Open a Shop</span>
+                <span class="quick-action-sub">Sell to the whole exchange</span>
+            </a>
+            {% endif %}
+            <a href="/wallet/{{ user.wallet_address }}" class="quick-action">
+                <span class="quick-action-title">Public Wallet</span>
+                <span class="quick-action-sub">Your public profile &amp; ledger</span>
+            </a>
+        </div>
+    </div>
 </div>
 
 <!-- Recent Transactions -->

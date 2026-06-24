@@ -18,100 +18,127 @@
 
     {% block head %}{% endblock %}
 </head>
-<body>
-    <!-- Navigation -->
-    <nav class="navbar">
-        <div class="container">
-            <a href="/" class="navbar-brand">
+<body data-currency="{{ settings.CURRENCY_SHORT }}">
+    <div class="app-shell">
+        <!-- Mobile top bar (hidden on desktop) -->
+        <header class="topbar">
+            <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+            <a href="{% if user %}/dashboard{% else %}/{% endif %}" class="topbar-brand">
+                <span class="brand-icon">&#9670;</span> Travelers Exchange
+            </a>
+        </header>
+
+        <!-- Sidebar navigation (left rail on desktop, off-canvas drawer on mobile) -->
+        <aside class="sidebar" id="sidebar">
+            <a href="{% if user %}/dashboard{% else %}/{% endif %}" class="sidebar-brand">
                 <span class="brand-icon">&#9670;</span> Travelers Exchange
             </a>
 
-            <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
-
-            <div class="nav-links">
-                <a href="/ledger" {% if active_page == 'ledger' %}class="active"{% endif %}>Ledger</a>
-                <a href="/nations" {% if active_page == 'nations' %}class="active"{% endif %}>Nations</a>
-                <a href="/wallet/search" {% if active_page == 'search' %}class="active"{% endif %}>Search</a>
-                <a href="/market" {% if active_page == 'market' %}class="active"{% endif %}>Market</a>
-                <a href="/exchange" {% if active_page == 'exchange' %}class="active"{% endif %}>Exchange</a>
+            <nav class="sidebar-nav" aria-label="Primary">
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">Explore</div>
+                    {% if user %}
+                    <a href="/dashboard" class="sidebar-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+                    {% else %}
+                    <a href="/" class="sidebar-link {% if request.url.path == '/' %}active{% endif %}">Home</a>
+                    {% endif %}
+                    <a href="/nations" class="sidebar-link {% if active_page == 'nations' %}active{% endif %}">Nations</a>
+                    <a href="/market" class="sidebar-link {% if active_page == 'market' %}active{% endif %}">Market</a>
+                    <a href="/exchange" class="sidebar-link {% if active_page == 'exchange' %}active{% endif %}">Stock Market</a>
+                    <a href="/ledger" class="sidebar-link {% if active_page == 'ledger' %}active{% endif %}">Public Ledger</a>
+                    <a href="/wallet/search" class="sidebar-link {% if request.url.path == '/wallet/search' %}active{% endif %}">Find a Wallet</a>
+                    <a href="/docs" class="sidebar-link {% if active_page == 'docs' %}active{% endif %}">Docs</a>
+                </div>
 
                 {% if user %}
-                    <span class="nav-divider" data-label="My Account"></span>
-                    <a href="/dashboard" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
-                    <a href="/send" {% if active_page == 'send' %}class="active"{% endif %}>Send</a>
-                    <a href="/history" {% if active_page == 'history' %}class="active"{% endif %}>History</a>
-                    <a href="/shop/manage" {% if active_page == 'shop' %}class="active"{% endif %}>My Shop</a>
-                    <a href="/portfolio" {% if active_page == 'portfolio' %}class="active"{% endif %}>Portfolio</a>
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">Wallet</div>
+                    <a href="/send" class="sidebar-link {% if active_page == 'send' %}active{% endif %}">Send</a>
+                    <a href="/history" class="sidebar-link {% if active_page == 'history' %}active{% endif %}">My Transactions</a>
+                    <a href="/portfolio" class="sidebar-link {% if active_page == 'portfolio' %}active{% endif %}">Portfolio</a>
+                    <a href="/shop/manage" class="sidebar-link {% if active_page == 'shop' %}active{% endif %}">My Shop</a>
+                    <a href="/loans/mine" class="sidebar-link {% if active_page == 'loans' %}active{% endif %}">Loans</a>
                     {% if user_nation %}
-                    <a href="/banks/nation/{{ user_nation.id }}" {% if active_page == 'banks' %}class="active"{% endif %}>Banks</a>
+                    <a href="/banks/nation/{{ user_nation.id }}" class="sidebar-link {% if active_page == 'banks' %}active{% endif %}">Banks</a>
                     {% endif %}
-                    <a href="/loans/mine" {% if active_page == 'loans' %}class="active"{% endif %}>Loans</a>
-                    <a href="/docs" {% if active_page == 'docs' %}class="active"{% endif %}>Docs</a>
-                    <a href="/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
+                </div>
+                {% endif %}
 
-                    {% if user_led_nation %}
-                        <span class="nav-divider" data-label="My Nation"></span>
-                        <a href="/nation/treasury" {% if active_page == 'treasury' %}class="active"{% endif %}>Treasury</a>
-                        <a href="/nation/distribute" {% if active_page == 'distribute' %}class="active"{% endif %}>Distribute</a>
-                        <a href="/nation/members" {% if active_page == 'members' %}class="active"{% endif %}>Members</a>
-                        <a href="/nation/shops/pending" {% if active_page == 'pending_shops' %}class="active"{% endif %}>Pending Shops</a>
-                    {% endif %}
+                {% if user_led_nation %}
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">My Nation</div>
+                    <a href="/nation/treasury" class="sidebar-link {% if active_page == 'treasury' %}active{% endif %}">Treasury</a>
+                    <a href="/nation/distribute" class="sidebar-link {% if active_page == 'distribute' %}active{% endif %}">Distribute</a>
+                    <a href="/nation/members" class="sidebar-link {% if active_page == 'members' %}active{% endif %}">Members</a>
+                    <a href="/nation/shops/pending" class="sidebar-link {% if active_page == 'pending_shops' %}active{% endif %}">Pending Shops</a>
+                    <a href="/nation/settings" class="sidebar-link {% if active_page == 'nation' %}active{% endif %}">Nation Settings</a>
+                </div>
+                {% endif %}
 
-                    {% if user.role == 'world_mint' %}
-                        <span class="nav-divider" data-label="Admin"></span>
-                        <a href="/mint" {% if active_page == 'mint' %}class="active"{% endif %}>Mint</a>
-                    {% endif %}
+                {% if user and user.role == 'world_mint' %}
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">Admin</div>
+                    <a href="/mint" class="sidebar-link {% if active_page == 'mint' %}active{% endif %}">Mint Console</a>
+                </div>
+                {% endif %}
+            </nav>
 
-                    <span class="nav-divider" data-label="Session"></span>
-                    <form action="/logout" method="POST" class="logout-form" style="display:inline;">
-                        <button type="submit" class="nav-logout logout-btn">Logout</button>
+            <div class="sidebar-account">
+                {% if user %}
+                    <div class="sidebar-account-name" title="{{ user.username }}">{{ user.display_name or user.username }}</div>
+                    <a href="/settings" class="sidebar-link {% if active_page == 'settings' %}active{% endif %}">Settings</a>
+                    <form action="/logout" method="POST" class="logout-form">
+                        <button type="submit" class="sidebar-link logout-btn">Logout</button>
                     </form>
                 {% else %}
-                    <span class="nav-divider"></span>
-                    <a href="/login" {% if active_page == 'login' %}class="active"{% endif %}>Login</a>
-                    <a href="/register" {% if active_page == 'register' %}class="active"{% endif %}>Register</a>
+                    <a href="/login" class="sidebar-link {% if active_page == 'login' %}active{% endif %}">Login</a>
+                    <a href="/register" class="sidebar-link sidebar-link-cta {% if active_page == 'register' %}active{% endif %}">Register</a>
                 {% endif %}
             </div>
-        </div>
-    </nav>
+        </aside>
 
-    <!-- Optional breadcrumbs -->
-    {% block breadcrumb %}{% endblock %}
+        <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
 
-    <!-- Flash Messages -->
-    <div class="page-content">
-        <div class="container">
-            <div id="flash-container">
-                {% if flash_success %}
-                <div class="alert alert-success" data-auto-dismiss="true">
-                    <span>{{ flash_success }}</span>
-                    <button class="alert-close" aria-label="Close">&times;</button>
+        <!-- Main content column -->
+        <div class="app-main">
+            <!-- Optional breadcrumbs -->
+            {% block breadcrumb %}{% endblock %}
+
+            <div class="page-content">
+                <div class="container">
+                    <div id="flash-container">
+                        {% if flash_success %}
+                        <div class="alert alert-success" data-auto-dismiss="true">
+                            <span>{{ flash_success }}</span>
+                            <button class="alert-close" aria-label="Close">&times;</button>
+                        </div>
+                        {% endif %}
+                        {% if flash_error %}
+                        <div class="alert alert-error" data-auto-dismiss="true">
+                            <span>{{ flash_error }}</span>
+                            <button class="alert-close" aria-label="Close">&times;</button>
+                        </div>
+                        {% endif %}
+                        {% if flash_info %}
+                        <div class="alert alert-info" data-auto-dismiss="true">
+                            <span>{{ flash_info }}</span>
+                            <button class="alert-close" aria-label="Close">&times;</button>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    {% block content %}{% endblock %}
                 </div>
-                {% endif %}
-                {% if flash_error %}
-                <div class="alert alert-error" data-auto-dismiss="true">
-                    <span>{{ flash_error }}</span>
-                    <button class="alert-close" aria-label="Close">&times;</button>
-                </div>
-                {% endif %}
-                {% if flash_info %}
-                <div class="alert alert-info" data-auto-dismiss="true">
-                    <span>{{ flash_info }}</span>
-                    <button class="alert-close" aria-label="Close">&times;</button>
-                </div>
-                {% endif %}
             </div>
 
-            {% block content %}{% endblock %}
+            <!-- Footer -->
+            <footer class="footer">
+                <div class="container">
+                    Travelers Exchange &mdash; Currency: {{ settings.CURRENCY_NAME }} ({{ settings.CURRENCY_SHORT }}) &mdash; &copy; {{ current_year or 2026 }}
+                </div>
+            </footer>
         </div>
     </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            Travelers Exchange &mdash; Currency: {{ settings.CURRENCY_NAME }} ({{ settings.CURRENCY_SHORT }}) &mdash; &copy; {{ current_year or 2026 }}
-        </div>
-    </footer>
 
     <script src="/static/js/app.js"></script>
     {% block scripts %}{% endblock %}

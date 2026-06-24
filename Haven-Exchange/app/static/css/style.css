@@ -121,6 +121,8 @@ ul, ol {
 
     /* Layout */
     --nav-height: 60px;
+    --sidebar-width: 240px;
+    --topbar-height: 56px;
     --max-width: 1200px;
     --max-width-narrow: 640px;
 
@@ -201,7 +203,7 @@ hr {
 
 .page-content {
     flex: 1;
-    padding-top: calc(var(--nav-height) + var(--space-xl));
+    padding-top: var(--space-xl);
     padding-bottom: var(--space-3xl);
 }
 
@@ -2108,4 +2110,256 @@ textarea {
         color: var(--text-muted);
         font-weight: 600;
     }
+}
+
+/* =========================================================================
+   App Shell — persistent left sidebar navigation
+   ========================================================================= */
+.app-shell {
+    min-height: 100vh;
+}
+
+/* ----- Mobile top bar (hidden on desktop) ----- */
+.topbar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--topbar-height);
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 0 var(--space-md);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-primary);
+    z-index: 1001;
+}
+
+.topbar-brand {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--accent) !important;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.topbar-brand .brand-icon { font-size: 1.25rem; }
+
+/* ----- Sidebar ----- */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-width);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-primary);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 1000;
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-lg) var(--space-md);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.sidebar-brand:hover { color: var(--accent-hover) !important; }
+.sidebar-brand .brand-icon { font-size: 1.35rem; }
+
+.sidebar-nav {
+    flex: 1;
+    padding: var(--space-md) var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.sidebar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-group-label {
+    padding: var(--space-xs) var(--space-md);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 700;
+}
+
+.sidebar-link {
+    display: block;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.3;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.sidebar-link.active {
+    color: var(--accent);
+    background: var(--accent-subtle);
+    font-weight: 600;
+}
+
+/* ----- Account footer (pinned to bottom of the rail) ----- */
+.sidebar-account {
+    padding: var(--space-sm) var(--space-sm) var(--space-md);
+    border-top: 1px solid var(--border-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-account-name {
+    padding: var(--space-xs) var(--space-md) var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-account .logout-form { margin: 0; }
+
+.sidebar-account .logout-btn {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+}
+
+.sidebar-link-cta {
+    color: var(--accent);
+    border: 1px solid var(--border-primary);
+    margin-top: var(--space-xs);
+    text-align: center;
+}
+
+.sidebar-link-cta:hover {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+}
+
+/* ----- Backdrop (mobile drawer) ----- */
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 999;
+}
+
+.sidebar-backdrop.open { display: block; }
+
+/* ----- Main content column ----- */
+.app-main {
+    margin-left: var(--sidebar-width);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-main .footer { margin-top: auto; }
+
+/* ----- Mobile: collapse sidebar into an off-canvas drawer ----- */
+@media (max-width: 768px) {
+    .topbar { display: flex; }
+
+    .sidebar {
+        width: 80vw;
+        max-width: 300px;
+        transform: translateX(-100%);
+        transition: transform var(--transition-normal);
+        box-shadow: var(--shadow-lg);
+        z-index: 1100;
+    }
+
+    .sidebar.open { transform: translateX(0); }
+
+    .app-main {
+        margin-left: 0;
+        padding-top: var(--topbar-height);
+    }
+}
+
+/* ----- Dashboard quick-action tiles ----- */
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-md);
+}
+
+.quick-action {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-md);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    transition: all var(--transition-fast);
+}
+
+.quick-action:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.quick-action-title { color: var(--text-primary); font-weight: 600; }
+.quick-action-sub { color: var(--text-muted); font-size: 0.8rem; }
+
+/* ----- Mint console tab bar ----- */
+.console-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    border-bottom: 1px solid var(--border-primary);
+    margin-bottom: var(--space-xl);
+}
+
+.console-tab {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.9rem;
+    border-bottom: 2px solid transparent;
+    transition: all var(--transition-fast);
+}
+
+.console-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.console-tab.active {
+    color: var(--accent);
+    background: var(--accent-subtle);
+    border-bottom-color: var(--accent);
 }

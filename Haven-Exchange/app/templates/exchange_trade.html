@@ -6,7 +6,7 @@
 <div class="breadcrumb"><div class="breadcrumb-inner">
     <a href="/dashboard">Dashboard</a>
     <span class="crumb-sep">›</span>
-    <a href="/exchange">Exchange</a>
+    <a href="/exchange">Stock Market</a>
     <span class="crumb-sep">›</span>
     <a href="/exchange/{{ stock.ticker }}">{{ stock.ticker }}</a>
     <span class="crumb-sep">›</span>
@@ -113,6 +113,6 @@
 
 <div class="btn-group" style="margin-top: var(--space-lg);">
     <a href="/exchange/{{ stock.ticker }}" class="btn btn-secondary">Back to {{ stock.ticker }}</a>
-    <a href="/exchange" class="btn btn-secondary">Back to Exchange</a>
+    <a href="/exchange" class="btn btn-secondary">Back to Stock Market</a>
 </div>
 {% endblock %}

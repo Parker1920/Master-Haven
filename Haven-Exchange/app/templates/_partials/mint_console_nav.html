@@ -1,0 +1,11 @@
+{# World Mint console tab bar — included at the top of every /mint page so the
+   admin surface reads as one console instead of scattered pages with one-way
+   "Back to Mint Dashboard" links. Active tab is derived from the request path
+   so no route changes are needed. #}
+<div class="console-tabs">
+    <a href="/mint" class="console-tab {% if request.url.path == '/mint' %}active{% endif %}">Overview</a>
+    <a href="/mint/nations" class="console-tab {% if request.url.path.startswith('/mint/nations') %}active{% endif %}">Nation Directory</a>
+    <a href="/mint/shops/pending" class="console-tab {% if request.url.path.startswith('/mint/shops') %}active{% endif %}">Pending Shops{% if pending_shops_count and pending_shops_count > 0 %} ({{ pending_shops_count }}){% endif %}</a>
+    <a href="/mint/stats" class="console-tab {% if request.url.path.startswith('/mint/stats') %}active{% endif %}">Statistics</a>
+    <a href="/mint/settings" class="console-tab {% if request.url.path.startswith('/mint/settings') %}active{% endif %}">Settings</a>
+</div>

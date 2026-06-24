@@ -2,6 +2,16 @@
 
 {% block title %}{{ stock.ticker }} — Travelers Exchange{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb"><div class="breadcrumb-inner">
+    <a href="/dashboard">Dashboard</a>
+    <span class="crumb-sep">›</span>
+    <a href="/exchange">Stock Market</a>
+    <span class="crumb-sep">›</span>
+    <span class="crumb-current">{{ stock.ticker }}</span>
+</div></div>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>
@@ -43,7 +53,7 @@
     {% else %}
         <a href="/login" class="btn btn-primary">Login to Trade</a>
     {% endif %}
-    <a href="/exchange" class="btn btn-secondary">Back to Exchange</a>
+    <a href="/exchange" class="btn btn-secondary">Back to Stock Market</a>
 </div>
 
 <div class="two-col">

@@ -1,10 +1,11 @@
 {# Onboarding banner — included at the top of dashboard.html.
 
-State machine:
-  - logged-in user, new (created_at < 24h) AND no nation_id → full welcome + 3-step checklist
+State machine (state-driven, not time-boxed, so guidance persists until the
+user actually joins a nation — they no longer "miss the window" by returning
+after 24h):
   - has pending nation application → pending banner
-  - no nation, not new → compact "join a nation" prompt
-  - in approved nation → no banner
+  - no nation (any age)           → get-started checklist (dismissible)
+  - in a nation                   → no banner
 #}
 
 {% if user_pending_nation and not user.nation_id %}
@@ -18,29 +19,33 @@ State machine:
         </p>
     </div>
 </div>
-{% elif user and user.nation_id is none and is_new_user %}
-<div class="card" style="margin-bottom: var(--space-lg); border-left: 4px solid var(--accent);">
+{% elif user and user.nation_id is none %}
+<div id="onboarding-banner" class="card" style="margin-bottom: var(--space-lg); border-left: 4px solid var(--accent); position: relative;">
+    <button type="button" id="onboarding-dismiss" class="alert-close" aria-label="Dismiss" style="position:absolute; top:var(--space-sm); right:var(--space-md);">&times;</button>
     <div class="card-body">
-        <h3 style="margin: 0 0 var(--space-sm);">&#128075; Welcome to Travelers Exchange!</h3>
-        <p class="text-muted" style="margin-bottom: var(--space-md);">Here&rsquo;s how to get started:</p>
+        <h3 style="margin: 0 0 var(--space-sm);">&#128075; Get started on Travelers Exchange</h3>
+        <p class="text-muted" style="margin-bottom: var(--space-md);">You&rsquo;re not in a nation yet &mdash; and coin comes from a nation&rsquo;s treasury. Here&rsquo;s how to get going:</p>
         <ol style="margin: 0 0 var(--space-md); padding-left: var(--space-lg); line-height: 1.8;">
-            <li><strong>Find a community.</strong> <a href="/nations">Browse nations</a> already running on the exchange.</li>
+            <li><strong>Find a community.</strong> <a href="/nations">Browse nations</a> already running on the exchange and join one.</li>
             <li><strong>Or start your own.</strong> <a href="/nations/apply">Apply to lead a nation</a> &mdash; the World Mint reviews and approves.</li>
             <li><strong>Read the docs.</strong> <a href="/docs">Learn how the economy, banks, and stocks work</a>.</li>
         </ol>
-    </div>
-</div>
-{% elif user and user.nation_id is none %}
-<div class="card" style="margin-bottom: var(--space-lg);">
-    <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;">
-        <div>
-            <strong>You&rsquo;re not in a nation yet.</strong>
-            <p class="text-muted" style="margin: var(--space-xs) 0 0;">Join an existing nation or apply to lead a new one.</p>
-        </div>
         <div class="btn-group">
             <a href="/nations" class="btn btn-secondary btn-sm">Browse Nations</a>
             <a href="/nations/apply" class="btn btn-primary btn-sm">Apply to lead</a>
         </div>
     </div>
 </div>
+<script>
+(function () {
+    var b = document.getElementById("onboarding-banner");
+    if (!b) return;
+    try { if (localStorage.getItem("tx_onboarding_dismissed") === "1") { b.style.display = "none"; return; } } catch (e) {}
+    var x = document.getElementById("onboarding-dismiss");
+    if (x) x.addEventListener("click", function () {
+        b.style.display = "none";
+        try { localStorage.setItem("tx_onboarding_dismissed", "1"); } catch (e) {}
+    });
+})();
+</script>
 {% endif %}

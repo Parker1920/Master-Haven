@@ -5,6 +5,10 @@
 (function () {
     "use strict";
 
+    // Currency short code, sourced from <body data-currency> so JS never
+    // hardcodes a currency name (it's configurable via settings.CURRENCY_SHORT).
+    var CURRENCY = (document.body && document.body.getAttribute("data-currency")) || "TC";
+
     /* ------------------------------------------------------------------
        Copy to Clipboard
        ------------------------------------------------------------------ */
@@ -316,25 +320,29 @@
        ------------------------------------------------------------------ */
     function initMobileNav() {
         var toggle = document.querySelector(".nav-toggle");
-        var navLinks = document.querySelector(".nav-links");
+        var sidebar = document.getElementById("sidebar");
+        var backdrop = document.getElementById("sidebar-backdrop");
+        if (!toggle || !sidebar) return;
 
-        if (toggle && navLinks) {
-            toggle.addEventListener("click", function () {
-                navLinks.classList.toggle("open");
-                var isOpen = navLinks.classList.contains("open");
-                toggle.setAttribute("aria-expanded", isOpen);
-                toggle.innerHTML = isOpen ? "&times;" : "&#9776;";
-            });
-
-            // Close nav when clicking a link (mobile)
-            navLinks.querySelectorAll("a").forEach(function (link) {
-                link.addEventListener("click", function () {
-                    navLinks.classList.remove("open");
-                    toggle.setAttribute("aria-expanded", "false");
-                    toggle.innerHTML = "&#9776;";
-                });
-            });
+        function setOpen(open) {
+            sidebar.classList.toggle("open", open);
+            if (backdrop) backdrop.classList.toggle("open", open);
+            toggle.setAttribute("aria-expanded", open ? "true" : "false");
+            toggle.innerHTML = open ? "&times;" : "&#9776;";
         }
+
+        toggle.addEventListener("click", function () {
+            setOpen(!sidebar.classList.contains("open"));
+        });
+
+        if (backdrop) {
+            backdrop.addEventListener("click", function () { setOpen(false); });
+        }
+
+        // Close the drawer when a navigation link is tapped (mobile)
+        sidebar.querySelectorAll("a").forEach(function (link) {
+            link.addEventListener("click", function () { setOpen(false); });
+        });
     }
 
     /* ------------------------------------------------------------------
@@ -518,7 +526,7 @@
             var shares = parseInt(input.value, 10) || 0;
             if (shares < 1) shares = 1;
             var total = price * shares;
-            totalEl.textContent = total.toLocaleString() + " HM";
+            totalEl.textContent = total.toLocaleString() + " " + CURRENCY;
         }
 
         if (buyInput && buyTotal) {
@@ -545,7 +553,7 @@
             var shares = parseInt(sharesInput.value, 10) || 0;
             if (shares < 100) shares = 100;
             var total = 5 * shares;
-            totalEl.textContent = total.toLocaleString() + " HM";
+            totalEl.textContent = total.toLocaleString() + " " + CURRENCY;
         });
     }
 
