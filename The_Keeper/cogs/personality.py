@@ -80,8 +80,8 @@ class PersonalityCog(commands.Cog):
                 await target.send(DWEEB_IMAGE_URL)
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
-
-    # -------------------- Handle active session --------------------
+                
+# -------------------- Handle active session ------
     async def handle_session(self, message):
         user_id = message.author.id
         session = active_sessions.get(user_id)
@@ -93,38 +93,40 @@ class PersonalityCog(commands.Cog):
             active_sessions.pop(user_id, None)
             return
 
-        content = message.content.lower().strip()
-        valid_command = False
-
-        # ---- tell ----
-        if content.startswith("tell "):
+        content = message.content.strip()
+        
+        if content.lower().startswith("tell "):
             await self.handle_tell(message)
-            valid_command = True
-        # ---- stats / map / best ----
-        elif content in ["stats", "show me the stars"] or content.startswith("best"):
-            stats_cog = self.bot.get_cog("Haven_statsCog")
-            if stats_cog:
-                ctx = await self.bot.get_context(message)
-                if content == "stats":
-                    await stats_cog.stats(ctx)
-                elif content == "show me the stars":
-                    await stats_cog.map_command(ctx)
-                elif content.startswith("best"):
-                    parts = message.content.split()
-                    count = 10
-                    community = None
-                    if len(parts) >= 2 and parts[1].isdigit():
-                        count = int(parts[1])
-                        if len(parts) >= 3:
-                            community = parts[2].upper()
-                    elif len(parts) >= 2:
-                        community = parts[1].upper()
-                    await stats_cog.best(ctx, count=count, community=community)
-            else:
-                await message.channel.send("Haven stats commands are currently unavailable.")
-            valid_command = True
+            active_sessions.pop(user_id, None)
+            return
 
-        # ---- leaderboard (featured) ----
+        command_name = content.split()[0].lower()
+        command = self.bot.get_command(command_name)
+
+        if command:
+            ctx = await self.bot.get_context(message)
+            ctx.command = command
+            
+            ctx.view = discord.ext.commands.view.StringView(content)
+            ctx.view.skip_string(command_name) 
+            
+            try:
+                await command.invoke(ctx)
+                active_sessions.pop(user_id, None)
+                return
+            except Exception as e:
+                await message.channel.send(f"An error occurred executing that command.")
+                active_sessions.pop(user_id, None)
+                return
+
+        session["fails"] += 1
+        fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
+        await message.channel.send(fail_responses[fail_index])
+
+        if session["fails"] >= MAX_FAILS:
+            active_sessions.pop(user_id, None)
+
+
         elif "leaderboard" in content:
             FEATURED_CHANNEL_ID = int(os.getenv("FEATURED_CHANNEL_ID", "0"))
             if message.channel.id != FEATURED_CHANNEL_ID:
@@ -149,12 +151,10 @@ class PersonalityCog(commands.Cog):
                 await message.channel.send("The archives are unreachable.")
             valid_command = True
 
-        # ---- End session if valid ----
         if valid_command:
             active_sessions.pop(user_id, None)
             return
 
-        # ---- Fail handling ----
         session["fails"] += 1
         fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
         await message.channel.send(fail_responses[fail_index])
