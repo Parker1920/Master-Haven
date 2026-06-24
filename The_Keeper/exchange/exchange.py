@@ -59,11 +59,9 @@ class ExchangeAPIClient:
         return await self._request("GET", "/api/wallet", discord_user_id=discord_user_id)
 
     async def list_nations(self) -> list:
-        # Fixed: Moved down from the exception class to the Client class
         return await self._request("GET", "/api/nations") 
 
     async def join_nation(self, discord_user_id: str, nation_id: int) -> Dict[str, Any]:
-        # Fixed: Moved down from the exception class to the Client class
         return await self._request(
             "POST",
             f"/api/nations/{nation_id}/join",
