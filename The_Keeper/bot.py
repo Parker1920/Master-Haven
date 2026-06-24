@@ -180,7 +180,7 @@ COGS = [
     "cmds.list",
     "cmds.slash",
     "cmds.voyager",    
-    "cmds.ekimoney"
+    "cmds.ekimoney",
     "setup",
 ]
 
