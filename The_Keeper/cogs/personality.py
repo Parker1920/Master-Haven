@@ -149,11 +149,17 @@ class PersonalityCog(commands.Cog):
                 await community_cog.show_logs(ctx, search=search_term)
             else:
                 await message.channel.send("The archives are unreachable.")
+                
             valid_command = True
-
-        if valid_command:
-            active_sessions.pop(user_id, None)
-            return
+            
+            try:
+                await command.invoke(ctx)
+                active_sessions.pop(user_id, None)
+                return
+            except Exception as e:
+                await message.channel.send(f"An error occurred executing that command.")
+                active_sessions.pop(user_id, None)
+                return
 
         session["fails"] += 1
         fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
