@@ -186,12 +186,17 @@ async def create_discovery(
             if sys_row:
                 system_name = sys_row['name']
 
+        # Capture the planet/moon NAME (the relink key that survives id churn),
+        # falling back to a client-supplied name when the id can't be resolved,
+        # and mirror it into the JSON blob (json.dumps(payload) below).
         planet_name = None
         if payload.get('planet_id'):
             cursor.execute('SELECT name FROM planets WHERE id = ?', (payload['planet_id'],))
             p_row = cursor.fetchone()
             if p_row:
                 planet_name = p_row['name']
+        if not planet_name:
+            planet_name = (payload.get('planet_name') or '').strip() or None
 
         moon_name = None
         if payload.get('moon_id'):
@@ -199,6 +204,11 @@ async def create_discovery(
             m_row = cursor.fetchone()
             if m_row:
                 moon_name = m_row['name']
+        if not moon_name:
+            moon_name = (payload.get('moon_name') or '').strip() or None
+
+        payload['planet_name'] = planet_name
+        payload['moon_name'] = moon_name
 
         api_location_type = payload.get('location_type') or 'space'
         api_lat, api_lng = normalize_discovery_coords(
@@ -781,12 +791,17 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             if str(tgt['system_id']) != str(system_id):
                 raise HTTPException(status_code=400, detail='An edit cannot move a discovery to a different system.')
 
+        # Capture the planet/moon NAME (the relink key that survives id churn),
+        # falling back to a client-supplied name when the id can't be resolved,
+        # and mirror it into the JSON blob (json.dumps(payload) below).
         planet_name = None
         if payload.get('planet_id'):
             cursor.execute('SELECT name FROM planets WHERE id = ?', (payload['planet_id'],))
             p_row = cursor.fetchone()
             if p_row:
                 planet_name = p_row['name']
+        if not planet_name:
+            planet_name = (payload.get('planet_name') or '').strip() or None
 
         moon_name = None
         if payload.get('moon_id'):
@@ -794,6 +809,11 @@ async def submit_discovery(payload: dict, request: Request, session: Optional[st
             m_row = cursor.fetchone()
             if m_row:
                 moon_name = m_row['name']
+        if not moon_name:
+            moon_name = (payload.get('moon_name') or '').strip() or None
+
+        payload['planet_name'] = planet_name
+        payload['moon_name'] = moon_name
 
         # Surface coordinates — only meaningful for planet/moon discoveries.
         # Normalize + range-check, null them for space discoveries, and write
@@ -1207,13 +1227,48 @@ def _match_body_by_name(cursor, system_id, kind, location_name):
     return None if ambiguous else best_id
 
 
-def _resolve_discovery_links(cursor, system_id, location_type, raw_planet_id, raw_moon_id, location_name, pending_id):
+def _match_body_by_exact_name(cursor, system_id, kind, name):
+    """Recover a dropped planet/moon link by an EXACT (case-insensitive) match of
+    the body's own name against the system's CURRENT bodies.
+
+    `name` is the body name denormalized onto the pending row at submit time
+    (pending_discoveries.planet_name / moon_name) — captured while the original
+    id was still live, so it survives a later planet-id churn (DELETE+INSERT
+    rebuild → new ids) that the raw id can't. This is the primary recovery key:
+    a discovery picked from a planet/moon dropdown carries only an id and no
+    free-text location_name, so the location_name substring heuristic has nothing
+    to match — the captured name is the only thing that does. Returns a live id,
+    or None when there's no match or the name is ambiguous (two current bodies
+    share it — leave it unlinked rather than guess). `kind` is 'planets'/'moons'.
+    """
+    if not name or not system_id:
+        return None
+    target = name.strip().lower()
+    if not target:
+        return None
+    if kind == 'moons':
+        cursor.execute(
+            'SELECT m.id AS id, m.name AS name FROM moons m '
+            'JOIN planets p ON p.id = m.planet_id WHERE p.system_id = ?',
+            (system_id,),
+        )
+    else:
+        cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+    matches = [row['id'] for row in cursor.fetchall() if (row['name'] or '').strip().lower() == target]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _resolve_discovery_links(cursor, system_id, location_type, raw_planet_id, raw_moon_id,
+                             location_name, pending_id, planet_name=None, moon_name=None):
     """Resolve a discovery's planet/moon links for insertion against live FKs.
 
     1. Keep stored ids that still reference a live row.
     2. For a stored id that's gone (planet/moon rebuilt with a new id — common
-       for old pending rows), best-effort re-link to the correct CURRENT body by
-       matching its name inside `location_name` (see _match_body_by_name).
+       for old pending rows), best-effort re-link to the correct CURRENT body by:
+         a. an EXACT match of the body name captured at submit time
+            (pending_discoveries.planet_name / moon_name — survives id churn even
+            when the discovery was picked from a dropdown with no location_name), then
+         b. matching the name inside the free-text `location_name` (see _match_body_by_name).
     3. If still unresolved, null it so the FK can't fail — the discovery is
        approved at the system level ("unlinked"), with its location_name intact.
     Returns (planet_id, moon_id).
@@ -1222,16 +1277,18 @@ def _resolve_discovery_links(cursor, system_id, location_type, raw_planet_id, ra
     moon_id = _existing_link_id(cursor, 'moons', raw_moon_id)
 
     if location_type != 'space' and system_id:
-        if raw_planet_id and planet_id is None:
-            recovered = _match_body_by_name(cursor, system_id, 'planets', location_name)
+        if planet_id is None and (raw_planet_id or planet_name):
+            recovered = (_match_body_by_exact_name(cursor, system_id, 'planets', planet_name)
+                         or _match_body_by_name(cursor, system_id, 'planets', location_name))
             if recovered is not None:
                 planet_id = recovered
                 logger.info(
                     f"Discovery approve (pending #{pending_id}): stale planet_id "
                     f"{raw_planet_id} re-linked to live planet {recovered} by name."
                 )
-        if raw_moon_id and moon_id is None:
-            recovered = _match_body_by_name(cursor, system_id, 'moons', location_name)
+        if moon_id is None and (raw_moon_id or moon_name):
+            recovered = (_match_body_by_exact_name(cursor, system_id, 'moons', moon_name)
+                         or _match_body_by_name(cursor, system_id, 'moons', location_name))
             if recovered is not None:
                 moon_id = recovered
                 logger.info(
@@ -1331,6 +1388,8 @@ def _apply_discovery_approval(cursor, submission, session_data):
         cursor, link_system_id, location_type,
         discovery_data.get('planet_id'), discovery_data.get('moon_id'),
         discovery_data.get('location_name') or '', submission.get('id'),
+        planet_name=submission.get('planet_name') or discovery_data.get('planet_name'),
+        moon_name=submission.get('moon_name') or discovery_data.get('moon_name'),
     )
 
     if is_edit:
