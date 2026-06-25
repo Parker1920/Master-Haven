@@ -109,7 +109,7 @@ from db import (
     parse_station_data, add_activity_log,
     get_system_glyph, find_matching_system, find_matching_pending_system,
     build_mismatch_flags, merge_system_data,
-    snapshot_child_name_maps, relink_discoveries_after_rebuild,
+    snapshot_child_name_maps, capture_discovery_links, restore_discovery_links,
     set_base_fields,
     PHOTOS_DIR, LOGS_DIR,
 )
@@ -2899,6 +2899,11 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # system's discoveries to the rebuilt rows afterward — otherwise the new
             # primary keys orphan every linked discovery (the Mabaya "tags wiped" bug).
             _disc_planet_old, _disc_moon_old = snapshot_child_name_maps(cursor, sys_id)
+            # Capture discovery->body links BY NAME before the delete. The
+            # discoveries FKs are ON DELETE SET NULL, so the DELETE below nulls
+            # every linked discovery; restore_discovery_links() re-points them by
+            # name after the rebuild (the old id->id relink was a no-op under FK-on).
+            _disc_links = capture_discovery_links(cursor, sys_id)
             cursor.execute('DELETE FROM planets WHERE system_id = ?', (sys_id,))
             # Delete existing space station
             cursor.execute('DELETE FROM space_stations WHERE system_id = ?', (sys_id,))
@@ -2966,10 +2971,18 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             logger.info(f"Created new system {sys_id}, discovered_by: {editor_username}")
 
         # Insert planets with ALL fields (including weather, resources, hazards from Haven Extractor)
+        # Fix B: reuse the pre-delete planet/moon ids on re-insert so an edit
+        # preserves planet/moon primary keys instead of churning them. Pop-on-use
+        # from a copy so a duplicate body name can't reuse one id twice, and the
+        # snapshot maps stay intact. New systems / new bodies get a NULL id, which
+        # AUTOINCREMENT auto-assigns. The old ids are free (rows deleted above).
+        _reuse_planets = dict(_disc_planet_old) if existing else {}
+        _reuse_moons = dict(_disc_moon_old) if existing else {}
         for planet in payload.get('planets', []):
+            _reuse_pid = _reuse_planets.pop((planet.get('name') or '').strip().lower(), None)
             cursor.execute('''
                 INSERT INTO planets (
-                    system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
+                    id, system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
                     fauna_count, flora_count, has_water, materials, base_location, photo, notes, description,
                     biome, biome_subtype, planet_size, planet_index, is_moon,
                     storm_frequency, weather_intensity, building_density,
@@ -2982,8 +2995,9 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                     estimated_age, core_element, lore_notes, root_structure, nutrient_source
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
+                _reuse_pid,
                 sys_id,
                 planet.get('name', 'Unknown'),
                 planet.get('x', 0),
@@ -3049,7 +3063,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 planet.get('root_structure'),
                 planet.get('nutrient_source')
             ))
-            planet_id = cursor.lastrowid
+            planet_id = _reuse_pid if _reuse_pid is not None else cursor.lastrowid
             set_base_fields(cursor, 'planets', planet_id, planet)
 
             # Insert moons with ALL fields.
@@ -3059,16 +3073,19 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
             # rare_resource / plant_resource, which silently dropped moon biome
             # data on every partner direct-create.
             for moon in planet.get('moons', []):
+                _reuse_mid = _reuse_moons.pop(
+                    ((planet.get('name') or '').strip().lower(), (moon.get('name') or '').strip().lower()), None)
                 cursor.execute('''
-                    INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                    INSERT INTO moons (id, planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                         has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                         ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                         is_bubble, is_floating_islands,
                         swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                         biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                         estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
+                    _reuse_mid,
                     planet_id,
                     moon.get('name', 'Unknown'),
                     moon.get('orbit_radius', 0.5),
@@ -3116,7 +3133,7 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                     moon.get('root_structure'),
                     moon.get('nutrient_source')
                 ))
-                set_base_fields(cursor, 'moons', cursor.lastrowid, moon)
+                set_base_fields(cursor, 'moons', _reuse_mid if _reuse_mid is not None else cursor.lastrowid, moon)
 
         # Insert space station if present
         if payload.get('space_station'):
@@ -3205,12 +3222,12 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
                 logger.warning(f"Admin region direct-write failed: {region_err}")
 
         # Re-point discoveries to the rebuilt planets/moons (edit path only).
-        # The planets/moons were deleted and re-inserted with new ids above, so
-        # match them back to their discoveries by name. Without this, every save
-        # of a system with discoveries orphans them into "in space".
+        # The FK cascade nulled every linked discovery on the DELETE above;
+        # restore_discovery_links re-points them by the name captured pre-delete
+        # (id-reuse keeps the ids stable, so this resolves to the same rows).
+        # Without this, every save of a system with discoveries orphaned them.
         if existing:
-            _relinked = relink_discoveries_after_rebuild(
-                cursor, sys_id, _disc_planet_old, _disc_moon_old)
+            _relinked = restore_discovery_links(cursor, sys_id, _disc_links)
             if _relinked:
                 logger.info(f"Re-pointed {_relinked} discovery link(s) after rebuild of system {sys_id}")
 

@@ -285,6 +285,85 @@ def relink_discoveries_after_rebuild(cursor, system_id, planet_old, moon_old):
     return relinked
 
 
+def capture_discovery_links(cursor, system_id):
+    """Capture each discovery's planet/moon link BY NAME, taken BEFORE a
+    delete-and-reinsert of the system's planets/moons.
+
+    This replaces the id->id `relink_discoveries_after_rebuild` for the rebuild
+    paths, which is a no-op under `PRAGMA foreign_keys=ON`: the discoveries FKs
+    are `ON DELETE SET NULL`, so `DELETE FROM planets` immediately nulls every
+    `discoveries.planet_id`/`moon_id` on the system — relink then finds nothing
+    to match against the old id. Capturing the *name* here (while the link is
+    still intact) lets `restore_discovery_links()` re-point by name AFTER the
+    rebuild, surviving the cascade.
+
+    Returns a list of `(discovery_id, planet_key, moon_key)` where planet_key is
+    the lowercased planet name (or None) and moon_key is
+    `(parent_planet_lower, moon_lower)` (or None). Both names are captured
+    independently so a moon discovery keeps both its parent-planet and moon links.
+    """
+    cursor.execute('''
+        SELECT d.id,
+               p.name  AS pname,
+               m.name  AS mname,
+               mp.name AS mp_name
+        FROM discoveries d
+        LEFT JOIN planets p  ON d.planet_id = p.id
+        LEFT JOIN moons   m  ON d.moon_id   = m.id
+        LEFT JOIN planets mp ON m.planet_id = mp.id
+        WHERE d.system_id = ?
+    ''', (system_id,))
+    captured = []
+    for did, pname, mname, mp_name in cursor.fetchall():
+        pkey = pname.strip().lower() if pname and pname.strip() else None
+        mkey = None
+        if mname and mname.strip():
+            mkey = ((mp_name or '').strip().lower(), mname.strip().lower())
+        if pkey or mkey:
+            captured.append((did, pkey, mkey))
+    return captured
+
+
+def restore_discovery_links(cursor, system_id, captured):
+    """Re-point captured discovery links to the rebuilt planets/moons by name.
+
+    Pair with `capture_discovery_links()` taken BEFORE the delete. Cascade-proof:
+    works even though `DELETE FROM planets` nulled the links, because the target
+    is resolved from the name captured pre-delete, not the (now-null) live row.
+    A planet/moon that was renamed or removed in the edit simply stays unlinked
+    (no current name match). Returns the number of discovery rows re-pointed.
+    """
+    if not captured:
+        return 0
+    cursor.execute('SELECT id, name FROM planets WHERE system_id = ?', (system_id,))
+    planet_new, new_pid_to_name = {}, {}
+    for pid, pname in cursor.fetchall():
+        new_pid_to_name[pid] = (pname or '')
+        if pname and pname.strip():
+            planet_new[pname.strip().lower()] = pid
+    moon_new = {}
+    if new_pid_to_name:
+        qmarks = ','.join('?' * len(new_pid_to_name))
+        cursor.execute(
+            f'SELECT id, name, planet_id FROM moons WHERE planet_id IN ({qmarks})',
+            list(new_pid_to_name.keys()))
+        for mid, mname, parent_pid in cursor.fetchall():
+            if mname and mname.strip():
+                parent = (new_pid_to_name.get(parent_pid) or '').strip().lower()
+                moon_new[(parent, mname.strip().lower())] = mid
+    restored = 0
+    for did, pkey, mkey in captured:
+        new_pid = planet_new.get(pkey) if pkey else None
+        new_mid = moon_new.get(mkey) if mkey else None
+        if new_pid is None and new_mid is None:
+            continue
+        cursor.execute(
+            'UPDATE discoveries SET planet_id = ?, moon_id = ? WHERE id = ?',
+            (new_pid, new_mid, did))
+        restored += cursor.rowcount
+    return restored
+
+
 def set_base_fields(cursor, table: str, row_id, body: dict) -> None:
     """Persist a planet/moon's base location + lat/long after its INSERT.
 

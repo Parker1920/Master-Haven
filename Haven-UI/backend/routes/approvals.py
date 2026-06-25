@@ -30,7 +30,8 @@ from db import (
     merge_system_data,
     get_system_glyph,
     snapshot_child_name_maps,
-    relink_discoveries_after_rebuild,
+    capture_discovery_links,
+    restore_discovery_links,
     set_base_fields,
 )
 from glyph_decoder import (
@@ -2404,6 +2405,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                 # Pre-delete planet/moon name->id snapshot (populated only on the
                 # edit path, where planets are rebuilt) so discovery links survive.
                 _batch_planet_old, _batch_moon_old = {}, {}
+                _batch_links = []
 
                 if is_edit:
                     # Update contributors list - add edit entry
@@ -2478,6 +2480,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                     # links can be re-pointed to the rebuilt rows (otherwise the
                     # new primary keys orphan every linked discovery).
                     _batch_planet_old, _batch_moon_old = snapshot_child_name_maps(cursor, system_id)
+                    # Capture discovery->body links BY NAME before the delete (the
+                    # FK cascade nulls them); restored by name after the rebuild.
+                    _batch_links = capture_discovery_links(cursor, system_id)
                     # Delete existing planets, moons, and space station
                     cursor.execute('SELECT id FROM planets WHERE system_id = ?', (system_id,))
                     planet_ids = [row[0] for row in cursor.fetchall()]
@@ -2552,15 +2557,20 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         1 if system_data.get('no_space_station') else 0,
                     ))
 
-                # Insert planets
+                # Insert planets. Fix B: reuse pre-delete planet/moon ids so an
+                # edit preserves primary keys instead of churning them (pop-on-use
+                # from a copy; new bodies get NULL id -> AUTOINCREMENT assigns).
+                _reuse_planets = dict(_batch_planet_old)
+                _reuse_moons = dict(_batch_moon_old)
                 for planet in system_data.get('planets', []):
                     sentinel_val = planet.get('sentinel') or planet.get('sentinel_level', 'None')
                     fauna_val = planet.get('fauna') or planet.get('fauna_level', 'N/A')
                     flora_val = planet.get('flora') or planet.get('flora_level', 'N/A')
+                    _reuse_pid = _reuse_planets.pop((planet.get('name') or '').strip().lower(), None)
 
                     cursor.execute('''
                         INSERT INTO planets (
-                            system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
+                            id, system_id, name, x, y, z, climate, weather, sentinel, fauna, flora,
                             fauna_count, flora_count, has_water, materials, base_location, photo, notes, description,
                             biome, biome_subtype, planet_size, planet_index, is_moon,
                             storm_frequency, weather_intensity, building_density,
@@ -2573,8 +2583,9 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                             estimated_age, core_element, lore_notes, root_structure, nutrient_source
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
+                        _reuse_pid,
                         system_id,
                         planet.get('name'),
                         planet.get('x', 0),
@@ -2636,20 +2647,23 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                         planet.get('root_structure'),
                         planet.get('nutrient_source')
                     ))
-                    planet_id = cursor.lastrowid
+                    planet_id = _reuse_pid if _reuse_pid is not None else cursor.lastrowid
                     set_base_fields(cursor, 'planets', planet_id, planet)
 
                     for moon in planet.get('moons', []):
+                        _reuse_mid = _reuse_moons.pop(
+                            ((planet.get('name') or '').strip().lower(), (moon.get('name') or '').strip().lower()), None)
                         cursor.execute('''
-                            INSERT INTO moons (planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
+                            INSERT INTO moons (id, planet_id, name, orbit_radius, orbit_speed, climate, sentinel, fauna, flora, materials, notes, description, photo,
                                 has_rings, is_dissonant, is_infested, extreme_weather, water_world, vile_brood, exotic_trophy,
                                 ancient_bones, salvageable_scrap, storm_crystals, gravitino_balls, infested, is_gas_giant,
                                 is_bubble, is_floating_islands,
                                 swarm_debris, trash_debris, high_sentinel_activity, aggressive_sentinel_activity,
                                 biome, biome_subtype, weather, planet_size, common_resource, uncommon_resource, rare_resource, plant_resource,
                                 estimated_age, core_element, lore_notes, root_structure, nutrient_source)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
+                            _reuse_mid,
                             planet_id,
                             moon.get('name'),
                             moon.get('orbit_radius', 0.5),
@@ -2696,7 +2710,7 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                             moon.get('root_structure'),
                             moon.get('nutrient_source'),
                         ))
-                        set_base_fields(cursor, 'moons', cursor.lastrowid, moon)
+                        set_base_fields(cursor, 'moons', _reuse_mid if _reuse_mid is not None else cursor.lastrowid, moon)
 
                 # Insert space station if present
                 if system_data.get('space_station'):
@@ -2733,12 +2747,12 @@ def _process_batch_approvals_sync(job_id: str, submission_ids: list, session_sna
                 )
 
                 # Re-point discoveries to the rebuilt planets/moons (edit path only).
-                # Planets/moons were deleted and re-inserted with new ids above, so
-                # match them back by name — otherwise a batch-approved edit orphans
+                # The FK cascade nulled them on the DELETE; restore by the names
+                # captured pre-delete — otherwise a batch-approved edit orphans
                 # every linked discovery into "in space".
                 if is_edit:
-                    _batch_relinked = relink_discoveries_after_rebuild(
-                        cursor, system_id, _batch_planet_old, _batch_moon_old)
+                    _batch_relinked = restore_discovery_links(
+                        cursor, system_id, _batch_links)
                     if _batch_relinked:
                         logger.info(
                             f"Batch job {job_id} submission {submission_id}: "
