@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir \
         aiohttp \
         aiosqlite \
         gspread \
-        google-auth
+        google-auth \
+        httpx
 
 # bot.py hardcodes this path for the .env file; mount the real .env here at runtime.
 RUN mkdir -p /storage/emulated/0/Voyage/The_Keeper

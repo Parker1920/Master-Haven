@@ -18,6 +18,7 @@ from constants import (
     GALAXY_NAMES,
     validate_galaxy,
     validate_reality,
+    normalize_reality,
 )
 from db import (
     get_db_connection,
@@ -45,6 +46,8 @@ from services.completeness import (
     _is_filled,
 )
 from services.restrictions import apply_data_restrictions
+from services.namegen_service import generate_names
+from option_catalog import get_option_catalog
 
 logger = logging.getLogger('control.room')
 
@@ -2463,47 +2466,144 @@ async def api_namegen(glyph: str, galaxy: str = 'Euclid'):
     """Generate procedural system and region names from a glyph code and galaxy.
 
     Public endpoint — used by the Wizard to pre-populate name fields so users
-    can verify the procedural name before submitting.
+    can verify the procedural name before submitting. Delegates to the shared
+    `services.namegen_service` (same logic the extractor + glyph/preview use).
 
     Returns:
         system_name: Procedural system name
         region_name: Procedural region name
     """
-    import json as _json
-    from pathlib import Path as _Path
-
-    if not glyph or len(glyph) != 12:
+    glyph = (glyph or '').strip().upper()
+    if len(glyph) != 12:
         raise HTTPException(status_code=400, detail="glyph must be a 12-character hex string")
-
     try:
-        portal_code = int(glyph, 16)
+        int(glyph, 16)
     except ValueError:
         raise HTTPException(status_code=400, detail="glyph must be valid hexadecimal")
 
-    # Resolve galaxy name to index
-    galaxies_path = _Path(__file__).parent.parent / 'data' / 'galaxies.json'
-    try:
-        with open(galaxies_path) as f:
-            galaxies = _json.load(f)
-        galaxy_to_idx = {v: int(k) for k, v in galaxies.items()}
-    except Exception:
-        galaxy_to_idx = {'Euclid': 0}
-
-    galaxy_idx = galaxy_to_idx.get(galaxy, 0)
-
-    try:
-        from nms_namegen.system import systemName
-        from nms_namegen.region import regionName
-
-        system_name = systemName(portal_code, galaxy_idx)
-        region_name = regionName(portal_code, galaxy_idx)
-
-        return {
-            'system_name': system_name,
-            'region_name': region_name,
-        }
-    except ImportError:
+    system_name, region_name = generate_names(glyph, galaxy)
+    if system_name is None:
+        # Glyph is valid (checked above), so a None result means the
+        # nms_namegen library is unavailable/errored in this build.
         raise HTTPException(status_code=503, detail="Name generation library not available")
+    return {'system_name': system_name, 'region_name': region_name}
+
+
+@router.get('/api/glyph/preview')
+async def api_glyph_preview(
+    glyph: str,
+    galaxy: str = 'Euclid',
+    reality: str = 'Normal',
+    session: Optional[str] = Cookie(None),
+):
+    """One-call preview for a glyph: decoded coords + procedural system/region
+    names + the region's current naming status.
+
+    Public, no auth. Built so the Keeper Discord bot (and any client) can mirror
+    the Wizard's "glyph -> names + region check" flow in a single round-trip
+    instead of calling /api/decode_glyph + /api/namegen + /api/regions/... .
+
+    Response:
+        {
+          "glyph", "galaxy", "reality",
+          "decoded": { "planet", "ssi", "region_x", "region_y", "region_z" },
+          "system_name", "region_name",          # procedural suggestions (may be null)
+          "region_status": {
+            "named": bool, "custom_name": str|null,
+            "pending": bool, "system_count": int
+          }
+        }
+    """
+    glyph = (glyph or '').strip().upper()
+    if len(glyph) != 12:
+        raise HTTPException(status_code=400, detail="glyph must be a 12-character hex string")
+    parts = _decode_glyph_parts(glyph)
+    if parts is None:
+        raise HTTPException(status_code=400, detail="glyph must be valid hexadecimal")
+
+    reality = normalize_reality(reality)
+    galaxy = galaxy or 'Euclid'
+
+    system_name, region_name = generate_names(glyph, galaxy)
+
+    rx, ry, rz = parts['region_x'], parts['region_y'], parts['region_z']
+    region_status = {
+        'named': False, 'custom_name': None, 'pending': False, 'system_count': 0,
+    }
+    session_data = get_session(session)
+    conn = None
+    try:
+        db_path = get_db_path()
+        if db_path.exists():
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT custom_name FROM regions
+                WHERE region_x = ? AND region_y = ? AND region_z = ?
+                  AND reality = ? AND galaxy = ?
+            ''', (rx, ry, rz, reality, galaxy))
+            row = cursor.fetchone()
+            custom_name = row['custom_name'] if row else None
+
+            cursor.execute('''
+                SELECT id, discord_tag FROM systems
+                WHERE region_x = ? AND region_y = ? AND region_z = ?
+                  AND reality = ? AND galaxy = ?
+            ''', (rx, ry, rz, reality, galaxy))
+            systems = [dict(r) for r in cursor.fetchall()]
+            visible = apply_data_restrictions(systems, session_data)
+
+            cursor.execute('''
+                SELECT 1 FROM pending_region_names
+                WHERE region_x = ? AND region_y = ? AND region_z = ?
+                  AND reality = ? AND galaxy = ? AND status = 'pending'
+                LIMIT 1
+            ''', (rx, ry, rz, reality, galaxy))
+            pending = cursor.fetchone() is not None
+
+            region_status = {
+                'named': custom_name is not None,
+                'custom_name': custom_name,
+                'pending': pending,
+                'system_count': len(visible),
+            }
     except Exception as e:
-        logger.error(f"Name generation failed for glyph={glyph} galaxy={galaxy}: {e}")
-        raise HTTPException(status_code=500, detail="Name generation failed")
+        # Region status is best-effort; never fail the whole preview over it.
+        logger.warning(f"glyph preview region lookup failed for {glyph}: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return {
+        'glyph': glyph,
+        'galaxy': galaxy,
+        'reality': reality,
+        'decoded': {
+            'planet': parts['planet'],
+            'ssi': parts['ssi'],
+            'region_x': rx, 'region_y': ry, 'region_z': rz,
+        },
+        'system_name': system_name,
+        'region_name': region_name,
+        'region_status': region_status,
+    }
+
+
+@router.get('/api/option-catalog')
+async def api_option_catalog():
+    """Canonical curated option lists for system submission.
+
+    Returns the searchable adjective lists (biomes, weather, sentinel, flora,
+    fauna, resources, exotic trophies), the system-level enums (star / economy /
+    conflict / lifeform / game-mode / reality), planet sizes, and the planet/moon
+    boolean attribute definitions.
+
+    SINGLE SOURCE OF TRUTH: served straight from src/data/optionCatalog.json,
+    the same file the web wizard reads (via src/data/adjectives.js). Public, no
+    auth. Built for the Keeper Discord bot's slash-command autocomplete, but
+    usable by any client. Cached in-process; small + static.
+    """
+    catalog = get_option_catalog()
+    if not catalog:
+        raise HTTPException(status_code=503, detail="Option catalog unavailable")
+    return catalog

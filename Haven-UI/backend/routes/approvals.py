@@ -62,6 +62,7 @@ from services.completeness import (
 from services.civilizations import civ_scope_filter, user_can_act_for_civ
 from services.dispatch import fire_and_forget
 from services.events import resolve_submission_event_id
+from services.namegen_service import generate_names, looks_like_placeholder_name
 from services.discoveries import (
     _sanitize_discoveries_draft,
     _promote_draft_discoveries,
@@ -3394,6 +3395,21 @@ async def receive_extraction(
         submission_data['conflict_level'] = payload.get('conflict_level', 'Unknown')
         submission_data['dominant_lifeform'] = payload.get('dominant_lifeform', 'Unknown')
 
+    # --- Server-side name safety net (shared services.namegen_service) ---
+    # Some clients (notably the Keeper Discord bot) submit a blank or placeholder
+    # system name ("System_<glyph>" or the Keeper's "[TAG] X#-XXXX"). Replace
+    # those with the real procedural NMS name so the queue/map don't fill with
+    # placeholders. Real client-supplied names and the extractor's own
+    # procedural names are left untouched (looks_like_placeholder_name is tight).
+    # gen_region_name is reused for the deferred region-name proposal below.
+    gen_system_name, gen_region_name = generate_names(glyph_code, submission_data['galaxy'])
+    if gen_system_name and looks_like_placeholder_name(submission_data['name']):
+        logger.info(
+            f"Extraction name safety net: '{submission_data['name']}' -> "
+            f"procedural '{gen_system_name}' for {glyph_code}"
+        )
+        submission_data['name'] = gen_system_name
+
     # Convert planets array
     planets = []
     moons = []
@@ -3657,6 +3673,53 @@ async def receive_extraction(
                 conn.commit()
             except Exception:
                 pass  # Non-critical, don't fail the submission
+
+        # --- Deferred region-name proposal (server-side safety net) ---
+        # Mirror the Wizard's Option B: if this region is genuinely unnamed and
+        # has no pending proposal, queue the procedural region name (or a
+        # client-supplied `proposed_region_name`) for approval. The "one pending
+        # per voxel" check keeps it idempotent, so a parallel client region
+        # submit (e.g. the extractor's own) can't create a duplicate. Never
+        # blocks the system submission.
+        proposed_region = (payload.get('proposed_region_name') or '').strip() or (gen_region_name or '')
+        if proposed_region and region_x is not None:
+            try:
+                cursor.execute('''
+                    SELECT 1 FROM regions
+                    WHERE region_x = ? AND region_y = ? AND region_z = ?
+                      AND reality = ? AND galaxy = ? AND custom_name IS NOT NULL
+                ''', (region_x, region_y, region_z, reality, submission_data['galaxy']))
+                already_named = cursor.fetchone()
+                cursor.execute('''
+                    SELECT 1 FROM pending_region_names
+                    WHERE region_x = ? AND region_y = ? AND region_z = ?
+                      AND reality = ? AND galaxy = ? AND status = 'pending'
+                ''', (region_x, region_y, region_z, reality, submission_data['galaxy']))
+                already_pending = cursor.fetchone()
+                if not already_named and not already_pending:
+                    cursor.execute('''
+                        INSERT INTO pending_region_names
+                        (region_x, region_y, region_z, proposed_name, submitted_by,
+                         submitted_by_ip, submission_date, status, discord_tag,
+                         personal_discord_username, reality, galaxy,
+                         submitter_profile_id, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        region_x, region_y, region_z, proposed_region[:50],
+                        submitter_display, client_ip,
+                        datetime.now(timezone.utc).isoformat(),
+                        discord_tag if discord_tag else None,
+                        discord_username if discord_username else None,
+                        reality, submission_data['galaxy'],
+                        submitter_profile_id, submission_source,
+                    ))
+                    conn.commit()
+                    logger.info(
+                        f"Extraction queued region name '{proposed_region}' for "
+                        f"({region_x},{region_y},{region_z})/{submission_data['galaxy']}/{reality}"
+                    )
+            except Exception as region_err:
+                logger.warning(f"Extraction deferred region name insert failed: {region_err}")
 
         logger.info(f"Received extraction from Haven Extractor: {glyph_code} with {len(planets)} planets, {len(moons)} moons (discord_tag={discord_tag}, user={discord_username})")
 
