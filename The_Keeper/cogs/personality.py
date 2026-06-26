@@ -164,8 +164,11 @@ class PersonalityCog(commands.Cog):
                 active_sessions.pop(user_id, None)
                 return
             except Exception as e:
-                print(f"[SLASH CALLBACK ERROR] {e}")
-                await message.channel.send("An error occurred, the Witnesa has been notified")
+                import traceback
+                print("[SLASH CALLBACK EXCEPTION DETECTED]")
+                traceback.print_exc() 
+                
+                await message.channel.send("An error occurred, The Witness has been notified.")
                 active_sessions.pop(user_id, None)
                 return
 
