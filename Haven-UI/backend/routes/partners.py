@@ -1169,6 +1169,8 @@ async def get_partner_systems(session: Optional[str] = Cookie(None)):
                 FROM systems s
                 LEFT JOIN regions r ON s.region_x = r.region_x
                     AND s.region_y = r.region_y AND s.region_z = r.region_z
+                    AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
+                    AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
                 LEFT JOIN data_restrictions dr ON s.id = dr.system_id
                 ORDER BY s.discord_tag, s.name
             ''')
@@ -1184,6 +1186,8 @@ async def get_partner_systems(session: Optional[str] = Cookie(None)):
                 FROM systems s
                 LEFT JOIN regions r ON s.region_x = r.region_x
                     AND s.region_y = r.region_y AND s.region_z = r.region_z
+                    AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
+                    AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
                 LEFT JOIN data_restrictions dr ON s.id = dr.system_id
                 WHERE s.discord_tag = ?
                 ORDER BY s.name

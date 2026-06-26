@@ -1505,6 +1505,8 @@ def load_systems_from_db() -> list:
             SELECT s.*, r.custom_name as region_name
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+                AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
+                AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
         ''')
         systems_rows = cursor.fetchall()
         systems = [dict(row) for row in systems_rows]

@@ -1571,6 +1571,8 @@ async def public_community_regions(community: str):
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
+                AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
+                AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
             WHERE s.discord_tag = ?
             ORDER BY r.custom_name IS NULL, r.custom_name, s.name
         ''', [community])

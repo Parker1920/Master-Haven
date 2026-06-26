@@ -1157,7 +1157,9 @@ async def api_resolve_glyph_by_name(
         "s.personal_discord_username, r.custom_name as region_name"
     )
     join = ("LEFT JOIN regions r ON s.region_x = r.region_x "
-            "AND s.region_y = r.region_y AND s.region_z = r.region_z")
+            "AND s.region_y = r.region_y AND s.region_z = r.region_z "
+            "AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal') "
+            "AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')")
 
     conn = None
     try:
@@ -1611,6 +1613,8 @@ async def api_systems(
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x
                 AND s.region_y = r.region_y AND s.region_z = r.region_z
+                AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
+                AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
             {where_sql}
             ORDER BY s.created_at DESC NULLS LAST, s.id DESC
             LIMIT ? OFFSET ?
@@ -1926,6 +1930,8 @@ async def api_search(
             f"SELECT COUNT(*) FROM systems s "
             f"LEFT JOIN regions r ON s.region_x = r.region_x "
             f"  AND s.region_y = r.region_y AND s.region_z = r.region_z "
+            f"  AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal') "
+            f"  AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid') "
             f"WHERE {search_where} {adv_sql}",
             (*search_params, *adv_params),
         )
@@ -1954,6 +1960,8 @@ async def api_search(
             f"FROM systems s "
             f"LEFT JOIN regions r ON s.region_x = r.region_x "
             f"  AND s.region_y = r.region_y AND s.region_z = r.region_z "
+            f"  AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal') "
+            f"  AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid') "
             f"WHERE {search_where} {adv_sql} "
             f"ORDER BY {order_sql} "
             f"LIMIT ? OFFSET ?",
@@ -2284,6 +2292,8 @@ async def api_unified_search(
             f"SELECT COUNT(*) FROM systems s "
             f"LEFT JOIN regions r ON s.region_x = r.region_x "
             f"  AND s.region_y = r.region_y AND s.region_z = r.region_z "
+            f"  AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal') "
+            f"  AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid') "
             f"WHERE {sys_where} {adv_sql}",
             (*sys_params, *adv_params),
         )
@@ -2308,6 +2318,8 @@ async def api_unified_search(
             f"FROM systems s "
             f"LEFT JOIN regions r ON s.region_x = r.region_x "
             f"  AND s.region_y = r.region_y AND s.region_z = r.region_z "
+            f"  AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal') "
+            f"  AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid') "
             f"WHERE {sys_where} {adv_sql} "
             f"ORDER BY {order_sql} "
             f"LIMIT ?",

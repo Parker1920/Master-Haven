@@ -855,10 +855,14 @@ async def search_regions_for_warroom(search: str = '', limit: int = 20, session:
                 SELECT DISTINCT s.region_x, s.region_y, s.region_z, s.galaxy,
                        r.custom_name as region_name,
                        (SELECT COUNT(*) FROM systems s2
-                        WHERE s2.region_x = s.region_x AND s2.region_y = s.region_y AND s2.region_z = s.region_z) as system_count,
+                        WHERE s2.region_x = s.region_x AND s2.region_y = s.region_y AND s2.region_z = s.region_z
+                          AND COALESCE(s2.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
+                          AND COALESCE(s2.reality, 'Normal') = COALESCE(s.reality, 'Normal')) as system_count,
                        GROUP_CONCAT(s.name, ', ') as sample_systems
                 FROM systems s
                 LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y AND s.region_z = r.region_z
+                    AND COALESCE(r.galaxy,  'Euclid') = COALESCE(s.galaxy,  'Euclid')
+                    AND COALESCE(r.reality, 'Normal') = COALESCE(s.reality, 'Normal')
                 WHERE LOWER(s.name) LIKE ?
                 GROUP BY s.region_x, s.region_y, s.region_z
                 LIMIT ?
@@ -3642,6 +3646,7 @@ async def search_territory_systems(
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
                 AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
             LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
             WHERE 1=1
         '''
@@ -3707,6 +3712,7 @@ async def get_territory_regions(
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
                 AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
             LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
             WHERE s.galaxy = ?
         '''
@@ -3801,6 +3807,7 @@ async def get_region_ownership_summary(galaxy: str = 'Euclid', session: Optional
             FROM systems s
             LEFT JOIN regions r ON s.region_x = r.region_x AND s.region_y = r.region_y
                 AND s.region_z = r.region_z AND COALESCE(s.galaxy, 'Euclid') = COALESCE(r.galaxy, 'Euclid')
+                AND COALESCE(s.reality, 'Normal') = COALESCE(r.reality, 'Normal')
             LEFT JOIN partner_accounts p ON s.discord_tag = p.discord_tag AND p.is_active = 1
             WHERE s.galaxy = ?
             GROUP BY s.region_x, s.region_y, s.region_z, s.galaxy, s.discord_tag
