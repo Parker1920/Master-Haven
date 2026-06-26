@@ -94,30 +94,33 @@ class PersonalityCog(commands.Cog):
             return
 
         content = message.content.strip()
-        
+        if not content:
+            return
+
         if content.lower().startswith("tell "):
             await self.handle_tell(message)
             active_sessions.pop(user_id, None)
             return
 
+      
         command_name = content.split()[0].lower()
         command = self.bot.get_command(command_name)
 
         if command:
-            ctx = await self.bot.get_context(message)
-            ctx.command = command
+            fake_prefix = "!" 
+            message.content = f"{fake_prefix}{content}"
             
-            ctx.view = discord.ext.commands.view.StringView(content)
-            ctx.view.skip_string(command_name) 
+            ctx = await self.bot.get_context(message, prefix=fake_prefix)
             
-            try:
-                await command.invoke(ctx)
-                active_sessions.pop(user_id, None)
-                return
-            except Exception as e:
-                await message.channel.send(f"An error occurred executing that command.")
-                active_sessions.pop(user_id, None)
-                return
+            if ctx.valid:
+                try:
+                    await self.bot.invoke(ctx)
+                    active_sessions.pop(user_id, None) 
+                    return
+                except Exception as e:
+                    await message.channel.send("An error occurred executing that command.")
+                    active_sessions.pop(user_id, None)
+                    return
 
         session["fails"] += 1
         fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
@@ -125,20 +128,6 @@ class PersonalityCog(commands.Cog):
 
         if session["fails"] >= MAX_FAILS:
             active_sessions.pop(user_id, None)
-
-
-        elif "leaderboard" in content:
-            FEATURED_CHANNEL_ID = int(os.getenv("FEATURED_CHANNEL_ID", "0"))
-            if message.channel.id != FEATURED_CHANNEL_ID:
-                await message.channel.send("You can only run this command in the Featured channel.")
-            else:
-                featured_cog = self.bot.get_cog("FeaturedCog")
-                if featured_cog:
-                    await featured_cog.post_leaderboard()
-                else:
-                    await message.channel.send("My Archives are failing")
-            valid_command = True
-
         # ---- logs (CommunityCog) ----
         elif content.startswith("show logs"):
             parts = message.content.split(" ", 2)
