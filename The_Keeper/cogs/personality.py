@@ -4,12 +4,10 @@ import discord
 from discord.ext import commands
 import random
 from datetime import datetime, timedelta, timezone
-from Haven_stats import Haven_statsCog
 import difflib 
 
 # -------------------- Constants --------------------
 SESSION_TIMEOUT = 30
-MAX_COMMANDS_PER_SESSION = 3
 MAX_FAILS = 3
 SPECIAL_USER_ID = 1265127644652109834
 DWEEB_IMAGE_URL = "https://cdn.discordapp.com/attachments/1483946204919501030/1485174291338366976/VideoCapture_20260203-180628.jpg"
@@ -81,7 +79,7 @@ class PersonalityCog(commands.Cog):
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
                 
-# -------------------- Handle active session ------
+     # -------------------- Handle active session ------
     async def handle_session(self, message):
         user_id = message.author.id
         session = active_sessions.get(user_id)
@@ -97,19 +95,32 @@ class PersonalityCog(commands.Cog):
         if not content:
             return
 
+        # 1. Handle special custom text commands first
         if content.lower().startswith("tell "):
             await self.handle_tell(message)
             active_sessions.pop(user_id, None)
             return
 
-      
-        command_name = content.split()[0].lower()
-        command = self.bot.get_command(command_name)
+        if content.lower().startswith("show logs"):
+            parts = content.split(" ", 2)
+            search_term = parts[2] if len(parts) >= 3 else None
+            community_cog = self.bot.get_cog("CommunityCog")
+            if community_cog:
+                ctx = await self.bot.get_context(message)
+                await community_cog.show_logs(ctx, search=search_term)
+            else:
+                await message.channel.send("The archives are unreachable.")
+            active_sessions.pop(user_id, None)
+            return
 
+        # Extract potential command name
+        command_name = content.split()[0].lower()
+
+        # 2. Try processing as a native bot text prefix command
+        command = self.bot.get_command(command_name)
         if command:
             fake_prefix = "!" 
             message.content = f"{fake_prefix}{content}"
-            
             ctx = await self.bot.get_context(message, prefix=fake_prefix)
             
             if ctx.valid:
@@ -122,40 +133,51 @@ class PersonalityCog(commands.Cog):
                     active_sessions.pop(user_id, None)
                     return
 
-        session["fails"] += 1
-        fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
-        await message.channel.send(fail_responses[fail_index])
-
-        if session["fails"] >= MAX_FAILS:
-            active_sessions.pop(user_id, None)
-        # ---- logs (CommunityCog) ----
-        elif content.startswith("show logs"):
-            parts = message.content.split(" ", 2)
-            search_term = parts[2] if len(parts) >= 3 else None
-            community_cog = self.bot.get_cog("CommunityCog")
-            if community_cog:
-                ctx = await self.bot.get_context(message)
-                await community_cog.show_logs(ctx, search=search_term)
-            else:
-                await message.channel.send("The archives are unreachable.")
+        # 3. Try processing dynamically as a Slash Command from bot.tree
+        slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
+        
+        if slash_command and isinstance(slash_command, discord.app_commands.Command):
+            args = content.split()[1:]
+            
+            # Lightweight mock class to trick the slash command callback layout
+            class MockInteraction:
+                def __init__(self, msg):
+                    self.channel = msg.channel
+                    self.user = msg.author
+                    self.guild = msg.guild
+                    self.response = self 
+                    self.followup = self 
                 
-            valid_command = True
+                async def send_message(self, content_str, *args, **kwargs):
+                    return await self.channel.send(content_str)
+                
+                async def send(self, content_str, *args, **kwargs):
+                    return await self.channel.send(content_str)
+                
+                async def defer(self, *args, **kwargs):
+                    pass
+
+            mock_interaction = MockInteraction(message)
             
             try:
-                await command.invoke(ctx)
+                await slash_command.callback(mock_interaction, *args)
                 active_sessions.pop(user_id, None)
                 return
             except Exception as e:
-                await message.channel.send(f"An error occurred executing that command.")
+                print(f"[SLASH CALLBACK ERROR] {e}")
+                await message.channel.send("An error occurred executing that cosmic command.")
                 active_sessions.pop(user_id, None)
                 return
 
+      
         session["fails"] += 1
-        fail_index = min(session["fails"] - 1, len(fail_responses) - 1)
-        await message.channel.send(fail_responses[fail_index])
-
         if session["fails"] >= MAX_FAILS:
+            await message.channel.send(fail_responses[-1])
             active_sessions.pop(user_id, None)
+        else:
+            fail_index = session["fails"] - 1
+            await message.channel.send(fail_responses[fail_index])
+
 
     # -------------------- Listener --------------------
     @commands.Cog.listener()
@@ -193,8 +215,10 @@ class PersonalityCog(commands.Cog):
             await message.add_reaction("👋")
             await message.channel.send(random.choice(keeper_responses).format(member=message.author))
             return
+            
         if "keeper" in content:
             await message.add_reaction("👀")
+
 # -------------------- Setup --------------------
 async def setup(bot: commands.Bot):
     await bot.add_cog(PersonalityCog(bot))
