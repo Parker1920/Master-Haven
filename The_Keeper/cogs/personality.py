@@ -129,7 +129,7 @@ class PersonalityCog(commands.Cog):
                     active_sessions.pop(user_id, None) 
                     return
                 except Exception as e:
-                    await message.channel.send("An error occurred executing that command.")
+                    await message.channel.send("An error occurred, the Witness has heen notified.")
                     active_sessions.pop(user_id, None)
                     return
 
@@ -164,8 +164,11 @@ class PersonalityCog(commands.Cog):
                 active_sessions.pop(user_id, None)
                 return
             except Exception as e:
-                print(f"[SLASH CALLBACK ERROR] {e}")
-                await message.channel.send("An error occurred executing that cosmic command.")
+                import traceback
+                print("[SLASH CALLBACK EXCEPTION DETECTED]")
+                traceback.print_exc() 
+                
+                await message.channel.send("An error occurred, The Witness has been notified.")
                 active_sessions.pop(user_id, None)
                 return
 

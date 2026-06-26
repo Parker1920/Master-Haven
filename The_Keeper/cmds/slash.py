@@ -59,38 +59,38 @@ class CommandsCog(commands.Cog):
         await     interaction.response.send_message("Sent.", ephemeral=True)
 
 #-------------send--------------------
-        @app_commands.describe(
-            channel="Channel to send to",
-            message="Message to send",
-            title="Optional title for the embed",
-            footer="Optional footer text (renders in small font)",
-            color="Hex color like #ff0000",
-            image="Optional image/gif URL"
+    @app_commands.describe(
+        channel="Channel to send to",
+        message="Message to send",
+        title="Optional title for the embed",
+        footer="Optional footer text (renders in small font)",
+        color="Hex color like #ff0000",
+        image="Optional image/gif URL"
         )
-        async def send(
-            self,
-            interaction: discord.Interaction,
-            channel: discord.TextChannel,
-            message: str,
-            title: str | None = None, 
-            footer: str | None = None,
-            color: str = "#5865F2",
-            image: str | None = None
-        ):
-            embed = discord.Embed(
-                title=title, 
-                description=message,
-                color=discord.Color.from_str(color)
-            )
+    async def send(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        message: str,
+        title: str | None = None, 
+        footer: str | None = None,
+        color: str = "#5865F2",
+        image: str | None = None
+    ):
+        embed = discord.Embed(
+            title=title, 
+            description=message,
+            color=discord.Color.from_str(color)
+        )
         
-            if image:
-                embed.set_image(url=image)
+        if image:
+            embed.set_image(url=image)
                 
-            if footer:
-                embed.set_footer(text=footer)
+        if footer:
+            embed.set_footer(text=footer)
         
-            await channel.send(embed=embed)
-            await interaction.response.send_message("Sent.", ephemeral=True)
+        await channel.send(embed=embed)
+        await interaction.response.send_message("Sent.", ephemeral=True)
 
     # ---------------- COMMUNITY ----------------
     @app_commands.command(name="community", description="Look up a civ/community")
