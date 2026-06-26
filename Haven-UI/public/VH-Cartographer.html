@@ -3810,7 +3810,13 @@ function updateBreadcrumb() {
 // ---- Embed mode --------------------------------------------------
 function applyEmbedMode() {
   if (!IS_EMBED) return;
-  ['.topbar', '.hint', '#legend', '#zoom-bar', '#map-breadcrumb', '#focus-chip', '#detail', '#crosshair']
+  // Includes the v11 search bar (#carto-search), filter gear (#carto-filter-toggle),
+  // filter pills (#carto-pills), filter panel (#carto-filters) + its backdrop —
+  // these were added after the original embed-hide list and were shrouding the
+  // dashboard mini-map preview. Embed-only (IS_EMBED guard above); the full
+  // /map/latest view never hits this path, so its search/filter UI is untouched.
+  ['.topbar', '.hint', '#legend', '#zoom-bar', '#map-breadcrumb', '#focus-chip', '#detail', '#crosshair',
+   '#carto-search', '#carto-filter-toggle', '#carto-pills', '#carto-filters', '#carto-filter-backdrop']
     .forEach(sel => { const el = document.querySelector(sel); if (el) el.style.display = 'none'; });
   S.ctrl.autoRotate = true;  // gentle idle spin for the dashboard iframe preview
   applyBrightness(1.5);      // ignore any persisted slider value in embed
