@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viobot Alias Generator</title>
+  <style>
+    :root {
+      --bg: #02040b;
+      --panel: rgba(8, 16, 31, 0.84);
+      --panel-2: rgba(10, 22, 42, 0.96);
+      --text: #edf7ff;
+      --muted: #94a9c7;
+      --soft: #c7d6ef;
+      --line: rgba(34, 211, 238, 0.22);
+      --cyan: #22d3ee;
+      --blue: #60a5fa;
+      --violet: #a78bfa;
+      --green: #34d399;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --input: rgba(2, 6, 23, 0.72);
+      --radius: 10px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.55;
+      background:
+        radial-gradient(circle at 16% 0%, rgba(34, 211, 238, 0.16), transparent 30rem),
+        radial-gradient(circle at 90% 6%, rgba(167, 139, 250, 0.14), transparent 32rem),
+        linear-gradient(135deg, #02040b 0%, #06101f 50%, #030712 100%);
+      overflow-x: hidden;
+    }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ===== Topbar ===== */
+    .topbar {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(16px);
+      background: rgba(2, 6, 23, 0.84);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav {
+      width: min(1320px, calc(100% - 28px));
+      margin: 0 auto; min-height: 62px;
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: max-content; }
+    .logo {
+      width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.28), rgba(96, 165, 250, 0.12)), rgba(2, 6, 23, 0.96);
+      border: 1px solid rgba(34, 211, 238, 0.34);
+      box-shadow: 0 0 22px rgba(34, 211, 238, 0.16);
+      font-family: var(--mono); color: var(--cyan); font-weight: 900;
+    }
+    .brand strong { display: block; font-size: 0.98rem; letter-spacing: 0.02em; }
+    .brand span.sub { display: block; color: var(--muted); font-size: 0.74rem; margin-top: -3px; }
+    .nav-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+    /* ===== Buttons ===== */
+    button { font-family: var(--sans); cursor: pointer; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      min-height: 36px; padding: 7px 13px; border-radius: 7px;
+      border: 1px solid rgba(34, 211, 238, 0.30);
+      background: linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(96, 165, 250, 0.06)), rgba(2, 6, 23, 0.86);
+      color: var(--text); font-weight: 700; font-size: 0.86rem;
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 0 22px rgba(34, 211, 238, 0.14); }
+    .btn.secondary { background: rgba(15, 23, 42, 0.78); border-color: rgba(148, 163, 184, 0.22); color: var(--soft); }
+    .btn.secondary:hover { background: rgba(30, 41, 59, 0.9); }
+    .btn.ghost { background: transparent; border-color: rgba(148,163,184,0.20); color: var(--soft); }
+    .btn.danger { background: transparent; color: var(--red); border-color: rgba(251, 113, 133, 0.4); }
+    .btn.danger:hover { background: rgba(251, 113, 133, 0.10); }
+    .btn.tiny { min-height: 28px; padding: 3px 9px; font-size: 0.76rem; border-radius: 6px; }
+    .btn.primary { background: linear-gradient(90deg, var(--cyan), var(--blue)); color: #04121d; border-color: transparent; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* ===== Layout ===== */
+    .shell { width: min(1320px, calc(100% - 28px)); margin: 0 auto; padding: 18px 0 64px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
+
+    .col { display: flex; flex-direction: column; gap: 14px; }
+    .col.right { position: sticky; top: 74px; }
+    @media (max-width: 1040px) { .col.right { position: static; } }
+
+    .card {
+      position: relative; border-radius: var(--radius); padding: 16px;
+      background: linear-gradient(180deg, rgba(12, 24, 45, 0.86), rgba(3, 8, 19, 0.92));
+      border: 1px solid var(--line);
+      box-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
+    }
+    .card::before {
+      content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, rgba(34, 211, 238, 0.9), rgba(96, 165, 250, 0.12), transparent);
+      opacity: 0.85; border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .card h2 {
+      margin: 0 0 12px; font-size: 1.02rem; letter-spacing: -0.01em;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .card h2 .hint-chip { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin: 10px 0 5px; font-weight: 600; }
+    label.inline { display: inline-flex; align-items: center; gap: 7px; margin: 0; cursor: pointer; }
+    input[type="text"], input[type="url"], textarea, select {
+      width: 100%; background: var(--input); color: var(--text);
+      border: 1px solid rgba(34, 211, 238, 0.18); border-radius: 8px;
+      padding: 9px 11px; font-size: 0.9rem; outline: none; font-family: var(--sans);
+    }
+    textarea { min-height: 76px; resize: vertical; line-height: 1.5; font-family: var(--mono); font-size: 0.86rem; }
+    input:focus, textarea:focus, select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12); }
+    input[type="color"] { width: 44px; height: 38px; padding: 2px; border-radius: 8px; background: var(--input); border: 1px solid var(--line); cursor: pointer; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row.tight { gap: 8px; }
+    @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+
+    /* ===== Segmented toggle ===== */
+    .seg { display: inline-flex; background: rgba(2,6,23,0.7); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+    .seg button {
+      border: 0; background: transparent; color: var(--muted); padding: 6px 12px; border-radius: 6px;
+      font-size: 0.82rem; font-weight: 700;
+    }
+    .seg button.active { background: linear-gradient(90deg, rgba(34,211,238,0.22), rgba(96,165,250,0.12)); color: var(--text); box-shadow: inset 0 -2px 0 rgba(34,211,238,0.3); }
+
+    .namecheck { font-family: var(--mono); font-size: 0.82rem; color: var(--cyan); }
+
+    /* ===== Field rows with inserter ===== */
+    .field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .md-btn {
+      min-width: 28px; height: 26px; padding: 0 6px; border-radius: 6px;
+      border: 1px solid rgba(148,163,184,0.18); background: rgba(2,6,23,0.6); color: var(--soft);
+      font-size: 0.78rem; font-weight: 700; font-family: var(--mono);
+    }
+    .md-btn:hover { border-color: var(--cyan); color: var(--text); }
+    .count { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); }
+    .count.over { color: var(--red); font-weight: 700; }
+    .count.warn { color: var(--yellow); }
+
+    /* message / embed cards */
+    .block {
+      border-radius: 9px; padding: 12px; margin-top: 10px;
+      background: rgba(2, 6, 23, 0.5); border: 1px solid rgba(34, 211, 238, 0.14);
+    }
+    .block.embed { border-left: 2px solid var(--violet); background: rgba(10, 8, 26, 0.46); }
+    .block-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .block-head .title { font-weight: 800; font-size: 0.82rem; color: var(--soft); text-transform: uppercase; letter-spacing: 0.06em; }
+    .block-actions { display: flex; gap: 4px; }
+    .field-item { border: 1px dashed rgba(148,163,184,0.2); border-radius: 8px; padding: 9px; margin-top: 8px; background: rgba(2,6,23,0.4); }
+
+    /* ===== Inserter popover ===== */
+    .pop {
+      position: absolute; z-index: 400; min-width: 280px; max-width: 340px; max-height: 360px; overflow-y: auto;
+      background: var(--panel-2); border: 1px solid var(--cyan); border-radius: 10px; padding: 7px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+    }
+    .pop .grp { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--cyan); margin: 8px 6px 3px; font-weight: 800; }
+    .pop .opt { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    .pop .opt:hover { background: rgba(34,211,238,0.12); }
+    .pop .opt code { font-family: var(--mono); color: #a5f3fc; font-size: 0.82rem; }
+    .pop .opt small { display: block; color: var(--muted); font-size: 0.72rem; }
+
+    /* ===== Preview (Discord-ish) ===== */
+    .dc {
+      background: #313338; border-radius: 10px; padding: 14px 16px;
+      font-family: "gg sans", var(--sans); color: #dbdee1; border: 1px solid rgba(0,0,0,0.4);
+    }
+    .dc-msg { display: flex; gap: 12px; padding: 6px 0; }
+    .dc-avatar { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--violet)); flex: 0 0 38px; }
+    .dc-body { min-width: 0; flex: 1; }
+    .dc-author { font-weight: 600; color: #f2f3f5; font-size: 0.92rem; }
+    .dc-author .bot { background: #5865f2; color: #fff; font-size: 0.6rem; padding: 1px 4px; border-radius: 4px; margin-left: 6px; vertical-align: middle; font-weight: 700; }
+    .dc-author .ts { color: #949ba4; font-size: 0.7rem; font-weight: 400; margin-left: 8px; }
+    .dc-content { white-space: pre-wrap; word-break: break-word; font-size: 0.95rem; line-height: 1.4; }
+    .dc-embed {
+      margin-top: 6px; max-width: 520px; background: #2b2d31; border-radius: 4px;
+      border-left: 4px solid #5865f2; padding: 10px 14px 12px; display: grid; gap: 6px;
+    }
+    .dc-embed .e-title { color: #f2f3f5; font-weight: 700; font-size: 0.95rem; }
+    .dc-embed .e-desc { font-size: 0.86rem; white-space: pre-wrap; word-break: break-word; color: #dbdee1; }
+    .dc-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .dc-field { min-width: 0; }
+    .dc-field.full { grid-column: 1 / -1; }
+    .dc-field .fn { font-weight: 700; font-size: 0.8rem; color: #f2f3f5; }
+    .dc-field .fv { font-size: 0.82rem; white-space: pre-wrap; word-break: break-word; }
+    .dc-embed .e-img { margin-top: 4px; max-width: 100%; border-radius: 4px; }
+    .dc-embed .e-thumb { float: right; width: 72px; height: 72px; border-radius: 4px; object-fit: cover; margin-left: 10px; }
+    .dc-embed .e-footer { font-size: 0.72rem; color: #949ba4; margin-top: 4px; }
+    .dc .mention { background: rgba(88,101,242,0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; }
+    .dc code.ic { background: #1e1f22; padding: 1px 4px; border-radius: 4px; font-family: var(--mono); font-size: 0.82em; }
+    .dc pre.cb { background: #1e1f22; border: 1px solid #111214; border-radius: 4px; padding: 8px; overflow-x: auto; font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; }
+    .dc blockquote { border-left: 4px solid #4e5058; margin: 2px 0; padding: 0 8px; color: #dbdee1; }
+    .dc h1.mdh { font-size: 1.15rem; margin: 4px 0; } .dc h2.mdh { font-size: 1.05rem; margin: 4px 0; } .dc h3.mdh { font-size: 0.98rem; margin: 4px 0; }
+    .dc a { color: #00a8fc; }
+    .preview-note { font-size: 0.72rem; color: var(--muted); margin-top: 8px; }
+
+    /* ===== Output ===== */
+    pre.output {
+      white-space: pre-wrap; word-break: break-word; background: #04060d;
+      border: 1px solid var(--line); border-radius: 9px; padding: 13px;
+      margin: 0; color: #cdeafe; line-height: 1.5; font-size: 0.86rem; font-family: var(--mono);
+      max-height: 360px; overflow-y: auto;
+    }
+    .sample-bar { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+    @media (max-width: 520px) { .sample-bar { grid-template-columns: 1fr; } }
+
+    .warnings { display: grid; gap: 6px; margin-top: 10px; }
+    .warn-item { font-size: 0.8rem; padding: 7px 10px; border-radius: 7px; border-left: 3px solid; }
+    .warn-item.err { background: rgba(251,113,133,0.10); border-color: var(--red); color: #fecdd3; }
+    .warn-item.warn { background: rgba(250,204,21,0.08); border-color: var(--yellow); color: #fef08a; }
+    .warn-item.ok { background: rgba(52,211,153,0.08); border-color: var(--green); color: #bbf7d0; }
+    .status { min-height: 20px; font-size: 0.84rem; color: var(--green); margin-top: 8px; }
+
+    /* ===== Modal / drawer ===== */
+    .overlay { position: fixed; inset: 0; z-index: 300; background: rgba(2,6,23,0.66); backdrop-filter: blur(4px); display: none; padding: 24px; overflow-y: auto; }
+    .overlay.open { display: block; }
+    .modal { width: min(840px, 100%); margin: 24px auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 30px 90px rgba(0,0,0,0.6); }
+    .modal h3 { margin: 0 0 4px; font-size: 1.2rem; }
+    .modal .sub { color: var(--muted); font-size: 0.86rem; margin: 0 0 14px; }
+    .modal-close { float: right; }
+    .tools-grid { display: grid; gap: 12px; }
+    .tools-page { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: rgba(2,6,23,0.4); }
+    .tools-page h4 { margin: 0 0 6px; color: var(--cyan); font-size: 0.92rem; }
+    .tools-page .pgrp { margin-top: 8px; }
+    .tools-page .pgrp b { font-size: 0.8rem; color: var(--soft); }
+    .tools-page code { font-family: var(--mono); color: #a5f3fc; background: rgba(2,6,23,0.7); padding: 1px 5px; border-radius: 4px; font-size: 0.82rem; }
+    .tools-page .ex { font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; background: #04060d; border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-top: 6px; color: #cdeafe; }
+    .preset-list { display: grid; gap: 8px; }
+    .preset-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: rgba(2,6,23,0.4); }
+    .preset-row .meta { min-width: 0; }
+    .preset-row .meta b { display: block; }
+    .preset-row .meta small { color: var(--muted); }
+    .import-area textarea { min-height: 200px; }
+
+    .footer-note { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 26px; }
+    .kbd { font-family: var(--mono); background: rgba(2,6,23,0.7); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 0.78rem; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; background: rgba(2,6,23,0.6); border:1px solid var(--line); color:var(--soft); font-size:0.74rem; }
+
+    /* ===== Easy-mode additions ===== */
+    .mode-seg { margin-right: 6px; }
+    .goal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    @media (max-width: 520px) { .goal-grid { grid-template-columns: 1fr; } }
+    .goal-btn { text-align: left; border: 1px solid var(--line); background: rgba(2,6,23,0.5); color: var(--text); border-radius: 9px; padding: 10px 12px; cursor: pointer; transition: .12s ease; }
+    .goal-btn:hover { border-color: var(--cyan); background: rgba(34,211,238,0.08); transform: translateY(-1px); }
+    .goal-btn b { display: block; font-size: 0.9rem; }
+    .goal-btn small { color: var(--muted); font-size: 0.76rem; }
+    .input-row { display: grid; grid-template-columns: 1fr 110px auto auto; gap: 8px; align-items: center; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: rgba(2,6,23,0.45); margin-top: 8px; }
+    @media (max-width: 560px) { .input-row { grid-template-columns: 1fr 1fr; } }
+    .input-row input[type="text"], .input-row select { min-height: 34px; padding: 6px 9px; }
+    .usage { font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); background: rgba(2,6,23,0.6); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; word-break: break-word; }
+    .easy-hint { font-size: 0.78rem; color: var(--muted); margin: 2px 0 4px; }
+    .cond-field { margin-top: 10px; }
+    .mini-warn { font-size: 0.78rem; color: var(--yellow); margin-top: 8px; background: rgba(250,204,21,0.08); border-left: 3px solid var(--yellow); border-radius: 6px; padding: 7px 10px; }
+    .pop .opt code.friendly { color: var(--text); font-family: var(--sans); font-size: 0.86rem; }
+    .explain { font-size: 0.82rem; color: var(--muted); margin: -2px 0 11px; line-height: 1.5; }
+    .explain b { color: var(--soft); }
+    .eg { font-size: 0.79rem; color: var(--soft); background: rgba(34,211,238,0.06); border-left: 2px solid var(--cyan); border-radius: 6px; padding: 8px 10px; margin: 8px 0 2px; line-height: 1.5; }
+    .eg b { color: var(--cyan); }
+    .pop-note { font-size: 0.74rem; color: var(--muted); padding: 7px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav">
+      <div class="brand">
+        <span class="logo">V</span>
+        <span>
+          <strong>Viobot Alias Generator</strong>
+          <span class="sub">Build aliases &amp; embeds &middot; full DSL</span>
+        </span>
+      </div>
+      <div class="nav-actions">
+        <div class="seg mode-seg" id="segMode" title="Easy = guided & plain-English. Advanced = raw full-power form.">
+          <button data-mode="easy" class="active">Easy</button>
+          <button data-mode="advanced">Advanced</button>
+        </div>
+        <button class="btn secondary" id="btnPresets">Presets</button>
+        <button class="btn secondary" id="btnImport">Import</button>
+        <button class="btn secondary" id="btnHelp">Cheatsheet</button>
+        <button class="btn ghost tiny" id="btnSelfTest" title="Run internal self-tests">self-test</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <div class="layout">
+      <!-- ===================== BUILDER ===================== -->
+      <section class="col left">
+        <div class="card" id="goalCard">
+          <h2>Start from a goal <span class="hint-chip">pick one, then just reword it</span></h2>
+          <div class="goal-grid" id="goalGrid"></div>
+        </div>
+
+        <div class="card">
+          <h2>Alias setup <span class="hint-chip">name &amp; permissions</span></h2>
+          <p class="explain">An <b>alias</b> is a saved custom command. You give it a name and decide who can run it. Later you paste the finished command into Discord <b>once</b>, and from then on people just type <span class="kbd">!name</span>.</p>
+
+          <label>Alias type</label>
+          <div class="seg" id="segCommand">
+            <button data-cmd="alias" class="active">Public &nbsp;!alias</button>
+            <button data-cmd="palias">Private &nbsp;!palias</button>
+          </div>
+          <div class="explain" style="margin-top:5px;"><b>Public</b> = saved for the whole server. <b>Private</b> = a personal shortcut only you can use.</div>
+
+          <div class="row" style="margin-top:10px;">
+            <div>
+              <label for="fName">Alias name</label>
+              <input type="text" id="fName" placeholder="welcome" />
+              <div class="namecheck" id="nameEcho"></div>
+            </div>
+            <div id="accessWrap">
+              <label>Who can run it</label>
+              <div class="seg" id="segAccess">
+                <button data-access="modonly" class="active">Mods only</button>
+                <button data-access="public">Everyone</button>
+              </div>
+              <div class="explain" style="margin-top:5px;"><b>Mods only</b> = just your staff team. <b>Everyone</b> = any member.</div>
+            </div>
+          </div>
+
+          <label for="fHelp">Help text <span style="color:var(--muted);font-weight:400">(shown in <span class="kbd">!alias list</span>)</span></label>
+          <input type="text" id="fHelp" placeholder="What this alias does" />
+        </div>
+
+        <div class="card" id="inputsCard">
+          <h2>Inputs <span class="hint-chip">optional</span></h2>
+          <p class="explain">Extra words someone can type <b>after</b> the command — like a user to tag or a reason. Name them here, then drop them into your message with <b>Insert ▾</b>. (Skip this if your alias is the same every time.)</p>
+          <p class="explain" style="margin-bottom:8px;"><b>User</b> = someone they @mention or paste an ID for. &nbsp; <b>Text</b> = any typed words. &nbsp; <b>rest</b> = grab <i>everything</i> from that point on (for a multi-word reason — keep it last).</p>
+          <div id="inputs"></div>
+          <button class="btn tiny secondary" id="addInput" style="margin-top:8px;">+ Add input</button>
+          <div class="usage" id="inputUsage"></div>
+          <p class="eg">Example: add an input named <b>user</b> (User). Now <b>Insert ▾ → Tag user</b> drops them into your text, so running <span class="kbd">!welcome @Bob</span> greets Bob by name.</p>
+        </div>
+
+        <div class="card">
+          <h2>Messages <span class="hint-chip">what the bot sends</span></h2>
+          <p class="explain">What Viobot actually posts when the alias runs. Each block is <b>one Discord message</b> — give it plain text, a <b>Card</b> (a coloured info box), or both. Add more than one block to send several messages in a row.</p>
+          <div id="messages"></div>
+          <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn primary" id="addMessage">+ Add message</button>
+            <button class="btn ghost tiny" id="clearAll">Reset builder</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== PREVIEW + OUTPUT ===================== -->
+      <section class="col right">
+        <div class="card">
+          <h2>Live preview <span class="hint-chip">how it'll look</span></h2>
+          <p class="explain">Exactly how Discord will show your message. To see your inputs/variables fill in, type a sample below as if someone ran the command.</p>
+          <div class="sample-bar">
+            <div>
+              <label for="fArgs">Try a sample run <span style="color:var(--muted);font-weight:400">— what people might type, comma-separated</span></label>
+              <input type="text" id="fArgs" placeholder="e.g. a user ID, then a reason" />
+            </div>
+            <label class="inline" style="margin-bottom:9px;" title="On: show what the variables become. Off: show the raw $ codes.">
+              <input type="checkbox" id="cbResolve" checked style="width:auto;" /> Fill in variables
+            </label>
+          </div>
+          <div class="dc" id="preview"></div>
+          <div class="preview-note">Mentions are shown for preview only — Viobot sends with pings suppressed, so running the alias won't actually notify anyone. Images/thumbnails only appear if the URL is valid.</div>
+        </div>
+
+        <div class="card">
+          <h2>Generated alias <span class="hint-chip">copy this</span></h2>
+          <p class="explain">The finished command. Copy it and paste it into your server <b>once</b> — Viobot saves the alias. You don't paste this every time; after that, people just run <span class="kbd">!name</span>.</p>
+          <pre class="output" id="output"></pre>
+          <div style="margin-top:11px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn primary" id="btnCopy">Copy alias</button>
+            <button class="btn secondary" id="btnDownload">Download .txt</button>
+            <span class="pill" id="charPill">0 chars</span>
+          </div>
+          <div class="status" id="status"></div>
+          <div class="warnings" id="warnings"></div>
+        </div>
+      </section>
+    </div>
+
+    <p class="footer-note">
+      Mirrors the live Viobot alias engine (actions, embed options, variables &amp; conditionals). Offline tool — nothing is sent anywhere.
+    </p>
+  </main>
+
+  <!-- ===================== Cheatsheet modal ===================== -->
+  <div class="overlay" id="helpOverlay">
+    <div class="modal">
+      <button class="btn secondary modal-close" data-close>Close</button>
+      <h3>Alias cheatsheet</h3>
+      <p class="sub">The same reference Viobot shows with <span class="kbd">!alias tools</span>.</p>
+      <div class="tools-grid" id="toolsGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===================== Presets modal ===================== -->
+  <div class="overlay" id="presetOverlay">
+    <div class="modal">
+      <button class="btn secondary modal-close" data-close>Close</button>
+      <h3>Presets &amp; templates</h3>
+      <p class="sub">Load a starter, or save your current build to reuse later.</p>
+      <h4 style="margin:14px 0 6px;font-size:0.9rem;color:var(--cyan)">Starter templates</h4>
+      <div class="preset-list" id="starterList"></div>
+      <h4 style="margin:18px 0 6px;font-size:0.9rem;color:var(--cyan)">Your saved presets</h4>
+      <div class="preset-list" id="savedList"></div>
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn primary" id="savePreset">Save current build</button>
+        <button class="btn secondary" id="exportPresets">Export all (.json)</button>
+        <button class="btn secondary" id="importPresets">Import (.json)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Import modal ===================== -->
+  <div class="overlay" id="importOverlay">
+    <div class="modal import-area">
+      <button class="btn secondary modal-close" data-close>Close</button>
+      <h3>Import an existing alias</h3>
+      <p class="sub">Paste a full <span class="kbd">!alias create …</span> (or just the body) to load it into the builder for editing.</p>
+      <textarea id="importText" placeholder="!alias create welcome help=&quot;Welcome message&quot; access=public&#10;say&#10;Welcome $n($1)!&#10;/embed&#10;/title=&quot;Hello&quot;&#10;/description=&quot;Glad you're here.&quot;&#10;/color=#22d3ee"></textarea>
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn primary" id="doImport">Load into builder</button>
+      </div>
+      <div class="status" id="importStatus"></div>
+    </div>
+  </div>
+
+  <!-- ===================== Condition builder modal ===================== -->
+  <div class="overlay" id="condOverlay">
+    <div class="modal" style="width:min(640px,100%)">
+      <button class="btn secondary modal-close" data-close>Close</button>
+      <h3>Show text only when…</h3>
+      <p class="sub">A condition shows text only in certain cases — Viobot checks it each time the alias runs. Example: tag the user <em>only if</em> they actually gave one. "Show this" appears when the condition is true; "Otherwise" shows when it isn't.</p>
+      <label for="condWhen">Only show when</label>
+      <select id="condWhen"></select>
+      <div class="cond-field">
+        <div class="field-head"><label for="condThen">Show this</label><div class="toolbar"><button class="md-btn" type="button" id="condThenInsert">Insert ▾</button></div></div>
+        <textarea id="condThen" placeholder="e.g. welcome!"></textarea>
+      </div>
+      <div class="cond-field">
+        <div class="field-head"><label for="condElse">Otherwise show <span style="color:var(--muted);font-weight:400">(optional)</span></label><div class="toolbar"><button class="md-btn" type="button" id="condElseInsert">Insert ▾</button></div></div>
+        <textarea id="condElse" placeholder="Leave blank to show nothing"></textarea>
+      </div>
+      <div class="mini-warn" id="condWarn" style="display:none"></div>
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn primary" id="condInsert">Insert</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/json,.json" style="display:none" />
+
+  <script>
+  /* ============================================================
+   *  VIOBOT_SPEC — single source of truth, mirrors the bot engine
+   *  (src/utils/aliasEngine.js, alias.js/palias.js, aliasLimits.js)
+   * ============================================================ */
+  const LIMITS = {
+    title: 256, description: 4096, fieldName: 256, fieldValue: 1024,
+    footer: 2048, fieldsPerEmbed: 25, embedTotal: 6000, embedsPerMessage: 10,
+    freeAlias: 50,
+  };
+
+  // Real command names that an alias may NOT shadow (from the bot repo).
+  const RESERVED = new Set([
+    'alias','palias','var','warn','mute','unmute','susmute','mutespammer','voicemute','unvoicemute',
+    'ban','unban','bancompromised','setrole','setnick','commandqueue','contactthread','tickets',
+    'modtools','plustools','remind','announce','user','version','violog','papertrail','paperuser',
+    'feedback','setup','config','contactcategories','activityreport','serveravatar','vioaddcommand',
+    'beta','premium','botservers','botblacklist','ownertools','accountverification','uinfo',
+  ]);
+
+  // Variable/function palette — grouped. `caret` = where to drop the cursor after insert.
+  const FUNCTIONS = [
+    { group:'Arguments', insert:'$0',  label:'$0',  desc:'All arguments joined' },
+    { group:'Arguments', insert:'$1',  label:'$1',  desc:'First argument' },
+    { group:'Arguments', insert:'$2',  label:'$2',  desc:'Second argument' },
+    { group:'Arguments', insert:'$3',  label:'$3',  desc:'Third argument' },
+    { group:'Arguments', insert:'$slice(1)', label:'$slice(start,end)', desc:'Args from start to end (0-indexed; end optional)' },
+    { group:'User',      insert:'$n',  label:'$n',  desc:'Mention the person who ran the alias' },
+    { group:'User',      insert:'$u',  label:'$u',  desc:'Username of the runner' },
+    { group:'User',      insert:'$id', label:'$id', desc:'User ID of the runner' },
+    { group:'User',      insert:'$n($1)', label:'$n(arg)', desc:'Mention the user passed as an argument' },
+    { group:'User',      insert:'$u($1)', label:'$u(arg)', desc:'Username of a user argument' },
+    { group:'User',      insert:'$id($1)', label:'$id(arg)', desc:'User ID of a user argument' },
+    { group:'Channel',   insert:'$c', label:'$c', desc:'Current channel name' },
+    { group:'Channel',   insert:'$cid', label:'$cid', desc:'Current channel ID' },
+    { group:'Channel',   insert:'$channel', label:'$channel', desc:'Mention the current channel' },
+    { group:'Conditionals', insert:'$if(,)', caret:4, label:'$if(cond,then)', desc:'Shows "then" only if "cond" is filled' },
+    { group:'Conditionals', insert:'$ifelse(,,)', caret:8, label:'$ifelse(cond,then,else)', desc:'then if cond is set, else otherwise (use null for empty)' },
+    { group:'Conditionals', insert:'$is_url($1)', label:'$is_url(x)', desc:'true / false — is x a URL?' },
+    { group:'Conditionals', insert:'$is_channel($1)', label:'$is_channel(x)', desc:'true / false — is x a channel?' },
+    { group:'Server vars',  insert:'$var(name)', caret:5, label:'$var(name)', desc:'Insert a server variable (set with !var)' },
+    { group:'Server vars',  insert:'$var(name|fallback)', caret:5, label:'$var(name|fallback)', desc:'Variable with fallback text if unset' },
+  ];
+
+  const MARKDOWN = [
+    { label:'B',  wrap:['**','**'], title:'Bold' },
+    { label:'I',  wrap:['*','*'], title:'Italic' },
+    { label:'U',  wrap:['__','__'], title:'Underline' },
+    { label:'S',  wrap:['~~','~~'], title:'Strikethrough' },
+    { label:'`',  wrap:['`','`'], title:'Inline code' },
+    { label:'{ }', wrap:['```\n','\n```'], title:'Code block' },
+    { label:'>',  prefix:'> ', title:'Quote' },
+    { label:'🔗', link:true, title:'Masked link [text](url)' },
+  ];
+
+  // Cheatsheet pages — text taken from the bot's !alias tools guide.
+  const TOOLS_PAGES = [
+    { h:'Actions', groups:[
+      { b:'Actions', lines:['`say` — start a plain message','`/embed` — start an embed (after a say it attaches to that message)'] },
+    ], ex:'say\nHello $n($1), welcome to the server.' },
+    { h:'Embed options (after /embed)', groups:[
+      { b:'Options', lines:['`/title="Title"`','`/description="Description"` (can span lines)','`/color=#236591`','`/field=Name|Value` or `/field=Name|Value|inline`','`/footer="Footer text"`','`/image="https://…png"`','`/thumbnail="https://…png"`'] },
+    ], ex:'/embed\n/title="Verification Help"\n/description="Please follow the instructions below."\n/color=#236591\n/field=Step 1|Read the rules.\n/field=Step 2|Open a ticket if needed.\n/footer="Viobot"' },
+    { h:'Argument variables', groups:[
+      { b:'Variables', lines:['`$0` — all arguments','`$1` `$2` `$3` — first / second / third','`$slice(1,3)` — args 1 through 2','`$slice(1)` — from arg index 1 to the end'] },
+    ], ex:'say\nReason provided: $0\nFirst argument: $1\nRemaining: $slice(1)' },
+    { h:'User & channel variables', groups:[
+      { b:'User', lines:['`$n` — caller mention','`$u` — caller username','`$id` — caller ID','`$n($1)` `$u($1)` `$id($1)` — from a user argument'] },
+      { b:'Channel', lines:['`$c` — channel name','`$cid` — channel ID','`$channel` — channel mention'] },
+    ], ex:'say\nHey $n, thanks for posting in $channel.' },
+    { h:'Conditionals & server variables', groups:[
+      { b:'Conditionals', lines:['`$if(condition,trueValue)`','`$ifelse(condition,trueValue,falseValue)` (use `null` for empty)','`$is_url(value)`','`$is_channel(value)`'] },
+      { b:'Server variables', lines:['`$var(name)` — insert a server variable','`$var(name|fallback)` — fallback if unset','Managed with `!var`'] },
+      { b:'Not supported', lines:['`/targetchannel`, `/deletethis`, embed author/url/timestamp, running bot commands'] },
+    ], ex:'say\n$if($1,$n($1)) welcome!\n$ifelse($is_url($1),Link: $1,null)' },
+  ];
+
+  /* ============================================================
+   *  STATE MODEL
+   * ============================================================ */
+  function blankEmbed() { return { title:'', description:'', color:'', fields:[], footer:'', image:'', thumbnail:'' }; }
+  function blankMessage() { return { text:'', embeds:[] }; }
+  function blankState() {
+    return { command:'alias', name:'welcome', help:'', access:'modonly', inputs:[],
+             messages:[ { text:'', embeds:[ blankEmbed() ] } ] };
+  }
+  let state = blankState();
+  let uiMode = 'easy';   // 'easy' | 'advanced'
+  let sampleArgs = [];
+  let sampleVars = {}; // editable via $var preview (kept simple: name->value)
+
+  /* ============================================================
+   *  ENGINE PORT — expandAliasVars / parseAliasBody
+   *  (faithful to src/utils/aliasEngine.js for preview + import)
+   * ============================================================ */
+  function readBalanced(input, openIndex) {
+    let depth = 0, inner = '';
+    for (let i = openIndex; i < input.length; i++) {
+      const ch = input[i];
+      if (ch === '(') { depth++; if (depth > 1) inner += ch; continue; }
+      if (ch === ')') { depth--; if (depth === 0) return { inner, endIndex: i }; inner += ch; continue; }
+      inner += ch;
+    }
+    return null;
+  }
+  function splitTopCommas(v) {
+    const parts = []; let cur = '', depth = 0;
+    for (const ch of String(v||'')) {
+      if (ch === '(') { depth++; cur += ch; continue; }
+      if (ch === ')') { depth--; cur += ch; continue; }
+      if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    parts.push(cur.trim());
+    return parts;
+  }
+  function splitTopPipe(v) {
+    const t = String(v||''); let depth = 0;
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth = Math.max(0, depth - 1);
+      else if (ch === '|' && depth === 0) return [t.slice(0, i).trim(), t.slice(i+1).trim()];
+    }
+    return [t.trim(), undefined];
+  }
+  function isTruthy(v) {
+    const n = String(v||'').trim().toLowerCase();
+    return !['', 'false', 'null', 'undefined', '0'].includes(n);
+  }
+  function isValidUrl(v) { try { new URL(String(v||'').replace(/^["']/,'').replace(/["']$/,'')); return true; } catch { return false; } }
+
+  function expandVars(text, ctx) {
+    if (text == null) return '';
+    const input = String(text); let out = '';
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+      if (ch !== '$') { out += ch; continue; }
+      let j = i + 1, key = '';
+      while (j < input.length && /[A-Za-z0-9_]/.test(input[j])) { key += input[j]; j++; }
+      if (!key) { out += ch; continue; }
+      let inner = null;
+      if (input[j] === '(') {
+        const r = readBalanced(input, j);
+        if (!r) { out += '$' + key; i = j - 1; continue; }
+        inner = r.inner; j = r.endIndex + 1;
+      }
+      out += evalVar(key, inner, ctx);
+      i = j - 1;
+    }
+    return out;
+  }
+  function findId(s) { return (String(s||'').match(/\d{17,20}/) || [])[0] || null; }
+  function evalVar(key, inner, ctx) {
+    const lower = key.toLowerCase();
+    if (/^\d+$/.test(lower)) {
+      const idx = Number(lower);
+      if (idx === 0) return ctx.args.join(' ');
+      return ctx.args[idx-1] || '';
+    }
+    switch (lower) {
+      case 'n': {
+        if (!inner) return '<@' + ctx.caller.id + '>';
+        const ex = expandVars(inner, ctx); const id = findId(ex);
+        return id ? '<@' + id + '>' : ex;
+      }
+      case 'u': {
+        if (!inner) return ctx.caller.name;
+        const ex = expandVars(inner, ctx); return findId(ex) ? 'User' : ex;
+      }
+      case 'id': {
+        if (!inner) return ctx.caller.id;
+        const ex = expandVars(inner, ctx); return findId(ex) || ex;
+      }
+      case 'c': return ctx.channel.name;
+      case 'cid': return ctx.channel.id;
+      case 'channel': return '<#' + ctx.channel.id + '>';
+      case 'slice': {
+        if (!inner) return '';
+        const [a, b] = splitTopCommas(inner);
+        const start = parseInt(a, 10); const end = b ? parseInt(b, 10) : undefined;
+        if (Number.isNaN(start)) return '';
+        return ctx.args.slice(start, Number.isNaN(end) ? undefined : end).join(' ');
+      }
+      case 'if': {
+        if (!inner) return '';
+        const p = splitTopCommas(inner); if (p.length < 2) return '';
+        return isTruthy(expandVars(p[0], ctx)) ? expandVars(p[1], ctx) : '';
+      }
+      case 'ifelse': {
+        if (!inner) return '';
+        const p = splitTopCommas(inner); if (p.length < 3) return '';
+        const cond = expandVars(p[0], ctx);
+        const t = p[1].toLowerCase() === 'null' ? '' : expandVars(p[1], ctx);
+        const f = p[2].toLowerCase() === 'null' ? '' : expandVars(p[2], ctx);
+        return isTruthy(cond) ? t : f;
+      }
+      case 'is_url': return isValidUrl(inner ? expandVars(inner, ctx).trim() : '') ? 'true' : 'false';
+      case 'is_channel': {
+        const v = inner ? expandVars(inner, ctx).trim() : '';
+        return (findId(v) || (v && /^[a-z0-9_\-]+$/i.test(v))) ? 'true' : 'false';
+      }
+      case 'var': {
+        if (!inner) return '';
+        const [rawName, rawFb] = splitTopPipe(inner);
+        const name = expandVars(rawName, ctx).trim().toLowerCase();
+        if (!/^[a-z0-9_.-]{1,64}$/.test(name)) return rawFb !== undefined ? expandVars(rawFb, ctx) : '';
+        const val = ctx.vars[name];
+        if (val === undefined || val === null || val === '') return rawFb !== undefined ? expandVars(rawFb, ctx) : '';
+        return String(val);
+      }
+      default: return '$' + key;
+    }
+  }
+
+  // Port of parseAliasBody → returns {messages:[...]} model.
+  function parseBody(rawBody) {
+    const lines = String(rawBody||'').split(/\r?\n/);
+    const messages = [];
+    let curMsg = null, curEmbed = null, multiDesc = null;
+    const ensureMsg = () => { if (!curMsg) { curMsg = blankMessage(); messages.push(curMsg); } return curMsg; };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (multiDesc !== null) {
+        if (line.endsWith('"')) {
+          const ci = rawLine.lastIndexOf('"');
+          const content = ci >= 0 ? rawLine.slice(0, ci) : rawLine;
+          multiDesc += '\n' + content;
+          if (curEmbed) curEmbed.description = multiDesc;
+          multiDesc = null;
+        } else { multiDesc += '\n' + rawLine; }
+        continue;
+      }
+      if (!line) continue;
+      if (line.startsWith('/targetchannel=') || line.startsWith('/deletethis')) continue;
+
+      if (line === 'say' || line.startsWith('say ')) {
+        curMsg = blankMessage();
+        curMsg.text = line.startsWith('say ') ? line.slice(4).trim() : '';
+        curEmbed = null; messages.push(curMsg); continue;
+      }
+      if (line.startsWith('/embed')) {
+        curEmbed = blankEmbed(); ensureMsg().embeds.push(curEmbed); continue;
+      }
+      if (line.startsWith('/title=')) { if (curEmbed) curEmbed.title = stripQuotes(line.slice(7).trim()); continue; }
+      if (line.startsWith('/description=')) {
+        if (curEmbed) {
+          const raw = rawLine.slice(rawLine.indexOf('/description=') + 13);
+          const tr = raw.trim();
+          if (tr.startsWith('"') && !tr.endsWith('"')) { multiDesc = raw.replace(/^\s*"/, ''); }
+          else { curEmbed.description = stripQuotes(tr).replace(/\\n/g, '\n'); }
+        }
+        continue;
+      }
+      if (line.startsWith('/color=')) {
+        if (curEmbed) { const raw = line.slice(7).trim(); curEmbed.color = raw.startsWith('#') ? raw.toLowerCase() : ('#' + Number(parseInt(raw,10)||0).toString(16).padStart(6,'0')); }
+        continue;
+      }
+      if (line.startsWith('/field=')) {
+        if (curEmbed) {
+          const raw = rawLine.slice(rawLine.indexOf('/field=') + 7);
+          let name, value, inline = false;
+          if (raw.includes('|')) {
+            const p = raw.split('|');
+            name = (p[0] ?? '').trim();
+            value = (p[1] ?? '').trim().replace(/\\n/g, '\n');
+            const ir = (p[2] || '').trim().toLowerCase();
+            inline = ir === 'true' || ir === 'yes' || ir === 'inline';
+          } else { name = ''; value = raw.trim().replace(/\\n/g, '\n'); }
+          if (value) curEmbed.fields.push({ name, value, inline });
+        }
+        continue;
+      }
+      if (line.startsWith('/footer=')) { if (curEmbed) curEmbed.footer = stripQuotes(rawLine.slice(rawLine.indexOf('/footer=')+8).trim()); continue; }
+      if (line.startsWith('/image=')) { if (curEmbed) curEmbed.image = stripQuotes(rawLine.slice(rawLine.indexOf('/image=')+7).trim()); continue; }
+      if (line.startsWith('/thumbnail=')) { if (curEmbed) curEmbed.thumbnail = stripQuotes(rawLine.slice(rawLine.indexOf('/thumbnail=')+11).trim()); continue; }
+
+      // plain text line under a say
+      if (curMsg) curMsg.text += (curMsg.text ? '\n' : '') + rawLine.replace(/\\n/g, '\n');
+      else { curMsg = blankMessage(); curMsg.text = rawLine.replace(/\\n/g, '\n'); messages.push(curMsg); }
+    }
+    return messages.length ? messages : [ blankMessage() ];
+  }
+  function stripQuotes(v) { return String(v||'').replace(/^["']/, '').replace(/["']$/, ''); }
+  function normalizeName(n) { return String(n||'').trim().toLowerCase().replace(/^!/, '').split(/\s+/)[0] || ''; }
+
+  /* ============================================================
+   *  GENERATOR — model → alias command text
+   * ============================================================ */
+  function oneLine(s) { return String(s||'').replace(/\r?\n/g, ' ').trim(); }
+  function embedIsEmpty(e) {
+    return !(oneLine(e.title) || e.description.trim() || e.color || (e.fields||[]).some(f=>f.value.trim()) || oneLine(e.footer) || oneLine(e.image) || oneLine(e.thumbnail));
+  }
+  function messageIsEmpty(m) { return !(m.text.trim() || (m.embeds||[]).some(e=>!embedIsEmpty(e))); }
+
+  function generate() {
+    const cmd = state.command === 'palias' ? '!palias' : '!alias';
+    let header = cmd + ' create ' + (normalizeName(state.name) || 'name');
+    if (state.help.trim()) header += ' help="' + state.help.replace(/"/g, '').trim() + '"';
+    if (state.command === 'alias') header += ' access=' + (state.access || 'modonly');
+
+    const lines = [header, ''];
+    for (const m of state.messages) {
+      if (messageIsEmpty(m)) continue;
+      lines.push('say');
+      if (m.text.trim()) lines.push(m.text.replace(/\r?\n/g, '\\n'));
+      for (const e of (m.embeds || [])) {
+        if (embedIsEmpty(e)) continue;
+        lines.push('/embed');
+        if (oneLine(e.title)) lines.push('/title="' + oneLine(e.title) + '"');
+        if (e.description.trim()) {
+          if (e.description.includes('\n')) {
+            const dl = e.description.split(/\r?\n/);
+            lines.push('/description="' + dl[0]);
+            for (let i = 1; i < dl.length - 1; i++) lines.push(dl[i]);
+            lines.push(dl[dl.length - 1] + '"');
+          } else {
+            lines.push('/description="' + e.description.trim() + '"');
+          }
+        }
+        if (e.color) lines.push('/color=' + e.color);
+        for (const f of (e.fields || [])) {
+          if (!f.value.trim()) continue;
+          const name = oneLine(f.name);
+          const value = f.value.replace(/\r?\n/g, '\\n');
+          lines.push('/field=' + name + '|' + value + (f.inline ? '|inline' : ''));
+        }
+        if (oneLine(e.footer)) lines.push('/footer="' + oneLine(e.footer) + '"');
+        if (oneLine(e.image)) lines.push('/image="' + oneLine(e.image) + '"');
+        if (oneLine(e.thumbnail)) lines.push('/thumbnail="' + oneLine(e.thumbnail) + '"');
+      }
+    }
+    return lines.join('\n');
+  }
+
+  /* ============================================================
+   *  MARKDOWN → HTML (preview only; common Discord subset)
+   * ============================================================ */
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function renderMarkdown(text) {
+    if (!text) return '';
+    let s = esc(text);
+    const blocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, (m, c) => { blocks.push('<pre class="cb">' + c.replace(/^\n/,'') + '</pre>'); return "@@CB" + (blocks.length-1) + "@@"; });
+    s = s.replace(/`([^`\n]+)`/g, '<code class="ic">$1</code>');
+    // mentions
+    s = s.replace(/&lt;#(\d{17,20})&gt;/g, '<span class="mention">#channel</span>');
+    s = s.replace(/&lt;@&amp;(\d{17,20})&gt;/g, '<span class="mention">@role</span>');
+    s = s.replace(/&lt;@!?(\d{17,20})&gt;/g, '<span class="mention">@user</span>');
+    // masked links
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // headers (line start)
+    s = s.replace(/^(#{1,3})\s+(.+)$/gm, (m, h, t) => '<h' + h.length + ' class="mdh">' + t + '</h' + h.length + '>');
+    // blockquote
+    s = s.replace(/^&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
+    // bold / underline / italic / strike
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<u>$1</u>');
+    s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    s = s.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
+    // restore code blocks (only our placeholders; leave real text alone)
+    if (blocks.length) s = s.replace(/@@CB(\d+)@@/g, function(m, i){ return blocks[Number(i)] !== undefined ? blocks[Number(i)] : m; });
+    // newlines (avoid extra <br> right after block elements)
+    s = s.replace(/\n/g, '<br>');
+    s = s.replace(/(<\/(?:pre|blockquote|h1|h2|h3)>)<br>/g, '$1');
+    return s;
+  }
+
+  /* ============================================================
+   *  PREVIEW + OUTPUT + VALIDATION
+   * ============================================================ */
+  function ctx() {
+    return {
+      args: sampleArgs,
+      vars: sampleVars,
+      caller: { name: 'You', id: '000000000000000000' },
+      channel: { name: 'general', id: '111111111111111111' },
+    };
+  }
+  function maybe(text) {
+    const resolve = document.getElementById('cbResolve').checked;
+    return resolve ? expandVars(text, ctx()) : String(text || '');
+  }
+
+  function renderPreview() {
+    const root = document.getElementById('preview');
+    const c = ctx();
+    let html = '';
+    const visible = state.messages.filter(m => !messageIsEmpty(m));
+    if (!visible.length) { root.innerHTML = '<div style="color:#949ba4;font-size:0.85rem;">Nothing to preview yet — add some text or an embed.</div>'; return; }
+
+    for (const m of visible) {
+      html += '<div class="dc-msg"><div class="dc-avatar"></div><div class="dc-body">';
+      html += '<div class="dc-author">Viobot <span class="bot">APP</span><span class="ts">today</span></div>';
+      if (m.text.trim()) html += '<div class="dc-content">' + renderMarkdown(maybe(m.text)) + '</div>';
+      for (const e of (m.embeds || [])) {
+        if (embedIsEmpty(e)) continue;
+        const color = e.color || '#5865f2';
+        html += '<div class="dc-embed" style="border-left-color:' + esc(color) + '">';
+        if (oneLine(e.thumbnail) && isValidUrl(maybe(e.thumbnail))) html += '<img class="e-thumb" src="' + esc(maybe(e.thumbnail)) + '" alt="" onerror="this.style.display=\'none\'">';
+        if (oneLine(e.title)) html += '<div class="e-title">' + renderMarkdown(maybe(e.title)) + '</div>';
+        if (e.description.trim()) html += '<div class="e-desc">' + renderMarkdown(maybe(e.description)) + '</div>';
+        const fields = (e.fields || []).filter(f => f.value.trim());
+        if (fields.length) {
+          html += '<div class="dc-fields">';
+          fields.forEach(f => {
+            html += '<div class="dc-field' + (f.inline ? '' : ' full') + '">';
+            html += '<div class="fn">' + renderMarkdown(maybe(f.name) || '​') + '</div>';
+            html += '<div class="fv">' + renderMarkdown(maybe(f.value)) + '</div></div>';
+          });
+          html += '</div>';
+        }
+        if (oneLine(e.image) && isValidUrl(maybe(e.image))) html += '<img class="e-img" src="' + esc(maybe(e.image)) + '" alt="" onerror="this.style.display=\'none\'">';
+        if (oneLine(e.footer)) html += '<div class="e-footer">' + esc(maybe(e.footer)) + '</div>';
+        html += '</div>';
+      }
+      html += '</div></div>';
+    }
+    root.innerHTML = html;
+  }
+
+  function validate() {
+    const warns = [];
+    const name = normalizeName(state.name);
+    if (!name) warns.push(['err', 'Alias needs a name.']);
+    if (name && RESERVED.has(name)) warns.push(['err', 'Name "' + name + '" is a real Viobot command — pick another.']);
+    if (state.name && /\s/.test(state.name.trim())) warns.push(['warn', 'Alias names are a single word — only "' + name + '" will be used.']);
+    if (state.help.includes('"')) warns.push(['warn', 'Quotes in help text are removed (they end the help value).']);
+
+    const visible = state.messages.filter(m => !messageIsEmpty(m));
+    if (!visible.length) warns.push(['err', 'Add at least one message (text or an embed).']);
+
+    visible.forEach((m, mi) => {
+      const embeds = (m.embeds || []).filter(e => !embedIsEmpty(e));
+      if (embeds.length > LIMITS.embedsPerMessage) warns.push(['err', 'Message ' + (mi+1) + ' has ' + embeds.length + ' embeds (max ' + LIMITS.embedsPerMessage + ').']);
+      embeds.forEach((e, ei) => {
+        const tag = 'Embed ' + (mi+1) + '.' + (ei+1) + ': ';
+        let total = 0;
+        if (oneLine(e.title).length > LIMITS.title) warns.push(['err', tag + 'title over ' + LIMITS.title + '.']);
+        total += oneLine(e.title).length;
+        if (e.description.length > LIMITS.description) warns.push(['err', tag + 'description over ' + LIMITS.description + '.']);
+        total += e.description.length;
+        const fields = (e.fields || []).filter(f => f.value.trim());
+        if (fields.length > LIMITS.fieldsPerEmbed) warns.push(['err', tag + fields.length + ' fields (max ' + LIMITS.fieldsPerEmbed + ').']);
+        fields.forEach((f, fi) => {
+          if (oneLine(f.name).length > LIMITS.fieldName) warns.push(['err', tag + 'field ' + (fi+1) + ' name over ' + LIMITS.fieldName + '.']);
+          if (f.value.length > LIMITS.fieldValue) warns.push(['err', tag + 'field ' + (fi+1) + ' value over ' + LIMITS.fieldValue + '.']);
+          if (f.name.includes('|') || f.value.includes('|')) warns.push(['warn', tag + 'field ' + (fi+1) + ' contains "|" — Viobot uses it as a separator, it will split the field.']);
+          total += oneLine(f.name).length + f.value.length;
+        });
+        if (oneLine(e.footer).length > LIMITS.footer) warns.push(['err', tag + 'footer over ' + LIMITS.footer + '.']);
+        total += oneLine(e.footer).length;
+        if (total > LIMITS.embedTotal) warns.push(['err', tag + 'total ' + total + ' chars over ' + LIMITS.embedTotal + '.']);
+        if (oneLine(e.image) && !isValidUrl(oneLine(e.image))) warns.push(['warn', tag + 'image is not a valid URL — it will be skipped.']);
+        if (oneLine(e.thumbnail) && !isValidUrl(oneLine(e.thumbnail))) warns.push(['warn', tag + 'thumbnail is not a valid URL — it will be skipped.']);
+        // unbalanced parens
+        [e.title, e.description, e.footer].concat(fields.map(f=>f.value)).forEach(t => {
+          if (parenBalance(t) !== 0 && !warns.some(w=>w[1].includes('Unbalanced'))) warns.push(['warn', tag + 'Unbalanced parentheses in a $() variable.']);
+        });
+      });
+      if (parenBalance(m.text) !== 0) warns.push(['warn', 'Message ' + (mi+1) + ' text has unbalanced parentheses in a $() variable.']);
+    });
+
+    if (!warns.length) warns.push(['ok', 'Looks good. Free servers can store up to ' + LIMITS.freeAlias + ' ' + (state.command==='palias'?'private':'public') + ' aliases (more with Plus/Beta).']);
+    return warns;
+  }
+  function parenBalance(t) {
+    let d = 0; const s = String(t||'');
+    for (let i = 0; i < s.length; i++) { if (s[i] === '(') d++; else if (s[i] === ')') d--; if (d < 0) return d; }
+    return d;
+  }
+
+  function refresh() {
+    const out = generate();
+    document.getElementById('output').textContent = out;
+    document.getElementById('charPill').textContent = out.length + ' chars';
+    renderPreview();
+    const wEl = document.getElementById('warnings');
+    wEl.innerHTML = validate().map(([t, msg]) => '<div class="warn-item ' + t + '">' + esc(msg) + '</div>').join('');
+  }
+
+  /* ============================================================
+   *  BUILDER DOM (rebuilt on structural change only)
+   * ============================================================ */
+  function el(tag, props = {}, kids = []) {
+    const n = document.createElement(tag);
+    for (const k in props) {
+      if (k === 'class') n.className = props[k];
+      else if (k === 'html') n.innerHTML = props[k];
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), props[k]);
+      else if (k === 'value') n.value = props[k];
+      else n.setAttribute(k, props[k]);
+    }
+    (Array.isArray(kids) ? kids : [kids]).forEach(c => { if (c != null) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+
+  // a labelled text input/textarea WITH inserter + markdown toolbar, bound to state
+  function boundField(opts) {
+    // opts: {label, value, multiline, placeholder, max, onInput, markdown}
+    const wrap = el('div');
+    const head = el('div', { class: 'field-head' });
+    head.appendChild(el('label', {}, opts.label));
+    const tb = el('div', { class: 'toolbar' });
+    const input = opts.multiline
+      ? el('textarea', { placeholder: opts.placeholder || '' })
+      : el('input', { type: 'text', placeholder: opts.placeholder || '' });
+    input.value = opts.value || '';
+    input.addEventListener('input', () => { opts.onInput(input.value); updateCount(); refresh(); });
+
+    const sync = () => { opts.onInput(input.value); updateCount(); refresh(); };
+    // markdown buttons
+    if (opts.markdown) MARKDOWN.forEach(md => {
+      tb.appendChild(el('button', { class: 'md-btn', type: 'button', title: md.title, onclick: () => { applyMarkdown(input, md); sync(); } }, md.label));
+    });
+    // insert variable button (mode-aware: plain-English in Easy, raw tokens in Advanced)
+    const insBtn = el('button', { class: 'md-btn', type: 'button', title: 'Insert a variable',
+      onclick: (e) => { uiMode === 'easy' ? openFriendlyInserter(e.currentTarget, input, sync) : openInserter(e.currentTarget, input, sync); } },
+      uiMode === 'easy' ? 'Insert ▾' : '$ ▾');
+    tb.appendChild(insBtn);
+    // condition button (visual $if / $ifelse) — skip on URL/color fields
+    if (opts.allowCondition !== false) {
+      tb.appendChild(el('button', { class: 'md-btn', type: 'button', title: 'Show text only when…', onclick: () => openConditionBuilder(input, sync) }, '＋ If'));
+    }
+    head.appendChild(tb);
+    wrap.appendChild(head);
+    wrap.appendChild(input);
+
+    const counter = opts.max ? el('div', { class: 'count' }) : null;
+    if (counter) wrap.appendChild(counter);
+    function updateCount() {
+      if (!counter) return;
+      const len = (opts.multiline ? input.value : oneLine(input.value)).length;
+      counter.textContent = len + ' / ' + opts.max;
+      counter.className = 'count' + (len > opts.max ? ' over' : (len > opts.max * 0.9 ? ' warn' : ''));
+    }
+    updateCount();
+    return wrap;
+  }
+
+  function renderBuilder() {
+    if (!Array.isArray(state.inputs)) state.inputs = [];
+    // mode toggle + easy-only cards
+    document.querySelectorAll('#segMode button').forEach(b => b.classList.toggle('active', b.dataset.mode === uiMode));
+    const gc = document.getElementById('goalCard'); if (gc) gc.style.display = uiMode === 'easy' ? 'block' : 'none';
+    const ic = document.getElementById('inputsCard'); if (ic) ic.style.display = uiMode === 'easy' ? 'block' : 'none';
+
+    // command + access + name + help reflect into the static controls
+    document.querySelectorAll('#segCommand button').forEach(b => b.classList.toggle('active', b.dataset.cmd === state.command));
+    document.querySelectorAll('#segAccess button').forEach(b => b.classList.toggle('active', b.dataset.access === state.access));
+    document.getElementById('accessWrap').style.visibility = state.command === 'alias' ? 'visible' : 'hidden';
+    document.getElementById('fName').value = state.name;
+    document.getElementById('fHelp').value = state.help;
+    updateNameEcho();
+
+    renderGoalStrip();
+    renderInputs();
+
+    const root = document.getElementById('messages');
+    root.innerHTML = '';
+    state.messages.forEach((m, mi) => root.appendChild(messageCard(m, mi)));
+    refresh();
+  }
+
+  function messageCard(m, mi) {
+    const card = el('div', { class: 'block' });
+    const head = el('div', { class: 'block-head' });
+    head.appendChild(el('span', { class: 'title' }, 'Message ' + (mi + 1)));
+    const acts = el('div', { class: 'block-actions' });
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', title: 'Move up', onclick: () => { move(state.messages, mi, -1); renderBuilder(); } }, '↑'));
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', title: 'Move down', onclick: () => { move(state.messages, mi, 1); renderBuilder(); } }, '↓'));
+    acts.appendChild(el('button', { class: 'btn tiny danger', type: 'button', onclick: () => { state.messages.splice(mi, 1); if (!state.messages.length) state.messages.push(blankMessage()); renderBuilder(); } }, 'Remove'));
+    head.appendChild(acts);
+    card.appendChild(head);
+
+    card.appendChild(boundField({
+      label: 'Message text', value: m.text, multiline: true,
+      placeholder: uiMode === 'easy' ? 'Optional. Type your message; use Insert ▾ for names, mentions, etc.' : 'Optional. e.g. $if($1,$n($1)) welcome!',
+      markdown: true, onInput: v => { m.text = v; },
+    }));
+
+    (m.embeds || []).forEach((e, ei) => card.appendChild(embedCard(e, m, mi, ei)));
+
+    const addRow = el('div', { class: 'block-actions', style: 'margin-top:10px;' });
+    addRow.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', onclick: () => { m.embeds.push(blankEmbed()); renderBuilder(); } }, uiMode === 'easy' ? '+ Add card (embed)' : '+ Add embed'));
+    card.appendChild(addRow);
+    return card;
+  }
+
+  function embedCard(e, m, mi, ei) {
+    const card = el('div', { class: 'block embed' });
+    const head = el('div', { class: 'block-head' });
+    head.appendChild(el('span', { class: 'title', style: 'color:#c4b5fd' }, (uiMode === 'easy' ? 'Card ' : 'Embed ') + (ei + 1)));
+    const acts = el('div', { class: 'block-actions' });
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', title: 'Move up', onclick: () => { move(m.embeds, ei, -1); renderBuilder(); } }, '↑'));
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', title: 'Move down', onclick: () => { move(m.embeds, ei, 1); renderBuilder(); } }, '↓'));
+    acts.appendChild(el('button', { class: 'btn tiny danger', type: 'button', onclick: () => { m.embeds.splice(ei, 1); renderBuilder(); } }, 'Remove'));
+    head.appendChild(acts);
+    card.appendChild(head);
+    if (uiMode === 'easy') card.appendChild(el('div', { class: 'explain', style: 'margin-top:2px;' }, 'A coloured info box — a title, a description, and optional fields (little labelled boxes). Leave parts blank to hide them.'));
+
+    card.appendChild(boundField({ label: 'Title', value: e.title, max: LIMITS.title, markdown: false, onInput: v => e.title = v }));
+    card.appendChild(boundField({ label: 'Description', value: e.description, multiline: true, max: LIMITS.description, markdown: true, onInput: v => e.description = v }));
+
+    // color + footer row
+    const row = el('div', { class: 'row tight' });
+    const colorWrap = el('div');
+    colorWrap.appendChild(el('label', {}, 'Color'));
+    const colorRow = el('div', { style: 'display:flex; gap:8px; align-items:center;' });
+    const picker = el('input', { type: 'color', value: e.color || '#5865f2' });
+    const hex = el('input', { type: 'text', placeholder: '#22d3ee or none', value: e.color || '' });
+    picker.addEventListener('input', () => { e.color = picker.value; hex.value = picker.value; refresh(); });
+    hex.addEventListener('input', () => { e.color = hex.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(e.color)) picker.value = e.color; refresh(); });
+    colorRow.appendChild(picker); colorRow.appendChild(hex);
+    const clearColor = el('button', { class: 'btn tiny ghost', type: 'button', title: 'No color', onclick: () => { e.color = ''; hex.value = ''; refresh(); } }, '✕');
+    colorRow.appendChild(clearColor);
+    colorWrap.appendChild(colorRow);
+    row.appendChild(colorWrap);
+    row.appendChild(boundField({ label: 'Footer', value: e.footer, max: LIMITS.footer, onInput: v => e.footer = v }));
+    card.appendChild(row);
+
+    // image + thumbnail
+    const row2 = el('div', { class: 'row tight' });
+    row2.appendChild(boundField({ label: 'Image URL', value: e.image, placeholder: 'https://…', allowCondition: false, onInput: v => e.image = v }));
+    row2.appendChild(boundField({ label: 'Thumbnail URL', value: e.thumbnail, placeholder: 'https://…', allowCondition: false, onInput: v => e.thumbnail = v }));
+    card.appendChild(row2);
+
+    // fields
+    const fl = el('label', {}, 'Fields');
+    card.appendChild(fl);
+    (e.fields || []).forEach((f, fi) => card.appendChild(fieldItem(f, e, fi)));
+    card.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', style: 'margin-top:6px;', onclick: () => { e.fields.push({ name: '', value: '', inline: false }); renderBuilder(); } }, '+ Add field'));
+
+    return card;
+  }
+
+  function fieldItem(f, e, fi) {
+    const wrap = el('div', { class: 'field-item' });
+    const head = el('div', { class: 'block-head' });
+    head.appendChild(el('span', { class: 'title', style: 'font-size:0.74rem;' }, 'Field ' + (fi + 1)));
+    const acts = el('div', { class: 'block-actions' });
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', onclick: () => { move(e.fields, fi, -1); renderBuilder(); } }, '↑'));
+    acts.appendChild(el('button', { class: 'btn tiny secondary', type: 'button', onclick: () => { move(e.fields, fi, 1); renderBuilder(); } }, '↓'));
+    acts.appendChild(el('button', { class: 'btn tiny danger', type: 'button', onclick: () => { e.fields.splice(fi, 1); renderBuilder(); } }, '✕'));
+    head.appendChild(acts);
+    wrap.appendChild(head);
+    wrap.appendChild(boundField({ label: 'Name', value: f.name, max: LIMITS.fieldName, onInput: v => f.name = v }));
+    wrap.appendChild(boundField({ label: 'Value', value: f.value, multiline: true, max: LIMITS.fieldValue, markdown: true, onInput: v => f.value = v }));
+    const inl = el('label', { class: 'inline', style: 'margin-top:8px;' });
+    const cb = el('input', { type: 'checkbox', style: 'width:auto;' });
+    cb.checked = !!f.inline;
+    cb.addEventListener('change', () => { f.inline = cb.checked; refresh(); });
+    inl.appendChild(cb); inl.appendChild(document.createTextNode(' Inline (sit side-by-side)'));
+    wrap.appendChild(inl);
+    return wrap;
+  }
+
+  function move(arr, i, dir) { const j = i + dir; if (j < 0 || j >= arr.length) return; const t = arr[i]; arr[i] = arr[j]; arr[j] = t; }
+
+  /* ============================================================
+   *  TEXT HELPERS — markdown wrap + variable insert at caret
+   * ============================================================ */
+  function applyMarkdown(input, md) {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const sel = input.value.slice(start, end);
+    let insert, caret;
+    if (md.link) {
+      const text = sel || 'text';
+      insert = '[' + text + '](url)';
+      caret = start + insert.length - 4; // before "url)"
+      input.value = input.value.slice(0, start) + insert + input.value.slice(end);
+      input.focus(); input.setSelectionRange(caret, caret + 3);
+      return;
+    }
+    if (md.prefix) {
+      insert = md.prefix + sel;
+      input.value = input.value.slice(0, start) + insert + input.value.slice(end);
+      input.focus(); input.setSelectionRange(start + insert.length, start + insert.length);
+      return;
+    }
+    insert = md.wrap[0] + sel + md.wrap[1];
+    input.value = input.value.slice(0, start) + insert + input.value.slice(end);
+    input.focus();
+    const pos = sel ? start + insert.length : start + md.wrap[0].length;
+    input.setSelectionRange(pos, pos);
+  }
+
+  function insertAtCaret(input, text, caretOffset) {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, start) + text + input.value.slice(end);
+    input.focus();
+    const pos = start + (caretOffset != null ? caretOffset : text.length);
+    input.setSelectionRange(pos, pos);
+  }
+
+  let openPop = null;
+  function closePop() { if (openPop) { openPop.remove(); openPop = null; } }
+  document.addEventListener('click', (e) => { if (openPop && !openPop.contains(e.target) && !e.target.closest('.md-btn')) closePop(); });
+
+  function openInserter(btn, input, after) {
+    closePop();
+    const pop = el('div', { class: 'pop' });
+    pop.appendChild(el('div', { class: 'pop-note' }, 'Variables — replaced with real values when the alias runs.'));
+    let last = '';
+    FUNCTIONS.forEach(fn => {
+      if (fn.group !== last) { pop.appendChild(el('div', { class: 'grp' }, fn.group)); last = fn.group; }
+      const opt = el('button', { class: 'opt', type: 'button', onclick: () => { insertAtCaret(input, fn.insert, fn.caret); closePop(); after(); } });
+      opt.appendChild(el('code', {}, fn.label));
+      opt.appendChild(el('small', {}, fn.desc));
+      pop.appendChild(opt);
+    });
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+    let left = window.scrollX + r.left;
+    left = Math.min(left, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12);
+    pop.style.left = Math.max(8, left) + 'px';
+    openPop = pop;
+  }
+
+  /* ============================================================
+   *  EASY MODE — named inputs, plain-English inserter, conditions
+   * ============================================================ */
+  const INPUT_TYPES = [ { v: 'user', label: 'User' }, { v: 'text', label: 'Text' } ];
+  function argIndexOf(i) { return i + 1; } // 1-based positional arg
+
+  // Build the plain-English insert menu from the current inputs + always-available specials.
+  function friendlyGroups() {
+    const groups = [];
+    groups.push({ title: 'The person who ran it', items: [
+      { label: '👤 Mention them', insert: '$n' },
+      { label: '👤 Their name', insert: '$u' },
+      { label: '👤 Their user ID', insert: '$id' },
+    ]});
+    groups.push({ title: 'This channel', items: [
+      { label: '📺 Mention this channel', insert: '$channel' },
+      { label: '📺 Channel name', insert: '$c' },
+      { label: '📺 Channel ID', insert: '$cid' },
+    ]});
+    const inputs = state.inputs || [];
+    if (inputs.length) {
+      const items = [];
+      inputs.forEach((inp, i) => {
+        const k = argIndexOf(i);
+        const nm = (inp.name || ('input ' + k)).trim() || ('input ' + k);
+        if (inp.type === 'user') {
+          items.push({ label: '👤 Tag ' + nm, insert: '$n($' + k + ')' });
+          items.push({ label: '👤 ' + nm + "'s name", insert: '$u($' + k + ')' });
+          items.push({ label: '👤 ' + nm + "'s ID", insert: '$id($' + k + ')' });
+        } else if (inp.rest) {
+          items.push({ label: '📝 ' + nm + ' (everything they type)', insert: '$slice(' + (k - 1) + ')' });
+        } else {
+          items.push({ label: '📝 ' + nm, insert: '$' + k });
+        }
+      });
+      groups.push({ title: 'Your inputs', items });
+    }
+    groups.push({ title: 'Everything they typed', items: [ { label: '🧩 All arguments', insert: '$0' } ]});
+    groups.push({ title: 'Server variable', items: [
+      { label: '🏷️ Server variable…', insert: '__var__' },
+      { label: '🏷️ Server variable with fallback…', insert: '__varfb__' },
+    ]});
+    const fu = inputs.findIndex(x => x.type === 'user');
+    if (fu >= 0) {
+      const k = argIndexOf(fu);
+      const nm = (inputs[fu].name || ('input ' + k)).trim() || ('input ' + k);
+      groups.push({ title: 'Smart', items: [ { label: '✨ Tag ' + nm + ' only if they gave one', insert: '$if($' + k + ',$n($' + k + '))' } ]});
+    }
+    return groups;
+  }
+
+  function positionPop(pop, btn) {
+    const r = btn.getBoundingClientRect();
+    pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+    let left = window.scrollX + r.left;
+    left = Math.min(left, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12);
+    pop.style.left = Math.max(8, left) + 'px';
+  }
+
+  function openFriendlyInserter(btn, input, after) {
+    closePop();
+    const pop = el('div', { class: 'pop' });
+    pop.appendChild(el('div', { class: 'pop-note' }, 'Pick what the bot should drop in here. These get filled in automatically each time someone runs the command.'));
+    friendlyGroups().forEach(g => {
+      pop.appendChild(el('div', { class: 'grp' }, g.title));
+      g.items.forEach(it => {
+        const opt = el('button', { class: 'opt', type: 'button', onclick: () => {
+          let token = it.insert;
+          if (token === '__var__') {
+            const nm = prompt('Server variable name (the one set with !var):', '');
+            if (!nm) { closePop(); return; }
+            token = '$var(' + nm.trim().toLowerCase() + ')';
+          } else if (token === '__varfb__') {
+            const nm = prompt('Server variable name:', '');
+            if (!nm) { closePop(); return; }
+            const fb = prompt('Fallback text to show if it is not set:', '') || '';
+            token = '$var(' + nm.trim().toLowerCase() + '|' + fb + ')';
+          }
+          insertAtCaret(input, token);
+          closePop();
+          after();
+        }});
+        opt.appendChild(el('code', { class: 'friendly' }, it.label));
+        pop.appendChild(opt);
+      });
+    });
+    document.body.appendChild(pop);
+    positionPop(pop, btn);
+    openPop = pop;
+  }
+
+  /* ----- named inputs UI ----- */
+  function renderInputs() {
+    const root = document.getElementById('inputs');
+    if (!root) return;
+    root.innerHTML = '';
+    (state.inputs || []).forEach((inp, i) => {
+      const row = el('div', { class: 'input-row' });
+      const name = el('input', { type: 'text', placeholder: 'name (e.g. user, reason)' });
+      name.value = inp.name || '';
+      name.addEventListener('input', () => { inp.name = name.value; updateInputUsage(); refresh(); });
+      const type = el('select');
+      INPUT_TYPES.forEach(t => type.appendChild(el('option', { value: t.v }, t.label)));
+      type.value = inp.type || 'text';
+      type.addEventListener('change', () => { inp.type = type.value; if (inp.type !== 'text') inp.rest = false; renderInputs(); updateInputUsage(); refresh(); });
+      row.appendChild(name);
+      row.appendChild(type);
+      if ((inp.type || 'text') === 'text') {
+        const restLbl = el('label', { class: 'inline' });
+        const restCb = el('input', { type: 'checkbox', style: 'width:auto;' });
+        restCb.checked = !!inp.rest;
+        restCb.addEventListener('change', () => { inp.rest = restCb.checked; updateInputUsage(); refresh(); });
+        restLbl.appendChild(restCb); restLbl.appendChild(document.createTextNode(' rest'));
+        restLbl.title = 'Captures everything typed from here on (use for a multi-word reason). Put it last.';
+        row.appendChild(restLbl);
+      } else {
+        row.appendChild(el('span'));
+      }
+      row.appendChild(el('button', { class: 'btn tiny danger', type: 'button', title: 'Remove input', onclick: () => { state.inputs.splice(i, 1); renderInputs(); updateInputUsage(); refresh(); } }, '✕'));
+      root.appendChild(row);
+    });
+    if (!(state.inputs || []).length) root.appendChild(el('div', { class: 'easy-hint' }, 'No inputs yet. Add one if people should type something after the command.'));
+    updateInputUsage();
+  }
+  function updateInputUsage() {
+    const u = document.getElementById('inputUsage');
+    if (!u) return;
+    const parts = (state.inputs || []).map(inp => {
+      const nm = (inp.name || 'input').trim().replace(/\s+/g, '_') || 'input';
+      return inp.rest ? '[' + nm + '…]' : '[' + nm + ']';
+    });
+    u.textContent = 'Usage:  !' + (normalizeName(state.name) || 'alias') + (parts.length ? ' ' + parts.join(' ') : '   (takes no input)');
+  }
+
+  /* ----- visual conditional builder ----- */
+  let condTarget = null;
+  function openConditionBuilder(input, after) {
+    condTarget = { el: input, pos: (input.selectionStart != null ? input.selectionStart : input.value.length), after: after };
+    const when = document.getElementById('condWhen');
+    when.innerHTML = '';
+    const opts = [];
+    (state.inputs || []).forEach((inp, i) => {
+      const k = argIndexOf(i);
+      const nm = (inp.name || ('input ' + k)).trim() || ('input ' + k);
+      opts.push({ label: 'they included ' + nm, cond: '$' + k });
+      opts.push({ label: nm + ' is a link', cond: '$is_url($' + k + ')' });
+      opts.push({ label: nm + ' is a channel', cond: '$is_channel($' + k + ')' });
+    });
+    opts.push({ label: 'they typed anything at all', cond: '$0' });
+    opts.forEach(o => when.appendChild(el('option', { value: o.cond }, o.label)));
+    document.getElementById('condThen').value = '';
+    document.getElementById('condElse').value = '';
+    document.getElementById('condWarn').style.display = 'none';
+    openOverlay('condOverlay');
+  }
+
+  /* ----- goal strip ----- */
+  function renderGoalStrip() {
+    const g = document.getElementById('goalGrid');
+    if (!g) return;
+    g.innerHTML = '';
+    STARTERS.forEach(p => {
+      const b = el('button', { class: 'goal-btn', type: 'button', onclick: () => { applyState(p.build()); setStatus('Loaded "' + p.name + '".'); } });
+      b.appendChild(el('b', {}, p.name));
+      b.appendChild(el('small', {}, p.desc));
+      g.appendChild(b);
+    });
+    const blank = el('button', { class: 'goal-btn', type: 'button', onclick: () => { applyState(blankState()); setStatus('Cleared — blank alias.'); } });
+    blank.appendChild(el('b', {}, 'Start from scratch'));
+    blank.appendChild(el('small', {}, 'An empty alias'));
+    g.appendChild(blank);
+  }
+
+  /* ----- best-effort input inference on import ----- */
+  function inferInputs(body) {
+    const inputs = [];
+    const ensure = (k) => { while (inputs.length < k) inputs.push({ name: 'input' + (inputs.length + 1), type: 'text' }); return inputs[k - 1]; };
+    let m;
+    const userRe = /\$(?:n|u|id)\(\s*\$(\d+)\s*\)/gi;
+    while ((m = userRe.exec(body))) { const k = Number(m[1]); if (k >= 1) ensure(k).type = 'user'; }
+    const sliceRe = /\$slice\(\s*(\d+)/gi;
+    while ((m = sliceRe.exec(body))) { const k = Number(m[1]) + 1; if (k >= 1) { const inp = ensure(k); if (inp.type !== 'user') { inp.type = 'text'; inp.rest = true; } } }
+    const argRe = /\$(\d+)\b/g;
+    while ((m = argRe.exec(body))) { const k = Number(m[1]); if (k >= 1) ensure(k); }
+    inputs.forEach((inp, i) => { if (/^input\d+$/.test(inp.name)) inp.name = (inp.type === 'user' ? 'user' : 'arg') + (i + 1); });
+    return inputs;
+  }
+
+  /* ----- easy-mode wiring ----- */
+  document.querySelectorAll('#segMode button').forEach(b => b.addEventListener('click', () => { uiMode = b.dataset.mode; renderBuilder(); }));
+  document.getElementById('addInput').addEventListener('click', () => { state.inputs = state.inputs || []; state.inputs.push({ name: '', type: 'text' }); renderInputs(); refresh(); });
+  document.getElementById('condThenInsert').addEventListener('click', e => openFriendlyInserter(e.currentTarget, document.getElementById('condThen'), () => {}));
+  document.getElementById('condElseInsert').addEventListener('click', e => openFriendlyInserter(e.currentTarget, document.getElementById('condElse'), () => {}));
+  document.getElementById('condInsert').addEventListener('click', () => {
+    if (!condTarget) return;
+    const cond = document.getElementById('condWhen').value;
+    const thenV = document.getElementById('condThen').value;
+    const elseV = document.getElementById('condElse').value;
+    const warn = document.getElementById('condWarn');
+    if (thenV.indexOf(',') >= 0 || elseV.indexOf(',') >= 0) {
+      warn.textContent = 'Remove the commas — Viobot uses commas to separate the parts of a condition, so a comma inside your text would cut it off.';
+      warn.style.display = 'block';
+      return;
+    }
+    const token = elseV.trim()
+      ? '$ifelse(' + cond + ',' + (thenV || 'null') + ',' + elseV + ')'
+      : '$if(' + cond + ',' + thenV + ')';
+    const t = condTarget;
+    t.el.value = t.el.value.slice(0, t.pos) + token + t.el.value.slice(t.pos);
+    t.el.focus();
+    const np = t.pos + token.length;
+    if (t.el.setSelectionRange) t.el.setSelectionRange(np, np);
+    document.getElementById('condOverlay').classList.remove('open');
+    t.after();
+    condTarget = null;
+  });
+
+  /* ============================================================
+   *  STATIC CONTROL WIRING
+   * ============================================================ */
+  function updateNameEcho() {
+    const n = normalizeName(state.name);
+    const echo = document.getElementById('nameEcho');
+    echo.textContent = n ? 'Runs as  !' + n : '';
+    echo.style.color = RESERVED.has(n) ? 'var(--red)' : 'var(--cyan)';
+  }
+  document.querySelectorAll('#segCommand button').forEach(b => b.addEventListener('click', () => { state.command = b.dataset.cmd; renderBuilder(); }));
+  document.querySelectorAll('#segAccess button').forEach(b => b.addEventListener('click', () => { state.access = b.dataset.access; renderBuilder(); }));
+  document.getElementById('fName').addEventListener('input', e => { state.name = e.target.value; updateNameEcho(); refresh(); });
+  document.getElementById('fHelp').addEventListener('input', e => { state.help = e.target.value; refresh(); });
+  document.getElementById('fArgs').addEventListener('input', e => { sampleArgs = e.target.value.split(',').map(s => s.trim()).filter((_, i, a) => true); if (e.target.value.trim() === '') sampleArgs = []; refresh(); });
+  document.getElementById('cbResolve').addEventListener('change', refresh);
+  document.getElementById('addMessage').addEventListener('click', () => { state.messages.push(blankMessage()); renderBuilder(); });
+  document.getElementById('clearAll').addEventListener('click', () => { if (confirm('Reset the whole builder?')) { state = blankState(); sampleArgs = []; document.getElementById('fArgs').value = ''; renderBuilder(); } });
+
+  /* ===== copy / download ===== */
+  function setStatus(msg, err) { const s = document.getElementById('status'); s.textContent = msg; s.style.color = err ? 'var(--red)' : 'var(--green)'; clearTimeout(window._st); window._st = setTimeout(() => s.textContent = '', 4000); }
+  document.getElementById('btnCopy').addEventListener('click', async () => {
+    const text = document.getElementById('output').textContent;
+    try { await navigator.clipboard.writeText(text); setStatus('Copied — paste it into your server and Viobot will store it.'); }
+    catch {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); setStatus('Copied.'); } catch { setStatus('Copy failed — select the output box and copy manually.', true); }
+      ta.remove();
+    }
+  });
+  document.getElementById('btnDownload').addEventListener('click', () => {
+    const name = normalizeName(state.name) || 'alias';
+    const blob = new Blob([document.getElementById('output').textContent], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name + '-alias.txt';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    setStatus('Downloaded ' + a.download + '.');
+  });
+
+  /* ===== modals ===== */
+  function openOverlay(id) { document.getElementById(id).classList.add('open'); }
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('.overlay').classList.remove('open')));
+  document.querySelectorAll('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); }));
+  document.getElementById('btnHelp').addEventListener('click', () => openOverlay('helpOverlay'));
+  document.getElementById('btnImport').addEventListener('click', () => openOverlay('importOverlay'));
+  document.getElementById('btnPresets').addEventListener('click', () => { renderPresetLists(); openOverlay('presetOverlay'); });
+
+  /* ===== cheatsheet content ===== */
+  (function buildTools() {
+    const grid = document.getElementById('toolsGrid');
+    TOOLS_PAGES.forEach(p => {
+      const card = el('div', { class: 'tools-page' });
+      card.appendChild(el('h4', {}, p.h));
+      p.groups.forEach(g => {
+        const pg = el('div', { class: 'pgrp' });
+        pg.appendChild(el('b', {}, g.b));
+        const ul = el('div', { html: g.lines.map(l => '<div>' + l.replace(/`([^`]+)`/g, '<code>$1</code>') + '</div>').join('') });
+        pg.appendChild(ul);
+        card.appendChild(pg);
+      });
+      if (p.ex) card.appendChild(el('div', { class: 'ex' }, p.ex));
+      grid.appendChild(card);
+    });
+  })();
+
+  /* ============================================================
+   *  PRESETS (starters + localStorage)
+   * ============================================================ */
+  const STARTERS = [
+    { name: 'Greet a member', desc: 'Tags the person you name, or no one if blank', build: () => ({
+      command:'alias', name:'welcome', help:'Welcome a member', access:'public', inputs:[ { name:'user', type:'user' } ],
+      messages:[ { text:'$if($1,$n($1)) welcome to the server!', embeds:[ {
+        title:'Welcome aboard', description:"We're glad you're here. Read the rules and say hi!",
+        color:'#22d3ee', fields:[], footer:'Posted by $u', image:'', thumbnail:'' } ] } ] }) },
+    { name: 'Links / resources', desc: 'A tidy embed of links & channels', build: () => ({
+      command:'alias', name:'links', help:'Useful links', access:'public', inputs:[],
+      messages:[ { text:'', embeds:[ {
+        title:'Helpful Links', description:'Everything you need in one place.',
+        color:'#a78bfa',
+        fields:[ {name:'🌐 Website', value:'https://example.com', inline:true}, {name:'📚 Docs', value:'https://example.com/docs', inline:true}, {name:'❓ Support', value:'Open a ticket in $channel', inline:false} ],
+        footer:'', image:'', thumbnail:'' } ] } ] }) },
+    { name: 'Staff quick-reply', desc: 'Canned support reply, can tag a user', build: () => ({
+      command:'alias', name:'support', help:'Point to support', access:'modonly', inputs:[ { name:'user', type:'user' } ],
+      messages:[ { text:'$if($1,$n($1))', embeds:[ {
+        title:'Need help?', description:'Please follow the steps below.',
+        color:'#34d399', fields:[ {name:'Step 1', value:'Read the pinned messages.', inline:false}, {name:'Step 2', value:'Open a ticket if you still need help.', inline:false} ],
+        footer:'Support Team', image:'', thumbnail:'' } ] } ] }) },
+    { name: 'Rules', desc: 'A simple rules embed', build: () => ({
+      command:'alias', name:'rules', help:'Server rules', access:'public', inputs:[],
+      messages:[ { text:'', embeds:[ {
+        title:'Server Rules', description:'Be excellent to each other.',
+        color:'#facc15', fields:[ {name:'1. Be respectful', value:'No harassment or hate.', inline:false}, {name:'2. No spam', value:'Keep channels on-topic.', inline:false}, {name:'3. Follow Discord ToS', value:'Always.', inline:false} ],
+        footer:'Thanks for keeping it friendly', image:'', thumbnail:'' } ] } ] }) },
+    { name: 'Warn + reason', desc: 'Tags a user and echoes a multi-word reason', build: () => ({
+      command:'alias', name:'notice', help:'Public notice with reason', access:'modonly',
+      inputs:[ { name:'user', type:'user' }, { name:'reason', type:'text', rest:true } ],
+      messages:[ { text:'$if($1,$n($1))', embeds:[ {
+        title:'Notice', description:'$ifelse($2,Reason: $slice(1),A staff notice.)',
+        color:'#fb7185', fields:[], footer:'Issued by $u', image:'', thumbnail:'' } ] } ] }) },
+    { name: 'Share a link (smart)', desc: 'Only shows the link if a real URL is given', build: () => ({
+      command:'alias', name:'share', help:'Share a link', access:'public', inputs:[ { name:'link', type:'text' } ],
+      messages:[ { text:'$ifelse($is_url($1),$u shared a link below,$u tried to share something — but no valid link was given.)', embeds:[ {
+        title:'Shared link', description:'$ifelse($is_url($1),$1,null)', color:'#60a5fa', fields:[], footer:'', image:'', thumbnail:'' } ] } ] }) },
+  ];
+
+  const LS_KEY = 'viobot_alias_presets_v1';
+  function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
+  function saveSaved(list) { try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch { setStatus('Could not save (storage blocked on file://). Use Export instead.', true); } }
+
+  function applyState(s) {
+    state = JSON.parse(JSON.stringify(s));
+    // backfill missing keys
+    if (!Array.isArray(state.inputs)) state.inputs = [];
+    state.messages = (state.messages || [blankMessage()]).map(m => ({ text: m.text || '', embeds: (m.embeds || []).map(e => Object.assign(blankEmbed(), e)) }));
+    renderBuilder();
+  }
+
+  function renderPresetLists() {
+    const sl = document.getElementById('starterList');
+    sl.innerHTML = '';
+    STARTERS.forEach(p => {
+      const row = el('div', { class: 'preset-row' });
+      row.appendChild(el('div', { class: 'meta', html: '<b>' + esc(p.name) + '</b><small>' + esc(p.desc) + '</small>' }));
+      row.appendChild(el('button', { class: 'btn tiny primary', type: 'button', onclick: () => { applyState(p.build()); document.getElementById('presetOverlay').classList.remove('open'); setStatus('Loaded "' + p.name + '".'); } }, 'Load'));
+      sl.appendChild(row);
+    });
+    const saved = loadSaved();
+    const dl = document.getElementById('savedList');
+    dl.innerHTML = saved.length ? '' : '<div style="color:var(--muted);font-size:0.84rem;">No saved presets yet.</div>';
+    saved.forEach((p, i) => {
+      const row = el('div', { class: 'preset-row' });
+      row.appendChild(el('div', { class: 'meta', html: '<b>' + esc(p.name || 'untitled') + '</b><small>' + esc((p.state && p.state.command === 'palias' ? '!palias ' : '!alias ') + (p.state && p.state.name || '')) + '</small>' }));
+      const acts = el('div', { style: 'display:flex;gap:6px;' });
+      acts.appendChild(el('button', { class: 'btn tiny primary', type: 'button', onclick: () => { applyState(p.state); document.getElementById('presetOverlay').classList.remove('open'); setStatus('Loaded "' + p.name + '".'); } }, 'Load'));
+      acts.appendChild(el('button', { class: 'btn tiny danger', type: 'button', onclick: () => { const l = loadSaved(); l.splice(i, 1); saveSaved(l); renderPresetLists(); } }, '✕'));
+      row.appendChild(acts);
+      dl.appendChild(row);
+    });
+  }
+  document.getElementById('savePreset').addEventListener('click', () => {
+    const label = prompt('Name this preset:', normalizeName(state.name) || 'preset');
+    if (!label) return;
+    const list = loadSaved(); list.push({ name: label, state: JSON.parse(JSON.stringify(state)) }); saveSaved(list); renderPresetLists();
+  });
+  document.getElementById('exportPresets').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(loadSaved(), null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'viobot-alias-presets.json';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  });
+  document.getElementById('importPresets').addEventListener('click', () => document.getElementById('fileInput').click());
+  document.getElementById('fileInput').addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => { try { const data = JSON.parse(fr.result); if (Array.isArray(data)) { saveSaved(data); renderPresetLists(); setStatus('Imported ' + data.length + ' presets.'); } else setStatus('Invalid presets file.', true); } catch { setStatus('Could not read presets file.', true); } };
+    fr.readAsText(file); e.target.value = '';
+  });
+
+  /* ============================================================
+   *  IMPORT (reverse-parse an existing alias)
+   * ============================================================ */
+  document.getElementById('doImport').addEventListener('click', () => {
+    const raw = document.getElementById('importText').value;
+    const st = document.getElementById('importStatus');
+    if (!raw.trim()) { st.textContent = 'Paste an alias first.'; st.style.color = 'var(--red)'; return; }
+    try {
+      const parsed = importAlias(raw);
+      applyState(parsed);
+      document.getElementById('importOverlay').classList.remove('open');
+      setStatus('Imported alias into the builder.');
+    } catch (err) { st.textContent = 'Could not parse: ' + err.message; st.style.color = 'var(--red)'; }
+  });
+
+  function importAlias(raw) {
+    const lines = String(raw).replace(/\r\n/g, '\n').split('\n');
+    let command = 'alias', name = '', help = '', access = 'modonly', bodyStart = 0;
+    // find header line (first non-empty)
+    let hi = 0; while (hi < lines.length && !lines[hi].trim()) hi++;
+    const header = (lines[hi] || '').trim();
+    const hm = header.match(/^!?(p?alias)\s+create\s+(\S+)(.*)$/i);
+    if (hm) {
+      command = hm[1].toLowerCase() === 'palias' ? 'palias' : 'alias';
+      name = normalizeName(hm[2]);
+      const opts = hm[3] || '';
+      help = (opts.match(/help="([^"]*)"/i) || [])[1] || '';
+      access = (opts.match(/\baccess=(public|modonly)\b/i) || [])[1] || 'modonly';
+      bodyStart = hi + 1;
+    } else {
+      // no header — treat entire thing as a body
+      command = 'alias'; name = 'imported'; bodyStart = 0;
+    }
+    const body = lines.slice(bodyStart).join('\n').trim();
+    const messages = parseBody(body);
+    return { command, name: name || 'imported', help, access: access.toLowerCase(), messages, inputs: inferInputs(body) };
+  }
+
+  /* ============================================================
+   *  SELF-TESTS (verification harness)
+   * ============================================================ */
+  function runSelfTests() {
+    const results = [];
+    const assert = (cond, label) => results.push((cond ? 'PASS' : 'FAIL') + ' — ' + label);
+    const C = () => ({ args: ['123456789012345678', 'hello', 'world'], vars: { greeting: 'Hi' }, caller: { name: 'You', id: '000000000000000000' }, channel: { name: 'general', id: '111111111111111111' } });
+
+    assert(expandVars('Reason: $0', C()) === 'Reason: 123456789012345678 hello world', '$0 joins args');
+    assert(expandVars('$1', C()) === '123456789012345678', '$1 first arg');
+    assert(expandVars('$slice(1)', C()) === 'hello world', '$slice(1) to end');
+    assert(expandVars('$slice(1,2)', C()) === 'hello', '$slice(1,2)');
+    assert(expandVars('$if($1,yes)', C()) === 'yes', '$if truthy');
+    assert(expandVars('$if(,yes)', C()) === '', '$if falsy empty');
+    assert(expandVars('$ifelse(,a,b)', C()) === 'b', '$ifelse false branch');
+    assert(expandVars('$ifelse(x,a,null)', C()) === 'a', '$ifelse null keyword');
+    assert(expandVars('$n($1)', C()) === '<@123456789012345678>', '$n(arg) mention');
+    assert(expandVars('$n(nope)', C()) === 'nope', '$n no-id returns input');
+    assert(expandVars('$u', C()) === 'You', '$u caller');
+    assert(expandVars('$channel', C()) === '<#111111111111111111>', '$channel mention');
+    assert(expandVars('$var(greeting)', C()) === 'Hi', '$var lookup');
+    assert(expandVars('$var(missing|fallback $u)', C()) === 'fallback You', '$var fallback expands');
+    assert(expandVars('$if($1,$n($1))', C()) === '<@123456789012345678>', 'nested $if/$n');
+    assert(expandVars('$nope', C()) === '$nope', 'unknown left literal');
+
+    // round-trip: generate → parse → generate stable
+    const before = state;
+    const sample = { command:'alias', name:'rt', help:'Round trip', access:'public',
+      messages:[ { text:'Hello $n($1)\nLine two', embeds:[ { title:'T "q"', description:'Para one\n\nPara two', color:'#22d3ee', fields:[ {name:'A', value:'one', inline:true}, {name:'B', value:'two\nlines', inline:false} ], footer:'F', image:'https://x.com/a.png', thumbnail:'' } ] } ] };
+    state = sample;
+    const gen1 = generate();
+    const reparsed = importAlias(gen1);
+    state = reparsed;
+    const gen2 = generate();
+    assert(gen1 === gen2, 'generate → import → generate is stable');
+    assert(reparsed.command === 'alias' && reparsed.name === 'rt' && reparsed.access === 'public' && reparsed.help === 'Round trip', 'header round-trips');
+    assert(reparsed.messages[0].embeds[0].description === 'Para one\n\nPara two', 'multi-line description (with blank line) round-trips');
+    assert(reparsed.messages[0].embeds[0].fields.length === 2 && reparsed.messages[0].embeds[0].fields[0].inline === true, 'fields + inline round-trip');
+    assert(reparsed.messages[0].text === 'Hello $n($1)\nLine two', 'say text newline round-trips');
+
+    // --- Easy mode: plain-English inserter maps inputs to the right tokens ---
+    state = { command:'alias', name:'t', help:'', access:'modonly',
+      inputs:[ { name:'user', type:'user' }, { name:'reason', type:'text', rest:true } ], messages:[ blankMessage() ] };
+    const flat = friendlyGroups().flatMap(g => g.items.map(it => it.insert));
+    assert(flat.includes('$n($1)'), 'friendly: user input -> $n($1)');
+    assert(flat.includes('$slice(1)'), 'friendly: rest text input -> $slice(1)');
+    assert(flat.includes('$n'), 'friendly: runner mention -> $n');
+    assert(flat.includes('$channel'), 'friendly: this channel -> $channel');
+    assert(flat.includes('$if($1,$n($1))'), 'friendly: smart tag-if-given');
+    const inf = inferInputs('say\nHi $n($1) here is $slice(1)');
+    assert(inf.length === 2 && inf[0].type === 'user' && inf[1].rest === true, 'inferInputs: detects user arg + rest text');
+
+    state = before;
+
+    const pass = results.filter(r => r.startsWith('PASS')).length;
+    console.log('%cViobot Alias Generator self-tests: ' + pass + '/' + results.length + ' passed', 'color:#22d3ee;font-weight:bold');
+    results.forEach(r => console.log((r.startsWith('PASS') ? '%c' : '%c') + r, 'color:' + (r.startsWith('PASS') ? '#34d399' : '#fb7185')));
+    return { pass, total: results.length, results };
+  }
+  document.getElementById('btnSelfTest').addEventListener('click', () => {
+    const r = runSelfTests();
+    refresh();
+    setStatus('Self-tests: ' + r.pass + '/' + r.total + ' passed — see browser console (F12) for details.', r.pass !== r.total);
+  });
+
+  /* ============================================================
+   *  BOOT
+   * ============================================================ */
+  renderBuilder();
+  if (location.search.includes('selftest')) runSelfTests();
+  </script>
+</body>
+</html>

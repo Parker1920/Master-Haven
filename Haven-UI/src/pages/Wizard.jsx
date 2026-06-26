@@ -395,7 +395,14 @@ export default function Wizard() {
                 setProposedRegionName((prev) => {
                   if (userEditedRegionRef.current) return prev
                   const newName = ng.data.region_name || ''
-                  if (!prev || prev === lastProceduralRegionRef.current) {
+                  // Overwrite when: empty, OR still equal to the last value we
+                  // auto-filled, OR we've never auto-filled this session
+                  // (lastProceduralRegionRef === ''). The last clause is the
+                  // safety net: with userEditedRegionRef already false above, a
+                  // non-empty prev when we've auto-filled nothing can only be a
+                  // stale value carried across a reset — never a user edit — so
+                  // it's always safe to replace.
+                  if (!prev || prev === lastProceduralRegionRef.current || !lastProceduralRegionRef.current) {
                     lastProceduralRegionRef.current = newName
                     return newName
                   }
@@ -1209,6 +1216,16 @@ export default function Wizard() {
     userEditedRegionRef.current = false
     lastProceduralRegionRef.current = ''
     originalStationRef.current = null
+    // Clear the region-name STATE too, not just the refs that guard it.
+    // Resetting lastProceduralRegionRef to '' while leaving a stale
+    // proposedRegionName non-empty made the namegen guard (see the region
+    // effect) read the leftover value as "user-customized" and refuse to
+    // overwrite it — so the next system inherited the prior system's region
+    // name. Reset them together so the invariant holds: after Submit Another,
+    // proposedRegionName === '' === lastProceduralRegionRef.current.
+    setProposedRegionName('')
+    setRegionNameSavedAt(null)
+    setRegionInfo(null)
     setSystem((s) => ({
       ...EMPTY_SYSTEM,
       reality: s.reality,
