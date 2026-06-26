@@ -79,7 +79,7 @@ class PersonalityCog(commands.Cog):
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
                 
-        # -------------------- Handle active session ------
+     # -------------------- Handle active session ------
     async def handle_session(self, message):
         user_id = message.author.id
         session = active_sessions.get(user_id)
@@ -101,10 +101,23 @@ class PersonalityCog(commands.Cog):
             active_sessions.pop(user_id, None)
             return
 
-        # 2. Try processing as a native bot text prefix command
-        command_name = content.split()[0].lower()
-        command = self.bot.get_command(command_name)
+        if content.lower().startswith("show logs"):
+            parts = content.split(" ", 2)
+            search_term = parts[2] if len(parts) >= 3 else None
+            community_cog = self.bot.get_cog("CommunityCog")
+            if community_cog:
+                ctx = await self.bot.get_context(message)
+                await community_cog.show_logs(ctx, search=search_term)
+            else:
+                await message.channel.send("The archives are unreachable.")
+            active_sessions.pop(user_id, None)
+            return
 
+        # Extract potential command name
+        command_name = content.split()[0].lower()
+
+        # 2. Try processing as a native bot text prefix command
+        command = self.bot.get_command(command_name)
         if command:
             fake_prefix = "!" 
             message.content = f"{fake_prefix}{content}"
@@ -120,26 +133,34 @@ class PersonalityCog(commands.Cog):
                     active_sessions.pop(user_id, None)
                     return
 
-        # 3. NEW: Try processing as a Slash Command from cmds.slash
-        # Look for the slash command matching the first word typed after activation
+        # 3. Try processing dynamically as a Slash Command from bot.tree
         slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
         
         if slash_command and isinstance(slash_command, discord.app_commands.Command):
-            # Parse arguments if your slash command expects them
             args = content.split()[1:]
             
-            # We must construct a mock interaction to feed into the slash command callback
+            # Lightweight mock class to trick the slash command callback layout
+            class MockInteraction:
+                def __init__(self, msg):
+                    self.channel = msg.channel
+                    self.user = msg.author
+                    self.guild = msg.guild
+                    self.response = self 
+                    self.followup = self 
+                
+                async def send_message(self, content_str, *args, **kwargs):
+                    return await self.channel.send(content_str)
+                
+                async def send(self, content_str, *args, **kwargs):
+                    return await self.channel.send(content_str)
+                
+                async def defer(self, *args, **kwargs):
+                    pass
+
+            mock_interaction = MockInteraction(message)
+            
             try:
-                # Get the underlying async function of the slash command
-                callback = slash_command.callback
-                
-                # Check your global interaction checks first before running
-                interaction = await self.bot.get_interaction(message)
-                
-                # Assign the parsed arguments dynamically to match the parameters
-                # Note: This basic parser assumes simple string arguments.
-                await callback(interaction, *args) 
-                
+                await slash_command.callback(mock_interaction, *args)
                 active_sessions.pop(user_id, None)
                 return
             except Exception as e:
@@ -148,7 +169,7 @@ class PersonalityCog(commands.Cog):
                 active_sessions.pop(user_id, None)
                 return
 
-        # 4. If nothing matched, handle it as a failure
+      
         session["fails"] += 1
         if session["fails"] >= MAX_FAILS:
             await message.channel.send(fail_responses[-1])
@@ -156,6 +177,7 @@ class PersonalityCog(commands.Cog):
         else:
             fail_index = session["fails"] - 1
             await message.channel.send(fail_responses[fail_index])
+
 
     # -------------------- Listener --------------------
     @commands.Cog.listener()
