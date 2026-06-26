@@ -15,7 +15,7 @@ class CommandsCog(commands.Cog):
         self.parser = GoogleDocParser(DOC_URL)
 
 
-    # ---------------- Announce ----------------
+#---------------- Announce --------------
     @app_commands.command(name="announce", description="Send doc to selected channel")
     @app_commands.describe(
         channel="Channel to send to",
