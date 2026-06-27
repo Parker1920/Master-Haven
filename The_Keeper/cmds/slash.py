@@ -59,6 +59,7 @@ class CommandsCog(commands.Cog):
         await     interaction.response.send_message("Sent.", ephemeral=True)
 
 #-------------send--------------------
+    @app_commands.command(name="send", description="Send a custom embed")
     @app_commands.describe(
         channel="Channel to send to",
         message="Message to send",
