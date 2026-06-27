@@ -194,6 +194,9 @@ class PersonalityCog(commands.Cog):
             
         if "keeper" in content:
             await message.add_reaction("👀")
+        if "right, keeper?" in content or "right keeper?" in content:
+            await message.channel.send("yep")
+            return
 
 # -------------------- Setup --------------------
 async def setup(bot: commands.Bot):
