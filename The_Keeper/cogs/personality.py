@@ -5,6 +5,7 @@ from discord.ext import commands
 import random
 from datetime import datetime, timedelta, timezone
 import difflib 
+import traceback
 
 # -------------------- Constants --------------------
 SESSION_TIMEOUT = 30
@@ -25,12 +26,88 @@ keeper_responses = [
     "We witness your voyage, {member.mention}"
 ]
 
-fail_responses = ["huh?", "one more time?", "Gather your thoughts and resummon me"]
+fail_responses = ["huh?", "one more time?", "Gather your thoughts and resummon me."]
+
+# -------------------- Mock Interaction for Slash Commands --------------------
+class MockInteraction:
+    def __init__(self, msg):
+        self.channel = msg.channel
+        self.user = msg.author
+        self.guild = msg.guild
+        self.response = self  # Allows interaction.response.send_message
+        self.followup = self  # Allows interaction.followup.send
+    
+    async def send_message(self, content_str, *args, **kwargs):
+        return await self.channel.send(content_str)
+    
+    async def send(self, content_str, *args, **kwargs):
+        return await self.channel.send(content_str)
+    
+    async def defer(self, *args, **kwargs):
+        pass
+
 
 # -------------------- Cog --------------------
 class PersonalityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    # -------------------- Handle Session --------------------
+    async def handle_session(self, message):
+        user_id = message.author.id
+        content = message.content.strip()
+        lower_content = content.lower()
+        
+        # 1. Check if session has expired dynamically
+        now = datetime.now(timezone.utc)
+        if active_sessions[user_id]["expiry"] < now:
+            active_sessions.pop(user_id, None)
+            return  # Let on_message drop out or handle normally
+
+        # Reset expiry window slightly on interaction activity (Optional comfort feature)
+        active_sessions[user_id]["expiry"] = now + timedelta(seconds=SESSION_TIMEOUT)
+
+        # 2. Check if it's a 'tell' command
+        if lower_content.startswith("tell"):
+            await self.handle_tell(message)
+            active_sessions.pop(user_id, None)  # Successfully complete session
+            return
+
+        # 3. Try processing dynamically as a Slash Command from bot.tree
+        command_name = lower_content.split()[0] if lower_content.split() else ""
+        slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
+        
+        if slash_command and isinstance(slash_command, discord.app_commands.Command):
+            args = content.split()[1:]
+            mock_interaction = MockInteraction(message)
+            
+            try:
+                cog_instance = slash_command.binding
+                if cog_instance is not None:
+                    await slash_command.callback(cog_instance, mock_interaction, *args)
+                else:
+                    await slash_command.callback(mock_interaction, *args)
+
+                active_sessions.pop(user_id, None)  # Clean up after successful command execution
+                return
+            except Exception as e:
+                print("[SLASH CALLBACK EXCEPTION DETECTED]")
+                traceback.print_exc() 
+                await message.channel.send("An error occurred executing that cosmic command.")
+                active_sessions.pop(user_id, None)
+                return
+
+        # 4. If nothing matches, handle a validation failure flow
+        active_sessions[user_id]["fails"] += 1
+        
+        if active_sessions[user_id]["fails"] >= MAX_FAILS:
+            await message.channel.send(fail_responses[2]) # "Gather your thoughts..."
+            active_sessions.pop(user_id, None)
+        else:
+            # Pick one of the intermediate "huh?" / "one more time?" responses
+            await message.channel.send(random.choice(fail_responses[:2]))
+        
+        return
 
     # -------------------- Handle 'tell' --------------------
     async def handle_tell(self, message):
@@ -44,16 +121,15 @@ class PersonalityCog(commands.Cog):
 
         # ---- Special user tells everyone ----
         if message.author.id == SPECIAL_USER_ID and target_name == "everyone":
-            if message.author.id in active_sessions:
-                await message.channel.send(f"@everyone You're {msg_text[len('everyone'):].strip()}")
-                for member in message.channel.members:
-                    if member.bot or member == message.author:
-                        continue
-                    try:
-                        await member.send(DWEEB_IMAGE_URL)
-                    except discord.Forbidden:
-                        continue
-                return
+            await message.channel.send(f"@everyone You're {msg_text.strip()}")
+            for member in message.channel.members:
+                if member.bot or member == message.author:
+                    continue
+                try:
+                    await member.send(DWEEB_IMAGE_URL)
+                except discord.Forbidden:
+                    continue
+            return
 
         # ---- Normal target lookup ----
         target = discord.utils.find(
@@ -78,56 +154,6 @@ class PersonalityCog(commands.Cog):
                 await target.send(DWEEB_IMAGE_URL)
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
-                
-# -------------------- Handle active session ------
-            # 3. Try processing dynamically as a Slash Command from bot.tree
-        slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
-        
-        if slash_command and isinstance(slash_command, discord.app_commands.Command):
-            args = content.split()[1:]
-            
-            # Lightweight mock class to trick the slash command callback layout
-            class MockInteraction:
-                def __init__(self, msg):
-                    self.channel = msg.channel
-                    self.user = msg.author
-                    self.guild = msg.guild
-                    self.response = self  # Allows interaction.response.send_message
-                    self.followup = self  # Allows interaction.followup.send
-                
-                async def send_message(self, content_str, *args, **kwargs):
-                    return await self.channel.send(content_str)
-                
-                async def send(self, content_str, *args, **kwargs):
-                    return await self.channel.send(content_str)
-                
-                async def defer(self, *args, **kwargs):
-                    pass
-
-            mock_interaction = MockInteraction(message)
-            
-            try:
-                # Get the Cog instance holding this command
-                cog_instance = slash_command.binding
-                
-                if cog_instance is not None:
-                    # Pass the Cog instance (self), then the mock interaction, then the text arguments
-                    await slash_command.callback(cog_instance, mock_interaction, *args)
-                else:
-                   
-                    await slash_command.callback(mock_interaction, *args)
-
-                active_sessions.pop(user_id, None)
-                return
-            except Exception as e:
-                import traceback
-                print("[SLASH CALLBACK EXCEPTION DETECTED]")
-                traceback.print_exc() 
-                
-                await message.channel.send("An error occurred executing that cosmic command.")
-                active_sessions.pop(user_id, None)
-                return
-
 
     # -------------------- Listener --------------------
     @commands.Cog.listener()
@@ -138,13 +164,13 @@ class PersonalityCog(commands.Cog):
         content = message.content.lower().strip()
         user_id = message.author.id
         now = datetime.now(timezone.utc)
-
-        # ---- Cleanup expired sessions ----
+        
+# ---- Cleanup expired sessions globally ----
         expired = [uid for uid, sess in active_sessions.items() if sess["expiry"] < now]
         for uid in expired:
             active_sessions.pop(uid, None)
 
-        # ---- Active session ----
+        # ---- Route Active session ----
         if user_id in active_sessions:
             await self.handle_session(message)
             return
