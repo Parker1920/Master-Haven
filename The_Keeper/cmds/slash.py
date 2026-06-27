@@ -59,59 +59,58 @@ class CommandsCog(commands.Cog):
         await     interaction.response.send_message("Sent.", ephemeral=True)
 
 #-------------send--------------------
-    @app_commands.describe(
-        channel="Channel to send to",
-        message="Message to send",
-        title="Optional title for the embed",
-        footer="Optional footer text (renders in small font)",
-        color="Hex color like #ff0000",
-        image="Optional image/gif URL"
+        @app_commands.describe(
+            channel="Channel to send to",
+            message="Message to send",
+            title="Optional title for the embed",
+            footer="Optional footer text (renders in small font)",
+            color="Hex color like #ff0000",
+            image="Optional image/gif URL"
         )
-    async def send(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        message: str,
-        title: str | None = None, 
-        footer: str | None = None,
-        color: str = "#5865F2",
-        image: str | None = None
-    ):
-        embed = discord.Embed(
-            title=title, 
-            description=message,
-            color=discord.Color.from_str(color)
-        )
+        async def send(
+            self,
+            interaction: discord.Interaction,
+            channel: discord.TextChannel,
+            message: str,
+            title: str | None = None, 
+            footer: str | None = None,
+            color: str = "#5865F2",
+            image: str | None = None
+        ):
+            embed = discord.Embed(
+                title=title, 
+                description=message,
+                color=discord.Color.from_str(color)
+            )
         
-        if image:
-            embed.set_image(url=image)
+            if image:
+                embed.set_image(url=image)
                 
-        if footer:
-            embed.set_footer(text=footer)
+            if footer:
+                embed.set_footer(text=footer)
         
-        await channel.send(embed=embed)
-        await interaction.response.send_message("Sent.", ephemeral=True)
+            await channel.send(embed=embed)
+            await interaction.response.send_message("Sent.", ephemeral=True)
 
     # ---------------- COMMUNITY ----------------
     @app_commands.command(name="community", description="Look up a civ/community")
-    async def community(
-        self,
-        interaction: discord.Interaction,
-        search: str | None = None
-    ):
-        
-        community_cog = self.bot.get_cog("CommunityCog")
+async def community(
+    self,
+    interaction: discord.Interaction,
+    search: str | None = None
+):
+    community_cog = self.bot.get_cog("CommunityCog")
 
-        if not community_cog:
-            return await interaction.response.send_message("Community system not loaded.")
-            
-            await interaction.response.defer(thinking=True)
-            view = SearchView(community_cog)
+    if not community_cog:
+        return await interaction.response.send_message("Community system not loaded.", ephemeral=True)
 
-        await interaction.response.send_message("Open search:", view=SearchView(community_cog))
+    if search:
+        await community_cog.run_search(interaction, search)
+        return
 
-        if search:
-            await community_cog.run_search(interaction, search)
+    view = SearchView(community_cog)
+    await interaction.response.send_message("Open search:", view=view)
+
 
     # ---------------- ADD CIV ----------------
     @app_commands.command(name="addciv", description="Add a civ/community")
