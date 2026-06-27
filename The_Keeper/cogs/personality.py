@@ -79,61 +79,8 @@ class PersonalityCog(commands.Cog):
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
                 
-     # -------------------- Handle active session ------
-    async def handle_session(self, message):
-        user_id = message.author.id
-        session = active_sessions.get(user_id)
-        if not session:
-            return
-
-        now = datetime.now(timezone.utc)
-        if session["expiry"] < now:
-            active_sessions.pop(user_id, None)
-            return
-
-        content = message.content.strip()
-        if not content:
-            return
-
-        # 1. Handle special custom text commands first
-        if content.lower().startswith("tell "):
-            await self.handle_tell(message)
-            active_sessions.pop(user_id, None)
-            return
-
-        if content.lower().startswith("show logs"):
-            parts = content.split(" ", 2)
-            search_term = parts[2] if len(parts) >= 3 else None
-            community_cog = self.bot.get_cog("CommunityCog")
-            if community_cog:
-                ctx = await self.bot.get_context(message)
-                await community_cog.show_logs(ctx, search=search_term)
-            else:
-                await message.channel.send("The archives are unreachable.")
-            active_sessions.pop(user_id, None)
-            return
-
-        # Extract potential command name
-        command_name = content.split()[0].lower()
-
-        # 2. Try processing as a native bot text prefix command
-        command = self.bot.get_command(command_name)
-        if command:
-            fake_prefix = "!" 
-            message.content = f"{fake_prefix}{content}"
-            ctx = await self.bot.get_context(message, prefix=fake_prefix)
-            
-            if ctx.valid:
-                try:
-                    await self.bot.invoke(ctx)
-                    active_sessions.pop(user_id, None) 
-                    return
-                except Exception as e:
-                    await message.channel.send("An error occurred, the Witness has heen notified.")
-                    active_sessions.pop(user_id, None)
-                    return
-
-        # 3. Try processing dynamically as a Slash Command from bot.tree
+# -------------------- Handle active session ------
+            # 3. Try processing dynamically as a Slash Command from bot.tree
         slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
         
         if slash_command and isinstance(slash_command, discord.app_commands.Command):
@@ -145,8 +92,8 @@ class PersonalityCog(commands.Cog):
                     self.channel = msg.channel
                     self.user = msg.author
                     self.guild = msg.guild
-                    self.response = self 
-                    self.followup = self 
+                    self.response = self  # Allows interaction.response.send_message
+                    self.followup = self  # Allows interaction.followup.send
                 
                 async def send_message(self, content_str, *args, **kwargs):
                     return await self.channel.send(content_str)
@@ -160,7 +107,16 @@ class PersonalityCog(commands.Cog):
             mock_interaction = MockInteraction(message)
             
             try:
-                await slash_command.callback(mock_interaction, *args)
+                # Get the Cog instance holding this command
+                cog_instance = slash_command.binding
+                
+                if cog_instance is not None:
+                    # Pass the Cog instance (self), then the mock interaction, then the text arguments
+                    await slash_command.callback(cog_instance, mock_interaction, *args)
+                else:
+                   
+                    await slash_command.callback(mock_interaction, *args)
+
                 active_sessions.pop(user_id, None)
                 return
             except Exception as e:
@@ -168,18 +124,9 @@ class PersonalityCog(commands.Cog):
                 print("[SLASH CALLBACK EXCEPTION DETECTED]")
                 traceback.print_exc() 
                 
-                await message.channel.send("An error occurred, The Witness has been notified.")
+                await message.channel.send("An error occurred executing that cosmic command.")
                 active_sessions.pop(user_id, None)
                 return
-
-      
-        session["fails"] += 1
-        if session["fails"] >= MAX_FAILS:
-            await message.channel.send(fail_responses[-1])
-            active_sessions.pop(user_id, None)
-        else:
-            fail_index = session["fails"] - 1
-            await message.channel.send(fail_responses[fail_index])
 
 
     # -------------------- Listener --------------------
