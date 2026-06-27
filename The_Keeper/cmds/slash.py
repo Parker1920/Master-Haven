@@ -1,131 +1,409 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
+import aiohttp
+import csv
 import os
-
-from announcements import GoogleDocParser
-from cogs.community import SearchView, AddCivView
-
-DOC_URL = "https://docs.google.com/document/d/1FRfxnmXdhU_O-OGTxG52lM0298zzKnGp7W2Qs5njBPo/export?format=txt"
+from io import StringIO
+import asyncio
+import gspread
 
 
-class CommandsCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self.parser = GoogleDocParser(DOC_URL)
+# -------------------- PAGINATOR --------------------
+class SearchPaginator(discord.ui.View):
+    def __init__(self, cog, results, embed_builder):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.results = results
+        self.embed_builder = embed_builder
+        self.index = 0
 
+    def build_page(self):
+        row = self.results[self.index]
+        embed = self.embed_builder(row, self.index + 1)
 
-    # ---------------- Announce ----------------
-    @app_commands.command(name="announce", description="Send doc to selected channel")
-    @app_commands.describe(
-        channel="Channel to send to",
-        tag="User or role to mention (optional)"
-    )
-    async def announce(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        tag: discord.Member | discord.Role | None = None
-    ):
+        link = next((v for k, v in row.items() if "link" in k.lower()), None)
+
+        if link:
+            link = str(link).strip()
+            if not link.startswith("http"):
+                link = f"https://{link}"
+            content = link
+        else:
+            content = None
+
+        return embed, content
+
+    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
+    async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         await interaction.response.defer()
 
-        text = self.parser.get_doc_text()
-        sections = self.parser.parse_blocks(text)
+        try:
+            if self.index > 0:
+                self.index -= 1
 
-        for section in sections:
-            if section:
-                await channel.send(section[:2000])
+            embed, content = self.build_page()
 
-        if tag:
-            await channel.send(tag.mention)
+            await interaction.edit_original_response(
+                embed=embed,
+                content=content,
+                view=self
+            )
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        await interaction.response.defer()
+
+        try:
+            if self.index < len(self.results) - 1:
+                self.index += 1
+
+            embed, content = self.build_page()
+
+            await interaction.edit_original_response(
+                embed=embed,
+                content=content,
+                view=self
+            )
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+# -------------------- SEARCH MODAL --------------------
+class SearchModal(discord.ui.Modal, title="Community Search"):
+    search = discord.ui.TextInput(label="Enter search term", required=True)
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.run_search(interaction, self.search.value)
+
+
+# -------------------- SEARCH VIEW --------------------
+class SearchView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+
+    @discord.ui.button(label="Search", style=discord.ButtonStyle.primary)
+    async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SearchModal(self.cog))
+
+
+# -------------------- ADD CIV MODAL --------------------
+class AddCivModal(discord.ui.Modal, title="Add Entry"):
+    name = discord.ui.TextInput(label="Community Name", required=True)
+    description = discord.ui.TextInput(
+        label="Description",
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+    link = discord.ui.TextInput(label="Permanent Link", required=False)
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        loop = asyncio.get_running_loop()
+
+        try:
+            await loop.run_in_executor(None, self.cog.setup_gsheet)
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Could not connect to Google Sheets: `{type(e).__name__}: {e}`",
+                ephemeral=True,
+            )
+            return
+
+        headers = await loop.run_in_executor(
+            None,
+            self.cog.sheet.row_values,
+            1
+        )
+
+        existing_values = await loop.run_in_executor(
+            None,
+            self.cog.sheet.get_all_values
+        )
+
+        rows = existing_values[1:]
+        new_name = self.name.value.strip().lower()
+
+        for row in rows:
+            if row and row[0].strip().lower() == new_name:
+
+                await interaction.followup.send(
+                    "⚠️ This community already has an entry. Would you like to edit it?",
+                    view=EditConfirmView(
+                        self.cog,
+                        self.name.value,
+                        self.description.value,
+                        self.link.value
+                    ),
+                    ephemeral=True
+                )
+                return
+
+        new_row = [""] * len(headers)
+
+        new_row[0] = self.name.value
+        new_row[3] = self.description.value
+        new_row[4] = self.link.value or ""
+
+        def insert():
+            next_row = len(self.cog.sheet.get_all_values()) + 1
+
+            self.cog.sheet.update_cell(next_row, 1, self.name.value)
+            self.cog.sheet.update_cell(next_row, 4, self.description.value)
+            self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
+
+        await loop.run_in_executor(None, insert)
 
         await interaction.followup.send(
-            f"Sent to {channel.mention}",
+            "✅ Entry added successfully!",
             ephemeral=True
         )
-#---------------say------------
-    @app_commands.command(name="say", description="Send a message")
-    @app_commands.describe(
-        channel="Channel to send to",
-        message="Message to send"
-      )
-    async def say(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        message: str
-    ):
-        await channel.send(message)
-        await     interaction.response.send_message("Sent.", ephemeral=True)
 
-#-------------send--------------------
-    @app_commands.command(name="send", description="Send a custom embed")
-    @app_commands.describe(
-        channel="Channel to send to",
-        message="Message to send",
-        title="Optional title for the embed",
-        footer="Optional footer text (renders in small font)",
-        color="Hex color like #ff0000",
-        image="Optional image/gif URL"
-    )
-    async def send(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        message: str,
-        title: str | None = None, 
-        footer: str | None = None,
-        color: str = "#5865F2",
-        image: str | None = None
-    ):
-        embed = discord.Embed(
-            title=title, 
-            description=message,
-            color=discord.Color.from_str(color)
+
+# -------------------- VIEW --------------------
+class AddCivView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=120)
+        self.cog = cog
+
+    @discord.ui.button(label="Create Entry", style=discord.ButtonStyle.success)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddCivModal(self.cog))
+
+
+# -------------------- EDIT CONFIRM VIEW --------------------
+class EditConfirmView(discord.ui.View):
+    def __init__(self, cog, name, description, link):
+        super().__init__(timeout=60)
+
+        self.cog = cog
+        self.name = name
+        self.description = description
+        self.link = link
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        loop = asyncio.get_running_loop()
+
+        await loop.run_in_executor(None, self.cog.setup_gsheet)
+
+        values = await loop.run_in_executor(
+            None,
+            self.cog.sheet.get_all_values
         )
-        
-        if image:
-            embed.set_image(url=image)
-                
-        if footer:
-            embed.set_footer(text=footer)
-        
-        await channel.send(embed=embed)
-        await interaction.response.send_message("Sent.", ephemeral=True)
 
-    # ---------------- COMMUNITY ----------------
-    @app_commands.command(name="community", description="Look up a civ/community")
-    async def community(
-        self,
-        interaction: discord.Interaction,
-        search: str | None = None
-    ):
-        community_cog = self.bot.get_cog("CommunityCog")
-    
-        if not community_cog:
-            return await interaction.response.send_message("Community system not loaded.", ephemeral=True)
-    
-        if search:
-            await community_cog.run_search(interaction, search)
+        target_row = None
+
+        for i, row in enumerate(values[1:], start=2):
+            if row and row[0].strip().lower() == self.name.lower():
+                target_row = i
+                break
+
+        if not target_row:
+            await interaction.followup.send(
+                "Entry not found.",
+                ephemeral=True
+            )
             return
-    
-        view = SearchView(community_cog)
-        await interaction.response.send_message("Open search:", view=view)
 
+        def update():
+            self.cog.sheet.update_cell(target_row, 4, self.description)
+            self.cog.sheet.update_cell(target_row, 5, self.link or "")
 
-    # ---------------- ADD CIV ----------------
-    @app_commands.command(name="addciv", description="Add a civ/community")
-    async def addciv(self, interaction: discord.Interaction):
-        cog = self.bot.get_cog("CommunityCog")
+        await loop.run_in_executor(None, update)
 
-        embed = discord.Embed(
-            title="Add Entry",
-            description="Click below to create a new entry.",
-            color=discord.Color.green()
+        await interaction.followup.send(
+            f"✏ Updated **{self.name}** successfully.",
+            ephemeral=True
         )
 
-        await interaction.response.send_message(embed=embed, view=AddCivView(cog))
+    @discord.ui.button(label="No", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Cancelled.",
+            ephemeral=True
+        )
 
 
-async def setup(bot):
-    await bot.add_cog(CommandsCog(bot))
+# -------------------- SHEET --------------------
+SHEET_ID = "1P1DvL7sm4qt3vKInWhkqVdKOl20ui_aVaCJNEHtQS64"
+
+SHEET_URL = (
+    f"https://docs.google.com/spreadsheets/d/"
+    f"{SHEET_ID}/export?format=csv"
+)
+
+
+# -------------------- COG --------------------
+class CommunityCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.session = aiohttp.ClientSession()
+        self.gc = None
+        self.sheet = None
+
+    async def cog_unload(self):
+        await self.session.close()
+
+    def setup_gsheet(self):
+        if self.sheet:
+            return
+
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+
+        creds_path = os.getenv(
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "/app/creds.json"
+        )
+
+        self.gc = gspread.service_account(
+            filename=creds_path,
+            scopes=scopes
+        )
+
+        self.sheet = self.gc.open_by_key(SHEET_ID).sheet1
+
+    async def fetch_sheet(self):
+        async with self.session.get(SHEET_URL) as resp:
+            text = await resp.text()
+            return list(csv.reader(StringIO(text)))
+
+    async def run_search(self, interaction: discord.Interaction, search: str):
+
+        rows = await self.fetch_sheet()
+
+        if not rows:
+            await interaction.edit_original_response(
+                content="No data found.",
+                embed=None,
+                view=None
+            )
+            return
+
+        headers = [h.strip() for h in rows[0]]
+
+        data = []
+
+        for r in rows[1:]:
+
+            if not r:
+                continue
+
+            row_dict = {
+                headers[i]: (r[i] if i < len(r) else "")
+                for i in range(len(headers))
+            }
+
+            data.append(row_dict)
+
+        search_words = search.lower().strip().split()
+
+        scored = []
+
+        for r in data:
+
+            row_values = list(r.values())
+
+            name = str(row_values[0]).strip().lower() if row_values else ""
+
+            if not name:
+                continue
+
+            score = sum(
+                1 for w in search_words
+                if w in name
+            )
+
+            if score > 0:
+                scored.append((score, r))
+        matches = [
+            r for _, r in sorted(
+                scored,
+                key=lambda x: x[0],
+                reverse=True
+            )
+        ][:10]
+
+        if not matches:
+            await interaction.edit_original_response(
+                content="No match found (try more specific terms).",
+                embed=None,
+                view=None
+            )
+            return
+
+        def build_embed(row, i):
+            community_name = row.get("Community", f"Result {i}")
+
+            e = discord.Embed(
+                title=str(community_name).strip(), 
+                color=discord.Color.purple()
+            )
+
+            allowed = [
+                "Description",
+                "perma-link"
+            ]
+
+            label_map = {                
+                "Description": "Description",
+                "perma-link": "Permanent Link"
+            }
+
+            for k in allowed:
+                value = row.get(k)
+                if value and str(value).strip():
+                    e.add_field(
+                        name=label_map.get(k, k),
+                        value=value,
+                        inline=False
+                    )          
+
+            link = next(
+                (
+                    v for k, v in row.items()
+                    if "link" in k.lower() and v
+                ),
+                None
+            )
+
+            if link:
+
+                if not link.startswith("http"):
+                    link = "https://" + link
+
+    return e
+    
+        view = SearchPaginator(self, matches, build_embed)
+
+        embed, content = view.build_page()
+
+        await interaction.edit_original_response(
+            embed=embed,
+            content=content,
+            view=view
+        )
+
+
+# -------------------- SETUP --------------------
+async def setup(bot: commands.Bot):
+    await bot.add_cog(CommunityCog(bot))
