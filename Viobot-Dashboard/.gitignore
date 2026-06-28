@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+*.local
+
+# Real Viobot DB copies — NEVER commit user data
+dev-fixtures/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db

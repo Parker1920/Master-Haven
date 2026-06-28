@@ -1,0 +1,22 @@
+{
+  "name": "viobot-dashboard-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Viobot Dashboard backend — Phase 1 (framework + Discord OAuth2 + admin-scoped guild access)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node --test test/guildAccess.test.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^9.1.3",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1"
+  }
+}

@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+server/dev-fixtures
+**/.env
+deploy/.env
+**/*.db
+**/*.db-wal
+**/*.db-shm
+.git
+*.log
