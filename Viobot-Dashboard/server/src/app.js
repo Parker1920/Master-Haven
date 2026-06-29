@@ -3,9 +3,11 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { env, oauthConfigured } from './env.js';
 import { dbInfo } from './db.js';
+import { getAppearance } from './dashboard/store.js';
 import authRoutes from './routes/auth.js';
 import guildRoutes from './routes/guilds.js';
 import configRoutes from './routes/config.js';
+import adminRoutes from './routes/admin.js';
 
 export async function buildApp(opts = {}) {
   const app = Fastify({ logger: opts.logger ?? true });
@@ -44,9 +46,13 @@ export async function buildApp(opts = {}) {
     };
   });
 
+  // Public: the dashboard's appearance (theme/brand/tabs) — needed to render before login.
+  app.get('/api/appearance', async () => ({ appearance: getAppearance() }));
+
   await app.register(authRoutes);
   await app.register(guildRoutes);
   await app.register(configRoutes);
+  await app.register(adminRoutes);
 
   // Serve the built SPA (production/container). SPA fallback for client-side routes; /api still 404s JSON.
   if (serveStatic) {

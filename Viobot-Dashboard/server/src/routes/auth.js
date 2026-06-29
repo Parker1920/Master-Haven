@@ -3,6 +3,7 @@ import { env, oauthConfigured, redirectTo } from '../env.js';
 import { buildAuthUrl, exchangeCode, fetchUser, fetchUserGuilds } from '../framework/oauth.js';
 import { createSession, destroySession } from '../framework/session.js';
 import { readSession } from '../framework/requireAuth.js';
+import { isDashboardAdmin } from '../dashboard/store.js';
 
 const STATE_COOKIE = 'vbd_oauth_state';
 
@@ -79,7 +80,7 @@ export default async function authRoutes(app) {
   app.get('/api/auth/me', async (req, reply) => {
     const { session } = readSession(req);
     if (!session?.user) return reply.code(401).send({ error: 'not_authenticated' });
-    return { user: session.user };
+    return { user: session.user, isAdmin: isDashboardAdmin(session.user.id) };
   });
 
   app.post('/api/auth/logout', async (req, reply) => {

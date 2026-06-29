@@ -9,7 +9,8 @@ import { readVariables, writeVariables } from '../viobot/variables.js';
 import { readAliases, updateAliasMeta, deleteAlias } from '../viobot/aliases.js';
 import { getFeatureAccess, hasFeature } from '../viobot/premium.js';
 import { readAnnouncements, addAnnouncement, deleteAnnouncement } from '../viobot/announcements.js';
-import { configRegistry } from '../viobot/configRegistry.js';
+import { readAvatar, setAvatar, resetAvatar } from '../viobot/avatar.js';
+import { getRegistry } from '../dashboard/store.js';
 
 /**
  * Resolve the requested guild ONLY if the caller may configure it:
@@ -63,7 +64,7 @@ export default async function configRoutes(app) {
       req.log.warn({ err: lookupError }, 'roles/channels fetch failed');
     }
 
-    return { guild: r.guild, config, updatedAt, registry: configRegistry, roles, channels, lookupError };
+    return { guild: r.guild, config, updatedAt, registry: getRegistry(), roles, channels, lookupError };
   });
 
   // Save a server's config (validated, optimistic-concurrency, backup-before-write).
@@ -237,6 +238,49 @@ export default async function configRoutes(app) {
     } catch (e) {
       if (e.code === 'NOTFOUND') return reply.code(404).send({ error: 'not_found' });
       req.log.error({ err: String(e.message || e) }, 'announcement delete failed');
+      return reply.code(500).send({ error: 'write_failed' });
+    }
+  });
+
+  // Custom server avatar (Plus / Beta feature). Applies to Discord (PATCH member @me) + persists.
+  app.get('/api/guilds/:id/avatar', async (req, reply) => {
+    const guildId = String(req.params.id);
+    const r = await resolveAccessibleGuild(req, guildId);
+    if (r.error) return denied(reply, r.error);
+    return { avatar: readAvatar(guildId), allowed: await hasFeature(guildId, 'custom_avatar') };
+  });
+
+  // Larger body limit — the upload is a base64 data URI.
+  app.put('/api/guilds/:id/avatar', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
+    const guildId = String(req.params.id);
+    const r = await resolveAccessibleGuild(req, guildId);
+    if (r.error) return denied(reply, r.error);
+    if (!(await hasFeature(guildId, 'custom_avatar'))) {
+      return reply.code(403).send({ error: 'feature_locked', message: 'Custom server avatar requires Plus or Beta.' });
+    }
+    const { session } = readSession(req);
+    try {
+      const avatar = await setAvatar(guildId, (req.body || {}).dataUri, session?.user?.id ?? null);
+      return { ok: true, avatar };
+    } catch (e) {
+      if (e.code === 'BAD') return reply.code(400).send({ error: 'invalid', message: String(e.message) });
+      if (e.code === 'DISCORD') return reply.code(502).send({ error: 'discord_rejected', message: String(e.message) });
+      req.log.error({ err: String(e.message || e) }, 'avatar set failed');
+      return reply.code(500).send({ error: 'write_failed' });
+    }
+  });
+
+  app.delete('/api/guilds/:id/avatar', async (req, reply) => {
+    const guildId = String(req.params.id);
+    const r = await resolveAccessibleGuild(req, guildId);
+    if (r.error) return denied(reply, r.error);
+    if (!(await hasFeature(guildId, 'custom_avatar'))) return reply.code(403).send({ error: 'feature_locked' });
+    try {
+      await resetAvatar(guildId);
+      return { ok: true, avatar: null };
+    } catch (e) {
+      if (e.code === 'DISCORD') return reply.code(502).send({ error: 'discord_rejected', message: String(e.message) });
+      req.log.error({ err: String(e.message || e) }, 'avatar reset failed');
       return reply.code(500).send({ error: 'write_failed' });
     }
   });

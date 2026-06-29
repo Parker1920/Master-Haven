@@ -5,15 +5,9 @@ import VariablesEditor from '../components/VariablesEditor.jsx';
 import AliasesEditor from '../components/AliasesEditor.jsx';
 import PlusBetaView from '../components/PlusBetaView.jsx';
 import { initials, guildIconUrl, userAvatarUrl, fallbackGradient } from '../util.js';
+import { visibleTabs } from '../appearance.js';
 
 const TEXTISH = new Set([0, 5]); // text + announcement channels
-const TABS = [
-  { id: 'settings', label: 'Settings' },
-  { id: 'tickets', label: 'Tickets' },
-  { id: 'variables', label: 'Variables' },
-  { id: 'aliases', label: 'Aliases' },
-  { id: 'plus', label: 'Plus / Beta' },
-];
 const CONFIG_TABS = new Set(['settings', 'tickets']); // tabs that edit config_json (shared save bar)
 const RESERVED_CAT = new Set(['report-user', 'other']);
 const DEFAULT_CATS = [
@@ -91,12 +85,28 @@ function RoleMulti({ values, roles, onChange }) {
   );
 }
 
+function PlainSelect({ value, options, onChange }) {
+  const opts = (options || []).map((o) => (o && typeof o === 'object' ? o : { value: o, label: String(o) }));
+  return (
+    <select className="cfg-select" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">— None —</option>
+      {opts.map((o) => <option key={o.value} value={o.value}>{o.label ?? o.value}</option>)}
+    </select>
+  );
+}
+
 function FieldEditor({ field, value, roles, channels, onChange }) {
   switch (field.type) {
     case 'role': return <RoleSelect value={value} roles={roles} onChange={onChange} />;
     case 'channel': return <ChannelSelect value={value} channels={channels} onChange={onChange} />;
     case 'bool': return <Toggle on={Boolean(value)} onChange={onChange} />;
     case 'role[]': return <RoleMulti values={value} roles={roles} onChange={onChange} />;
+    case 'string':
+      return <input className="cfg-select" style={{ cursor: 'text' }} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
+    case 'number':
+      return <input className="cfg-select" style={{ cursor: 'text' }} type="number" value={value ?? ''} onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))} />;
+    case 'select':
+      return <PlainSelect value={value} options={field.options} onChange={onChange} />;
     default: return null;
   }
 }
@@ -146,13 +156,14 @@ function CategoryEditor({ categories, onChange }) {
   );
 }
 
-export default function ConfigPage({ user, guild, onBack, onLogout }) {
+export default function ConfigPage({ user, guild, appearance, onBack, onLogout }) {
+  const tabs = visibleTabs(appearance);
   const [data, setData] = useState(undefined);
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
-  const [tab, setTab] = useState('settings');
+  const [tab, setTab] = useState(() => tabs[0]?.id || 'settings');
 
   function load() {
     setData(undefined);
@@ -229,7 +240,7 @@ export default function ConfigPage({ user, guild, onBack, onLogout }) {
         {data && draft && (
           <>
             <div className="config-tabs">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button key={t.id} className={`config-tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
               ))}
             </div>

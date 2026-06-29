@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Footer from '../components/Footer.jsx';
+import { brandName } from '../appearance.js';
 
-export default function Login() {
+export default function Login({ appearance }) {
   const [health, setHealth] = useState(null);
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false }));
@@ -14,7 +15,8 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-main">
         <div className="card">
-          <h1>Viobot Dashboard</h1>
+          {appearance?.logo && <img className="auth-logo" src={appearance.logo} alt="" />}
+          <h1>{brandName(appearance)}</h1>
           <p className="muted">Manage Viobot's settings for the servers you administer.</p>
 
           {oauthReady ? (

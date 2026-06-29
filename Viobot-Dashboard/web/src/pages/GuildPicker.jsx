@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Footer from '../components/Footer.jsx';
 import { initials, guildIconUrl, userAvatarUrl, fallbackGradient } from '../util.js';
+import { brandName } from '../appearance.js';
 
 function GuildAvatar({ guild }) {
   const [broken, setBroken] = useState(false);
@@ -16,7 +17,7 @@ function GuildAvatar({ guild }) {
   );
 }
 
-export default function GuildPicker({ user, onSelect, onLogout }) {
+export default function GuildPicker({ user, isAdmin, appearance, onSelect, onAdmin, onLogout }) {
   const [data, setData] = useState(undefined);
   const [error, setError] = useState(null);
 
@@ -31,10 +32,11 @@ export default function GuildPicker({ user, onSelect, onLogout }) {
     <div className="page">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-dot" />
-          Viobot Dashboard
+          {appearance?.logo ? <img className="brand-logo" src={appearance.logo} alt="" /> : <span className="brand-dot" />}
+          {brandName(appearance)}
         </div>
         <div className="user">
+          {isAdmin && <button className="btn btn-ghost" onClick={onAdmin}>⚙ Admin</button>}
           {avatar ? (
             <img className="user-avatar" src={avatar} alt="" />
           ) : (

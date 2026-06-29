@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 
 const VAR_NAME_RE = /^[a-z0-9_.-]{1,64}$/;
+
+// Self-sizing value field — grows to fit its content so nothing is clipped, no inner scrollbar.
+function AutoTextarea({ value, onChange, ...props }) {
+  const ref = useRef(null);
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; } };
+  useEffect(fit, [value]);
+  return <textarea ref={ref} rows={1} value={value} onChange={(e) => { onChange(e); fit(); }} {...props} />;
+}
 
 export default function VariablesEditor({ guildId }) {
   const [original, setOriginal] = useState(null);
@@ -73,6 +81,9 @@ export default function VariablesEditor({ guildId }) {
       {rows.length === 0 && <p className="val-empty" style={{ padding: '8px 0' }}>No variables yet.</p>}
 
       <div className="var-rows">
+        {rows.length > 0 && (
+          <div className="var-head"><span>Name</span><span>Value</span><span /></div>
+        )}
         {rows.map((r, i) => {
           const err = nameError(r.name, i);
           return (
@@ -86,8 +97,8 @@ export default function VariablesEditor({ guildId }) {
                 />
                 {err && <span className="var-err">{err}</span>}
               </div>
-              <textarea className="cfg-input var-val" placeholder="value" value={r.value} onChange={(e) => setRow(i, { value: e.target.value })} />
-              <button className="chip-x var-del" title="Remove" onClick={() => removeRow(i)}>×</button>
+              <AutoTextarea className="cfg-input var-val" placeholder="value" value={r.value} onChange={(e) => setRow(i, { value: e.target.value })} />
+              <button className="chip-x var-del" title="Remove variable" onClick={() => removeRow(i)}>×</button>
             </div>
           );
         })}

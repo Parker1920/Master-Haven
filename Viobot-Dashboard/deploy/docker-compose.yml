@@ -14,6 +14,10 @@ services:
       # The LIVE Viobot DB. Mounted read-WRITE so WAL shared-memory works for readers; the app holds
       # PRAGMA query_only=ON (VIOBOT_DB_READONLY=true) in Phase 1, so it can READ but never writes.
       - /home/pi8gb/docker/viobot-data/db:/app/data
+      # Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
+      - /home/pi8gb/docker/viobot-dashboard-data:/app/dashboard-data
+      # Docker socket — admin-only "Restart Viobot" button. Code is hard-restricted to the viobot container.
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8091:8090"
     networks:

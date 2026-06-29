@@ -64,5 +64,29 @@ export const api = {
   deleteAnnouncement: (id, annId) =>
     fetch(`/api/guilds/${id}/announcements/${encodeURIComponent(annId)}`, { method: 'DELETE', ...opts })
       .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `failed (${r.status})`); return d; }),
+  getAvatar: (id) => getJson(`/api/guilds/${id}/avatar`),
+  setAvatar: (id, dataUri) =>
+    fetch(`/api/guilds/${id}/avatar`, {
+      method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUri }),
+    }).then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  resetAvatar: (id) =>
+    fetch(`/api/guilds/${id}/avatar`, { method: 'DELETE', ...opts })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  getAppearance: () => getJson('/api/appearance'),
+  adminSaveAppearance: (appearance) =>
+    fetch('/api/admin/appearance', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appearance }) })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  adminGetRegistry: () => getJson('/api/admin/registry'),
+  adminSaveRegistry: (registry) =>
+    fetch('/api/admin/registry', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ registry }) })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  adminBotStatus: () => getJson('/api/admin/bot-status'),
+  adminRestartBot: () =>
+    fetch('/api/admin/restart-bot', { method: 'POST', ...opts })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  adminGetAdmins: () => getJson('/api/admin/admins'),
+  adminSaveAdmins: (admins) =>
+    fetch('/api/admin/admins', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admins }) })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `failed (${r.status})`); return d; }),
   logout: () => fetch('/api/auth/logout', { method: 'POST', ...opts }).then((r) => r.json()),
 };

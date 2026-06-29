@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import AnnouncementsEditor from './AnnouncementsEditor.jsx';
+import AvatarEditor from './AvatarEditor.jsx';
 
 export default function PlusBetaView({ guildId }) {
   const [data, setData] = useState(undefined);
@@ -51,11 +52,12 @@ export default function PlusBetaView({ guildId }) {
         </div>
       </section>
 
+      <AvatarEditor guildId={guildId} />
       <AnnouncementsEditor guildId={guildId} />
 
       <p className="muted small config-note">
         Access (above) is controlled by Discord entitlements and the bot owner — read-only here.
-        Custom server avatar is a separate add-on; custom contact categories are in the <b>Tickets</b> tab.
+        Custom contact categories are in the <b>Tickets</b> tab.
       </p>
     </>
   );

@@ -8,7 +8,6 @@ export const DEFAULTS = {
     muteRoleId: null,
     voiceMuteRoleId: null,
     verificationRequiredRoleId: null,
-    staffRoleIds: [],
   },
   channels: {
     loggingChannelId: null,

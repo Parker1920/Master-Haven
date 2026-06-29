@@ -26,7 +26,6 @@ export const configRegistry = {
         { path: 'roles.muteRoleId', type: 'role', label: 'Mute role' },
         { path: 'roles.voiceMuteRoleId', type: 'role', label: 'Voice mute role' },
         { path: 'roles.verificationRequiredRoleId', type: 'role', label: 'Verification-required role' },
-        { path: 'roles.staffRoleIds', type: 'role[]', label: 'Staff roles', default: [] },
       ],
     },
     {

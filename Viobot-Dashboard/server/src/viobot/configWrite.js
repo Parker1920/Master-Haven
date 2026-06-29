@@ -1,5 +1,5 @@
 import { getWriteDb, backupDb } from '../db.js';
-import { configRegistry } from './configRegistry.js';
+import { getRegistry } from '../dashboard/store.js';
 import { DEFAULTS } from './configRead.js';
 
 const getPath = (o, p) => p.split('.').reduce((x, k) => (x == null ? undefined : x[k]), o);
@@ -57,7 +57,7 @@ function sanitizeCategories(incoming, actorId, existing) {
 function applyManaged(base, incoming, roles, channels) {
   const roleIds = new Set(roles.map((r) => r.id));
   const chanIds = new Set(channels.map((c) => c.id));
-  for (const group of configRegistry.groups) {
+  for (const group of getRegistry().groups) {
     for (const f of group.fields) {
       const v = getPath(incoming, f.path);
       if (v === undefined) continue; // field not submitted → leave base value
@@ -67,6 +67,14 @@ function applyManaged(base, incoming, roles, channels) {
       else if (f.type === 'role[]') {
         const arr = (Array.isArray(v) ? v : []).filter((x) => typeof x === 'string' && roleIds.has(x));
         setPath(base, f.path, [...new Set(arr)]);
+      } else if (f.type === 'string') {
+        setPath(base, f.path, v == null ? null : String(v).slice(0, f.maxLength || 1000));
+      } else if (f.type === 'number') {
+        const n = Number(v);
+        setPath(base, f.path, Number.isFinite(n) ? n : (f.default ?? null));
+      } else if (f.type === 'select') {
+        const allowed = new Set((f.options || []).map((o) => (o && typeof o === 'object' ? o.value : o)));
+        setPath(base, f.path, allowed.has(v) ? v : (f.default ?? null));
       }
     }
   }

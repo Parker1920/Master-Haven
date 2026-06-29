@@ -43,6 +43,11 @@ export const env = {
   // Phase 1 reads only. The connection is opened read-write (so WAL shared-memory works against the
   // LIVE db) but PRAGMA query_only=ON guarantees no data writes. Flip to false only in Phase 2.
   dbReadonly: bool(process.env.VIOBOT_DB_READONLY, true),
+
+  // Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
+  dataDir: process.env.DASHBOARD_DATA_DIR ?? '/app/dashboard-data',
+  // Bootstrap dashboard admins (Discord IDs). Default = Viobot's bot owner (art3mis).
+  adminIds: (process.env.DASHBOARD_ADMIN_IDS ?? '1182179988150177812').split(',').map((s) => s.trim()).filter(Boolean),
 };
 
 export const oauthConfigured = () => Boolean(env.discord.clientId && env.discord.clientSecret);
