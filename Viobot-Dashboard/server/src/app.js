@@ -5,6 +5,7 @@ import { env, oauthConfigured } from './env.js';
 import { dbInfo } from './db.js';
 import authRoutes from './routes/auth.js';
 import guildRoutes from './routes/guilds.js';
+import configRoutes from './routes/config.js';
 
 export async function buildApp(opts = {}) {
   const app = Fastify({ logger: opts.logger ?? true });
@@ -45,6 +46,7 @@ export async function buildApp(opts = {}) {
 
   await app.register(authRoutes);
   await app.register(guildRoutes);
+  await app.register(configRoutes);
 
   // Serve the built SPA (production/container). SPA fallback for client-side routes; /api still 404s JSON.
   if (serveStatic) {

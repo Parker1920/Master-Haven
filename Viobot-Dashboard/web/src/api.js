@@ -14,5 +14,55 @@ export const api = {
   health: () => getJson('/api/health'),
   me: () => getJson('/api/auth/me'),
   guilds: () => getJson('/api/guilds'),
+  getGuildConfig: (id) => getJson(`/api/guilds/${id}/config`),
+  saveGuildConfig: (id, config, updatedAt) =>
+    fetch(`/api/guilds/${id}/config`, {
+      method: 'PUT',
+      ...opts,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, updatedAt }),
+    }).then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const e = new Error(d.message || d.error || `save failed (${r.status})`);
+        e.status = r.status;
+        e.code = d.error;
+        throw e;
+      }
+      return d;
+    }),
+  getVariables: (id) => getJson(`/api/guilds/${id}/variables`),
+  saveVariables: (id, variables) =>
+    fetch(`/api/guilds/${id}/variables`, {
+      method: 'PUT',
+      ...opts,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variables }),
+    }).then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const e = new Error(d.message || d.error || `save failed (${r.status})`);
+        e.status = r.status;
+        throw e;
+      }
+      return d;
+    }),
+  getAliases: (id) => getJson(`/api/guilds/${id}/aliases`),
+  updateAlias: (id, name, body) =>
+    fetch(`/api/guilds/${id}/aliases/${encodeURIComponent(name)}`, {
+      method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `failed (${r.status})`); return d; }),
+  deleteAlias: (id, name) =>
+    fetch(`/api/guilds/${id}/aliases/${encodeURIComponent(name)}`, { method: 'DELETE', ...opts })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `failed (${r.status})`); return d; }),
+  getPremium: (id) => getJson(`/api/guilds/${id}/premium`),
+  getAnnouncements: (id) => getJson(`/api/guilds/${id}/announcements`),
+  createAnnouncement: (id, body) =>
+    fetch(`/api/guilds/${id}/announcements`, {
+      method: 'POST', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  deleteAnnouncement: (id, annId) =>
+    fetch(`/api/guilds/${id}/announcements/${encodeURIComponent(annId)}`, { method: 'DELETE', ...opts })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `failed (${r.status})`); return d; }),
   logout: () => fetch('/api/auth/logout', { method: 'POST', ...opts }).then((r) => r.json()),
 };

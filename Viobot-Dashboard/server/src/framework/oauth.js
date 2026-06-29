@@ -10,7 +10,6 @@ export function buildAuthUrl(state) {
     response_type: 'code',
     scope: env.discord.scopes.join(' '),
     state,
-    prompt: 'none',
   });
   return `${DISCORD_API}/oauth2/authorize?${p.toString()}`;
 }

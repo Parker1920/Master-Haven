@@ -16,4 +16,11 @@ services:
       - /home/pi8gb/docker/viobot-data/db:/app/data
     ports:
       - "8091:8090"
+    networks:
+      - default          # this stack's own network
+      - docker_default   # shared with Nginx Proxy Manager so it can route the HTTPS domain here
     restart: unless-stopped
+
+networks:
+  docker_default:
+    external: true

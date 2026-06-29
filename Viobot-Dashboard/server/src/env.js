@@ -33,6 +33,12 @@ export const env = {
     secure: bool(process.env.SESSION_SECURE, process.env.NODE_ENV === 'production'),
   },
 
+  // Viobot's bot token — used server-side only, to read each guild's role/channel lists for the
+  // config dropdowns (the bot is already in these guilds). Same token that runs the bot on the Pi.
+  botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+  // Viobot Plus SKU id — to read each guild's premium entitlement status (read-only display).
+  plusSkuId: process.env.VIOBOT_PLUS_SKU_ID ?? '',
+
   viobotDbPath: process.env.VIOBOT_DB_PATH ?? '',
   // Phase 1 reads only. The connection is opened read-write (so WAL shared-memory works against the
   // LIVE db) but PRAGMA query_only=ON guarantees no data writes. Flip to false only in Phase 2.

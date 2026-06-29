@@ -1,7 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { env } from './env.js';
 
 let _db = null;
+let _writeDb = null;
 
 /**
  * Open the Viobot SQLite DB.
@@ -26,6 +29,32 @@ export function getDb() {
     _db.pragma('query_only = ON'); // hard guarantee: no data writes in read-only phase
   }
   return _db;
+}
+
+/**
+ * Write-capable connection (separate from the read-only one). Used only by the config write path.
+ * WAL allows this alongside the bot's own writer; busy_timeout serializes contention.
+ */
+export function getWriteDb() {
+  if (_writeDb) return _writeDb;
+  if (!env.viobotDbPath) throw new Error('VIOBOT_DB_PATH is not set.');
+  _writeDb = new Database(env.viobotDbPath, { fileMustExist: true });
+  _writeDb.pragma('busy_timeout = 8000');
+  return _writeDb;
+}
+
+/** Backup-before-write (SOW safe-transfer). Online-safe SQLite backup; keeps the most recent 15. */
+export async function backupDb() {
+  const dir = path.join(path.dirname(env.viobotDbPath), 'dashboard-backups');
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = path.join(dir, `viobot-${stamp}.db`);
+  await getWriteDb().backup(dest);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.db')).sort();
+  for (const f of files.slice(0, Math.max(0, files.length - 15))) {
+    try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
+  }
+  return dest;
 }
 
 export function dbInfo() {

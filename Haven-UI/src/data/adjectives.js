@@ -7,8 +7,10 @@
 // This module just re-exports the adjective/resource arrays under their historical names so
 // existing imports keep working. To add/change a value, edit optionCatalog.json.
 //
-// Adjective values match NMS in-game display strings. Arrays are sorted alphabetically
-// (exotic_trophies is kept in its curated order).
+// Adjective values match NMS in-game display strings. The source arrays in
+// optionCatalog.json are maintained A→Z, but `toSelectOptions` ALSO sorts
+// (case-insensitive) so every dropdown renders alphabetically regardless of the
+// source order — new entries can be appended to the JSON without hand-placing them.
 import catalog from './optionCatalog.json'
 
 export const biomeAdjectives = catalog.biomes
@@ -19,5 +21,11 @@ export const faunaAdjectives = catalog.fauna
 export const resourcesList = catalog.resources
 export const exoticTrophyList = catalog.exotic_trophies
 
-/** Convert a string array to react-select option format: [{ value, label }]. */
-export const toSelectOptions = (arr) => arr.map(value => ({ value, label: value }))
+/**
+ * Convert a string array to react-select option format: [{ value, label }],
+ * sorted alphabetically (case-insensitive) so dropdowns always render A→Z.
+ */
+export const toSelectOptions = (arr) =>
+  [...arr]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(value => ({ value, label: value }))

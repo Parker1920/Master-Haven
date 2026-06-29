@@ -6,6 +6,12 @@ import GlyphDisplay from '../GlyphDisplay'
 import { formatCoords } from '../LatLngInput'
 import { FEATURES } from '../../utils/AuthContext'
 
+// Biome options for the inline approval-edit dropdowns, sorted A→Z (case-insensitive)
+// so the menu reads alphabetically. Defined once and shared by the planet + moon
+// edit fields below so the two lists can't drift.
+const BIOME_EDIT_OPTIONS = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava','Marsh','Volcanic','Infested','Desolate','Exotic','Airless','Gas Giant']
+  .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+
 /**
  * SystemApprovalTab - Systems/regions/edit request approval content
  *
@@ -1161,7 +1167,7 @@ export default function SystemApprovalTab({
             {(() => {
               const planetsData = editMode && editData ? editData.planets : selectedSubmission.system_data?.planets;
               if (!planetsData || planetsData.length === 0) return null;
-              const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava','Marsh','Volcanic','Infested','Desolate','Exotic','Airless','Gas Giant'];
+              const biomeOptions = BIOME_EDIT_OPTIONS;
               const sizeOptions = ['Large','Medium','Small'];
               const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
               const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
@@ -1417,7 +1423,7 @@ export default function SystemApprovalTab({
             {(() => {
               const moonsData = editMode && editData ? editData.moons : selectedSubmission.system_data?.moons;
               if (!moonsData || moonsData.length === 0) return null;
-              const biomeOptions = ['Lush','Toxic','Scorched','Radioactive','Frozen','Barren','Dead','Weird','Swamp','Lava','Marsh','Volcanic','Infested','Desolate','Exotic','Airless','Gas Giant'];
+              const biomeOptions = BIOME_EDIT_OPTIONS;
               const sizeOptions = ['Large','Medium','Small'];
               const inputCls = "w-full px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
               const selectCls = "px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs";
