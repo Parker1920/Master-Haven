@@ -2589,6 +2589,139 @@ async def api_glyph_preview(
     }
 
 
+def _region_custom_name(cursor, rx, ry, rz, reality, galaxy):
+    """Return a region's approved custom name for these coords, or None. Best-effort."""
+    try:
+        cursor.execute(
+            'SELECT custom_name FROM regions '
+            'WHERE region_x = ? AND region_y = ? AND region_z = ? '
+            '  AND reality = ? AND galaxy = ?',
+            (rx, ry, rz, reality, galaxy),
+        )
+        row = cursor.fetchone()
+        return row['custom_name'] if row else None
+    except Exception:
+        return None
+
+
+@router.get('/api/glyph/system')
+async def api_glyph_system(
+    glyph: str,
+    galaxy: str = 'Euclid',
+    reality: str = 'Normal',
+    session: Optional[str] = Cookie(None),
+):
+    """Resolve a 12-char portal glyph to the catalogued Haven system + a deep
+    link into the 3D cartography system view.
+
+    Public, no auth (systems and the /map/system page are already public). Built
+    for the Keeper Discord bot: a user pastes a glyph and gets a link that opens
+    that system on the map; if it isn't catalogued, the decoded region + a submit
+    link come back instead. Matching uses the canonical last-11 + galaxy + reality
+    rule (find_matching_system), so a glyph read while standing on a *different*
+    planet of the same system still resolves. URLs are RELATIVE on purpose — the
+    caller prefixes the public site URL (never the internal docker host).
+    """
+    glyph = (glyph or '').strip().upper()
+    if len(glyph) != 12:
+        raise HTTPException(status_code=400, detail="glyph must be a 12-character hex string")
+    parts = _decode_glyph_parts(glyph)
+    if parts is None:
+        raise HTTPException(status_code=400, detail="glyph must be valid hexadecimal")
+
+    reality = normalize_reality(reality)
+    galaxy = galaxy or 'Euclid'
+    rx, ry, rz = parts['region_x'], parts['region_y'], parts['region_z']
+    decoded = {
+        'planet': parts['planet'],
+        'ssi': parts['ssi'],
+        'region_x': rx, 'region_y': ry, 'region_z': rz,
+    }
+
+    session_data = get_session(session)
+    conn = None
+    try:
+        db_path = get_db_path()
+        if not db_path.exists():
+            raise HTTPException(status_code=503, detail="database unavailable")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 1) Live (approved) system — the happy path.
+        approved = find_matching_system(cursor, glyph, galaxy, reality)
+        if approved:
+            sys_id = approved[0]
+            cursor.execute('SELECT id, name, discord_tag FROM systems WHERE id = ?', (sys_id,))
+            srow = cursor.fetchone()
+            # Honour hidden-from-public / restricted rows for the calling session;
+            # if it's not visible to this caller, fall through (never leak a link).
+            if srow and apply_data_restrictions([dict(srow)], session_data):
+                try:
+                    grade = calculate_completeness_score(cursor, sys_id)['grade']
+                except Exception:
+                    grade = None
+                return {
+                    'status': 'approved',
+                    'system_id': sys_id,
+                    'name': srow['name'],
+                    'completeness_grade': grade,
+                    'galaxy': galaxy,
+                    'reality': reality,
+                    'region_name': _region_custom_name(cursor, rx, ry, rz, reality, galaxy),
+                    'decoded': decoded,
+                    'map_url': f'/map/system/{sys_id}',
+                    'detail_url': f'/systems/{sys_id}',
+                    'cartographer_url': f'/map/latest?focus=system:{sys_id}',
+                }
+
+        # 2) Submitted but still in the approval queue (not on the live map yet).
+        pending = find_matching_pending_system(cursor, glyph, galaxy, reality)
+        if pending:
+            return {
+                'status': 'pending',
+                'submission_id': pending[0],
+                'name': pending[1],
+                'galaxy': galaxy,
+                'reality': reality,
+                'region_name': _region_custom_name(cursor, rx, ry, rz, reality, galaxy),
+                'decoded': decoded,
+            }
+
+        # 3) Not catalogued — hand back the decoded region + a submit link.
+        region_name = _region_custom_name(cursor, rx, ry, rz, reality, galaxy)
+        cursor.execute(
+            'SELECT id, discord_tag FROM systems '
+            'WHERE region_x = ? AND region_y = ? AND region_z = ? '
+            '  AND reality = ? AND galaxy = ?',
+            (rx, ry, rz, reality, galaxy),
+        )
+        region_systems = apply_data_restrictions([dict(r) for r in cursor.fetchall()], session_data)
+        if not region_name:
+            try:
+                region_name = generate_names(glyph, galaxy)[1]
+            except Exception:
+                region_name = None
+        from urllib.parse import quote
+        submit_url = f'/create?glyph={glyph}&galaxy={quote(galaxy)}&reality={quote(reality)}'
+        return {
+            'status': 'not_found',
+            'galaxy': galaxy,
+            'reality': reality,
+            'region_name': region_name,
+            'region_system_count': len(region_systems),
+            'decoded': decoded,
+            'submit_url': submit_url,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"glyph->system resolve failed for {glyph}: {e}")
+        raise HTTPException(status_code=500, detail="glyph resolution failed")
+    finally:
+        if conn:
+            conn.close()
+
+
 @router.get('/api/option-catalog')
 async def api_option_catalog():
     """Canonical curated option lists for system submission.
