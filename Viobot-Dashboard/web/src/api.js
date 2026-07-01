@@ -81,9 +81,10 @@ export const api = {
     fetch('/api/admin/registry', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ registry }) })
       .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
   adminBotStatus: () => getJson('/api/admin/bot-status'),
-  adminRestartBot: () =>
-    fetch('/api/admin/restart-bot', { method: 'POST', ...opts })
+  adminBotAction: (action) =>
+    fetch(`/api/admin/${action === 'restart' ? 'restart-bot' : `bot/${action}`}`, { method: 'POST', ...opts })
       .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  adminRestartBot: () => api.adminBotAction('restart'),
   adminGetAdmins: () => getJson('/api/admin/admins'),
   adminSaveAdmins: (admins) =>
     fetch('/api/admin/admins', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admins }) })

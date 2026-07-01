@@ -1,27 +1,37 @@
-/* Phase-1 styling. The full theming / customization layer is Phase 4 (Client-owned). */
+/* Cosmic theme — matches the Viobot docs palette so the dashboard + guides read as one site.
+   Token-driven: admins can override any of these live via ⚙ Admin → Appearance → Theme colors. */
 :root {
-  --bg: #0e1016;
-  --panel: #171a23;
-  --panel-2: #1e222e;
-  --border: #272c3a;
-  --border-strong: #333a4d;
-  --text: #e7e9f0;
-  --muted: #9aa3b6;
-  --faint: #6b7384;
-  --accent: #14b8a6;
+  --bg: #050816;
+  --bg-2: #08111f;
+  --panel: rgba(12, 21, 38, 0.78);
+  --panel-2: rgba(16, 29, 52, 0.92);
+  --border: rgba(125, 211, 252, 0.18);
+  --border-strong: rgba(125, 211, 252, 0.34);
+  --text: #edf7ff;
+  --muted: #94a9c7;
+  --faint: #6b7f9e;
+  --accent: #22d3ee;
   --accent-2: #5865f2;
-  --gold: #e6b341;
-  --danger: #f87171;
-  --shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --blue: #60a5fa;
+  --violet: #a78bfa;
+  --gold: #facc15;
+  --danger: #fb7185;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 50% -10%, #1a1d28 0%, var(--bg) 60%) no-repeat, var(--bg);
+  background:
+    radial-gradient(circle at 15% 5%, rgba(34, 211, 238, 0.20), transparent 28rem),
+    radial-gradient(circle at 80% 0%, rgba(167, 139, 250, 0.20), transparent 30rem),
+    radial-gradient(circle at 50% 100%, rgba(52, 211, 153, 0.08), transparent 35rem),
+    linear-gradient(135deg, #030712 0%, #061020 48%, #08111f 100%);
+  background-attachment: fixed;
   color: var(--text);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 h1, h2 { font-weight: 680; letter-spacing: -0.01em; margin: 0; }
@@ -32,13 +42,14 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 /* ---- Login ---- */
 .center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
   padding: 36px 32px; max-width: 420px; width: 100%; text-align: center; box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
 }
 .card h1 { margin-bottom: 6px; }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 10px;
+  display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 12px;
   padding: 11px 18px; font: inherit; font-weight: 600; color: #fff; cursor: pointer; text-decoration: none;
   transition: filter 0.12s, transform 0.12s, border-color 0.12s, color 0.12s;
 }
@@ -58,9 +69,12 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between;
   padding: 13px 22px; border-bottom: 1px solid var(--border);
-  background: rgba(20, 23, 32, 0.82); backdrop-filter: blur(10px);
+  background: rgba(8, 16, 31, 0.72); backdrop-filter: blur(12px);
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.01em; font-family: var(--mono); }
+.brand-home { background: none; border: 0; padding: 0; margin: 0; cursor: pointer; color: inherit; font-size: 1rem; line-height: inherit; }
+.brand-home:hover { color: var(--accent); }
+.btn-ghost.is-active { color: var(--text); border-color: var(--accent); background: rgba(34, 211, 238, 0.08); }
 .brand-dot {
   width: 12px; height: 12px; border-radius: 4px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -72,6 +86,24 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .user-name { color: var(--text); font-weight: 550; }
 
 .container { max-width: 960px; width: 100%; margin: 0 auto; padding: 32px 22px 80px; flex: 1 1 auto; }
+
+/* ---- Guides (embedded docs) ---- */
+/* Slim strip uses the docs' exact base bg (#050816) so it flows straight into the docs' own
+   header inside the frame below — reading as one continuous header block, not two. */
+.guides-page { height: 100vh; }
+.guides-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 18px; background: #050816;
+}
+.guides-back {
+  background: transparent; border: 0; color: var(--muted); font: inherit; font-weight: 650;
+  font-family: var(--mono); letter-spacing: 0.01em; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+}
+.guides-back:hover { color: var(--accent); }
+.guides-user { display: flex; align-items: center; gap: 10px; }
+.guides-user .user-avatar { width: 26px; height: 26px; }
+.guides-user .user-name { font-size: 13px; }
+.guides-frame { flex: 1 1 auto; width: 100%; border: 0; display: block; background: var(--bg); }
 .page-head { margin-bottom: 22px; }
 .page-head h2 { font-size: 24px; }
 .page-head p { margin: 6px 0 0; }
@@ -83,8 +115,9 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 }
 .guild-card {
   display: flex; align-items: center; gap: 14px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
   padding: 14px; cursor: pointer; color: var(--text); text-align: left; font: inherit; width: 100%;
+  backdrop-filter: blur(10px);
   transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s, background 0.14s;
 }
 .guild-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); background: var(--panel-2); }
@@ -97,8 +130,8 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .guild-name { font-weight: 640; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .role-badge { align-self: flex-start; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid transparent; }
-.role-owner { color: var(--gold); background: rgba(230, 179, 65, 0.12); border-color: rgba(230, 179, 65, 0.3); }
-.role-admin { color: var(--accent); background: rgba(20, 184, 166, 0.12); border-color: rgba(20, 184, 166, 0.28); }
+.role-owner { color: var(--gold); background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3); }
+.role-admin { color: var(--accent); background: rgba(34, 211, 238, 0.12); border-color: rgba(34, 211, 238, 0.28); }
 
 .guild-go { font-size: 22px; color: var(--faint); flex: none; transition: color 0.14s, transform 0.14s; }
 
@@ -119,7 +152,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .site-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
   padding: 15px 22px; border-top: 1px solid var(--border);
-  background: rgba(20, 23, 32, 0.45); color: var(--faint); font-size: 12.5px;
+  background: rgba(8, 16, 31, 0.42); color: var(--faint); font-size: 12.5px;
 }
 .site-footer strong { color: var(--muted); font-weight: 600; }
 .site-footer .foot-build { margin-left: auto; }
@@ -133,7 +166,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .config-icon--fallback { display: grid; place-items: center; font-weight: 700; font-size: 20px; color: #fff; }
 .config-head h2 { font-size: 22px; }
 
-.config-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 4px 18px; margin-bottom: 16px; }
+.config-card { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 4px 18px; margin-bottom: 16px; backdrop-filter: blur(10px); }
 .config-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 15px 0 5px; margin: 0; }
 .config-fields { display: flex; flex-direction: column; }
 .config-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; row-gap: 8px; flex-wrap: wrap; padding: 13px 0; border-top: 1px solid var(--border); }
@@ -166,7 +199,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 
 .switch { width: 44px; height: 24px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--panel-2); position: relative; cursor: pointer; padding: 0; transition: background 0.15s, border-color 0.15s; }
 .switch-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--faint); transition: transform 0.15s, background 0.15s; }
-.switch-on { background: rgba(20, 184, 166, 0.25); border-color: var(--accent); }
+.switch-on { background: rgba(34, 211, 238, 0.25); border-color: var(--accent); }
 .switch-on .switch-knob { transform: translateX(20px); background: var(--accent); }
 
 .role-multi { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
@@ -179,7 +212,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 13px 22px; border-top: 1px solid var(--border-strong);
-  background: rgba(23, 26, 35, 0.96); backdrop-filter: blur(8px); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+  background: rgba(8, 16, 31, 0.94); backdrop-filter: blur(10px); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
 }
 .save-bar-msg { font-weight: 600; }
 .save-bar-actions { display: flex; gap: 10px; }
@@ -274,6 +307,8 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .reg-field .cfg-input { flex: 1; min-width: 120px; }
 .reg-field .reg-help { flex: 1.4; }
 .reg-field .cfg-select-sm { flex: none; }
+.reg-testing { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.testing-tag { margin-left: 8px; vertical-align: middle; font-size: 10px; padding: 2px 8px; }
 
 /* admin — admins editor */
 .admin-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
@@ -281,8 +316,9 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .admin-add { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .admin-add .cfg-input { max-width: 240px; }
 
-.bot-control { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.bot-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bot-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.bot-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.bot-actions .btn { width: 100%; justify-content: center; }
 
 /* appearance editor */
 .auth-logo { display: block; width: 56px; height: 56px; object-fit: contain; margin: 0 auto 12px; border-radius: 12px; }
@@ -322,6 +358,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   /* tab bars: scroll horizontally instead of overflowing */
   .config-tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
   .config-tab { white-space: nowrap; flex: none; }
+  .bot-actions { grid-template-columns: repeat(2, 1fr); }
 
   /* config rows: stack label over a full-width, left-aligned value */
   .config-row { flex-direction: column; align-items: stretch; }

@@ -1,13 +1,15 @@
 // Editable theme tokens (map to the CSS variables in styles.css) + the canonical per-server tabs.
+// Defaults mirror the cosmic palette in styles.css :root. The panel/border tokens actually render as
+// translucent rgba() (glass over the gradient); the hex here is an opaque approximation for the color picker.
 export const THEME_TOKENS = [
-  { key: 'accent', cssVar: '--accent', label: 'Accent', default: '#14b8a6' },
+  { key: 'accent', cssVar: '--accent', label: 'Accent', default: '#22d3ee' },
   { key: 'accent2', cssVar: '--accent-2', label: 'Accent 2 (Discord)', default: '#5865f2' },
-  { key: 'bg', cssVar: '--bg', label: 'Background', default: '#0e1016' },
-  { key: 'panel', cssVar: '--panel', label: 'Panel', default: '#171a23' },
-  { key: 'panel2', cssVar: '--panel-2', label: 'Panel (raised)', default: '#1e222e' },
-  { key: 'border', cssVar: '--border', label: 'Border', default: '#272c3a' },
-  { key: 'text', cssVar: '--text', label: 'Text', default: '#e7e9f0' },
-  { key: 'muted', cssVar: '--muted', label: 'Muted text', default: '#9aa3b6' },
+  { key: 'bg', cssVar: '--bg', label: 'Background', default: '#050816' },
+  { key: 'panel', cssVar: '--panel', label: 'Panel', default: '#0c1526' },
+  { key: 'panel2', cssVar: '--panel-2', label: 'Panel (raised)', default: '#101d34' },
+  { key: 'border', cssVar: '--border', label: 'Border', default: '#223349' },
+  { key: 'text', cssVar: '--text', label: 'Text', default: '#edf7ff' },
+  { key: 'muted', cssVar: '--muted', label: 'Muted text', default: '#94a9c7' },
 ];
 
 export const DEFAULT_TABS = [
@@ -20,6 +22,14 @@ export const DEFAULT_TABS = [
 
 export const DEFAULT_BRAND = 'Viobot Dashboard';
 export const brandName = (a) => a?.brandName || DEFAULT_BRAND;
+
+// Top-menu "Guides" item — embeds the docs site (served from its own origin so its assets resolve).
+// URL/label are admin-editable via Appearance; a hidden toggle drops the nav item entirely.
+export const DEFAULT_GUIDES_URL = '/docs/'; // same-origin: the server serves the docs at /docs (no subdomain)
+export const DEFAULT_GUIDES_LABEL = 'Guides';
+export const guidesUrl = (a) => (typeof a?.guidesUrl === 'string' && a.guidesUrl.trim() ? a.guidesUrl.trim() : DEFAULT_GUIDES_URL);
+export const guidesLabel = (a) => (typeof a?.guidesLabel === 'string' && a.guidesLabel.trim() ? a.guidesLabel.trim() : DEFAULT_GUIDES_LABEL);
+export const guidesEnabled = (a) => a?.guidesEnabled !== false; // default: shown
 
 // Apply theme variables to the live document.
 export function applyAppearance(appearance) {

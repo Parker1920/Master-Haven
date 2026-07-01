@@ -72,6 +72,9 @@ export default function RegistryEditor() {
                     onChange={(e) => updateField(gi, fi, { options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
                   />
                 )}
+                <label className="reg-testing" title="Only dashboard admins see this field — stage it before the public does">
+                  <input type="checkbox" checked={Boolean(f.testing)} onChange={(e) => updateField(gi, fi, { testing: e.target.checked })} /> Testing
+                </label>
                 <div className="reg-actions">
                   <button className="btn btn-ghost btn-sm" onClick={() => updateGroup(gi, { fields: move(g.fields, fi, -1) })} disabled={fi === 0}>↑</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => updateGroup(gi, { fields: move(g.fields, fi, 1) })} disabled={fi === g.fields.length - 1}>↓</button>

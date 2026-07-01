@@ -1,5 +1,5 @@
 import { getWriteDb, backupDb } from '../db.js';
-import { getRegistry } from '../dashboard/store.js';
+import { getRegistry, isDashboardAdmin } from '../dashboard/store.js';
 import { DEFAULTS } from './configRead.js';
 
 const getPath = (o, p) => p.split('.').reduce((x, k) => (x == null ? undefined : x[k]), o);
@@ -54,11 +54,12 @@ function sanitizeCategories(incoming, actorId, existing) {
   return out;
 }
 
-function applyManaged(base, incoming, roles, channels) {
+function applyManaged(base, incoming, roles, channels, actorIsAdmin) {
   const roleIds = new Set(roles.map((r) => r.id));
   const chanIds = new Set(channels.map((c) => c.id));
   for (const group of getRegistry().groups) {
     for (const f of group.fields) {
+      if (f.testing && !actorIsAdmin) continue; // testing fields are admin-only; ignore non-admin writes
       const v = getPath(incoming, f.path);
       if (v === undefined) continue; // field not submitted → leave base value
       if (f.type === 'role') setPath(base, f.path, typeof v === 'string' && roleIds.has(v) ? v : null);
@@ -109,7 +110,7 @@ export async function writeGuildConfig(guildId, incoming, expectedUpdatedAt, rol
       base = structuredClone(DEFAULTS);
     }
 
-    base = applyManaged(base, incoming, roles, channels);
+    base = applyManaged(base, incoming, roles, channels, isDashboardAdmin(actorId));
 
     // Structured field (not a simple registry entry): custom contact categories.
     if (incoming?.tickets && Array.isArray(incoming.tickets.customContactCategories)) {

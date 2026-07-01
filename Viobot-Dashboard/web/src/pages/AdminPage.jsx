@@ -5,23 +5,20 @@ import AppearanceEditor from '../components/AppearanceEditor.jsx';
 import AdminsEditor from '../components/AdminsEditor.jsx';
 import BotControl from '../components/BotControl.jsx';
 import LogViewer from '../components/LogViewer.jsx';
-import { initials, userAvatarUrl } from '../util.js';
+import TopBar from '../components/TopBar.jsx';
 
-export default function AdminPage({ user, appearance, onAppearanceChange, onBack, onLogout }) {
+export default function AdminPage({ user, appearance, onAppearanceChange, onBack, onGuides, onLogout }) {
   const [tab, setTab] = useState('fields');
-  const avatar = userAvatarUrl(user);
-  const displayName = user.global_name || user.username;
 
   return (
     <div className="page">
-      <header className="topbar">
-        <div className="brand"><button className="back-btn" onClick={onBack}>‹ Servers</button></div>
-        <div className="user">
-          {avatar ? <img className="user-avatar" src={avatar} alt="" /> : <span className="user-avatar user-avatar--fallback">{initials(displayName)}</span>}
-          <span className="user-name">{displayName}</span>
-          <button className="btn btn-ghost" onClick={onLogout}>Log out</button>
-        </div>
-      </header>
+      <TopBar
+        appearance={appearance}
+        user={user}
+        back={{ label: '‹ Servers', onClick: onBack }}
+        onGuides={onGuides}
+        onLogout={onLogout}
+      />
 
       <main className="container">
         <div className="config-head">

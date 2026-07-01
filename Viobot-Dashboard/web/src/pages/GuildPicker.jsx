@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Footer from '../components/Footer.jsx';
-import { initials, guildIconUrl, userAvatarUrl, fallbackGradient } from '../util.js';
-import { brandName } from '../appearance.js';
+import TopBar from '../components/TopBar.jsx';
+import { initials, guildIconUrl, fallbackGradient } from '../util.js';
 
 function GuildAvatar({ guild }) {
   const [broken, setBroken] = useState(false);
@@ -17,7 +17,7 @@ function GuildAvatar({ guild }) {
   );
 }
 
-export default function GuildPicker({ user, isAdmin, appearance, onSelect, onAdmin, onLogout }) {
+export default function GuildPicker({ user, isAdmin, appearance, onSelect, onAdmin, onGuides, onLogout }) {
   const [data, setData] = useState(undefined);
   const [error, setError] = useState(null);
 
@@ -25,27 +25,16 @@ export default function GuildPicker({ user, isAdmin, appearance, onSelect, onAdm
     api.guilds().then(setData).catch((e) => setError(String(e)));
   }, []);
 
-  const avatar = userAvatarUrl(user);
-  const displayName = user.global_name || user.username;
-
   return (
     <div className="page">
-      <header className="topbar">
-        <div className="brand">
-          {appearance?.logo ? <img className="brand-logo" src={appearance.logo} alt="" /> : <span className="brand-dot" />}
-          {brandName(appearance)}
-        </div>
-        <div className="user">
-          {isAdmin && <button className="btn btn-ghost" onClick={onAdmin}>⚙ Admin</button>}
-          {avatar ? (
-            <img className="user-avatar" src={avatar} alt="" />
-          ) : (
-            <span className="user-avatar user-avatar--fallback">{initials(displayName)}</span>
-          )}
-          <span className="user-name">{displayName}</span>
-          <button className="btn btn-ghost" onClick={onLogout}>Log out</button>
-        </div>
-      </header>
+      <TopBar
+        appearance={appearance}
+        user={user}
+        isAdmin={isAdmin}
+        onGuides={onGuides}
+        onAdmin={onAdmin}
+        onLogout={onLogout}
+      />
 
       <main className="container">
         <div className="page-head">

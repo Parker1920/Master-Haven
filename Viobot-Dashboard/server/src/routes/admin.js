@@ -1,7 +1,7 @@
 import { env } from '../env.js';
 import { readSession } from '../framework/requireAuth.js';
 import { getRegistry, setRegistry, getStoredAdmins, setStoredAdmins, isDashboardAdmin, getAppearance, setAppearance } from '../dashboard/store.js';
-import { getContainerStatus, restartContainer } from '../dashboard/dockerControl.js';
+import { getContainerStatus, restartContainer, stopContainer, startContainer, requestReimage } from '../dashboard/dockerControl.js';
 import { streamContainerLogs, isLogContainerAllowed } from '../dashboard/dockerLogs.js';
 
 function requireAdmin(req, reply) {
@@ -58,6 +58,31 @@ export default async function adminRoutes(app) {
       if (e.code === 'NOTFOUND') return reply.code(404).send({ error: 'not_found' });
       return reply.code(502).send({ error: 'docker_unavailable', message: String(e.message) });
     }
+  });
+
+  app.post('/api/admin/bot/stop', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    try { return await stopContainer('viobot'); }
+    catch (e) {
+      if (e.code === 'NOTFOUND') return reply.code(404).send({ error: 'not_found' });
+      return reply.code(502).send({ error: 'docker_unavailable', message: String(e.message) });
+    }
+  });
+
+  app.post('/api/admin/bot/start', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    try { return await startContainer('viobot'); }
+    catch (e) {
+      if (e.code === 'NOTFOUND') return reply.code(404).send({ error: 'not_found' });
+      return reply.code(502).send({ error: 'docker_unavailable', message: String(e.message) });
+    }
+  });
+
+  // Reimage = drop a flag file for the host cron to rebuild + recreate viobot (see viobot-rebuild-watch.sh).
+  app.post('/api/admin/bot/reimage', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    try { return requestReimage(); }
+    catch (e) { return reply.code(500).send({ error: 'reimage_failed', message: String(e.message) }); }
   });
 
   // Live log feed (SSE). Survives container restarts; reads the Docker socket only — the bot is untouched.

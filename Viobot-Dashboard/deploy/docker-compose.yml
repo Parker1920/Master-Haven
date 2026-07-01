@@ -16,6 +16,9 @@ services:
       - /home/pi8gb/docker/viobot-data/db:/app/data
       # Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
       - /home/pi8gb/docker/viobot-dashboard-data:/app/dashboard-data
+      # The Viobot docs site's built files (same dir the viobot-static container serves + auto-syncs),
+      # read-only — the dashboard serves them same-origin at /docs so the Guides tab needs no subdomain.
+      - /home/pi8gb/docker/viobot-static/html:/app/docs-content:ro
       # Docker socket — admin-only "Restart Viobot" button. Code is hard-restricted to the viobot container.
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

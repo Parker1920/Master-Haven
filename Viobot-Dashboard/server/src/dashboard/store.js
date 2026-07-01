@@ -60,6 +60,19 @@ export function setRegistry(reg) {
   return reg;
 }
 
+// The registry as a given viewer should see it. Fields flagged `testing: true` are only shown to
+// dashboard admins (staging a new command/field before the public sees it); empty groups drop out.
+export function registryForViewer(isAdmin) {
+  const reg = getRegistry();
+  if (isAdmin) return reg;
+  return {
+    ...reg,
+    groups: reg.groups
+      .map((g) => ({ ...g, fields: g.fields.filter((f) => !f.testing) }))
+      .filter((g) => g.fields.length),
+  };
+}
+
 export function getStoredAdmins() { return load().admins; }
 export function setStoredAdmins(ids) {
   load().admins = [...new Set((Array.isArray(ids) ? ids : []).map(String).map((s) => s.trim()).filter(Boolean))];
@@ -87,6 +100,14 @@ export function sanitizeAppearance(a) {
     out.tabs = a.tabs.filter((t) => t && typeof t.id === 'string')
       .map((t) => ({ id: t.id, label: typeof t.label === 'string' ? t.label.slice(0, 40) : t.id, hidden: Boolean(t.hidden) }));
   }
+  // Top-menu "Guides" item: allow blank (→ frontend default), an https URL, or a same-origin path
+  // like /docs/ (reject protocol-relative //host). Plus label + on/off.
+  if (typeof a.guidesUrl === 'string') {
+    const u = a.guidesUrl.trim();
+    if (u === '' || /^https:\/\//i.test(u) || /^\/[^/]/.test(u)) out.guidesUrl = u.slice(0, 300);
+  }
+  if (typeof a.guidesLabel === 'string') out.guidesLabel = a.guidesLabel.slice(0, 40);
+  if (typeof a.guidesEnabled === 'boolean') out.guidesEnabled = a.guidesEnabled;
   return out;
 }
 

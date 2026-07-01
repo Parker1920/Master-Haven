@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { env, oauthConfigured } from './env.js';
@@ -8,6 +9,47 @@ import authRoutes from './routes/auth.js';
 import guildRoutes from './routes/guilds.js';
 import configRoutes from './routes/config.js';
 import adminRoutes from './routes/admin.js';
+
+// Per-route social/link-embed (Open Graph) metadata. The SPA serves the same index.html for every
+// route, so scrapers (Discord/Twitter/etc.) would otherwise see one generic card — this gives `/`
+// and `/guides` their own. og:image is the Viobot logo already served at /images/viobot_icon.png.
+const OG_ROUTES = {
+  '/': {
+    title: 'Viobot Dashboard',
+    description: 'Configure Viobot for your Discord server.',
+    themeColor: '#22d3ee',
+  },
+  '/guides': {
+    title: 'Viobot Guides',
+    description: 'Commands and setup guides for Viobot.',
+    themeColor: '#a78bfa',
+  },
+};
+
+const htmlEscape = (s) =>
+  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function injectOg(indexHtml, route, path, origin) {
+  const image = `${origin}/images/viobot_icon.png`;
+  const url = `${origin}${path}`;
+  const tags = [
+    `<meta name="description" content="${htmlEscape(route.description)}" />`,
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:site_name" content="Viobot" />`,
+    `<meta property="og:title" content="${htmlEscape(route.title)}" />`,
+    `<meta property="og:description" content="${htmlEscape(route.description)}" />`,
+    `<meta property="og:url" content="${htmlEscape(url)}" />`,
+    `<meta property="og:image" content="${htmlEscape(image)}" />`,
+    `<meta name="twitter:card" content="summary" />`,
+    `<meta name="twitter:title" content="${htmlEscape(route.title)}" />`,
+    `<meta name="twitter:description" content="${htmlEscape(route.description)}" />`,
+    `<meta name="twitter:image" content="${htmlEscape(image)}" />`,
+    `<meta name="theme-color" content="${route.themeColor}" />`,
+  ].join('\n    ');
+  return indexHtml
+    .replace(/<title>.*?<\/title>/i, `<title>${htmlEscape(route.title)}</title>`)
+    .replace('</head>', `    ${tags}\n  </head>`);
+}
 
 export async function buildApp(opts = {}) {
   const app = Fastify({ logger: opts.logger ?? true });
@@ -57,6 +99,34 @@ export async function buildApp(opts = {}) {
   // Serve the built SPA (production/container). SPA fallback for client-side routes; /api still 404s JSON.
   if (serveStatic) {
     const fstatic = (await import('@fastify/static')).default;
+
+    // Inject per-route link-embed (OG) meta into index.html for `/` and `/guides`. Runs before the
+    // static handler; browsers ignore the extra tags, scrapers read them. Read once at startup.
+    let indexHtml = null;
+    try { indexHtml = fs.readFileSync(path.join(env.webDist, 'index.html'), 'utf8'); } catch { /* fall through */ }
+    if (indexHtml) {
+      app.addHook('onRequest', async (req, reply) => {
+        if (req.method !== 'GET') return;
+        const p = req.url.split('?')[0];
+        const route = OG_ROUTES[p];
+        if (route) reply.type('text/html').send(injectOg(indexHtml, route, p, env.publicOrigin));
+      });
+    }
+
+    // Docs (Guides) served same-origin from the auto-synced docs files, so the Guides tab embeds
+    // viobot.havenmap.online/docs/ — no separate subdomain. decorateReply:false so only the SPA
+    // registration below owns reply.sendFile (used by the SPA fallback). Registered first = more
+    // specific /docs/* and /images/* routes win over the SPA catch-all.
+    const docsDir = env.docsDir;
+    if (docsDir && fs.existsSync(docsDir)) {
+      await app.register(fstatic, { root: docsDir, prefix: '/docs/', redirect: true, decorateReply: false });
+      // The docs' only root-absolute asset is the logo at /images/*.
+      const imagesDir = path.join(docsDir, 'images');
+      if (fs.existsSync(imagesDir)) {
+        await app.register(fstatic, { root: imagesDir, prefix: '/images/', decorateReply: false });
+      }
+    }
+
     await app.register(fstatic, { root: env.webDist, prefix: '/' });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api')) {

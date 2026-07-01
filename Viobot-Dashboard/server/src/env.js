@@ -10,6 +10,8 @@ export const env = {
   // Where the SPA lives. Empty in local dev (Vite serves it); set to the served dir in the container.
   webOrigin: process.env.WEB_ORIGIN ?? 'http://localhost:5173',
   webDist: process.env.WEB_DIST ?? '',
+  // Canonical public origin — used to build absolute URLs for social/link embeds (og:image, og:url).
+  publicOrigin: process.env.PUBLIC_ORIGIN ?? 'https://viobot.havenmap.online',
 
   discord: {
     clientId: process.env.DISCORD_CLIENT_ID ?? '',
@@ -46,6 +48,10 @@ export const env = {
 
   // Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
   dataDir: process.env.DASHBOARD_DATA_DIR ?? '/app/dashboard-data',
+  // The Viobot docs site's built files (the same dir the docs container serves + auto-syncs). Mounted
+  // read-only so the dashboard can serve them same-origin at /docs — powers the Guides tab without a
+  // separate subdomain. Empty/absent → /docs isn't served (Guides can point elsewhere via appearance).
+  docsDir: process.env.DASHBOARD_DOCS_DIR ?? '/app/docs-content',
   // Bootstrap dashboard admins (Discord IDs). Default = Viobot's bot owner (art3mis).
   adminIds: (process.env.DASHBOARD_ADMIN_IDS ?? '1182179988150177812').split(',').map((s) => s.trim()).filter(Boolean),
 };

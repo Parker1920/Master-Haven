@@ -4,7 +4,8 @@ import Footer from '../components/Footer.jsx';
 import VariablesEditor from '../components/VariablesEditor.jsx';
 import AliasesEditor from '../components/AliasesEditor.jsx';
 import PlusBetaView from '../components/PlusBetaView.jsx';
-import { initials, guildIconUrl, userAvatarUrl, fallbackGradient } from '../util.js';
+import TopBar from '../components/TopBar.jsx';
+import { initials, guildIconUrl, fallbackGradient } from '../util.js';
 import { visibleTabs } from '../appearance.js';
 
 const TEXTISH = new Set([0, 5]); // text + announcement channels
@@ -156,7 +157,7 @@ function CategoryEditor({ categories, onChange }) {
   );
 }
 
-export default function ConfigPage({ user, guild, appearance, onBack, onLogout }) {
+export default function ConfigPage({ user, guild, appearance, isAdmin, onBack, onGuides, onLogout }) {
   const tabs = visibleTabs(appearance);
   const [data, setData] = useState(undefined);
   const [draft, setDraft] = useState(null);
@@ -200,24 +201,18 @@ export default function ConfigPage({ user, guild, appearance, onBack, onLogout }
     }
   }
 
-  const avatar = userAvatarUrl(user);
   const gIcon = guildIconUrl(guild);
-  const displayName = user.global_name || user.username;
 
   return (
     <div className="page">
-      <header className="topbar">
-        <div className="brand"><button className="back-btn" onClick={onBack}>‹ Servers</button></div>
-        <div className="user">
-          {avatar ? (
-            <img className="user-avatar" src={avatar} alt="" />
-          ) : (
-            <span className="user-avatar user-avatar--fallback">{initials(displayName)}</span>
-          )}
-          <span className="user-name">{displayName}</span>
-          <button className="btn btn-ghost" onClick={onLogout}>Log out</button>
-        </div>
-      </header>
+      <TopBar
+        appearance={appearance}
+        user={user}
+        isAdmin={isAdmin}
+        back={{ label: '‹ Servers', onClick: onBack }}
+        onGuides={onGuides}
+        onLogout={onLogout}
+      />
 
       <main className="container">
         <div className="config-head">
@@ -257,7 +252,7 @@ export default function ConfigPage({ user, guild, appearance, onBack, onLogout }
                     {group.fields.map((field) => (
                       <div key={field.path} className="config-row">
                         <div className="config-label">
-                          <span>{field.label}</span>
+                          <span>{field.label}{field.testing && <span className="pill pill-warn testing-tag">testing</span>}</span>
                           {field.help && <span className="config-help">{field.help}</span>}
                         </div>
                         <div className="config-value">

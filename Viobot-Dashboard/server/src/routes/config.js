@@ -10,7 +10,7 @@ import { readAliases, updateAliasMeta, deleteAlias } from '../viobot/aliases.js'
 import { getFeatureAccess, hasFeature } from '../viobot/premium.js';
 import { readAnnouncements, addAnnouncement, deleteAnnouncement } from '../viobot/announcements.js';
 import { readAvatar, setAvatar, resetAvatar } from '../viobot/avatar.js';
-import { getRegistry } from '../dashboard/store.js';
+import { registryForViewer, isDashboardAdmin } from '../dashboard/store.js';
 
 /**
  * Resolve the requested guild ONLY if the caller may configure it:
@@ -20,13 +20,14 @@ import { getRegistry } from '../dashboard/store.js';
 async function resolveAccessibleGuild(req, guildId) {
   const { session } = readSession(req);
   if (!session?.user) return { error: 401 };
+  const isAdmin = isDashboardAdmin(session.user.id);
 
   const botGuilds = getBotGuildIds();
   if (!botGuilds.has(guildId)) return { error: 404 }; // bot not in this guild
 
   // Dev session: no Discord identity, so allow any bot-present guild (testing only).
   if (session.dev) {
-    return { guild: { id: guildId, name: botGuilds.get(guildId) ?? guildId, owner: false } };
+    return { guild: { id: guildId, name: botGuilds.get(guildId) ?? guildId, owner: false }, isAdmin };
   }
 
   let userGuilds = session.guilds ?? [];
@@ -39,7 +40,7 @@ async function resolveAccessibleGuild(req, guildId) {
   }
   const guild = accessibleGuilds(userGuilds, botGuilds).find((g) => g.id === guildId);
   if (!guild) return { error: 403 }; // not an admin of this guild
-  return { guild };
+  return { guild, isAdmin };
 }
 
 export default async function configRoutes(app) {
@@ -64,7 +65,7 @@ export default async function configRoutes(app) {
       req.log.warn({ err: lookupError }, 'roles/channels fetch failed');
     }
 
-    return { guild: r.guild, config, updatedAt, registry: getRegistry(), roles, channels, lookupError };
+    return { guild: r.guild, config, updatedAt, registry: registryForViewer(r.isAdmin), roles, channels, lookupError };
   });
 
   // Save a server's config (validated, optimistic-concurrency, backup-before-write).
