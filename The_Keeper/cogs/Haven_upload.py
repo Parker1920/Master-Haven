@@ -347,12 +347,27 @@ class PlanetPromptView(discord.ui.View):
 
     @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Prevent opening the modal if 6 planets are already queued
         if len(self.planets) >= 6:
-            await interaction.response.send_message("❌ Maximum limit of 6 planets/moons reached for this system.", ephemeral=True)
+            await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
             return
 
-        await interaction.response.send_modal(PlanetInputModal(self))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            dynamic_biomes = await self.api.fetch_biome_adjectives() 
+            dynamic_biomes = dynamic_biomes[:25] if dynamic_biomes else ["Lush", "Desert", "Toxic"]
+
+            dropdown_view = BiomeDropdownView(self, dynamic_biomes)
+
+            await interaction.followup.send(
+                content="Step 1: Select the planet's Biome Type from the Haven database:",
+                view=dropdown_view,
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
+
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
     async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -361,7 +376,6 @@ class PlanetPromptView(discord.ui.View):
 
     async def execute_final_submission(self, interaction: discord.Interaction):
         try:
-            # Enforce strict ceiling before final execution
             if len(self.planets) > 6:
                 self.planets = self.planets[:6]
 
@@ -410,19 +424,35 @@ class PlanetPromptView(discord.ui.View):
             await interaction.followup.send(f"❌ Submission failed: {e}", ephemeral=True)
             
 #--------------------INPUT MODAL-------------
-class PlanetInputModal(discord.ui.Modal):
-    def __init__(self, prompt_view: PlanetPromptView):
-        super().__init__(title=f"Planet #{len(prompt_view.planets) + 1} Details")
+class BiomeDropdownView(discord.ui.View):
+    def __init__(self, prompt_view: PlanetPromptView, biome_options: list):
+        super().__init__(timeout=60)
         self.prompt_view = prompt_view
 
+        self.biome_select = discord.ui.Select(
+            placeholder="Choose a Biome...",
+            options=[discord.SelectOption(label=b, value=b) for b in biome_options]
+        )
+        self.biome_select.callback = self.on_biome_select
+        self.add_item(self.biome_select)
+
+    async def on_biome_select(self, interaction: discord.Interaction):
+        selected_biome = self.biome_select.values[0]
+        
+        await interaction.response.send_modal(PlanetInputModal(self.prompt_view, selected_biome))
+        self.stop()
+
+class PlanetInputModal(discord.ui.Modal):
+    def __init__(self, prompt_view: PlanetPromptView, chosen_biome: str):
+        super().__init__(title=f"Planet #{len(prompt_view.planets) + 1} Details")
+        self.prompt_view = prompt_view
+        self.chosen_biome = chosen_biome  
         self.p_name = TextInput(label="Planet Name", required=True, max_length=100)
-        self.biome = TextInput(label="Biome Type", placeholder="e.g. Lush, Desert, Toxic, Frozen...", required=True, max_length=50)
-        self.fauna = TextInput(label="Fauna Description / Count", placeholder="e.g. 12 Fauna, Aggressive...", required=False, max_length=100)
-        self.flora = TextInput(label="Flora Description", placeholder="e.g. Abundant, Vermilion...", required=False, max_length=100)
-        self.sentinel = TextInput(label="Sentinel Activity", placeholder="e.g. Low, High, Aggressive...", required=False, max_length=50)
+        self.fauna = TextInput(label="Fauna Details", required=False, max_length=100)
+        self.flora = TextInput(label="Flora Details", required=False, max_length=100)
+        self.sentinel = TextInput(label="Sentinel Activity", required=False, max_length=50)
 
         self.add_item(self.p_name)
-        self.add_item(self.biome)
         self.add_item(self.fauna)
         self.add_item(self.flora)
         self.add_item(self.sentinel)
@@ -430,13 +460,12 @@ class PlanetInputModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         self.prompt_view.planets.append({
             "name": self.p_name.value,
-            "biome": self.biome.value,
+            "biome": self.chosen_biome,
             "fauna": self.fauna.value or "Unknown",
             "flora": self.flora.value or "Unknown",
             "sentinel": self.sentinel.value or "Unknown"
         })
 
-        
         planet_list = "\n".join([f"• `{p['name']}` ({p['biome']})" for p in self.prompt_view.planets])
         msg = (
             f"### Current Queue to Submit:\n"
@@ -446,6 +475,7 @@ class PlanetInputModal(discord.ui.Modal):
         )
         
         await interaction.response.edit_message(content=msg, view=self.prompt_view)
+
    
 #-------------------Discovery Modal--------------
 import sqlite3
