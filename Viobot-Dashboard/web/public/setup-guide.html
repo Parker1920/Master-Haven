@@ -178,7 +178,6 @@
         <a href="#channels">Channels</a>
         <a href="#permissions">Permissions</a>
         <a href="#connect">Connect</a>
-        <a href="#cheatsheet">Cheat sheet</a>
         <a href="#test">Test</a>
         <a href="#troubleshoot">Troubleshooting</a>
         <a href="https://discord.gg/vN4rpUNcHu" target="_blank" rel="noopener">Support&nbsp;server ↗</a>
@@ -409,7 +408,7 @@
         <div class="step">
           <div>
             <h3>Point Viobot at your roles &amp; channels</h3>
-            <p>Run <code>/config</code> and use the role and channel pickers — or open the <a href="/">Viobot Dashboard</a> and set them there. Match each picker to what you built using the <a href="#cheatsheet">cheat sheet</a> below.</p>
+            <p>Run <code>/config</code> and use the role and channel pickers — or open the <a href="/">Viobot Dashboard</a> and set them there. Point each picker at the matching role or channel you created above (the <a href="#channels">Channels</a> table lists which config field each channel maps to).</p>
           </div>
         </div>
         <div class="step">
@@ -424,29 +423,6 @@
           </div>
         </div>
       </div>
-    </section>
-
-    <section id="cheatsheet" class="anchor">
-      <div class="section-head">
-        <span class="kicker">Reference</span>
-        <h2>Cheat sheet</h2>
-        <p>Every Viobot setting and what to point it at.</p>
-      </div>
-      <table class="card">
-        <thead><tr><th>Setting</th><th>Point it at</th><th>Required?</th></tr></thead>
-        <tbody>
-          <tr><td>Moderator role</td><td><span class="tag role">Moderator</span> (or your staff role)</td><td><span class="tag">Required</span></td></tr>
-          <tr><td>Mute role</td><td><span class="tag role">Muted</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Voice Mute role</td><td><span class="tag role">Voice Muted</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Verification-Required role</td><td><span class="tag role opt">Verification Required</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Logging channel</td><td><span class="tag chan">#mod-log</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Violations channel</td><td><span class="tag chan">#violations</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Papertrail channel</td><td><span class="tag chan">#papertrail</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Contact (members) channel</td><td><span class="tag chan">#contact-staff</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Contact (muted) channel</td><td><span class="tag chan">#muted-contact</span></td><td><span class="tag opt">Optional</span></td></tr>
-        </tbody>
-      </table>
-      <div class="note"><p>Only the <strong>Moderator role</strong> is truly required — it's how Viobot knows who may run its staff commands. Everything else is optional and simply switches on a specific feature: the Mute / Voice&nbsp;Mute roles power mutes, the log channels power logging, and the contact channels power tickets. Wire up only what you plan to use.</p></div>
     </section>
 
     <section id="test" class="anchor">
