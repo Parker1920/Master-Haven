@@ -120,8 +120,6 @@ class SystemOwnerCache:
         
 system_owner_cache = SystemOwnerCache(ttl_seconds=300)
 
-BASE = "https://havenmap.online"
-
 glyph_emojis = {
     "0": discord.PartialEmoji(name="0", id=1487546589269463211),
     "1": discord.PartialEmoji(name="1", id=1487546881692405843),
@@ -141,6 +139,52 @@ glyph_emojis = {
     "F": discord.PartialEmoji(name="F", id=1487547868922249479),
 }
 
+class GalaxyInputModal(discord.ui.Modal, title="Select Galaxy Context"):
+    galaxy = discord.ui.TextInput(
+        label="Galaxy",
+        default="Euclid",
+        placeholder="Enter galaxy name (e.g., Euclid, Eissentam, Hilbert)",
+        required=True,
+        max_length=50
+    )
+
+    def __init__(self, keypad_view: discord.ui.View, interaction_to_edit: discord.Interaction):
+        super().__init__()
+        self.keypad_view = keypad_view
+        self.orig_interaction = interaction_to_edit
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        galaxy_val = self.galaxy.value.strip()
+        glyph_code = self.keypad_view.input_string.upper()
+        
+        self.keypad_view.system_status = "loading"
+        data = await self.keypad_view.api.get_system_by_glyph(
+            glyph=glyph_code, 
+            galaxy=galaxy_val, 
+            reality="Normal"
+        )
+        
+        if data and "status" in data:
+            self.keypad_view.system_status = data["status"]
+            self.keypad_view.region_name = data.get("region_name")
+            
+            if self.keypad_view.system_status == "approved":
+                self.keypad_view.system_name = data.get("name")
+                self.keypad_view.completeness = data.get("completeness_grade")
+                self.keypad_view.map_url = f"{self.keypad_view.api.base}{data.get('map_url')}"
+            elif self.keypad_view.system_status == "not_found":
+                self.keypad_view.map_url = f"{self.keypad_view.api.base}{data.get('submit_url')}"
+        else:
+            self.keypad_view.system_status = "error"
+
+        for item in self.keypad_view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+        await self.keypad_view.safe_edit(self.orig_interaction)
+
 
 class SimpleHexKeypad(discord.ui.View):
 
@@ -156,6 +200,7 @@ class SimpleHexKeypad(discord.ui.View):
         self.system_name = None
         self.system_owner_type = "uncharted"
         self.system_owner_tag = None
+        self.map_url = None
 
         hex_keys = [
             ["0", "1", "2", "3"],
@@ -244,6 +289,12 @@ class SimpleHexKeypad(discord.ui.View):
             value=ownership_value,
             inline=False
         )
+        if self.map_url:
+            embed.add_field(
+                name="🌐 System Map",
+                value=f"🔗 **[View on Haven Map]({self.map_url})**",
+                inline=False
+            )
 
         return embed
 
@@ -273,12 +324,10 @@ class SimpleHexKeypad(discord.ui.View):
     async def fetch_system_owner(self, session, glyph):
         key = glyph.upper()
     
-        # 1. fast path: cached
         cached = system_owner_cache.get(key)
         if cached is not None:
             return cached
     
-        # 2. dedupe in-flight requests
         existing_task = system_owner_cache.get_in_flight(key)
         if existing_task:
             return await existing_task
@@ -313,166 +362,63 @@ class SimpleHexKeypad(discord.ui.View):
         return await task
             
 
-    def make_callback(self, key):
-
-        async def callback(interaction: discord.Interaction):
-
-            if interaction.user.id != self.owner_id:
-
-                return await interaction.response.send_message(
-                    "Not your keypad.",
-                    ephemeral=True
-                )
-
-            await interaction.response.defer()
-
-            if len(self.input_string) >= 12:
-                return
-
-            self.input_string += key
-
-            self.emoji_sequence.append(
-                f"<:{glyph_emojis[key].name}:{glyph_emojis[key].id}>"
-            )
-
-            # GLYPH 1
-            if len(self.input_string) == 1:
-
-                val = int(self.input_string, 16)
-
-                if val == 0:
-
-                    await self.temp_error(
-                        interaction,
-                        "⚠️ Address will take you to Glyph 1"
-                    )
-
-                elif val > 6:
-
-                    self.input_string = ""
-                    self.emoji_sequence = []
-
-                    await self.temp_error(
-                        interaction,
-                        "❌ Invalid Glyph input: planet index"
-                    )
-
-            # GLYPHS 2–4
-            if len(self.input_string) == 4:
-
-                ssi_val = int(self.input_string[1:4], 16)
-
-                if ssi_val == 0:
-
-                    self.input_string = self.input_string[:1]
-                    self.emoji_sequence = self.emoji_sequence[:1]
-
-                    await self.temp_error(
-                        interaction,
-                        "❌ Error in SSI"
-                    )
-
-                elif 1 <= ssi_val <= 0x123:
-                    self.class_type = "🟡 Yellow"
-
-                elif 0x124 <= ssi_val < 0x3E8:
-                    self.class_type = "RGB"
-
-                elif 0x3E9 <= ssi_val <= 0x429:
-                    self.class_type = "🟣 Purple"
-
-                elif 0x258 <= ssi_val <= 0x3E7:
-                    self.class_type = "!phantom"
-
-                elif ssi_val == 0x3E8:
-                    self.class_type = "!Glass"
-
-                elif ssi_val >= 0x430:
-                    self.class_type = "!phantom"
-
-            # GLYPHS 5–6
-            if len(self.input_string) == 6:
-
-                if self.input_string[4:6].upper() == "81":
-
-                    self.input_string = self.input_string[:4]
-                    self.emoji_sequence = self.emoji_sequence[:4]
-
-                    await self.temp_error(
-                        interaction,
-                        "❌ Invalid YY"
-                    )
-
-            # GLYPHS 7–9
-            if len(self.input_string) == 9:
-
-                if self.input_string[6:9].upper() == "801":
-
-                    self.input_string = self.input_string[:6]
-                    self.emoji_sequence = self.emoji_sequence[:6]
-
-                    await self.temp_error(
-                        interaction,
-                        "❌ Invalid ZZZ"
-                    )
-
-            # GLYPHS 10–12
-            if len(self.input_string) == 12:
-
-                if self.input_string[9:12].upper() == "801":
-
-                    self.input_string = self.input_string[:9]
-                    self.emoji_sequence = self.emoji_sequence[:9]
-
-                    await self.temp_error(
-                        interaction,
-                        "❌ Invalid XXX"
-                    )                
-
-                self.system_owner_type = "uncharted"
-                self.system_owner_tag = None
-
-                try:
-
-                    timeout = aiohttp.ClientTimeout(total=120)
-                    
-                    async with aiohttp.ClientSession(
-                        timeout=timeout
-                    ) as session:
-                        glyph = self.input_string.upper()
-                        data = await self.fetch_system_owner(
-                            session,
-                            glyph
-                        )
-                        
-                        if data:
-
-                            self.system_name = data.get("name", "Unknown System")
-                            self.system_owner_type = "community"
-                            self.system_owner_tag = data.get(
-                                "discord_tag"
-                            )
+        def make_callback(self, key):
+                async def callback(interaction: discord.Interaction):
+                    if interaction.user.id != self.owner_id:
+                        return await interaction.response.send_message("Not your keypad.", ephemeral=True)
+        
+                    if len(self.input_string) + 1 < 12:
+                        await interaction.response.defer()
+        
+                    if len(self.input_string) >= 12:
+                        return
+        
+                    self.input_string += key
+                    self.emoji_sequence.append(f"<:{glyph_emojis[key].name}:{glyph_emojis[key].id}>")
+        
+                    # --- VALIDATIONS ---
+                    if len(self.input_string) == 1:
+                        val = int(self.input_string, 16)
+                        if val == 0: await self.temp_error(interaction, "⚠️ Address will take you to Glyph 1")
+                        elif val > 6:
+                            self.input_string, self.emoji_sequence = "", []
+                            await self.temp_error(interaction, "❌ Invalid Glyph input: planet index")
+        
+                    if len(self.input_string) == 4:
+                        ssi_val = int(self.input_string[1:4], 16)
+                        if ssi_val == 0:
+                            self.input_string, self.emoji_sequence = self.input_string[:1], self.emoji_sequence[:1]
+                            await self.temp_error(interaction, "❌ Error in SSI")
+                        elif 1 <= ssi_val <= 0x123: self.class_type = "🟡 Yellow"
+                        elif 0x124 <= ssi_val < 0x3E8: self.class_type = "RGB"
+                        elif 0x3E9 <= ssi_val <= 0x429: self.class_type = "🟣 Purple"
+                        elif 0x258 <= ssi_val <= 0x3E7: self.class_type = "!phantom"
+                        elif ssi_val == 0x3E8: self.class_type = "!Glass"
+                        elif ssi_val >= 0x430: self.class_type = "!phantom"
+        
+                    if len(self.input_string) == 6 and self.input_string[4:6].upper() == "81":
+                        self.input_string, self.emoji_sequence = self.input_string[:4], self.emoji_sequence[:4]
+                        await self.temp_error(interaction, "❌ Invalid YY")
+        
+                    if len(self.input_string) == 9 and self.input_string[6:9].upper() == "801":
+                        self.input_string, self.emoji_sequence = self.input_string[:6], self.emoji_sequence[:6]
+                        await self.temp_error(interaction, "❌ Invalid ZZZ")
+        
+                    # --- 12 GLYPH COMPLETION ---
+                    if len(self.input_string) == 12:
+                        if self.input_string[9:12].upper() == "801":
+                            await interaction.response.defer() 
+                            self.input_string, self.emoji_sequence = self.input_string[:9], self.emoji_sequence[:9]
+                            await self.temp_error(interaction, "❌ Invalid XXX")                
                             await self.safe_edit(interaction)
+                            return
+        
+                        await interaction.response.send_modal(GalaxyInputModal(self, interaction))
+                        return
+        
+                    await self.safe_edit(interaction)
+                return callback            
 
-                except Exception:
-
-                    import traceback
-                    traceback.print_exc()
-
-                    self.system_owner_type = "uncharted"
-                    self.system_owner_tag = None
-
-                for item in self.children:
-
-                    if isinstance(item, discord.ui.Button):
-                        item.disabled = True
-
-                await self.safe_edit(interaction)
-                return
-
-            await self.safe_edit(interaction)
-
-        return callback
 
     async def backspace(self, interaction: discord.Interaction):
 
