@@ -1,0 +1,54 @@
+# Standalone compose for the Voyager's Haven studio site.
+#
+# Run from this folder:
+#   VH_DATA_DIR=~/docker/voyagers-haven-data docker compose up -d --build
+#
+# The data dir is mounted from the HOST (outside the repo) so `git pull` and
+# container rebuilds never touch the SQLite DB.
+#
+# Payments default to STRIPE_MODE=simulated. To take real payments once
+# voyagershaven.online + a Stripe account are registered, set:
+#   STRIPE_MODE=live
+#   STRIPE_SECRET_KEY=sk_live_...
+#   STRIPE_PUBLISHABLE_KEY=pk_live_...
+#   STRIPE_WEBHOOK_SECRET=whsec_...
+#   SITE_URL=https://voyagershaven.online
+
+services:
+  voyagers-haven:
+    build: .
+    container_name: voyagers-haven
+    restart: unless-stopped
+    ports:
+      - "8090:8000"
+    volumes:
+      - "${VH_DATA_DIR:-./data-local}:/data"
+    environment:
+      - DATA_DIR=/data
+      - DB_PATH=/data/voyagers_haven.db
+      - STRIPE_MODE=${STRIPE_MODE:-simulated}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - SITE_URL=${SITE_URL:-http://localhost:8090}
+      # Admin console (/admin) password — CHANGE THIS for production.
+      - ADMIN_PASSWORD=${VH_ADMIN_PASSWORD:-changeme}
+      # Contact + new-inquiry notifications (all optional; off until set).
+      - CONTACT_EMAIL=${VH_CONTACT_EMAIL:-ekimo.vhav@gmail.com}
+      - INQUIRY_WEBHOOK_URL=${VH_INQUIRY_WEBHOOK_URL:-}
+      - NOTIFY_EMAIL=${VH_NOTIFY_EMAIL:-}
+      - SMTP_HOST=${VH_SMTP_HOST:-}
+      - SMTP_PORT=${VH_SMTP_PORT:-587}
+      - SMTP_USER=${VH_SMTP_USER:-}
+      - SMTP_PASSWORD=${VH_SMTP_PASSWORD:-}
+      - SMTP_FROM=${VH_SMTP_FROM:-}
+    # Nginx Proxy Manager (the `npm` container) proxies voyagershaven.online to
+    # this service BY CONTAINER NAME, so both must share a docker network. NPM
+    # lives on `docker_default`. Without this, a `docker compose up --build`
+    # recreate drops the container onto an isolated network and NPM 502s.
+    networks:
+      - docker_default
+
+networks:
+  docker_default:
+    external: true

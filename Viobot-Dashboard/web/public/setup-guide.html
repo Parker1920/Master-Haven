@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viobot — Server Setup Guide</title>
+  <meta name="description" content="Step-by-step manual setup for Viobot: the roles, channels, and permissions to create so moderation, mutes, tickets, and logging work." />
+  <style>
+    :root {
+      --bg: #050816;
+      --panel: rgba(12, 21, 38, 0.78);
+      --panel-2: rgba(16, 29, 52, 0.92);
+      --text: #edf7ff;
+      --muted: #94a9c7;
+      --soft: #c7d6ef;
+      --line: rgba(125, 211, 252, 0.18);
+      --cyan: #22d3ee;
+      --blue: #60a5fa;
+      --violet: #a78bfa;
+      --green: #34d399;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+      --radius: 20px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--text);
+      background:
+        radial-gradient(circle at 15% 5%, rgba(34, 211, 238, 0.20), transparent 28rem),
+        radial-gradient(circle at 80% 0%, rgba(167, 139, 250, 0.20), transparent 30rem),
+        radial-gradient(circle at 50% 100%, rgba(52, 211, 153, 0.08), transparent 35rem),
+        linear-gradient(135deg, #030712 0%, #061020 48%, #08111f 100%);
+      background-attachment: fixed;
+      font-family: var(--sans); line-height: 1.65; overflow-x: hidden;
+    }
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; opacity: 0.35;
+      background-image:
+        linear-gradient(rgba(125, 211, 252, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(125, 211, 252, 0.08) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent 82%);
+      z-index: 0;
+    }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { width: min(1080px, calc(100% - 32px)); margin: 0 auto; position: relative; z-index: 1; }
+
+    .topbar {
+      position: sticky; top: 0; z-index: 30; backdrop-filter: blur(18px);
+      background: rgba(5, 8, 22, 0.82); border-bottom: 1px solid var(--line);
+    }
+    .nav {
+      width: min(1080px, calc(100% - 32px)); margin: 0 auto; min-height: 66px;
+      display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; color: var(--text); }
+    .brand:hover { text-decoration: none; }
+    .brand .mark {
+      width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
+      font-size: 18px; background: linear-gradient(135deg, rgba(34,211,238,.25), rgba(167,139,250,.25));
+      border: 1px solid var(--line);
+    }
+    .brand strong { display: block; font-size: 15px; letter-spacing: .2px; }
+    .brand span span { color: var(--muted); font-size: 12px; }
+    .links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .links a {
+      color: var(--soft); font-size: 13px; padding: 6px 11px; border-radius: 999px; border: 1px solid transparent;
+    }
+    .links a:hover { text-decoration: none; border-color: var(--line); background: rgba(125,211,252,.06); }
+    @media (max-width: 780px) { .links { display: none; } }
+
+    main { padding: 40px 0 80px; }
+    .hero { padding: 26px 0 8px; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--soft);
+      padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(12,21,38,.6);
+    }
+    .pill .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(52,211,153,.5); animation: pulse 2.2s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.45);} 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0);} 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0);} }
+    h1 { font-size: clamp(30px, 4.6vw, 46px); line-height: 1.1; margin: 0 0 14px; letter-spacing: -.5px; }
+    .gradient-text { background: linear-gradient(120deg, var(--cyan), var(--violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero p { color: var(--soft); font-size: 16px; max-width: 68ch; }
+
+    section { padding: 34px 0; border-top: 1px solid var(--line); margin-top: 24px; }
+    section:first-of-type { border-top: none; margin-top: 0; }
+    .section-head { margin-bottom: 20px; }
+    .section-head .kicker { color: var(--cyan); font-family: var(--mono); font-size: 12.5px; letter-spacing: 2px; text-transform: uppercase; }
+    .section-head h2 { font-size: clamp(22px, 3vw, 30px); margin: 6px 0 8px; }
+    .section-head p { color: var(--muted); margin: 0; max-width: 74ch; }
+
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 20px 22px; box-shadow: var(--shadow);
+    }
+    .grid { display: grid; gap: 16px; }
+    .cols-2 { grid-template-columns: repeat(2, 1fr); }
+    .cols-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 760px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+    .card h3 { margin: 0 0 8px; font-size: 16px; display: flex; align-items: center; gap: 9px; }
+    .card p { color: var(--muted); margin: 0; font-size: 14px; }
+    .card .ic { font-size: 18px; }
+
+    .steps { display: flex; flex-direction: column; gap: 14px; counter-reset: step; }
+    .step {
+      display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px;
+    }
+    .step::before {
+      counter-increment: step; content: counter(step);
+      width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
+      font-family: var(--mono); font-weight: 700; color: #041018;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+    }
+    .step h3 { margin: 2px 0 6px; font-size: 16.5px; }
+    .step p { color: var(--soft); margin: 0 0 8px; font-size: 14.5px; }
+    .step p:last-child { margin-bottom: 0; }
+
+    code, .kbd {
+      font-family: var(--mono); font-size: 0.87em; background: rgba(125,211,252,.10);
+      border: 1px solid var(--line); border-radius: 7px; padding: 1px 6px; color: #d7ecff;
+    }
+    .kbd { background: rgba(167,139,250,.12); color: #e6ddff; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 4px; }
+    table.card { padding: 0; overflow: hidden; }
+    th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    thead th { background: rgba(16,29,52,.7); color: var(--soft); font-weight: 600; font-size: 12.5px; letter-spacing: .4px; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: rgba(125,211,252,.04); }
+    td.mono, .mono { font-family: var(--mono); font-size: 13px; }
+
+    .tag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+    .tag.allow { color: var(--green); border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.08); }
+    .tag.deny  { color: var(--red); border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.08); }
+    .tag.opt   { color: var(--violet); border-color: rgba(167,139,250,.4); background: rgba(167,139,250,.08); }
+    .tag.role  { color: var(--yellow); border-color: rgba(250,204,21,.35); background: rgba(250,204,21,.08); }
+    .tag.chan  { color: var(--blue); border-color: rgba(96,165,250,.4); background: rgba(96,165,250,.08); }
+
+    .note {
+      border-radius: 14px; padding: 15px 18px; border: 1px solid var(--line);
+      background: rgba(34,211,238,.06); border-left: 3px solid var(--cyan); margin-top: 16px;
+    }
+    .note.warn { background: rgba(250,204,21,.06); border-left-color: var(--yellow); }
+    .note.key  { background: rgba(167,139,250,.07); border-left-color: var(--violet); }
+    .note strong { color: var(--text); }
+    .note p { margin: 6px 0 0; color: var(--soft); font-size: 14px; }
+    .note p:first-child { margin-top: 0; }
+
+    ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--soft); }
+    ul.clean li { margin: 5px 0; }
+    ul.check { list-style: none; padding: 0; margin: 8px 0 0; }
+    ul.check li { position: relative; padding: 6px 0 6px 30px; color: var(--soft); border-bottom: 1px solid var(--line); }
+    ul.check li:last-child { border-bottom: none; }
+    ul.check li::before { content: "☐"; position: absolute; left: 4px; top: 6px; color: var(--cyan); font-size: 16px; }
+
+    .lead-in { color: var(--soft); margin: 0 0 18px; }
+    footer { border-top: 1px solid var(--line); padding: 26px 0; color: var(--muted); font-size: 13px; text-align: center; margin-top: 30px; }
+    .anchor { scroll-margin-top: 84px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav" aria-label="Main navigation">
+      <a class="brand" href="#top">
+        <span class="mark">🛡️</span>
+        <span><strong>Viobot</strong><span>Server setup guide</span></span>
+      </a>
+      <div class="links">
+        <a href="#how">How it works</a>
+        <a href="#before">Before you start</a>
+        <a href="#roles">Roles</a>
+        <a href="#channels">Channels</a>
+        <a href="#permissions">Permissions</a>
+        <a href="#connect">Connect</a>
+        <a href="#cheatsheet">Cheat sheet</a>
+        <a href="#test">Test</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="hero anchor">
+      <div class="badge-row">
+        <span class="pill"><span class="pulse"></span> Manual setup</span>
+        <span class="pill">Prefix: <strong>&nbsp;!</strong></span>
+        <span class="pill">Slash: <strong>&nbsp;/config</strong></span>
+        <span class="pill">~15 minutes</span>
+      </div>
+      <h1>Set up <span class="gradient-text">Viobot</span><br />on your server.</h1>
+      <p>
+        Viobot points at roles and channels that <strong>you create</strong>. This guide walks through
+        exactly which roles, channels, and permissions to make so that moderation, mutes, tickets, and
+        logging all work — then how to connect them with <code>/setup</code>, <code>/config</code>, or the dashboard.
+      </p>
+    </section>
+
+    <section id="how" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Read this first</span>
+        <h2>How Viobot uses your server</h2>
+        <p>Understanding one thing up front saves the most common setup mistake.</p>
+      </div>
+      <div class="note key">
+        <p><strong>Viobot does not change channel permissions for you.</strong> When it mutes someone, it simply
+        <em>gives them the Mute role</em> — nothing more. That role only silences a person if <em>you</em> have
+        set the channel permissions to deny it. So the most important step below is <a href="#permissions">wiring the permissions</a> —
+        without it, muting adds a role that does nothing.</p>
+      </div>
+      <div class="grid cols-3" style="margin-top:16px">
+        <div class="card"><h3><span class="ic">🎭</span> Roles</h3><p>Viobot assigns roles (Mute, Voice&nbsp;Mute, Verification) and checks who is a Moderator. It never edits a role's own power — you decide that.</p></div>
+        <div class="card"><h3><span class="ic">#️⃣</span> Channels</h3><p>Viobot posts logs and violation records into channels you choose, and opens ticket threads inside a contact channel.</p></div>
+        <div class="card"><h3><span class="ic">🔗</span> Config</h3><p><code>/config</code> (or the dashboard) just stores the IDs of what you made. Nothing is created automatically.</p></div>
+      </div>
+    </section>
+
+    <section id="before" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Prerequisites</span>
+        <h2>Before you start</h2>
+        <p>Two things to get right, or nothing downstream works.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h3>Invite Viobot with moderation permissions</h3>
+            <p>Viobot needs, at minimum: <span class="tag">Manage Roles</span> <span class="tag">Manage Channels</span>
+            <span class="tag">Manage Threads</span> <span class="tag">Kick</span> <span class="tag">Ban</span>
+            <span class="tag">Moderate Members</span> <span class="tag">View Channels</span> <span class="tag">Send Messages</span>
+            <span class="tag">Embed Links</span> <span class="tag">Read Message History</span>.</p>
+            <p>If Viobot is already in your server, make sure these aren't removed by a restrictive role.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Put Viobot's role near the top of the role list</h3>
+            <p>A bot can only manage roles that sit <strong>below</strong> its own highest role. Drag
+            <span class="tag role">Viobot</span> above every role it will assign — especially
+            <span class="tag role">Muted</span>, <span class="tag role">Voice&nbsp;Muted</span>, and
+            <span class="tag role">Verification&nbsp;Required</span>.</p>
+            <div class="note warn"><p><strong>This is the #1 reason mutes silently fail.</strong> If Muted is above Viobot in
+            <span class="kbd">Server Settings → Roles</span>, Viobot can't apply it.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="roles" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Step 1</span>
+        <h2>Create the roles</h2>
+        <p>In <span class="kbd">Server Settings → Roles → Create Role</span>. Give the moderation roles
+        <strong>no special permissions</strong> — they're controlled by channel permissions in Step&nbsp;3, not by their own power.</p>
+      </div>
+      <table class="card">
+        <thead><tr><th>Role</th><th>Purpose</th><th>Give it permissions?</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag role">Moderator</span></td>
+            <td>Whoever holds this role may run Viobot's staff commands (<code>!ban</code>, <code>!mute</code>, tickets, etc.). You can reuse an existing staff role instead of making a new one.</td>
+            <td>Only the normal staff access you want them to have. It does <strong>not</strong> need Administrator.</td>
+          </tr>
+          <tr>
+            <td><span class="tag role">Muted</span></td>
+            <td>Viobot adds this to text-muted members.</td>
+            <td><strong>None.</strong> It silences people via the denies you set in Step&nbsp;3.</td>
+          </tr>
+          <tr>
+            <td><span class="tag role">Voice Muted</span></td>
+            <td>Viobot adds this to voice-muted members.</td>
+            <td><strong>None.</strong> Silenced via a voice deny in Step&nbsp;3.</td>
+          </tr>
+          <tr>
+            <td><span class="tag role opt">Verification Required</span> <span class="tag opt">optional</span></td>
+            <td>Marks members who still need to verify. Viobot respects it during mutes and when restoring roles to returning members.</td>
+            <td>None here — how it gates access depends on your verification setup.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note"><p>Only <strong>Moderator</strong>, <strong>Muted</strong>, and <strong>Voice Muted</strong> are required for a working setup. Add the others when you need them.</p></div>
+    </section>
+
+    <section id="channels" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Step 2</span>
+        <h2>Create the channels</h2>
+        <p>Two categories keep things tidy: a private <strong>Staff</strong> area for logs, and a
+        <strong>Contact</strong> area for tickets. Create them in <span class="kbd">Server Settings</span> or by right-clicking the channel list.</p>
+      </div>
+
+      <div class="grid cols-2">
+        <div class="card">
+          <h3><span class="ic">🔒</span> Staff category <span class="tag deny">hidden from @everyone</span></h3>
+          <p style="margin:10px 0 0">Staff-only channels for Viobot's output:</p>
+          <ul class="clean">
+            <li><code>#mod-log</code> — general moderation log</li>
+            <li><code>#violations</code> — one entry per warn / mute / ban</li>
+            <li><code>#papertrail</code> — record trail for audit</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3><span class="ic">📮</span> Contact category</h3>
+          <p style="margin:10px 0 0">Where members reach staff and tickets open:</p>
+          <ul class="clean">
+            <li><code>#contact-staff</code> — members open tickets here (Viobot creates a private thread)</li>
+            <li><code>#muted-contact</code> — the one channel a <em>muted</em> member can still use to reach staff</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="lead-in" style="margin-top:20px">Each channel maps to one Viobot setting:</p>
+      <table class="card">
+        <thead><tr><th>Channel</th><th>Maps to config field</th><th>Who posts / uses it</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag chan">#mod-log</span></td><td class="mono">loggingChannelId</td><td>Viobot posts moderation logs</td></tr>
+          <tr><td><span class="tag chan">#violations</span></td><td class="mono">violationsChannelId</td><td>Viobot posts each violation record</td></tr>
+          <tr><td><span class="tag chan">#papertrail</span></td><td class="mono">papertrailChannelId</td><td>Viobot posts audit trail</td></tr>
+          <tr><td><span class="tag chan">#contact-staff</span></td><td class="mono">contactMemberChannelId</td><td>Members open tickets; Viobot opens private threads</td></tr>
+          <tr><td><span class="tag chan">#muted-contact</span></td><td class="mono">contactMutedChannelId</td><td>Muted members contact staff</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="permissions" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Step 3 — the important one</span>
+        <h2>Wire the permissions</h2>
+        <p>This is what actually makes mutes silence people and keeps staff channels private. Set overwrites on
+        the <strong>category</strong> where possible — channels inside inherit them automatically.</p>
+      </div>
+
+      <div class="note"><p><strong>How Discord inheritance works:</strong> a permission you set on a category applies to
+      every channel inside it, unless a channel overrides it. So denying the Muted role on each <em>category</em> covers all
+      the channels under it in one move. Channels that sit outside any category need the deny set directly.</p></div>
+
+      <h3 style="margin:26px 0 4px; font-size:17px">🔇 Make the Muted role actually mute</h3>
+      <p class="lead-in">On <strong>every category</strong> (and any channel not in a category), edit permissions → add the
+      <span class="tag role">Muted</span> role → set these to deny (❌):</p>
+      <table class="card">
+        <thead><tr><th>Permission</th><th>Muted role</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Send Messages</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk in text channels</td></tr>
+          <tr><td>Add Reactions</td><td><span class="tag deny">❌ Deny</span></td><td>Can't react as a workaround</td></tr>
+          <tr><td>Create Public Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Can't spin up new threads</td></tr>
+          <tr><td>Create Private Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Same, private threads</td></tr>
+          <tr><td>Send Messages in Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk inside existing threads</td></tr>
+          <tr><td>Speak</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk in voice channels</td></tr>
+        </tbody>
+      </table>
+      <div class="note key"><p><strong>The one exception:</strong> on <span class="tag chan">#muted-contact</span>, override the above —
+      set the <span class="tag role">Muted</span> role to <span class="tag allow">✔ Allow</span> <strong>View Channel</strong> and
+      <strong>Send Messages</strong>. This leaves muted members exactly one place to reach staff.</p></div>
+
+      <h3 style="margin:30px 0 4px; font-size:17px">🔊 Make the Voice-Muted role mute voice</h3>
+      <p class="lead-in">On each <strong>voice category / voice channel</strong>, add the
+      <span class="tag role">Voice Muted</span> role and set:</p>
+      <table class="card">
+        <thead><tr><th>Permission</th><th>Voice Muted role</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Speak</td><td><span class="tag deny">❌ Deny</span></td><td>Stays in voice but can't be heard</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin:30px 0 4px; font-size:17px">🔒 Lock the Staff category</h3>
+      <p class="lead-in">On the <strong>Staff</strong> category:</p>
+      <table class="card">
+        <thead><tr><th>Role / member</th><th>View Channel</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag">@everyone</span></td><td><span class="tag deny">❌ Deny</span></td><td>Hides the staff channels from members</td></tr>
+          <tr><td><span class="tag role">Moderator</span></td><td><span class="tag allow">✔ Allow</span></td><td>Staff can read the logs</td></tr>
+          <tr><td><span class="tag role">Viobot</span></td><td><span class="tag allow">✔ Allow</span> + Send Messages + Embed Links</td><td>So Viobot can post log embeds</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin:30px 0 4px; font-size:17px">📮 Open up the Contact channels</h3>
+      <table class="card">
+        <thead><tr><th>Channel</th><th>@everyone</th><th>Viobot needs</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag chan">#contact-staff</span></td>
+            <td><span class="tag allow">✔ View</span> + <span class="tag allow">✔ Send</span> <span style="color:var(--muted)">(so members can open a ticket)</span></td>
+            <td><span class="tag allow">Create Private Threads</span> <span class="tag allow">Send Messages in Threads</span> <span class="tag allow">Manage Threads</span></td>
+          </tr>
+          <tr>
+            <td><span class="tag chan">#muted-contact</span></td>
+            <td><span class="tag deny">❌ View</span> <span style="color:var(--muted)">(only the Muted role, from above, sees it)</span></td>
+            <td><span class="tag allow">View</span> + <span class="tag allow">Send</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="connect" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Step 4</span>
+        <h2>Register &amp; connect Viobot</h2>
+        <p>Now tell Viobot about everything you just made.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h3>Register the server</h3>
+            <p>Run <code>/setup</code> once. This adds your server to Viobot's database so it can hold a configuration. It does not create anything.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Point Viobot at your roles &amp; channels</h3>
+            <p>Run <code>/config</code> and use the role and channel pickers — or open the <a href="/">Viobot Dashboard</a> and set them there. Match each picker to what you built using the <a href="#cheatsheet">cheat sheet</a> below.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Turn on the features you want</h3>
+            <p>In <code>/config</code> or the dashboard, enable:</p>
+            <ul class="clean">
+              <li><strong>Tickets</strong> — the contact-us / private-thread ticket system.</li>
+              <li><strong>Logger</strong> — moderation + server logging into your log channels.</li>
+              <li><strong>Auto-susmute new accounts</strong> — automatically suspicious-mutes very new accounts on join.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cheatsheet" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Reference</span>
+        <h2>Cheat sheet</h2>
+        <p>Every Viobot setting and what to point it at.</p>
+      </div>
+      <table class="card">
+        <thead><tr><th>Setting</th><th>Point it at</th><th>Required?</th></tr></thead>
+        <tbody>
+          <tr><td>Moderator role</td><td><span class="tag role">Moderator</span> (or your staff role)</td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Mute role</td><td><span class="tag role">Muted</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Voice Mute role</td><td><span class="tag role">Voice Muted</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Verification-Required role</td><td><span class="tag role opt">Verification Required</span></td><td><span class="tag opt">Optional</span></td></tr>
+          <tr><td>Logging channel</td><td><span class="tag chan">#mod-log</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Violations channel</td><td><span class="tag chan">#violations</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Papertrail channel</td><td><span class="tag chan">#papertrail</span></td><td><span class="tag opt">Optional</span></td></tr>
+          <tr><td>Contact (members) channel</td><td><span class="tag chan">#contact-staff</span></td><td><span class="tag opt">Tickets</span></td></tr>
+          <tr><td>Contact (muted) channel</td><td><span class="tag chan">#muted-contact</span></td><td><span class="tag opt">Tickets</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="test" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Step 5</span>
+        <h2>Test it before you rely on it</h2>
+        <p>Run through this on a test account (or with a willing staff member) to confirm everything is wired.</p>
+      </div>
+      <div class="card">
+        <ul class="check">
+          <li>Warn the test user — a record appears in <span class="tag chan">#violations</span>.</li>
+          <li>Temp-mute the test user — they get the <span class="tag role">Muted</span> role <strong>and genuinely can't send messages</strong> anywhere.</li>
+          <li>The muted user <strong>can</strong> still post in <span class="tag chan">#muted-contact</span>.</li>
+          <li>Voice-mute the test user — they can join voice but not be heard.</li>
+          <li>Open a ticket from <span class="tag chan">#contact-staff</span> — a private thread appears with the member + staff in it.</li>
+          <li>Confirm regular members <strong>cannot</strong> see the Staff category.</li>
+          <li>Unmute — the role is removed and they can talk again.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="troubleshoot" class="anchor">
+      <div class="section-head">
+        <span class="kicker">Troubleshooting</span>
+        <h2>Common problems</h2>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>😶 Muting doesn't silence anyone</h3>
+          <p>Either the <span class="tag role">Muted</span> role is <strong>above</strong> Viobot in the role list (drag Viobot higher), or you haven't set the deny permissions from <a href="#permissions">Step&nbsp;3</a>. The role by itself does nothing.</p>
+        </div>
+        <div class="card">
+          <h3>🚫 Viobot posts nothing in the log channels</h3>
+          <p>The Staff category hides channels from <span class="tag">@everyone</span> — but you must also <span class="tag allow">Allow</span> the <span class="tag role">Viobot</span> role <strong>View + Send Messages + Embed Links</strong> there.</p>
+        </div>
+        <div class="card">
+          <h3>🎫 Tickets fail to open</h3>
+          <p>Viobot needs <span class="tag allow">Create Private Threads</span> and <span class="tag allow">Manage Threads</span> in <span class="tag chan">#contact-staff</span>, and the <em>Tickets</em> feature must be enabled in config.</p>
+        </div>
+        <div class="card">
+          <h3>🔕 A muted member can't reach staff</h3>
+          <p>Check the <span class="tag chan">#muted-contact</span> exception: the <span class="tag role">Muted</span> role must be <span class="tag allow">Allowed</span> View + Send there, overriding the category-wide deny.</p>
+        </div>
+      </div>
+      <div class="note" style="margin-top:20px"><p>Changed settings in the dashboard and Viobot hasn't picked them up? Viobot caches each server's
+      config — a change may take a short moment (or a bot reload of that server) to apply. Roles and channels you
+      created in Discord always take effect immediately.</p></div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    Viobot server setup guide · Need a hand? Reach out through your community's Viobot support channel.
+  </footer>
+</body>
+</html>

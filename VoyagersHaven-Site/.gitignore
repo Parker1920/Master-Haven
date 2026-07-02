@@ -1,0 +1,19 @@
+# Frontend build + deps
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Backend
+backend/__pycache__/
+backend/.venv/
+**/__pycache__/
+
+# Local data (SQLite lives outside the repo in prod; this is the dev fallback)
+data-local/
+*.db
+*.db-wal
+*.db-shm
+
+# Env
+.env
+*.local

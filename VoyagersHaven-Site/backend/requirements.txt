@@ -1,0 +1,6 @@
+fastapi>=0.110,<0.120
+uvicorn[standard]>=0.27,<0.35
+python-multipart>=0.0.9,<0.1
+# Stripe is optional: only needed when STRIPE_MODE=live. The backend imports it
+# lazily, so the simulated (default) mode runs without it installed.
+stripe>=9.0,<13
