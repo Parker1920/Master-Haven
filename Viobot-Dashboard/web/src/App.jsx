@@ -7,7 +7,7 @@ import ConfigPage from './pages/ConfigPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import GuidesPage from './pages/GuidesPage.jsx';
 
-const isGuidesPath = () => window.location.pathname === '/guides';
+const isGuidesPath = () => window.location.pathname === '/guides' || window.location.pathname.startsWith('/guides/');
 
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined = loading, null = logged out

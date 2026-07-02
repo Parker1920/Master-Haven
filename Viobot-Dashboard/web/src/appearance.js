@@ -31,6 +31,28 @@ export const guidesUrl = (a) => (typeof a?.guidesUrl === 'string' && a.guidesUrl
 export const guidesLabel = (a) => (typeof a?.guidesLabel === 'string' && a.guidesLabel.trim() ? a.guidesLabel.trim() : DEFAULT_GUIDES_LABEL);
 export const guidesEnabled = (a) => a?.guidesEnabled !== false; // default: shown
 
+// The Guides page is a selector between these docs. Picking one opens it same-origin in an iframe
+// and pushes /guides/<slug> (deep-linkable, browser-back friendly). Order = display order.
+export const GUIDES = [
+  {
+    slug: 'setup',
+    title: 'Server Setup Guide',
+    icon: '🛠️',
+    tag: '~15 min',
+    blurb: 'Step-by-step: the roles, channels, and permissions to create so mutes, tickets, and logging actually work.',
+    url: '/setup-guide.html',
+  },
+  {
+    slug: 'docs',
+    title: 'Viobot Documentation',
+    icon: '📖',
+    tag: 'Reference',
+    blurb: 'The full reference — every command, feature, workflow, and FAQ for the bot.',
+    url: '/docs/',
+  },
+];
+export const guideBySlug = (slug) => GUIDES.find((g) => g.slug === slug) || null;
+
 // Apply theme variables to the live document.
 export function applyAppearance(appearance) {
   const root = document.documentElement;

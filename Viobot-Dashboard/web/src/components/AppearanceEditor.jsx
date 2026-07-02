@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { THEME_TOKENS, DEFAULT_TABS, DEFAULT_GUIDES_URL, DEFAULT_GUIDES_LABEL, applyAppearance } from '../appearance.js';
+import { THEME_TOKENS, DEFAULT_TABS, DEFAULT_GUIDES_LABEL, applyAppearance } from '../appearance.js';
 
 export default function AppearanceEditor({ appearance, onChange }) {
   const [draft, setDraft] = useState(() => structuredClone(appearance || {}));
@@ -119,7 +119,7 @@ export default function AppearanceEditor({ appearance, onChange }) {
 
       <section className="config-card">
         <h3 className="config-group-title">Guides (docs)</h3>
-        <p className="config-help" style={{ padding: '0 0 8px' }}>The “Guides” item in the top menu embeds the docs site. Turn it off to hide the item.</p>
+        <p className="config-help" style={{ padding: '0 0 8px' }}>The “Guides” item in the top menu opens a selector between the Server Setup Guide and the full Viobot Documentation. Turn it off to hide the item.</p>
         <div className="config-fields">
           <div className="config-row">
             <div className="config-label"><span>Show Guides</span></div>
@@ -131,12 +131,6 @@ export default function AppearanceEditor({ appearance, onChange }) {
             <div className="config-label"><span>Menu label</span></div>
             <div className="config-value">
               <input className="cfg-input" value={draft.guidesLabel ?? ''} placeholder={DEFAULT_GUIDES_LABEL} onChange={(e) => set({ guidesLabel: e.target.value })} />
-            </div>
-          </div>
-          <div className="config-row">
-            <div className="config-label"><span>Docs URL</span><span className="config-help">Must be https — the docs origin embedded in the frame</span></div>
-            <div className="config-value">
-              <input className="cfg-input mono" value={draft.guidesUrl ?? ''} placeholder={DEFAULT_GUIDES_URL} onChange={(e) => set({ guidesUrl: e.target.value })} />
             </div>
           </div>
         </div>
