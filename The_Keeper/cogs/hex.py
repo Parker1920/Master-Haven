@@ -6,9 +6,8 @@ import aiohttp
 import time
 import os
 
-# Configuration URLs
 BASE_URL = os.getenv("HAVEN_API", "https://havenmap.online")
-PUBLIC_URL = "https://havenmap.online"  # Hardcoded fallback as requested (no env required)
+PUBLIC_URL = "https://havenmap.online"
 
 API_KEY = os.getenv("HAVEN_API_KEY")
 if not API_KEY:
@@ -62,7 +61,6 @@ class HexAPI:
         except Exception as e:
             return {"duplicate": False, "error": str(e)}
 
-    # New endpoint mapping method
     async def get_system_by_glyph(self, glyph, galaxy="Euclid", reality="Normal"):
         session = await self._get_session()
         try:
@@ -114,7 +112,7 @@ system_owner_cache = SystemOwnerCache(ttl_seconds=300)
 glyph_emojis = {
     "0": discord.PartialEmoji(name="0", id=1487546589269463211),
     "1": discord.PartialEmoji(name="1", id=1487546881692405843),
-    "2": discord.PartialEmoji(name="2", id=1487547943319048222),
+    "2": discord.PartialEmoji(name="2", id=1487546943319048222),  
     "3": discord.PartialEmoji(name="3", id=1487546987858366615),
     "4": discord.PartialEmoji(name="4", id=1487547055651033129),
     "5": discord.PartialEmoji(name="5", id=1487547115688169754),
@@ -129,7 +127,6 @@ glyph_emojis = {
     "E": discord.PartialEmoji(name="E", id=1487547811003105300),
     "F": discord.PartialEmoji(name="F", id=1487547868922249479),
 }
-
 class GalaxyInputModal(discord.ui.Modal, title="Select Galaxy Context"):
     galaxy = discord.ui.TextInput(
         label="Galaxy",
