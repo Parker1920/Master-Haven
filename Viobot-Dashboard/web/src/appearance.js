@@ -25,7 +25,7 @@ export const brandName = (a) => a?.brandName || DEFAULT_BRAND;
 
 // Top-menu "Guides" item — embeds the docs site (served from its own origin so its assets resolve).
 // URL/label are admin-editable via Appearance; a hidden toggle drops the nav item entirely.
-export const DEFAULT_GUIDES_URL = '/docs/'; // same-origin: the server serves the docs at /docs (no subdomain)
+export const DEFAULT_GUIDES_URL = '/setup-guide.html'; // same-origin Viobot server-setup guide (art3mis's ref docs stay at /docs/)
 export const DEFAULT_GUIDES_LABEL = 'Guides';
 export const guidesUrl = (a) => (typeof a?.guidesUrl === 'string' && a.guidesUrl.trim() ? a.guidesUrl.trim() : DEFAULT_GUIDES_URL);
 export const guidesLabel = (a) => (typeof a?.guidesLabel === 'string' && a.guidesLabel.trim() ? a.guidesLabel.trim() : DEFAULT_GUIDES_LABEL);

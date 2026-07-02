@@ -181,6 +181,7 @@
         <a href="#cheatsheet">Cheat sheet</a>
         <a href="#test">Test</a>
         <a href="#troubleshoot">Troubleshooting</a>
+        <a href="https://discord.gg/vN4rpUNcHu" target="_blank" rel="noopener">Support&nbsp;server ↗</a>
       </div>
     </nav>
   </header>
@@ -208,10 +209,10 @@
         <p>Understanding one thing up front saves the most common setup mistake.</p>
       </div>
       <div class="note key">
-        <p><strong>Viobot does not change channel permissions for you.</strong> When it mutes someone, it simply
-        <em>gives them the Mute role</em> — nothing more. That role only silences a person if <em>you</em> have
-        set the channel permissions to deny it. So the most important step below is <a href="#permissions">wiring the permissions</a> —
-        without it, muting adds a role that does nothing.</p>
+        <p><strong>Viobot does not change channel permissions for you.</strong> When it mutes someone, it
+        <em>removes all of that member's removable roles, then applies the Mute role</em> — nothing more. That role only
+        silences a person if <em>you</em> have set the channel permissions to deny it. So the most important step below is
+        <a href="#permissions">wiring the permissions</a> — without it, muting adds a role that does nothing.</p>
       </div>
       <div class="grid cols-3" style="margin-top:16px">
         <div class="card"><h3><span class="ic">🎭</span> Roles</h3><p>Viobot assigns roles (Mute, Voice&nbsp;Mute, Verification) and checks who is a Moderator. It never edits a role's own power — you decide that.</p></div>
@@ -283,7 +284,7 @@
           </tr>
         </tbody>
       </table>
-      <div class="note"><p>Only <strong>Moderator</strong>, <strong>Muted</strong>, and <strong>Voice Muted</strong> are required for a working setup. Add the others when you need them.</p></div>
+      <div class="note"><p>Only the <strong>Moderator</strong> role is strictly required for Viobot to run. Add <strong>Muted</strong> and <strong>Voice Muted</strong> when you want text/voice mutes to work; everything else is optional.</p></div>
     </section>
 
     <section id="channels" class="anchor">
@@ -341,21 +342,17 @@
 
       <h3 style="margin:26px 0 4px; font-size:17px">🔇 Make the Muted role actually mute</h3>
       <p class="lead-in">On <strong>every category</strong> (and any channel not in a category), edit permissions → add the
-      <span class="tag role">Muted</span> role → set these to deny (❌):</p>
+      <span class="tag role">Muted</span> role → set this one thing to deny (❌):</p>
       <table class="card">
         <thead><tr><th>Permission</th><th>Muted role</th><th>Why</th></tr></thead>
         <tbody>
-          <tr><td>Send Messages</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk in text channels</td></tr>
-          <tr><td>Add Reactions</td><td><span class="tag deny">❌ Deny</span></td><td>Can't react as a workaround</td></tr>
-          <tr><td>Create Public Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Can't spin up new threads</td></tr>
-          <tr><td>Create Private Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Same, private threads</td></tr>
-          <tr><td>Send Messages in Threads</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk inside existing threads</td></tr>
-          <tr><td>Speak</td><td><span class="tag deny">❌ Deny</span></td><td>Can't talk in voice channels</td></tr>
+          <tr><td>View Channel</td><td><span class="tag deny">❌ Deny</span></td><td>A muted member can't see — and therefore can't talk in — any channel. That's all you need.</td></tr>
         </tbody>
       </table>
       <div class="note key"><p><strong>The one exception:</strong> on <span class="tag chan">#muted-contact</span>, override the above —
-      set the <span class="tag role">Muted</span> role to <span class="tag allow">✔ Allow</span> <strong>View Channel</strong> and
-      <strong>Send Messages</strong>. This leaves muted members exactly one place to reach staff.</p></div>
+      set the <span class="tag role">Muted</span> role to <span class="tag allow">✔ Allow</span> <strong>View Channel</strong>,
+      <span class="tag deny">❌ Deny</span> <strong>Send Messages</strong>, and <span class="tag allow">✔ Allow</span> <strong>Send Messages in Threads</strong>.
+      This leaves muted members exactly one place to reach staff — by opening a ticket thread (they can't post in the channel itself).</p></div>
 
       <h3 style="margin:30px 0 4px; font-size:17px">🔊 Make the Voice-Muted role mute voice</h3>
       <p class="lead-in">On each <strong>voice category / voice channel</strong>, add the
@@ -363,7 +360,7 @@
       <table class="card">
         <thead><tr><th>Permission</th><th>Voice Muted role</th><th>Why</th></tr></thead>
         <tbody>
-          <tr><td>Speak</td><td><span class="tag deny">❌ Deny</span></td><td>Stays in voice but can't be heard</td></tr>
+          <tr><td>Connect</td><td><span class="tag deny">❌ Deny</span></td><td>Can't even join a voice channel</td></tr>
         </tbody>
       </table>
 
@@ -384,13 +381,13 @@
         <tbody>
           <tr>
             <td><span class="tag chan">#contact-staff</span></td>
-            <td><span class="tag allow">✔ View</span> + <span class="tag allow">✔ Send</span> <span style="color:var(--muted)">(so members can open a ticket)</span></td>
+            <td><span class="tag allow">✔ View</span> + <span class="tag deny">❌ Send</span> + <span class="tag allow">✔ Send in Threads</span> <span style="color:var(--muted)">(members open a ticket and talk in the thread, not the channel)</span></td>
             <td><span class="tag allow">Create Private Threads</span> <span class="tag allow">Send Messages in Threads</span> <span class="tag allow">Manage Threads</span></td>
           </tr>
           <tr>
             <td><span class="tag chan">#muted-contact</span></td>
             <td><span class="tag deny">❌ View</span> <span style="color:var(--muted)">(only the Muted role, from above, sees it)</span></td>
-            <td><span class="tag allow">View</span> + <span class="tag allow">Send</span></td>
+            <td><span class="tag allow">Create Private Threads</span> <span class="tag allow">Send Messages in Threads</span> <span class="tag allow">Manage Threads</span></td>
           </tr>
         </tbody>
       </table>
@@ -438,17 +435,18 @@
       <table class="card">
         <thead><tr><th>Setting</th><th>Point it at</th><th>Required?</th></tr></thead>
         <tbody>
-          <tr><td>Moderator role</td><td><span class="tag role">Moderator</span> (or your staff role)</td><td><span class="tag">Yes</span></td></tr>
-          <tr><td>Mute role</td><td><span class="tag role">Muted</span></td><td><span class="tag">Yes</span></td></tr>
-          <tr><td>Voice Mute role</td><td><span class="tag role">Voice Muted</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Moderator role</td><td><span class="tag role">Moderator</span> (or your staff role)</td><td><span class="tag">Required</span></td></tr>
+          <tr><td>Mute role</td><td><span class="tag role">Muted</span></td><td><span class="tag opt">Optional</span></td></tr>
+          <tr><td>Voice Mute role</td><td><span class="tag role">Voice Muted</span></td><td><span class="tag opt">Optional</span></td></tr>
           <tr><td>Verification-Required role</td><td><span class="tag role opt">Verification Required</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Logging channel</td><td><span class="tag chan">#mod-log</span></td><td><span class="tag">Yes</span></td></tr>
-          <tr><td>Violations channel</td><td><span class="tag chan">#violations</span></td><td><span class="tag">Yes</span></td></tr>
+          <tr><td>Logging channel</td><td><span class="tag chan">#mod-log</span></td><td><span class="tag opt">Optional</span></td></tr>
+          <tr><td>Violations channel</td><td><span class="tag chan">#violations</span></td><td><span class="tag opt">Optional</span></td></tr>
           <tr><td>Papertrail channel</td><td><span class="tag chan">#papertrail</span></td><td><span class="tag opt">Optional</span></td></tr>
-          <tr><td>Contact (members) channel</td><td><span class="tag chan">#contact-staff</span></td><td><span class="tag opt">Tickets</span></td></tr>
-          <tr><td>Contact (muted) channel</td><td><span class="tag chan">#muted-contact</span></td><td><span class="tag opt">Tickets</span></td></tr>
+          <tr><td>Contact (members) channel</td><td><span class="tag chan">#contact-staff</span></td><td><span class="tag opt">Optional</span></td></tr>
+          <tr><td>Contact (muted) channel</td><td><span class="tag chan">#muted-contact</span></td><td><span class="tag opt">Optional</span></td></tr>
         </tbody>
       </table>
+      <div class="note"><p>Only the <strong>Moderator role</strong> is truly required — it's how Viobot knows who may run its staff commands. Everything else is optional and simply switches on a specific feature: the Mute / Voice&nbsp;Mute roles power mutes, the log channels power logging, and the contact channels power tickets. Wire up only what you plan to use.</p></div>
     </section>
 
     <section id="test" class="anchor">
@@ -460,9 +458,9 @@
       <div class="card">
         <ul class="check">
           <li>Warn the test user — a record appears in <span class="tag chan">#violations</span>.</li>
-          <li>Temp-mute the test user — they get the <span class="tag role">Muted</span> role <strong>and genuinely can't send messages</strong> anywhere.</li>
-          <li>The muted user <strong>can</strong> still post in <span class="tag chan">#muted-contact</span>.</li>
-          <li>Voice-mute the test user — they can join voice but not be heard.</li>
+          <li>Temp-mute the test user — they get the <span class="tag role">Muted</span> role and <strong>can no longer see or post in any channel</strong>.</li>
+          <li>The muted user <strong>can</strong> still reach staff by opening a ticket thread in <span class="tag chan">#muted-contact</span>.</li>
+          <li>Voice-mute the test user — they <strong>can no longer join</strong> any voice channel.</li>
           <li>Open a ticket from <span class="tag chan">#contact-staff</span> — a private thread appears with the member + staff in it.</li>
           <li>Confirm regular members <strong>cannot</strong> see the Staff category.</li>
           <li>Unmute — the role is removed and they can talk again.</li>
@@ -490,7 +488,7 @@
         </div>
         <div class="card">
           <h3>🔕 A muted member can't reach staff</h3>
-          <p>Check the <span class="tag chan">#muted-contact</span> exception: the <span class="tag role">Muted</span> role must be <span class="tag allow">Allowed</span> View + Send there, overriding the category-wide deny.</p>
+          <p>Check the <span class="tag chan">#muted-contact</span> exception: the <span class="tag role">Muted</span> role must be <span class="tag allow">Allowed</span> <strong>View Channel</strong> + <strong>Send Messages in Threads</strong> there (Send Messages stays denied), overriding the category-wide View deny.</p>
         </div>
       </div>
       <div class="note" style="margin-top:20px"><p>Changed settings in the dashboard and Viobot hasn't picked them up? Viobot caches each server's
@@ -500,7 +498,7 @@
   </main>
 
   <footer class="shell">
-    Viobot server setup guide · Need a hand? Reach out through your community's Viobot support channel.
+    Viobot server setup guide · Need a hand? Join the <a href="https://discord.gg/vN4rpUNcHu" target="_blank" rel="noopener">Viobot Support Server</a>.
   </footer>
 </body>
 </html>
