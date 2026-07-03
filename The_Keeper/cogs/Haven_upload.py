@@ -304,20 +304,13 @@ class PlanetPromptView(discord.ui.View):
             await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
             return
             
-        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             dynamic_biomes = await self.api.fetch_biome_adjectives() 
-            dynamic_biomes = dynamic_biomes[:25] if dynamic_biomes else ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
-            dropdown_view = BiomeDropdownView(self, dynamic_biomes)
-
-            await interaction.followup.send(
-                content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
-                view=dropdown_view,
-                ephemeral=True
-            )
+            suggestions = ", ".join(dynamic_biomes[:12]) if dynamic_biomes else "Lush, Desert, Toxic, Frozen, Barren, Exotic"
+            await interaction.response.send_modal(PlanetInputModal(self, suggestions))
         except Exception as e:
             logger.error(f"Failed to load Haven biomes: {e}")
-            await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
+            await interaction.response.send_modal(PlanetInputModal(self, "Lush, Desert, Toxic, Frozen"))
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
     async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -350,11 +343,11 @@ class PlanetPromptView(discord.ui.View):
                 await self.api.submit_discovery(planet_payload)
 
             from cogs.xp_system import process_discovery_xp
-            await process_discovery_xp(user_id=self.user_id, discovery_type="system", channel_id=interaction.channel.id)
+            await process_discovery_xp(bot=interaction.client, user_id=self.user_id, discovery_type="system", channel_id=interaction.channel.id)
 
             if self.planets:
                 for _ in self.planets:
-                    await process_discovery_xp(user_id=self.user_id, discovery_type="planet", channel_id=interaction.channel.id)
+                    await process_discovery_xp(bot=interaction.client, user_id=self.user_id, discovery_type="planet", channel_id=interaction.channel.id)
 
             embed = discord.Embed(
                 title="✅ Submission Complete!",
@@ -368,34 +361,24 @@ class PlanetPromptView(discord.ui.View):
             await interaction.followup.send(f"❌ Submission failed: {e}", ephemeral=True)
 
 
-class BiomeDropdownView(discord.ui.View):
-    def __init__(self, prompt_view: PlanetPromptView, biome_options: list):
-        super().__init__(timeout=60)
-        self.prompt_view = prompt_view
-        self.biome_select = discord.ui.Select(
-            placeholder="Choose a Biome...",
-            options=[discord.SelectOption(label=b, value=b) for b in biome_options]
-        )
-        self.biome_select.callback = self.on_biome_select
-        self.add_item(self.biome_select)
-
-    async def on_biome_select(self, interaction: discord.Interaction):
-        selected_biome = self.biome_select.values[0]
-        await interaction.response.send_modal(PlanetInputModal(self.prompt_view, selected_biome))
-        self.stop()
-
-
 class PlanetInputModal(discord.ui.Modal):
-    def __init__(self, prompt_view: PlanetPromptView, chosen_biome: str):
+    def __init__(self, prompt_view: PlanetPromptView, suggestions: str):
         super().__init__(title=f"Planet #{len(prompt_view.planets) + 1} Details")
         self.prompt_view = prompt_view
-        self.chosen_biome = chosen_biome  
+        
         self.p_name = TextInput(label="Planet Name", required=True, max_length=100)
+        self.biome = TextInput(
+            label="Biome Type", 
+            placeholder=f"Suggestions: {suggestions[:75]}...", 
+            required=True, 
+            max_length=50
+        )
         self.fauna = TextInput(label="Fauna Details", required=False, max_length=100)
         self.flora = TextInput(label="Flora Details", required=False, max_length=100)
         self.sentinel = TextInput(label="Sentinel Activity", required=False, max_length=50)
 
         self.add_item(self.p_name)
+        self.add_item(self.biome)
         self.add_item(self.fauna)
         self.add_item(self.flora)
         self.add_item(self.sentinel)
@@ -403,7 +386,7 @@ class PlanetInputModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         self.prompt_view.planets.append({
             "name": self.p_name.value,
-            "biome": self.chosen_biome,
+            "biome": self.biome.value,
             "fauna": self.fauna.value or "Unknown",
             "flora": self.flora.value or "Unknown",
             "sentinel": self.sentinel.value or "Unknown"
@@ -416,7 +399,6 @@ class PlanetInputModal(discord.ui.Modal):
             f"Would you like to add another planet, or proceed with final submission?"
         )
         await interaction.response.edit_message(content=msg, view=self.prompt_view)
-
 
 #-------------------Discovery Components--------------
 from cogs.xp_system import process_discovery_xp
@@ -580,10 +562,11 @@ class DiscoveryConfirmView(discord.ui.View):
             msg = f"✅ Discovery submitted!\nSystem: `{self.system_name or 'Unknown'}`\nDiscovery: `{discovery_name}`"
             
             xp_gained = await process_discovery_xp(
-                user_id=self.user_id,
-                discovery_type=self.discovery_type,
-                channel_id=interaction.channel.id,
-            )
+    bot=interaction.client, 
+    user_id=self.user_id,
+    discovery_type=self.discovery_type,
+    channel_id=interaction.channel.id,
+)
             
             if xp_gained:
                 msg += f"\n✨ +{xp_gained} XP earned"
