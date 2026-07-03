@@ -5,7 +5,7 @@ import discord
 from discord.ext import commands
 
 # Import your existing configuration and database path verbatim from xpdata.py
-from xpdata import DB_PATH, CONFIG  #[span_1](start_span)[span_1](end_span)
+from Data.xpdata import DB_PATH, CONFIG  #[span_1](start_span)[span_1](end_span)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -78,7 +78,7 @@ class TransferCog(commands.Cog):
             await status_msg.edit(content="✅ **Success!** All configuration settings and database records have been securely backed up to your Google Sheet.")
 
         except Exception as e:
-            # Error feedback
+       
             await status_msg.edit(content=f"❌ **An error occurred during transfer:** `{str(e)}`")
 
 async def setup(bot):
