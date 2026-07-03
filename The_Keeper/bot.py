@@ -166,6 +166,7 @@ COGS = [
     "cogs.personality",
     "cogs.xp_system",
     "cogs.xp_cog",
+    "cogs.xpconfig",
     "cogs.exchange",
     "cogs.reaction",
     "cogs.Haven_stats",
@@ -176,7 +177,6 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
-    "cogs.ask",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
@@ -197,7 +197,6 @@ async def global_command_check(ctx):
         channel_id=ctx.channel.id,
         member=ctx.author
     )
-
 
 # ---------------- SLASH COMMANDS (/)
 async def global_app_command_check(interaction: discord.Interaction):
