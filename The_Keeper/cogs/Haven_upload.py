@@ -411,6 +411,7 @@ class DiscoveryTypeSelect(discord.ui.View):
         self.owner_id = owner_id
         self.selected_type = None
         self.selected_reality = None
+        self.selected_class = "Unknown"
     
         options = [discord.SelectOption(label="Normal", value="Normal"), discord.SelectOption(label="Permadeath", value="Permadeath")]
         self.reality_dropdown = Select(placeholder="Select Reality", options=options, custom_id="reality_select")
@@ -427,7 +428,16 @@ class DiscoveryTypeSelect(discord.ui.View):
         self.select = discord.ui.Select(placeholder="Select Discovery Type", options=options)
         self.select.callback = self.select_callback
         self.add_item(self.select)
-        
+
+        class_options = [
+            discord.SelectOption(label="S Class", value="S"),
+            discord.SelectOption(label="A Class", value="A"),
+            discord.SelectOption(label="B Class", value="B"),
+            discord.SelectOption(label="C Class", value="C")
+        ]
+        self.class_dropdown = Select(placeholder="Select Class (S, A, B, C)", options=class_options, custom_id="class_select")
+        self.class_dropdown.callback = self.class_callback
+
         self.next_btn = discord.ui.Button(label="Next", style=discord.ButtonStyle.green, disabled=True)
         self.next_btn.callback = self.next_callback
         self.add_item(self.next_btn)
@@ -449,7 +459,27 @@ class DiscoveryTypeSelect(discord.ui.View):
         self.selected_type = self.select.values[0]
         for option in self.select.options:
             option.default = option.value == self.selected_type
+
+        self.clear_items()
+        self.add_item(self.reality_dropdown)
+        self.add_item(self.select)
+
+        if self.selected_type in ["starship", "multitool"]:
+            self.add_item(self.class_dropdown)
+        else:
+            self.selected_class = "Unknown"
+
+        self.add_item(self.next_btn)
         self.next_btn.disabled = not (self.selected_type and self.selected_reality)
+        await interaction.response.edit_message(view=self)
+
+    async def class_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This isn't your session.", ephemeral=True)
+            return
+        self.selected_class = self.class_dropdown.values[0]
+        for option in self.class_dropdown.options:
+            option.default = option.value == self.selected_class
         await interaction.response.edit_message(view=self)
     
     async def next_callback(self, interaction: discord.Interaction):
@@ -467,12 +497,12 @@ class DiscoveryTypeSelect(discord.ui.View):
             view = HexKeypad_class(api=self.api, glyph_emojis=self.glyph_emojis, owner_id=self.owner_id, mode="discovery")
             view.discovery_type = self.selected_type
             view.reality = self.selected_reality  
+            view.selected_class = self.selected_class
             embed = view.build_embed(title=f"Submit Discovery: {self.selected_type}")
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             self.stop()
         except Exception:
             traceback.print_exc()
-
 
 class DiscoverySubmissionModal(discord.ui.Modal):
     def __init__(self, glyph, user_id, api, discovery_type, system_exists=False, system_name=None, system_id=None, notes=None, reality=None):
@@ -488,35 +518,14 @@ class DiscoverySubmissionModal(discord.ui.Modal):
     
         self.galaxy_name = TextInput(label="Galaxy", placeholder="Enter the galaxy name", required=True, max_length=100)
         self.add_item(self.galaxy_name)
-        self.system_name = TextInput(label="System Name", max_length=100, required=not system_exists)
+        self.system_name = TextInput(label="System Name", max_length=100, required=not system_exists, default=system_name or "")
         self.add_item(self.system_name)
         self.community_tag = TextInput(label="Community Tag", placeholder="Enter Civ Tag", max_length=5, required=True)
         self.add_item(self.community_tag)
         self.discovery_name = TextInput(label="Discovery Name", max_length=100)
-        self.add_item(self.discovery_name)
-        self.notes = TextInput(label="Notes", style=discord.TextStyle.paragraph, required=False)
+        self.add_item(self.discovery_name)        
+        self.notes = TextInput(label="Notes", style=discord.TextStyle.paragraph, required=False, default=self.prefill_notes or "")
         self.add_item(self.notes)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your discovery session.", ephemeral=True)
-            return
-    
-        view = DiscoveryConfirmView(
-            glyph=self.glyph, user_id=self.user_id, api=self.api, discovery_type=self.dtype,
-            system_exists=self.system_exists, galaxy_name=self.galaxy_name.value, system_name=self.system_name.value,
-            system_id=self.system_id, notes=self.notes.value, discovery_name=self.discovery_name.value, community_tag=self.community_tag.value    
-        )
-    
-        embed = discord.Embed(title="Confirm Discovery Submission", color=0x00FFFF)
-        embed.add_field(name="Name", value=self.discovery_name.value, inline=False)
-        embed.add_field(name="Type", value=self.dtype, inline=True)
-        embed.add_field(name="Glyph", value=self.glyph, inline=True)
-        if self.notes.value:
-            embed.add_field(name="Notes", value=self.notes.value, inline=False)
-    
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
 
 class DiscoveryConfirmView(discord.ui.View):
     def __init__(self, glyph, user_id, api, discovery_type, system_exists=False, galaxy_name=None, system_name=None, system_id=None, notes=None, discovery_name=None, community_tag=None):
@@ -681,6 +690,8 @@ class HexKeypad(discord.ui.View):
 
                             @discord.ui.button(label="Continue", style=discord.ButtonStyle.green)
                             async def continue_btn(self, interaction2: discord.Interaction, button: discord.ui.Button):
+                                initial_notes = f"Class: {getattr(self.outer, 'selected_class', 'Unknown')}" if getattr(self.outer, 'discovery_type', '') in ["starship", "multitool"] else None
+            
                                 modal = DiscoverySubmissionModal(
                                     glyph=glyph, user_id=interaction2.user.id, api=self.outer.api,
                                     discovery_type=self.outer.discovery_type, system_exists=system_exists,
