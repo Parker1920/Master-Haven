@@ -22,6 +22,7 @@ if not API_KEY:
     raise RuntimeError("HAVEN_API_KEY must be set in .env")
     
     # -------------------- API LAYER ----------------
+    # -------------------- API LAYER ----------------
 class HavenAPI:
     def __init__(self):
         self.base = BASE_URL
@@ -49,6 +50,7 @@ class HavenAPI:
                     }
     
                 return data
+
     async def fetch_biome_adjectives(self):
         """Fetches the curated list of biomes from the Haven option catalog."""
         async with aiohttp.ClientSession() as session:
@@ -127,6 +129,7 @@ class HavenAPI:
                     raise Exception(f"Discovery submission failed: {data}")
     
                 return data
+
         
 #----------------------NAMEGEN------------------
 def generate_system_name(glyph_code: str, community_tag: str, levels_data: dict) -> str:
@@ -360,32 +363,32 @@ class PlanetPromptView(discord.ui.View):
         return True
 
         @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
-    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if len(self.planets) >= 6:
-            await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
-            return
-9
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            dynamic_biomes = await self.api.fetch_biome_adjectives() 
-            
-            if dynamic_biomes:
-                dynamic_biomes = dynamic_biomes[:25] 
-            else:
-                dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
-
-            dropdown_view = BiomeDropdownView(self, dynamic_biomes)
-
-            await interaction.followup.send(
-                content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
-                view=dropdown_view,
-                ephemeral=True
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to load Haven biomes: {e}")
-            await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
+        async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if len(self.planets) >= 6:
+                await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
+                return
+    
+            await interaction.response.defer(ephemeral=True, thinking=True)
+    
+            try:
+                dynamic_biomes = await self.api.fetch_biome_adjectives() 
+                
+                if dynamic_biomes:
+                    dynamic_biomes = dynamic_biomes[:25] 
+                else:
+                    dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
+    
+                dropdown_view = BiomeDropdownView(self, dynamic_biomes)
+    
+                await interaction.followup.send(
+                    content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
+                    view=dropdown_view,
+                    ephemeral=True
+                )
+    
+            except Exception as e:
+                logger.error(f"Failed to load Haven biomes: {e}")
+                await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
 
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
