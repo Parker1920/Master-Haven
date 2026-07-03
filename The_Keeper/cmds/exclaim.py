@@ -100,7 +100,7 @@ class CommandsRouter(commands.Cog):
         )
         
         embed.add_field(
-            name=f"{primary.capitalize()} Department Track",
+            name=f"{primary.capitalize()} Department",
             value=(
                 f"**Role XP:** {role_xp}\n"
                 f"**Level:** {level}\n"
