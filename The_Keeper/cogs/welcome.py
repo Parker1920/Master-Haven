@@ -65,7 +65,7 @@ class WelcomeCog(commands.Cog):
         embed = discord.Embed(
             title=f"Welcome, Voyager",
             description=(
-                "Welcome to The Voyager's Haven — a community dedicated to exploration, research, archiving and stellar cartography. We are invested in several projects to chart and connect the universe of No Mans Sky! Stay and watch, or connect with us!\n"
+                "Welcome to The Voyager's Haven — a community dedicated to exploration, research, archiving and stellar cartography. We have several departments with their own focus and events! See:<#1456653110725578793> to learn more and navigate our server. We are invested in several projects to chart and connect the universe of No Mans Sky! Stay and watch, or connect with us!\n"
                 "Check out some of our projects here!"
             ),
             color=0x8A00C4
@@ -118,4 +118,4 @@ class DeptView(discord.ui.View):
 # -------------------- SETUP --------------------
 async def setup(bot: commands.Bot):
     await bot.add_cog(WelcomeCog(bot))
-    print("[COG LOADED] WelcomeCog")
+    print("[LOADED] WelcomeCog")
