@@ -177,6 +177,7 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
+    "cogs.transfer",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
