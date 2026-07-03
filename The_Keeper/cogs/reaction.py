@@ -8,26 +8,23 @@ from cogs.Data.xpdata import PRIMARY_ROLE_MAP, save_panel, get_panel, DB_PATH, e
 # ---------------- EMBED BUILDER ----------------
 
 def build_main_embed(guild: discord.Guild):
-
+    """
+    Builds the dynamic control panel embed, live-tracking current server role counts.
+    """
     lines = []
 
     for role_name, role_id in PRIMARY_ROLE_MAP.items():
-
         role = guild.get_role(role_id)
-
-        if role:
-            count = sum(1 for _ in role.members)
-        else:
-            count = 0
-
-        lines.append(f"• **{role_name.capitalize()}** — {count}")
+        
+        count = len(role.members) if role else 0
+        lines.append(f"• **{role_name.capitalize()}** — `{count} members`")
 
     embed = discord.Embed(
         title="🌌 Department Control Panel",
         description=(
             "Select a department below.\n"
             "Department activities and channels award bonus XP.\n\n"
-            "**Department Count**"
+            "**Live Department Counts**"
         ),
         color=discord.Color.blurple()
     )
@@ -37,74 +34,66 @@ def build_main_embed(guild: discord.Guild):
         value="\n".join(lines),
         inline=False
     )
-
+    embed.set_footer(text="Live tracked • Updates instantly on click")
     return embed
 
 
 # ---------------- VIEW ----------------
 
 class DepartmentView(discord.ui.View):
-
+    """
+    Persistent view handling button interactions and instant embed live-updates.
+    """
     def __init__(self):
         super().__init__(timeout=None)
 
     async def update_panel(self, guild: discord.Guild):
-
         data = await get_panel(guild.id)
         if not data:
             return
 
         channel_id, message_id = data
         channel = guild.get_channel(channel_id)
-
         if not channel:
             return
 
         try:
             msg = await channel.fetch_message(message_id)
-
-            await msg.edit(
-                embed=build_main_embed(guild),
-                view=self
-            )
-
+            await msg.edit(embed=build_main_embed(guild), view=self)
         except discord.NotFound:
             pass
 
     async def give_role(self, interaction: discord.Interaction, role_key: str):
+        await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
         member = interaction.user
 
         await ensure_user(member.id)
 
-        role_id = PRIMARY_ROLE_MAP[role_key]
-        new_role = guild.get_role(role_id)
+        role_id = PRIMARY_ROLE_MAP.get(role_key)
+        new_role = guild.get_role(role_id) if role_id else None
 
         if not new_role:
-            msg = "Role not found in server."
-
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
-
+            await interaction.followup.send("❌ Role not found in server settings.", ephemeral=True)
             return
 
-        # ---------------- REMOVE OLD ROLES ----------------
+        # ---------------- LIVE ROLE UPDATES (DISCORD) ----------------
+        roles_to_remove = [
+            guild.get_role(r_id) for r_id in PRIMARY_ROLE_MAP.values()
+            if r_id != role_id and guild.get_role(r_id) in member.roles
+        ]
 
-        for r_id in PRIMARY_ROLE_MAP.values():
-            role = guild.get_role(r_id)
-
-            if role and role in member.roles:
-                await member.remove_roles(role)
-
-        await asyncio.sleep(0.5)
-
-        # ---------------- ADD NEW ROLE ----------------
-
-        if new_role not in member.roles:
-            await member.add_roles(new_role)
+        try:
+            if roles_to_remove:
+                await member.remove_roles(*[r for r in roles_to_remove if r])
+            
+            if new_role not in member.roles:
+                await member.add_roles(new_role)
+                
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Bot cannot manage this role. Move my role higher in the hierarchy!", ephemeral=True)
+            return
 
         # ---------------- DB UPDATE ----------------
 
@@ -115,29 +104,14 @@ class DepartmentView(discord.ui.View):
             )
             await db.commit()
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
-        # ---------------- FORCE CACHE REFRESH ----------------
-
-        try:
-            await guild.chunk(cache=True)
-        except Exception:
-            pass
-
-        await asyncio.sleep(0.5)
-
-        # ---------------- UPDATE PANEL ----------------
-
+        # ---------------- REFRESH PANEL WITH NEW NUMBERS ----------------
         await self.update_panel(guild)
 
-        # ---------------- RESPONSE ----------------
+        # ---------------- CONFIRMATION ----------------
+        await interaction.followup.send(f"✅ Assigned your primary department to **{new_role.name}**!", ephemeral=True)
 
-        msg = f"Set primary role to {new_role.name}"
-
-        if interaction.response.is_done():
-            await interaction.followup.send(msg, ephemeral=True)
-        else:
-            await interaction.response.send_message(msg, ephemeral=True)
 
     # ---------------- BUTTONS ----------------
 
@@ -164,8 +138,6 @@ class DepartmentView(discord.ui.View):
     @discord.ui.button(label="Xenobiology", emoji="🐾", style=discord.ButtonStyle.secondary, custom_id="xenobiologist")
     async def xenobiologist_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.give_role(interaction, "xenobiologist")
-
-
 # ---------------- COG ----------------
 
 class ReactionRoles(commands.Cog):
@@ -175,69 +147,34 @@ class ReactionRoles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-
         self.bot.add_view(DepartmentView())
-
-        for guild in self.bot.guilds:
-
-            data = await get_panel(guild.id)
-
-            if not data:
-                continue
-
-            channel_id, message_id = data
-            channel = guild.get_channel(channel_id)
-
-            if not channel:
-                continue
-
-            try:
-                msg = await channel.fetch_message(message_id)
-
-                await msg.edit(
-                    embed=build_main_embed(guild),
-                    view=DepartmentView()
-                )
-
-            except discord.NotFound:
-                pass
 
     @commands.command(name="react")
     @commands.has_permissions(administrator=True)
     async def react_panel(self, ctx):
-
+        """
+        Spawns or refreshes the live role-assignment panel.
+        Usage: !react
+        """
         embed = build_main_embed(ctx.guild)
-
         existing = await get_panel(ctx.guild.id)
 
         if existing:
-
             old_channel_id, old_message_id = existing
             old_channel = ctx.guild.get_channel(old_channel_id)
 
             if old_channel:
-
                 try:
                     old_msg = await old_channel.fetch_message(old_message_id)
-
-                    await old_msg.edit(
-                        embed=embed,
-                        view=DepartmentView()
-                    )
-
-                    await save_panel(ctx.guild.id, old_channel_id, old_message_id)
-
-                    await ctx.send("Reaction panel updated.", delete_after=5)
+                    await old_msg.edit(embed=embed, view=DepartmentView())
+                    await ctx.send("🔄 Live reaction panel refreshed and updated.", delete_after=5)
                     return
-
                 except discord.NotFound:
                     pass
 
         msg = await ctx.send(embed=embed, view=DepartmentView())
-
         await save_panel(ctx.guild.id, ctx.channel.id, msg.id)
-
-        await ctx.send("Reaction panel created and saved.", delete_after=5)
+        await ctx.send("✨ Live reaction panel created and registered to database.", delete_after=5)
 
 
 async def setup(bot):
