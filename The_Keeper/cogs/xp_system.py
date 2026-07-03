@@ -209,37 +209,39 @@ async def process_message_xp(message):
 
 # ---------------- DISCOVERY XP ----------------
 async def process_discovery_xp(bot: commands.Bot, user_id: int, discovery_type: str, channel_id: int):
-    user = await get_user(user_id)
-    
-    upload_channels = CONFIG.get("xp_enabled_channels", [])
-    office_channels = [] 
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT primary_role FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        primary_role = row[0].lower() if (row and row[0]) else None
 
-    primary_role = user.get("primary_role")
     if not primary_role:
         return 0
 
-    primary_role = primary_role.lower()
-    expected_role = DISCOVERY_TYPE_MAP.get(discovery_type.lower())
-
+    dtype_clean = discovery_type.lower()
+    expected_role = DISCOVERY_TYPE_MAP.get(dtype_clean)
     if not expected_role:
         return 0
 
+    role_cfg = CONFIG.get("roles", {}).get(primary_role, {})
+    upload_channels = role_cfg.get("upload_channels", [])
+    office_channel = role_cfg.get("office_channel")
+
     cooldown_time = CONFIG.get("xp_bonus", {}).get("discovery_cooldown", 30)
-    if not check_cooldown(user_id, f"discovery_{discovery_type}", cooldown_time):
+    if not check_cooldown(user_id, f"discovery_{dtype_clean}", cooldown_time):
         return 0
 
-    xp = CONFIG.get("xp_bonus", {}).get("base_discovery_xp", 10)
-
+    xp = CONFIG.get("xp_bonus", {}).get("base_discovery_xp", 5)
+    
     if primary_role == expected_role:
-        xp += CONFIG.get("xp_bonus", {}).get("role_match", 5)
+        xp += CONFIG.get("xp_bonus", {}).get("role_match", 3)
     else:
         xp += CONFIG.get("xp_bonus", {}).get("cross_role_penalty", -1)
-
+    
     if channel_id in upload_channels:
-        xp += CONFIG.get("xp_bonus", {}).get("channel_match", 5)
+        xp += CONFIG.get("xp_bonus", {}).get("channel_match", 1)
 
-    if office_channels and channel_id == office_channels[0]:
-        xp += CONFIG.get("xp_bonus", {}).get("channel_match", 5)    
+    if office_channel and channel_id == office_channel:
+        xp += CONFIG.get("xp_bonus", {}).get("channel_match", 1)    
 
     await add_xp(user_id, primary_role, xp)
 
@@ -247,11 +249,14 @@ async def process_discovery_xp(bot: commands.Bot, user_id: int, discovery_type: 
 
     if leveled_up:
         for guild in bot.guilds:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id).catch(lambda e: None)
-            if member:
-                if "update_rank_role" in globals() or "update_rank_role" in dir():
-                    await update_rank_role(member, level)
-                break
+            try:
+                member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+                if member:
+                    if "update_rank_role" in globals() or "update_rank_role" in dir():
+                        await update_rank_role(member, level)
+                    break
+            except Exception:
+                continue
 
     return xp
 
