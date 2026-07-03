@@ -292,6 +292,12 @@ async def on_message(message):
       
             await add_xp(message.author.id, user_role, amount)
 
+    ctx = await bot.get_context(message)
+    if not ctx.valid and message.guild: 
+        google_xp_cog = bot.get_cog("xp")  
+        if google_xp_cog:
+            asyncio.create_task(google_xp_cog.process_message_sheets_xp(message))
+        
     await bot.process_commands(message)
 
 
