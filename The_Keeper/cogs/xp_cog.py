@@ -1,4 +1,4 @@
-from Data.xpdata import *
+from cogs.Data.xpdata import *
 import time
 import discord
 from discord.ext import commands
