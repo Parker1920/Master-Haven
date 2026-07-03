@@ -2,22 +2,23 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import aiosqlite
+
 import sys, os
 import json
 from difflib import get_close_matches
 import aiohttp
 import traceback
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(BASE_DIR, "cogs", "Data"))
+sys.path.insert(0, BASE_DIR)
 
 sys.path.append(os.path.join(BASE_DIR, "cogs"))
 
-from cogs import xp_system, personality, Haven_stats, Haven_upload, featured, community
+from cogs import xp_system, ask, Haven_stats, Haven_upload, featured, community
 from cogs.xp_cog import DepartmentView
 from cogs.xp_system import get_user, get_level_from_xp, make_progress_bar, get_rank, xp_needed
 from cogs.community import SearchView, AddCivView
-from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH
+from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user
 import logging
 log = logging.getLogger("commands")
    
@@ -44,7 +45,7 @@ class CommandsRouter(commands.Cog):
         
 # ---------------- XP ----------------
     @commands.command(name="xp", help="check rank and level progress")
-    async def xp(self, ctx, member: discord.Member = None):
+    async def xp(self, ctx, member: discord.Member = None):        
     
         member = member or ctx.author
     
@@ -81,14 +82,14 @@ class CommandsRouter(commands.Cog):
     
         # ---------------- ROLE XP ----------------
         role_xp = await get_xp(member.id, primary)
-        level = int(await get_level(member.id, primary))
+        level = await get_level(member.id, primary)
     
         # find rank + xp requirement safely
         rank = next(
-            r for r in CONFIG["ranks"]
-            if r["min_level"] <= level <= r["max_level"]
+            (r for r in CONFIG["ranks"]
+             if r["min_level"] <= level <= r["max_level"]),
+            None
         )
-
     
         if not rank:
             rank = {"name": "Unknown", "xp_per_level": 100}
