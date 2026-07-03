@@ -3,7 +3,7 @@ from discord.ext import commands
 import asyncio
 import aiosqlite
 
-from Data.xpdata import PRIMARY_ROLE_MAP, save_panel, get_panel, DB_PATH, ensure_user
+from cogs.Data.xpdata import PRIMARY_ROLE_MAP, save_panel, get_panel, DB_PATH, ensure_user
 
 # ---------------- EMBED BUILDER ----------------
 
