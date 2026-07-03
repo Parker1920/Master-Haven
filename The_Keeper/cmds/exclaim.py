@@ -6,7 +6,7 @@ from discord import app_commands
 import sys, os
 import json
 from difflib import get_close_matches
-import aiohttp
+import aiohttp, aiosqlite
 import traceback
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
