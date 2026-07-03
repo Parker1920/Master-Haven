@@ -20,12 +20,22 @@ CONFIG = {
   },
 
   "xp_bonus": {
-    "base_discovery_xp": 5,
+    "base_discovery_xp": 5,   
+    "department_bonus_xp": 15,
     "role_match": 3,
     "cross_role_penalty": -1,
     "channel_match": 1,
     "discovery_cooldown": 30
   },
+  "Dept_map": {
+    "base": "architect",
+    "starship": "engineer",
+    "multitool": "engineer",
+    "flora": "xenobiologist",
+    "fauna": "xenobiologist",
+    "system": "cartographer",   
+    "planet": "cartographer"
+},
 
   "xp_enabled_channels": [
     1423941006142996524,
@@ -274,15 +284,11 @@ async def add_xp(user_id, role, amount):
         await ensure_user(user_id)
     
         async with aiosqlite.connect(DB_PATH) as db:
-            # 1. Check for old role tracks
             cur = await db.execute("SELECT role FROM user_roles WHERE user_id = ? AND role != ?", (user_id, role))
             old_rows = await cur.fetchall()
             
             if old_rows:
-                # We have an old track. Let's look up its details to merge them.
-                old_track_role = old_rows[0][0]
-                
-                # Fetch old track stats
+                old_track_role = old_rows[0][0]                
                 old_cur = await db.execute("SELECT xp, level FROM user_roles WHERE user_id=? AND role=?", (user_id, old_track_role))
                 old_data = await old_cur.fetchone()
                 
