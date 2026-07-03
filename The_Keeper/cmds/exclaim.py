@@ -18,7 +18,7 @@ from cogs import xp_system, ask, Haven_stats, Haven_upload, featured, community
 from cogs.xp_cog import DepartmentView
 from cogs.xp_system import get_user, get_level_from_xp, make_progress_bar, get_rank, xp_needed
 from cogs.community import SearchView, AddCivView
-from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH
+from cogs.Data.xpdata import get_level, get_xp, CONFIG, get_global, system_xp, get_conn, ensure_user, DB_PATH, RANKS_LIST
 import logging
 log = logging.getLogger("commands")
    
