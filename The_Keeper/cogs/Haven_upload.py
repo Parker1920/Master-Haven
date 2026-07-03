@@ -474,13 +474,15 @@ class DiscoveryTypeSelect(discord.ui.View):
         await interaction.response.edit_message(view=self)
 
     async def class_callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("This isn't your session.", ephemeral=True)
-            return
-        self.selected_class = self.class_dropdown.values[0]
-        for option in self.class_dropdown.options:
-            option.default = option.value == self.selected_class
-        await interaction.response.edit_message(view=self)
+    if interaction.user.id != self.owner_id:
+        await interaction.response.send_message("This isn't your session.", ephemeral=True)
+        return
+        
+    self.selected_class = self.class_dropdown.values[0]
+    for option in self.class_dropdown.options:
+        option.default = (option.value == self.selected_class)
+        
+    await interaction.response.defer()
     
     async def next_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner_id:
