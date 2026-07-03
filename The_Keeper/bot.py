@@ -176,6 +176,7 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
+    "cogs.ask",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
