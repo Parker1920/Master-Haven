@@ -34,8 +34,8 @@ class MockInteraction:
         self.channel = msg.channel
         self.user = msg.author
         self.guild = msg.guild
-        self.response = self  # Allows interaction.response.send_message
-        self.followup = self  # Allows interaction.followup.send
+        self.response = self
+        self.followup = self 
     
     async def send_message(self, content_str, *args, **kwargs):
         return await self.channel.send(content_str)
@@ -58,22 +58,18 @@ class PersonalityCog(commands.Cog):
         content = message.content.strip()
         lower_content = content.lower()
         
-        # 1. Check if session has expired dynamically
         now = datetime.now(timezone.utc)
         if active_sessions[user_id]["expiry"] < now:
             active_sessions.pop(user_id, None)
-            return  # Let on_message drop out or handle normally
-
-        # Reset expiry window slightly on interaction activity (Optional comfort feature)
+            return 
         active_sessions[user_id]["expiry"] = now + timedelta(seconds=SESSION_TIMEOUT)
 
-        # 2. Check if it's a 'tell' command
-        if lower_content.startswith("tell"):
+        # Triggers for either "tell" or "say"
+        if lower_content.startswith("tell") or lower_content.startswith("say"):
             await self.handle_tell(message)
-            active_sessions.pop(user_id, None)  # Successfully complete session
+            active_sessions.pop(user_id, None) 
             return
 
-        # 3. Try processing dynamically as a Slash Command from bot.tree
         command_name = lower_content.split()[0] if lower_content.split() else ""
         slash_command = discord.utils.get(self.bot.tree.get_commands(), name=command_name)
         
@@ -88,32 +84,31 @@ class PersonalityCog(commands.Cog):
                 else:
                     await slash_command.callback(mock_interaction, *args)
 
-                active_sessions.pop(user_id, None)  # Clean up after successful command execution
+                active_sessions.pop(user_id, None) 
                 return
             except Exception as e:
                 print("[SLASH CALLBACK EXCEPTION DETECTED]")
                 traceback.print_exc() 
-                await message.channel.send("An error occurred executing that cosmic command.")
+                await message.channel.send("An error occurred.")
                 active_sessions.pop(user_id, None)
                 return
 
-        # 4. If nothing matches, handle a validation failure flow
         active_sessions[user_id]["fails"] += 1
         
         if active_sessions[user_id]["fails"] >= MAX_FAILS:
-            await message.channel.send(fail_responses[2]) # "Gather your thoughts..."
+            await message.channel.send(fail_responses[2])
             active_sessions.pop(user_id, None)
         else:
-            # Pick one of the intermediate "huh?" / "one more time?" responses
             await message.channel.send(random.choice(fail_responses[:2]))
         
         return
 
-    # -------------------- Handle 'tell' --------------------
+    # -------------------- Handle 'tell' or 'say' --------------------
     async def handle_tell(self, message):
         parts = message.content.split(" ", 2)
         if len(parts) < 3:
-            await message.channel.send("Format: tell <user> <message>")
+            cmd_used = parts[0].lower()
+            await message.channel.send(f"Format: {cmd_used} <user> <message>")
             return
 
         target_name = parts[1].lower()
@@ -121,7 +116,7 @@ class PersonalityCog(commands.Cog):
 
         # ---- Special user tells everyone ----
         if message.author.id == SPECIAL_USER_ID and target_name == "everyone":
-            await message.channel.send(f"@everyone You're {msg_text.strip()}")
+            await message.channel.send(f"@everyone You're {msg_text}")
             for member in message.channel.members:
                 if member.bot or member == message.author:
                     continue
@@ -140,12 +135,25 @@ class PersonalityCog(commands.Cog):
             await message.channel.send(f"User '{parts[1]}' not found.")
             return
 
-        pronouns = ["he", "she", "they", "it", "him", "her", "them", "he's", "she's", "they're"]
+        # ---- Smart Pronoun Mapper ----
+        pronoun_map = {
+            "he": "he is", "him": "he is", "he's": "he is",
+            "she": "she is", "her": "she is", "she's": "she is",
+            "they": "they are", "them": "they are", "they're": "they are",
+            "it": "it is", "its": "it is", "it's": "it is"
+        }
+
         words = msg_text.split()
         first_word = words[0].lower() if words else ""
-
-        close = difflib.get_close_matches(first_word, pronouns, n=1, cutoff=0.7)
-        immersive_text = f"You're {' '.join(words[1:]).strip()}" if close else msg_text
+        
+        close_match = difflib.get_close_matches(first_word, list(pronoun_map.keys()), n=1, cutoff=0.7)
+        
+        if close_match:
+            matched_pronoun = close_match[0]
+            replacement_phrase = pronoun_map[matched_pronoun]
+            immersive_text = f"{replacement_phrase} {' '.join(words[1:]).strip()}"
+        else:
+            immersive_text = msg_text
 
         await message.channel.send(f"{target.mention} {immersive_text}")
 
@@ -165,7 +173,7 @@ class PersonalityCog(commands.Cog):
         user_id = message.author.id
         now = datetime.now(timezone.utc)
         
-# ---- Cleanup expired sessions globally ----
+        # ---- Cleanup expired sessions globally ----
         expired = [uid for uid, sess in active_sessions.items() if sess["expiry"] < now]
         for uid in expired:
             active_sessions.pop(uid, None)
