@@ -5,7 +5,7 @@ import discord
 from discord.ext import commands
 
 # Import your existing configuration and database path verbatim from xpdata.py
-from Data.xpdata import DB_PATH, CONFIG  #[span_1](start_span)[span_1](end_span)
+from cogs.Data.xpdata import DB_PATH, CONFIG  #[span_1](start_span)[span_1](end_span)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
