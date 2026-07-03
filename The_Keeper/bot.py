@@ -163,7 +163,7 @@ from setup import is_command_allowed
 
 # -------------------- COGS --------------------
 COGS = [
-    "cogs.personality",
+    "cogs.ask",
     "cogs.xp_system",
     "cogs.xp_cog",
     "cogs.xpconfig",
