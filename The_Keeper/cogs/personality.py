@@ -104,6 +104,7 @@ class PersonalityCog(commands.Cog):
         return
 
     # -------------------- Handle 'tell' or 'say' --------------------
+        # -------------------- Handle 'tell' or 'say' --------------------
     async def handle_tell(self, message):
         parts = message.content.split(" ", 2)
         if len(parts) < 3:
@@ -135,17 +136,19 @@ class PersonalityCog(commands.Cog):
             await message.channel.send(f"User '{parts[1]}' not found.")
             return
 
-        # ---- Smart Pronoun Mapper ----
+        # ---- Dynamic Direct-Address Mapper ----
+        # Maps third-person pronouns to direct second-person speech
         pronoun_map = {
-            "he": "he is", "him": "he is", "he's": "he is",
-            "she": "she is", "her": "she is", "she's": "she is",
-            "they": "they are", "them": "they are", "they're": "they are",
-            "it": "it is", "its": "it is", "it's": "it is"
+            "he": "you are", "him": "you", "he's": "you're", "his": "your",
+            "she": "you are", "her": "you", "she's": "you're", "hers": "yours",
+            "they": "you are", "them": "you", "they're": "you're", "their": "your", "theirs": "yours",
+            "it": "you are", "its": "your", "it's": "you're"
         }
 
         words = msg_text.split()
         first_word = words[0].lower() if words else ""
         
+        # Check for close matches to convert third-person indicators
         close_match = difflib.get_close_matches(first_word, list(pronoun_map.keys()), n=1, cutoff=0.7)
         
         if close_match:
@@ -155,6 +158,7 @@ class PersonalityCog(commands.Cog):
         else:
             immersive_text = msg_text
 
+ 
         await message.channel.send(f"{target.mention} {immersive_text}")
 
         if "dweeb" in msg_text.lower():
@@ -162,6 +166,7 @@ class PersonalityCog(commands.Cog):
                 await target.send(DWEEB_IMAGE_URL)
             except discord.Forbidden:
                 await message.channel.send(f"Couldn't DM {target.display_name}, their DMs might be closed.")
+
 
     # -------------------- Listener --------------------
     @commands.Cog.listener()
