@@ -43,3 +43,19 @@ export async function getGuildChannels(guildId) {
       .sort((a, b) => a.position - b.position);
   });
 }
+
+// A single guild member (bot-token REST; no privileged intent needed for a by-id fetch). Returns
+// `{ roles: [] }` when the user isn't in the guild (404). Cached briefly like roles/channels — so a
+// role change can take up to ~1 min to reflect in dashboard access (acceptable: the caller is already
+// a Discord admin, so this is a guardrail, not an escalation boundary).
+export async function getGuildMember(guildId, userId) {
+  return cached(`member:${guildId}:${userId}`, async () => {
+    if (!env.botToken) throw new Error('DISCORD_BOT_TOKEN not set');
+    const res = await fetch(`${API}/guilds/${guildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${env.botToken}` },
+    });
+    if (res.status === 404) return { roles: [] }; // not a member of this guild
+    if (!res.ok) throw new Error(`Discord member ${guildId}/${userId} → ${res.status} ${await res.text().catch(() => '')}`);
+    return res.json();
+  });
+}

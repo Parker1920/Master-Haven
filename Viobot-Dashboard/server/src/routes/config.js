@@ -11,6 +11,7 @@ import { getFeatureAccess, hasFeature } from '../viobot/premium.js';
 import { readAnnouncements, addAnnouncement, deleteAnnouncement } from '../viobot/announcements.js';
 import { readAvatar, setAvatar, resetAvatar } from '../viobot/avatar.js';
 import { registryForViewer, isDashboardAdmin } from '../dashboard/store.js';
+import { memberHoldsModeratorRole } from '../viobot/moderatorAccess.js';
 
 /**
  * Resolve the requested guild ONLY if the caller may configure it:
@@ -40,6 +41,14 @@ async function resolveAccessibleGuild(req, guildId) {
   }
   const guild = accessibleGuilds(userGuilds, botGuilds).find((g) => g.id === guildId);
   if (!guild) return { error: 403 }; // not an admin of this guild
+
+  // Beyond Administrator, a non-owner / non-operator must also hold the guild's configured Viobot
+  // moderator role (falls back to admin-only when no mod role is set — see moderatorAccess.js).
+  if (guild.owner !== true && !isAdmin) {
+    const modCheck = await memberHoldsModeratorRole(guildId, session.user.id);
+    if (modCheck.error) return { error: 502 }; // couldn't verify — retryable
+    if (!modCheck.ok) return { error: 403 };
+  }
   return { guild, isAdmin };
 }
 
@@ -49,7 +58,7 @@ export default async function configRoutes(app) {
     const guildId = String(req.params.id);
     const r = await resolveAccessibleGuild(req, guildId);
     if (r.error) {
-      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found' }[r.error];
+      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found', 502: 'discord_unavailable' }[r.error];
       return reply.code(r.error).send({ error: msg });
     }
 
@@ -73,7 +82,7 @@ export default async function configRoutes(app) {
     const guildId = String(req.params.id);
     const r = await resolveAccessibleGuild(req, guildId);
     if (r.error) {
-      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found' }[r.error];
+      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found', 502: 'discord_unavailable' }[r.error];
       return reply.code(r.error).send({ error: msg });
     }
 
@@ -109,7 +118,7 @@ export default async function configRoutes(app) {
     const guildId = String(req.params.id);
     const r = await resolveAccessibleGuild(req, guildId);
     if (r.error) {
-      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found' }[r.error];
+      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found', 502: 'discord_unavailable' }[r.error];
       return reply.code(r.error).send({ error: msg });
     }
     return { variables: readVariables(guildId) };
@@ -120,7 +129,7 @@ export default async function configRoutes(app) {
     const guildId = String(req.params.id);
     const r = await resolveAccessibleGuild(req, guildId);
     if (r.error) {
-      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found' }[r.error];
+      const msg = { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found', 502: 'discord_unavailable' }[r.error];
       return reply.code(r.error).send({ error: msg });
     }
     const body = req.body || {};
@@ -136,7 +145,7 @@ export default async function configRoutes(app) {
   });
 
   const denied = (reply, code) =>
-    reply.code(code).send({ error: { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found' }[code] });
+    reply.code(code).send({ error: { 401: 'not_authenticated', 403: 'forbidden', 404: 'not_found', 502: 'discord_unavailable' }[code] });
 
   // Public aliases — list.
   app.get('/api/guilds/:id/aliases', async (req, reply) => {
