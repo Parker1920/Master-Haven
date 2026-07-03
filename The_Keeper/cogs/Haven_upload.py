@@ -362,33 +362,34 @@ class PlanetPromptView(discord.ui.View):
             return False
         return True
 
-        @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
-        async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-            if len(self.planets) >= 6:
-                await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
-                return
-    
-            await interaction.response.defer(ephemeral=True, thinking=True)
-    
-            try:
-                dynamic_biomes = await self.api.fetch_biome_adjectives() 
-                
-                if dynamic_biomes:
-                    dynamic_biomes = dynamic_biomes[:25] 
-                else:
-                    dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
-    
-                dropdown_view = BiomeDropdownView(self, dynamic_biomes)
-    
-                await interaction.followup.send(
-                    content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
-                    view=dropdown_view,
-                    ephemeral=True
-                )
-    
-            except Exception as e:
-                logger.error(f"Failed to load Haven biomes: {e}")
-                await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
+    @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
+    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.planets) >= 6:
+            await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
+            return
+            
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            dynamic_biomes = await self.api.fetch_biome_adjectives() 
+            
+            if dynamic_biomes:
+                dynamic_biomes = dynamic_biomes[:25] 
+            else:
+                dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
+
+            dropdown_view = BiomeDropdownView(self, dynamic_biomes)
+
+            await interaction.followup.send(
+                content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
+                view=dropdown_view,
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to load Haven biomes: {e}")
+            await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
+
 
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
@@ -943,7 +944,6 @@ class HexKeypad(discord.ui.View):
                 await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
                 
                 try:
-                    # 1. Fetch data from validation endpoint
                     valid = await self.api.validate_glyph(glyph)
                     if not valid.get("valid"):
                         self.reset_state()
@@ -952,17 +952,14 @@ class HexKeypad(discord.ui.View):
                             ephemeral=True
                         )
                         return
-
-                    # Extract the actual API procedural/in-game name
+                 
                     api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
 
-                    # 2. Check for database duplicates
                     dup = await self.api.check_duplicate(glyph)
                     system_exists = dup.get("exists")
                     system_name = dup.get("system_name") or api_generated_name
                     system_id = dup.get("system_id")
 
-                    # 3. Handle DISCOVERY Mode routing
                     if self.mode == "discovery":
                         msg = (
                             f"⚠️ System already exists: **{system_name}**"
