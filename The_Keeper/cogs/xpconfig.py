@@ -21,11 +21,9 @@ class XPSetupPromptView(discord.ui.View):
             sheet = self.cog.get_sheet("guilds")
             rows = sheet.get_all_values()
             
-            # Look up if an entry for this server already exists
             target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
             
             if target_row:
-                # Keep previously saved configurations intact while safely refreshing the entry
                 existing_xp_per_msg = rows[target_row - 1][1] if len(rows[target_row - 1]) > 1 else "1"
                 existing_msg_en = rows[target_row - 1][2] if len(rows[target_row - 1]) > 2 else "False"
                 existing_msg = rows[target_row - 1][3] if len(rows[target_row - 1]) > 3 else "Congratulations {user}, you leveled up to {level}!"
@@ -35,11 +33,9 @@ class XPSetupPromptView(discord.ui.View):
                 updated_row = [self.guild_id, existing_xp_per_msg, existing_msg_en, existing_msg, existing_cooldown, existing_global]
                 sheet.update(range_name=f"A{target_row}:F{target_row}", values=[updated_row])
             else:
-                # Default configuration mapping layout for new guilds
                 default_row = [self.guild_id, "1", "False", "Congratulations {user}, you leveled up to {level}!", "5", "True"]
                 sheet.append_row(default_row)
 
-        # Runs the sheet transaction in an executor to keep the gateway completely unblocked
         await loop.run_in_executor(None, initialize_or_update_guild)
 
         embed = discord.Embed(
@@ -173,7 +169,6 @@ class LevelCurveModal(discord.ui.Modal, title="Configure Level Thresholds"):
             
             target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id and r[1] == self.level.value), None)
             
-            # Retain potential channel mapping column index if editing
             existing_channel = rows[target_row - 1][4] if target_row and len(rows[target_row - 1]) > 4 else ""
             existing_name = rows[target_row - 1][3] if target_row and len(rows[target_row - 1]) > 3 else f"Level {self.level.value}"
             
@@ -367,6 +362,92 @@ class LevelUpChannelModal(discord.ui.Modal, title="Configure Level Up Channel"):
         await interaction.followup.send(f"✅ Successfully linked level up messages to {display_name} across onboarding layout tracks!", ephemeral=True)
 
 
+class CustomTrackerPromptView(discord.ui.View):
+    def __init__(self, cog, guild_id: str):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CustomLayoutModal(self.cog, self.guild_id))
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        loop = asyncio.get_running_loop()
+
+        def set_standard_fallback():
+            sheet = self.cog.get_sheet("guilds")
+            rows = sheet.get_all_values()
+            target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
+            
+            if target_row:
+                while len(rows[target_row - 1]) < 6:
+                    rows[target_row - 1].append("")
+                sheet.update_cell(target_row, 7, "False")
+
+        await loop.run_in_executor(None, set_standard_fallback)
+        await interaction.followup.send("✅ System configured to use the default embedded tracking profile theme layout.", ephemeral=True)
+
+
+class CustomLayoutModal(discord.ui.Modal, title="Customize Level Embed Theme"):
+    embed_title = discord.ui.TextInput(
+        label="Embed Title Template", 
+        default="✨ {name}'s Level Progress",
+        placeholder="Variables allowed: {name} and {level}"
+    )
+    border_color = discord.ui.TextInput(
+        label="Embed Border Color (Hex Code or Name)", 
+        default="#99cc00", 
+        placeholder="e.g., #ff0055, gold, blue, blurple"
+    )
+    filled_bar = discord.ui.TextInput(
+        label="Filled Progress Bar Emoji", 
+        default="🟩", 
+        max_length=2, 
+        placeholder="Paste a single emoji icon character"
+    )
+    empty_bar = discord.ui.TextInput(
+        label="Empty Progress Bar Emoji", 
+        default="⬛", 
+        max_length=2, 
+        placeholder="Paste a single emoji icon character"
+    )
+
+    def __init__(self, cog, guild_id: str):
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        loop = asyncio.get_running_loop()
+
+        def save_custom_design_specs():
+            sheet = self.cog.get_sheet("guilds")
+            rows = sheet.get_all_values()
+            target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
+
+            if target_row:
+                current_row_data = rows[target_row - 1]
+                while len(current_row_data) < 6:
+                    current_row_data.append("")
+                
+                base_info = current_row_data[:6]
+                updated_row = base_info + [
+                    "True", 
+                    self.embed_title.value.strip(), 
+                    self.border_color.value.strip(), 
+                    self.filled_bar.value.strip(), 
+                    self.empty_bar.value.strip()
+                ]
+                sheet.update(range_name=f"A{target_row}:K{target_row}", values=[updated_row])
+
+        await loop.run_in_executor(None, save_custom_design_specs)
+        await interaction.followup.send(" Custom theme configuration saved successfully! Run `!level` again to see it.", ephemeral=True)
+
+
 # -------------------- MAIN COG & TRACKING LOGIC --------------------
 class XPConfigCog(commands.Cog, name="xp"):
     def __init__(self, bot):
@@ -436,96 +517,7 @@ class XPConfigCog(commands.Cog, name="xp"):
 
         return await loop.run_in_executor(None, process)
 
-class CustomTrackerPromptView(discord.ui.View):
-    def __init__(self, cog, guild_id: str):
-        super().__init__(timeout=120)
-        self.cog = cog
-        self.guild_id = guild_id
-
-    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Admin chose to configure custom colors/titles
-        await interaction.response.send_modal(CustomLayoutModal(self.cog, self.guild_id))
-
-    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Admin chose standard default options, record "False" to bypass future prompts
-        await interaction.response.defer(ephemeral=True)
-        loop = asyncio.get_running_loop()
-
-        def set_standard_fallback():
-            sheet = self.cog.get_sheet("guilds")
-            rows = sheet.get_all_values()
-            target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
-            
-            if target_row:
-                # Fill up to index 6 with 'False' to indicate custom is disabled
-                while len(rows[target_row - 1]) < 6:
-                    rows[target_row - 1].append("")
-                sheet.update_cell(target_row, 7, "False")
-
-        await loop.run_in_executor(None, set_standard_fallback)
-        await interaction.followup.send("✅ System configured to use the default embedded tracking profile theme layout.", ephemeral=True)
-
-
-class CustomLayoutModal(discord.ui.Modal, title="Customize Level Embed Theme"):
-    embed_title = discord.ui.TextInput(
-        label="Embed Title Template", 
-        default="✨ {name}'s Level Progress",
-        placeholder="Variables allowed: {name} and {level}"
-    )
-    border_color = discord.ui.TextInput(
-        label="Embed Border Color (Hex Code or Name)", 
-        default="#99cc00", 
-        placeholder="e.g., #ff0055, gold, blue, blurple"
-    )
-    filled_bar = discord.ui.TextInput(
-        label="Filled Progress Bar Emoji", 
-        default="🟩", 
-        max_length=2, 
-        placeholder="Paste a single emoji icon character"
-    )
-    empty_bar = discord.ui.TextInput(
-        label="Empty Progress Bar Emoji", 
-        default="⬛", 
-        max_length=2, 
-        placeholder="Paste a single emoji icon character"
-    )
-
-    def __init__(self, cog, guild_id: str):
-        super().__init__()
-        self.cog = cog
-        self.guild_id = guild_id
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        loop = asyncio.get_running_loop()
-
-        def save_custom_design_specs():
-            sheet = self.cog.get_sheet("guilds")
-            rows = sheet.get_all_values()
-            target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
-
-            if target_row:
-                current_row_data = rows[target_row - 1]
-                while len(current_row_data) < 6:
-                    current_row_data.append("")
-                
-                base_info = current_row_data[:6]
-                updated_row = base_info + [
-                    "True", 
-                    self.embed_title.value.strip(), 
-                    self.border_color.value.strip(), 
-                    self.filled_bar.value.strip(), 
-                    self.empty_bar.value.strip()
-                ]
-                sheet.update(range_name=f"A{target_row}:K{target_row}", values=[updated_row])
-
-        await loop.run_in_executor(None, save_custom_design_specs)
-        await interaction.followup.send(" Custom theme configuration saved successfully! Run `!level` again to see it.", ephemeral=True)
-
     # ------------------ STRUCTURAL SHEETS MAINTENANCE ENGINE ------------------
-        # ------------------ STRUCTURAL SHEETS MAINTENANCE ENGINE ------------------
     @commands.command(name="update")
     @commands.has_permissions(manage_guild=True)
     async def force_sheets_update(self, ctx: commands.Context):
@@ -582,12 +574,11 @@ class CustomLayoutModal(discord.ui.Modal, title="Customize Level Embed Theme"):
 
         await ctx.send(status_report)
 
-    # FIXED: Shifted left to be a sibling of force_sheets_update, not a child
     @commands.command(name="level")
     async def show_level(self, ctx: commands.Context, member: discord.Member = None):
         """Displays the user's current level, XP, and customizable progress bar."""
         member = member or ctx.author
-        if member.bot:  # FIXED: Corrected erratic indentation
+        if member.bot:
             await ctx.send("🤖 Bots don't have XP levels!")
             return
 
