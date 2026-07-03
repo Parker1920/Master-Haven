@@ -112,40 +112,6 @@ class CommandsRouter(commands.Cog):
         
         await ctx.send(embed=embed)
 
-
-
-# ---------------- Systems ----------------
-    @commands.command(name="newsystem", help="upload a system directly from the server")
-    async def addlog(self, ctx):
-        
-        haven_cog = self.bot.get_cog("HavenSubmission")
-        if not haven_cog:
-            await ctx.send("⚠️ HavenSubmission cog is not loaded.")
-            return
-        
-        api = getattr(haven_cog, "api", None)
-        if api is None:
-            await ctx.send("⚠️ HavenSubmission cog does not have an API instance.")
-            return
-
-        glyph_emojis = getattr(haven_cog, "glyph_emojis", {})
-        HexKeypad = getattr(haven_cog, "HexKeypad", None)
-        if HexKeypad is None:
-            await ctx.send("⚠️ HavenSubmission cog does not have HexKeypad defined.")
-            return
-
-        view = HexKeypad(api=api, glyph_emojis=glyph_emojis, owner_id=ctx.author.id)
-        self.bot.add_view(view)
-
-        embed = discord.Embed(
-            title="🖋 Submit System Log",
-            description="Press 12 glyphs to generate your system code.",
-            color=0x00FFFF
-        )
-
-        message = await ctx.send(embed=embed, view=view)
-        view.message = message
-
 # ---------------- Discoveries ----------------
     @commands.command(name="discovery", help="upload a discovery directly from the server")
     async def discovery(self, ctx):
