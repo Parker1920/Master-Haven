@@ -2,6 +2,7 @@ from Data.xpdata import *
 import time
 import discord
 from discord.ext import commands
+import aiosqlite  # Added explicit import for asynchronous database engines
 
 _message_cache = set()
 _role_locks = set()
@@ -78,7 +79,6 @@ class XpCog(commands.Cog):
         if len(_message_cache) > 5000:
             _message_cache.clear()
 
-        # Safely await the asynchronous calculation
         gained = await process_message_xp(message)        
         return gained
 
@@ -91,7 +91,6 @@ async def set_primary_role(member, role_name, bot):
     role_name = role_name.lower()
     guild = member.guild
 
-    # 1. Update the persistent SQLite database so it stays saved across restarts
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO users (user_id, primary_role) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET primary_role = excluded.primary_role",
@@ -99,7 +98,6 @@ async def set_primary_role(member, role_name, bot):
         )
         await db.commit()
 
-    # 2. Swap Discord Server Roles
     roles_to_remove = []
     for rid in PRIMARY_ROLE_MAP.values():
         role = guild.get_role(rid)
@@ -130,10 +128,7 @@ async def set_primary_role(member, role_name, bot):
 def xp_needed(level):
     return 100 + (level * 50)
 
-
-# Patched to fully handle async operations without blocking or unpacking failures
 async def add_global_xp(user_id, amount):
-    # Properly await async database queries
     global_row = await get_global(user_id)
     if global_row:
         xp, level, dm = global_row
@@ -161,21 +156,20 @@ async def process_message_xp(message):
         return 0
 
     user_id = message.author.id
-
-   
     user_role = "voyager"
-    with get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT primary_role FROM users WHERE user_id = ?", (user_id,))
-        row = cur.fetchone()
-        if row and row[0]:
-            user_role = row[0]
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT primary_role FROM users WHERE user_id = ?", (user_id,)) as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                user_role = row[0]
 
-    cooldown = get_cfg("xp.primary_cooldown", 5)
+
+    cooldown = CONFIG.get("xp", {}).get("primary_cooldown", 5)
     if not check_cooldown(user_id, user_role, cooldown):
         return 0
 
-    xp = get_cfg("xp.primary_per_message", 1)
+    xp = CONFIG.get("xp", {}).get("primary_per_message", 1)
 
     await add_xp(user_id, user_role, xp)
     await add_global_xp(user_id, xp)
