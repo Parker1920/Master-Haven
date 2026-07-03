@@ -1,21 +1,17 @@
 import re
 from datetime import datetime, timezone
-
 import discord
 from discord.ext import commands
-
-ACTIVATION_PHRASE = "Time:"
 
 class TimeParser(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        
         self.time_pattern = re.compile(
-            r"Time:\s*"
-            r"(\d{1,2}/\d{1,2}/(?:\d{2}|\d{4}))"
-            r"\s+"
-            r"(\d{1,2}:\d{2}\s*[ap]m)",
+            r"Time:\s*"                                
+            r"(\d{1,2}/\d{1,2}/(?:\d{2}|\d{4}))"     
+            r"\s+"                                      
+            r"(\d{1,2}:\d{2})\s*([ap]m)",               
             re.IGNORECASE
         )
 
@@ -29,24 +25,22 @@ class TimeParser(commands.Cog):
             return
 
         date_str = match.group(1)
-        time_str = match.group(2).replace(" ", "").lower()
+        time_clock = match.group(2)
+        am_pm = match.group(3).lower()
+        
+        full_time_str = f"{date_str} {time_clock}{am_pm}"
 
         try:
-            # Handle 2-digit or 4-digit years
-            if len(date_str.split("/")[-1]) == 2:
-                dt = datetime.strptime(
-                    f"{date_str} {time_str}",
-                    "%m/%d/%y %I:%M%p"
-                )
-            else:
-                dt = datetime.strptime(
-                    f"{date_str} {time_str}",
-                    "%m/%d/%Y %I:%M%p"
-                )
+            year_format = "%y" if len(date_str.split("/")[-1]) == 2 else "%Y"
+            
+            dt = datetime.strptime(
+                full_time_str,
+                f"%m/%d/{year_format} %I:%M%p"
+            )
 
             dt = dt.replace(tzinfo=timezone.utc)
-
             unix_timestamp = int(dt.timestamp())
+
 
             await message.channel.send(
                 f"UTC Timestamp: <t:{unix_timestamp}:F>\n"
@@ -57,7 +51,6 @@ class TimeParser(commands.Cog):
             await message.channel.send(
                 "Invalid date/time format. Example: `Time: 1/1/26 4:00pm`"
             )
-
 
 async def setup(bot):
     await bot.add_cog(TimeParser(bot))
