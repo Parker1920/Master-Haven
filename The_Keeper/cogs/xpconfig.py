@@ -229,14 +229,14 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
     level_names = discord.ui.TextInput(
         label="Level Names (separate by comma)", 
         placeholder="Bronze, Silver, Gold, Platinum, Diamond", 
-        style=discord.ui.TextStyle.paragraph
+        style=discord.TextStyle.paragraph
     )
     xp_per_level = discord.ui.TextInput(label="XP Required Per Level", placeholder="e.g., 500", max_length=5)
     level_up_msg = discord.ui.TextInput(
         label="Level Up Message (Optional)", 
         default="Congratulations {user}, you leveled up to {level}!", 
         required=False,
-        style=discord.ui.TextStyle.paragraph
+        style=discord.TextStyle.paragraph
     )
 
     def __init__(self, cog, guild_id: str):
