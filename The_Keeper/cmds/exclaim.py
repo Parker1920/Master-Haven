@@ -44,78 +44,74 @@ class CommandsRouter(commands.Cog):
         log.info(f"{ctx.author} used {ctx.command} in #{ctx.channel}")
         
 # ---------------- XP ----------------
-    @commands.command(name="xp", help="check rank and level progress")
-    async def xp(self, ctx, member: discord.Member = None):        
-    
-        member = member or ctx.author
-    
-        
-        await ensure_user(member.id)
-    
-        async with aiosqlite.connect(DB_PATH) as db:
-    
+        @commands.command(name="xp", help="check rank and level progress")
+        async def xp(self, ctx, member: discord.Member = None):        
+            member = member or ctx.author
             
-            cur = await db.execute(
-                "SELECT primary_role FROM users WHERE user_id=?",
-                (member.id,)
+            await ensure_user(member.id)
+        
+            async with aiosqlite.connect(DB_PATH) as db:
+                cur = await db.execute(
+                    "SELECT primary_role FROM users WHERE user_id=?",
+                    (member.id,)
+                )
+                row = await cur.fetchone()
+                await cur.close()
+        
+            if not row or not row[0]:
+                await ctx.send(f"{member.display_name} has no primary role assigned.")
+                return
+        
+            primary = row[0].lower()
+            ROLE_COLORS = {
+                "architect": discord.Color.blue(),
+                "cartographer": discord.Color.purple(),
+                "diplomat": discord.Color.teal(),
+                "xenobiologist": discord.Color.green(),
+                "engineer": discord.Color.orange(),
+                "historian": discord.Color.gold()
+            }
+        
+            color = ROLE_COLORS.get(primary, discord.Color.green())
+        
+            # ---------------- ROLE XP ----------------
+            role_xp = await get_xp(member.id, primary)
+            level = await get_level(member.id, primary)
+            ranks_list = CONFIG.get("ranks", [])
+            current_level = int(level)    
+            rank = next(
+                (r for r in ranks_list if int(r.get("min_level", 1)) <= current_level <= int(r.get("max_level", 1))),
+                None
             )
-            row = await cur.fetchone()
-            await cur.close()
-    
-        if not row or not row[0]:
-            await ctx.send(f"{member.display_name} has no primary role assigned.")
-            return
-    
-        primary = row[0].lower()
-    
-        # embed colors
-        ROLE_COLORS = {
-            "architect": discord.Color.blue(),
-            "cartographer": discord.Color.purple(),
-            "diplomat": discord.Color.teal(),
-            "xenobiologist": discord.Color.green(),
-            "engineer": discord.Color.orange(),
-            "historian": discord.Color.gold()
-        }
-    
-        color = ROLE_COLORS.get(primary, discord.Color.green())
-    
-        # ---------------- ROLE XP ----------------
-        role_xp = await get_xp(member.id, primary)
-        level = await get_level(member.id, primary)
-    
-        rank = next(
-    (r for r in RANKS_LIST if int(r["min_level"]) <= int(level) <= int(r["max_level"])),
-    None
-)
-    
-        if not rank:
-            rank = {"name": "Unknown", "xp_per_level": 100}
-    
-        xp_for_level = rank.get("xp_per_level", 100)
-    
-        xp_into_level = role_xp % xp_for_level if xp_for_level else role_xp
-    
-        bar = make_progress_bar(xp_into_level, xp_for_level, role=primary)
-    
-        # ---------------- EMBED ----------------
-        embed = discord.Embed(
-            title=f"{member.display_name}'s XP",
-            color=color
-        )
-    
-        embed.add_field(
-            name=f"{primary.capitalize()} (Primary)",
-            value=(
-                f"Role XP: {role_xp}\n"
-                f"Level: {level}\n"
-                f"Rank: {rank['name']}\n"
-                f"{bar}"
-            ),
-            inline=False
-        )
-    
-        await ctx.send(embed=embed)
+        
+            if not rank:
+                rank = {"name": "Unknown", "xp_per_level": 100}
+        
+            xp_for_level = rank.get("xp_per_level") or rank.get("xp_required", 100)
+        
+            xp_into_level = role_xp % xp_for_level if xp_for_level else role_xp
+        
+            bar = make_progress_bar(xp_into_level, xp_for_level, role=primary)
+        
+            # ---------------- EMBED ----------------
+            embed = discord.Embed(
+                title=f"{member.display_name}'s XP Status",
+                color=color
+            )
+        
+            embed.add_field(
+                name=f"{primary.capitalize()} Department Track",
+                value=(
+                    f"**Role XP:** {role_xp}\n"
+                    f"**Level:** {level}\n"
+                    f"**Rank:** {rank['name']}\n"
+                    f"{bar}"
+                ),
+                inline=False
+            )
+        
+            await ctx.send(embed=embed)
+
 
 
 # ---------------- Systems ----------------
