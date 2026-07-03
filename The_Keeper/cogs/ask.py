@@ -1,21 +1,4 @@
 # -------------------- cogs/ask.py --------------------
-# "Ask the Guide" — lets people talk to the Voyager's Haven brain.
-#
-# Two ways in:
-#   /ask <question>          — a slash command (discoverable, cooldown-limited)
-#   @The Keeper <question>   — a natural @mention in any channel (or a DM)
-#
-# Both hit the Haven Brain's public "voyager" mind, a locally-run (Ollama),
-# code-guarded RAG assistant that only answers about No Man's Sky and Haven.
-# The bot is a thin client — all the knowledge, guardrails, and generation
-# live in the brain service. It reaches that service by container name over the
-# shared `haven-net` docker network (same way it reaches the Haven API).
-#
-# Env:
-#   BRAIN_API      URL of the Haven Brain API.  Default http://haven-brain-api:8020
-#   BRAIN_MIND     which mind to talk to.        Default "voyager"
-#   BRAIN_BOT_KEY  optional shared secret; only sent if set (must match the
-#                  brain's HAVEN_BRAIN_BOT_KEY).
 
 import os
 import logging
