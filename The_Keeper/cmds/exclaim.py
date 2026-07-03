@@ -84,12 +84,10 @@ class CommandsRouter(commands.Cog):
         role_xp = await get_xp(member.id, primary)
         level = await get_level(member.id, primary)
     
-        # find rank + xp requirement safely
         rank = next(
-            (r for r in CONFIG["ranks"]
-             if r["min_level"] <= level <= r["max_level"]),
-            None
-        )
+    (r for r in RANKS_LIST if int(r["min_level"]) <= int(level) <= int(r["max_level"])),
+    None
+)
     
         if not rank:
             rank = {"name": "Unknown", "xp_per_level": 100}
