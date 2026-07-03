@@ -5,6 +5,53 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+# -------------------- INITIAL PROMPT VIEW --------------------
+class XPSetupPromptView(discord.ui.View):
+    def __init__(self, cog, guild_id: str):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        loop = asyncio.get_running_loop()
+
+        def initialize_guild():
+            sheet = self.cog.get_sheet("guilds")
+            rows = sheet.get_all_values()
+            
+            # Check if guild already exists
+            exists = any(r and r[0] == self.guild_id for r in rows[1:])
+            
+            if not exists:
+                # Layout: Guild ID, XP Per Msg, Level Up Msg En, Level Up Msg, Cooldown, Global XP
+                default_row = [self.guild_id, "1", "False", "Congratulations {user}, you leveled up to {level}!", "5", "True"]
+                sheet.append_row(default_row)
+
+        # Provisions row on background thread
+        await loop.run_in_executor(None, initialize_guild)
+
+        embed = discord.Embed(
+            title="📊 Multi-Guild XP Control Panel",
+            description=(
+                "Adjust metrics mapped directly to your spreadsheet setup.\n\n"
+                "**⚙️ Core Settings** - Adjust basic rules, payouts, and cooldown structures.\n"
+                "**🎭 Track Role** - Assign custom configurations directly to roles.\n"
+                "**📈 Level Curve** - Set specific XP brackets for level progressions."
+            ),
+            color=discord.Color.brand_green()
+        )
+        # Forward to the primary Multi-Interaction Control Panel
+        await interaction.followup.send(embed=embed, view=XPConfigWizard(self.cog, self.guild_id), ephemeral=True)
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="❌ XP system setup cancelled.", embed=None, view=self)
+
+
 # -------------------- THE MULTI-INTERACTION CONTROL WIZARD --------------------
 class XPConfigWizard(discord.ui.View):
     def __init__(self, cog, guild_id: str):
@@ -46,8 +93,22 @@ class CoreSettingsModal(discord.ui.Modal, title="Configure Core XP Settings"):
         def save_core():
             sheet = self.cog.get_sheet("guilds")
             rows = sheet.get_all_values()
+            
             target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id), None)
-            new_row = [self.guild_id, self.per_message.value, "0", "0", self.cooldown.value, self.global_xp.value.strip().capitalize()]
+            
+            # Maintain index structural data columns (2 and 3) if they already exist
+            existing_msg_en = rows[target_row - 1][2] if target_row and len(rows[target_row - 1]) > 2 else "False"
+            existing_msg = rows[target_row - 1][3] if target_row and len(rows[target_row - 1]) > 3 else ""
+
+            new_row = [
+                self.guild_id, 
+                self.per_message.value, 
+                existing_msg_en, 
+                existing_msg, 
+                self.cooldown.value, 
+                self.global_xp.value.strip().capitalize()
+            ]
+
             if target_row:
                 sheet.update(range_name=f"A{target_row}:F{target_row}", values=[new_row])
             else:
@@ -73,8 +134,11 @@ class LevelCurveModal(discord.ui.Modal, title="Configure Level Thresholds"):
         def save_curve():
             sheet = self.cog.get_sheet("level_xp")
             rows = sheet.get_all_values()
+            
+            # Composite Match: Guild ID + Target Level
             target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id and r[1] == self.level.value), None)
             new_row = [self.guild_id, self.level.value, self.xp_required.value]
+            
             if target_row:
                 sheet.update(range_name=f"A{target_row}:C{target_row}", values=[new_row])
             else:
@@ -110,8 +174,11 @@ class RoleConfigModal(discord.ui.Modal):
         def save_role():
             sheet = self.cog.get_sheet("server_roles")
             rows = sheet.get_all_values()
+            
+            # Composite Match: Guild ID + Role ID
             target_row = next((i for i, r in enumerate(rows[1:], start=2) if r and r[0] == self.guild_id and r[2] == str(self.role.id)), None)
             new_row = [self.guild_id, self.role.name, str(self.role.id), "", "", self.office_chan.value or ""]
+            
             if target_row:
                 sheet.update(range_name=f"A{target_row}:F{target_row}", values=[new_row])
             else:
@@ -142,46 +209,16 @@ class XPConfigCog(commands.Cog, name="xp"):
     @app_commands.command(name="xp", description="Open the multi-interaction server XP configuration control panel.")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def xp_dashboard(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="📊 Multi-Guild XP Control Panel",
-            description=(
-                "Adjust metrics mapped directly to your spreadsheet setup.\n\n"
-                "**⚙️ Core Settings** - Adjust basic rules, payouts, and cooldown structures.\n"
-                "**🎭 Track Role** - Assign custom configurations directly to roles.\n"
-                "**📈 Level Curve** - Set specific XP brackets for level progressions."
-            ),
-            color=discord.Color.brand_green()
+        # Fire initial starter onboarding greeting sequence instead of loading dashboard layout directly
+        await interaction.response.send_message(
+            content="Would you like to set up an XP system for this server?", 
+            view=XPSetupPromptView(self, str(interaction.guild_id)), 
+            ephemeral=True
         )
-        await interaction.response.send_message(embed=embed, view=XPConfigWizard(self, str(interaction.guild_id)), ephemeral=True)
-
-    @commands.command(name="activate")
-    @commands.has_permissions(administrator=True)
-    async def activate_xp(self, ctx):
-        """Initializes both metadata configuration rules AND individual tracking tables inside sheets."""
-        await ctx.send("🔄 *Setting up all sheet architectural structures & data sheets...*")
-        loop = asyncio.get_running_loop()
-
-        schemas = {
-            "guilds": ["guild_id", "primary_per_message_xp", "office_xp_bonus", "keyword_bonus", "cooldown_seconds", "global_xp_enabled"],
-            "server_roles": ["guild_id", "role_name", "role_id", "channels", "upload_channels", "office_channel_id"],
-            "level_xp": ["guild_id", "level", "xp_required"],
-            "users": ["guild_id", "user_id", "primary_role"],
-            "user_roles": ["guild_id", "user_id", "role_id", "xp", "level"],
-            "global_levels": ["guild_id", "user_id", "xp", "level", "senior_dm_sent"]
-        }
-
-        def setup_tabs():
-            for tab_name, headers in schemas.items():
-                sheet = self.get_sheet(tab_name)
-                if not sheet.row_values(1):
-                    sheet.insert_row(headers, 1)
-
-        await loop.run_in_executor(None, setup_tabs)
-        await ctx.send("✅ Spreadsheet tables and tracking rows initialized successfully!")
-
+    
     # ------------------ LIVE SPREADSHEET PROGRESSION DATA ENGINE ------------------
     async def add_spreadsheet_xp(self, guild_id: str, user_id: str, role_id: str, amount: int):
-        """Replaces database tracking. Adds xp to the user_roles worksheet for a specific guild context."""
+        """Adds xp to the user_roles worksheet for a specific guild context."""
         loop = asyncio.get_running_loop()
 
         def process():
