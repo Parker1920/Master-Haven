@@ -8,11 +8,9 @@ import sys, os
 import json
 import logging
 import re
-import aiohttp
 import asyncio
 
 logger = logging.getLogger(__name__)    
-    
     
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     
@@ -21,8 +19,7 @@ API_KEY = os.getenv("HAVEN_API_KEY")
 if not API_KEY:
     raise RuntimeError("HAVEN_API_KEY must be set in .env")
     
-    # -------------------- API LAYER ----------------
-    # -------------------- API LAYER ----------------
+# -------------------- API LAYER (FIXED INDENTATION) ----------------
 class HavenAPI:
     def __init__(self):
         self.base = BASE_URL
@@ -34,31 +31,19 @@ class HavenAPI:
                 f"{self.base}/api/validate_glyph",
                 json={"glyph": glyph}
             ) as resp:
-    
                 if resp.status != 200:
-                    return {
-                        "valid": False,
-                        "error": f"HTTP {resp.status}",
-                    }
-    
+                    return {"valid": False, "error": f"HTTP {resp.status}"}
                 data = await resp.json()
-    
                 if not isinstance(data, dict):
-                    return {
-                        "valid": False,
-                        "error": "Invalid API response",
-                    }
-    
+                    return {"valid": False, "error": "Invalid API response"}
                 return data
 
     async def fetch_biome_adjectives(self):
-        """Fetches the curated list of biomes from the Haven option catalog."""
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{self.base}/api/option-catalog", headers=self.headers) as resp:
                 if resp.status != 200:
                     logger.error(f"Failed to fetch option catalog: HTTP {resp.status}")
                     return []
-                
                 try:
                     data = await resp.json()
                     return data.get("biomes", [])
@@ -73,81 +58,47 @@ class HavenAPI:
                 params={"glyph_code": glyph, "galaxy": galaxy, "reality": reality},
                 headers=self.headers
             ) as resp:
-    
                 if resp.status != 200:
-                    return {
-                        "duplicate": False,
-                        "error": f"HTTP {resp.status}",
-                    }
-    
+                    return {"duplicate": False, "error": f"HTTP {resp.status}"}
                 data = await resp.json()
-    
                 if not isinstance(data, dict):
-                    return {
-                        "duplicate": False,
-                        "error": "Invalid API response",
-                    }
-    
+                    return {"valid": False, "error": "Invalid API response"}
                 return data
     
     async def submit_system(self, payload: dict):
-        print("Submitting payload:", payload)  
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{self.base}/api/extraction", json=payload, headers=self.headers) as resp:
                 try:
                     data = await resp.json()
                 except Exception:
                     data = None
-    
                 if resp.status not in (200, 201):
                     text = await resp.text()  
                     raise Exception(f"Status {resp.status}: {text}")
-    
                 return data
     
     async def submit_discovery(self, payload: dict):
         url = f"{self.base}/api/discoveries"
-    
-        print("\n--- API DEBUG ---")
-        print("POST URL:", url)
-        print("Payload:", payload)
-    
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=self.headers) as resp:
                 status = resp.status
                 text = await resp.text()
-    
-                print("Status:", status)
-                print("Response Text:", text)
-                print("-----------------\n")
-    
                 try:
                     data = await resp.json()
                 except Exception:
                     data = text  
                 if status not in (200, 201):
                     raise Exception(f"Discovery submission failed: {data}")
-    
                 return data
 
         
 #----------------------NAMEGEN------------------
 def generate_system_name(glyph_code: str, community_tag: str, levels_data: dict) -> str:
-    """
-    Autogenerates a standard Haven system name using:
-    [Civ Tag] [Star/Economy Type Class] [Truncated Glyph Index Identifier]
-    """
-    
     civ = community_tag.strip().upper() if community_tag else "HAVEN"
-    
-    
     unique_suffix = glyph_code[-4:].upper()
-    
     star_type = levels_data.get("star_type", "F").strip().upper()
     conflict = levels_data.get("conflict_lvl", "1")
-    
     class_indicator = f"{star_type[0]}{conflict}" if star_type else "G4"
-    
     return f"[{civ}] {class_indicator}-{unique_suffix}"
     
 # -------------------- REALITY MODAL-----------
@@ -184,12 +135,11 @@ class RealitySelectView(discord.ui.View):
         if not self.selected_reality:
             await interaction.response.send_message("Please select a reality before continuing.", ephemeral=True)
             return
-      
         await interaction.response.send_modal(
             GalaxyModal(self.glyph_code, self.user_id, self.api, self.selected_reality, self.api_generated_name)
         )
 
-        
+
 # -------------------- GALAXY MODAL -----------
 class GalaxyModal(discord.ui.Modal):
     def __init__(self, glyph_code, user_id, api, reality, api_generated_name):
@@ -212,6 +162,7 @@ class GalaxyModal(discord.ui.Modal):
         galaxy = self.galaxy_name.value
         view = LevelSelectView(self.glyph_code, self.user_id, self.api, galaxy, self.reality, self.api_generated_name)
         await interaction.response.send_message("✅ Galaxy submitted. Now select system levels:", view=view, ephemeral=True)
+
 
 #-------------------- LEVEL SELECT VIEW ------
 class LevelSelectView(discord.ui.View):
@@ -289,8 +240,7 @@ class LevelSelectView(discord.ui.View):
             )
         )
 
-  
-    
+
 # -------------------- SYSTEM MODAL -----------
 class SystemSubmissionModal(discord.ui.Modal):
     def __init__(self, glyph_code, user_id, api, galaxy, reality, levels, api_generated_name):
@@ -303,27 +253,14 @@ class SystemSubmissionModal(discord.ui.Modal):
         self.levels = levels
         self.api_generated_name = api_generated_name 
     
-        
-        self.system_name = TextInput(
-            label="System Name", 
-            placeholder="Enter the official system name", 
-            max_length=50, 
-            required=True
-        )
+        self.system_name = TextInput(label="System Name", placeholder="Enter the official system name", max_length=50, required=True)
         self.add_item(self.system_name)
     
-        self.community_tag = TextInput(
-            label="Community Tag",
-            placeholder="Enter Civ Tag",
-            max_length=5,
-            required=True
-        )
+        self.community_tag = TextInput(label="Community Tag", placeholder="Enter Civ Tag", max_length=5, required=True)
         self.add_item(self.community_tag)
     
     async def on_submit(self, interaction: discord.Interaction):
         provided_name = self.system_name.value.strip()
-        
-      
         final_system_name = provided_name if provided_name else self.api_generated_name
 
         system_payload = {
@@ -341,8 +278,7 @@ class SystemSubmissionModal(discord.ui.Modal):
         
         view = PlanetPromptView(self.user_id, self.api, system_payload)
         await interaction.response.send_message(
-            f"Captured details for **{final_system_name}**!\n"
-            "Would you like to add planets to this system before final submission?", 
+            f"Captured details for **{final_system_name}**!\nWould you like to add planets to this system before final submission?", 
             view=view, 
             ephemeral=True
         )
@@ -369,15 +305,9 @@ class PlanetPromptView(discord.ui.View):
             return
             
         await interaction.response.defer(ephemeral=True, thinking=True)
-
         try:
             dynamic_biomes = await self.api.fetch_biome_adjectives() 
-            
-            if dynamic_biomes:
-                dynamic_biomes = dynamic_biomes[:25] 
-            else:
-                dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
-
+            dynamic_biomes = dynamic_biomes[:25] if dynamic_biomes else ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
             dropdown_view = BiomeDropdownView(self, dynamic_biomes)
 
             await interaction.followup.send(
@@ -385,12 +315,9 @@ class PlanetPromptView(discord.ui.View):
                 view=dropdown_view,
                 ephemeral=True
             )
-
         except Exception as e:
             logger.error(f"Failed to load Haven biomes: {e}")
             await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
-
-
 
     @discord.ui.button(label="No, submit system", style=discord.ButtonStyle.green)
     async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -403,7 +330,6 @@ class PlanetPromptView(discord.ui.View):
                 self.planets = self.planets[:6]
 
             system_result = await self.api.submit_system(self.system_payload)
-            
             system_id = (
                 system_result.get("system_id")
                 or system_result.get("submission_id")
@@ -424,11 +350,7 @@ class PlanetPromptView(discord.ui.View):
                 await self.api.submit_discovery(planet_payload)
 
             from cogs.xp_system import process_discovery_xp
-            await process_discovery_xp(
-                user_id=self.user_id,
-                discovery_type="system",  
-                channel_id=interaction.channel.id
-            )
+            await process_discovery_xp(user_id=self.user_id, discovery_type="system", channel_id=interaction.channel.id)
 
             if self.planets:
                 for _ in self.planets:
@@ -442,16 +364,14 @@ class PlanetPromptView(discord.ui.View):
             embed.add_field(name="Glyph", value=f"`{self.system_payload['glyph_code']}`", inline=False)
             await interaction.followup.send(embed=embed, ephemeral=True)
             self.stop()
-
         except Exception as e:
             await interaction.followup.send(f"❌ Submission failed: {e}", ephemeral=True)
-            
-#--------------------INPUT MODAL-------------
+
+
 class BiomeDropdownView(discord.ui.View):
     def __init__(self, prompt_view: PlanetPromptView, biome_options: list):
         super().__init__(timeout=60)
         self.prompt_view = prompt_view
-
         self.biome_select = discord.ui.Select(
             placeholder="Choose a Biome...",
             options=[discord.SelectOption(label=b, value=b) for b in biome_options]
@@ -461,9 +381,9 @@ class BiomeDropdownView(discord.ui.View):
 
     async def on_biome_select(self, interaction: discord.Interaction):
         selected_biome = self.biome_select.values[0]
-        
         await interaction.response.send_modal(PlanetInputModal(self.prompt_view, selected_biome))
         self.stop()
+
 
 class PlanetInputModal(discord.ui.Modal):
     def __init__(self, prompt_view: PlanetPromptView, chosen_biome: str):
@@ -488,7 +408,6 @@ class PlanetInputModal(discord.ui.Modal):
             "flora": self.flora.value or "Unknown",
             "sentinel": self.sentinel.value or "Unknown"
         })
-
         planet_list = "\n".join([f"• `{p['name']}` ({p['biome']})" for p in self.prompt_view.planets])
         msg = (
             f"### Current Queue to Submit:\n"
@@ -496,41 +415,26 @@ class PlanetInputModal(discord.ui.Modal):
             f"**Planets Added:**\n{planet_list}\n\n"
             f"Would you like to add another planet, or proceed with final submission?"
         )
-        
         await interaction.response.edit_message(content=msg, view=self.prompt_view)
 
-   
-#-------------------Discovery Modal--------------
-import sqlite3
-from cogs import xp_system
-from cogs.xp_system import get_user, process_discovery_xp, DISCOVERY_TYPE_MAP
-from Data.xpdata import get_level, CONFIG
-import discord
-    
+
+#-------------------Discovery Components--------------
+from cogs.xp_system import process_discovery_xp
+
 class DiscoveryTypeSelect(discord.ui.View):
     def __init__(self, api, glyph_emojis, owner_id):
         super().__init__(timeout=60)
         self.api = api
         self.glyph_emojis = glyph_emojis
         self.owner_id = owner_id
-    
         self.selected_type = None
         self.selected_reality = None
     
-        # ---------------- REALITY ----------------
-        options = [
-            discord.SelectOption(label="Normal", value="Normal"),
-            discord.SelectOption(label="Permadeath", value="Permadeath")
-        ]
-        self.reality_dropdown = Select(
-            placeholder="Select Reality",
-            options=options,
-            custom_id="reality_select"
-        )
+        options = [discord.SelectOption(label="Normal", value="Normal"), discord.SelectOption(label="Permadeath", value="Permadeath")]
+        self.reality_dropdown = Select(placeholder="Select Reality", options=options, custom_id="reality_select")
         self.reality_dropdown.callback = self.reality_callback
         self.add_item(self.reality_dropdown)
     
-        # ---------------- DISCOVERY TYPE ----------------
         options = [
             discord.SelectOption(label="Starships", value="starship"),
             discord.SelectOption(label="Fauna", value="fauna"),
@@ -538,19 +442,11 @@ class DiscoveryTypeSelect(discord.ui.View):
             discord.SelectOption(label="Multi-tool", value="multitool"),
             discord.SelectOption(label="Bases", value="base")
         ]
-        
-        self.select = discord.ui.Select(
-            placeholder="Select Discovery Type",
-            options=options
-        )
+        self.select = discord.ui.Select(placeholder="Select Discovery Type", options=options)
         self.select.callback = self.select_callback
         self.add_item(self.select)
         
-        self.next_btn = discord.ui.Button(
-            label="Next",
-            style=discord.ButtonStyle.green,
-            disabled=True
-        )
+        self.next_btn = discord.ui.Button(label="Next", style=discord.ButtonStyle.green, disabled=True)
         self.next_btn.callback = self.next_callback
         self.add_item(self.next_btn)
     
@@ -558,84 +454,47 @@ class DiscoveryTypeSelect(discord.ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("This isn't your session.", ephemeral=True)
             return
-
         self.selected_reality = self.reality_dropdown.values[0]
-    
         for option in self.reality_dropdown.options:
             option.default = option.value == self.selected_reality
-    
         self.next_btn.disabled = not (self.selected_type and self.selected_reality)
-    
         await interaction.response.edit_message(view=self)
     
     async def select_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("This isn't your session.", ephemeral=True)
             return
-    
         self.selected_type = self.select.values[0]
-    
         for option in self.select.options:
             option.default = option.value == self.selected_type
-    
         self.next_btn.disabled = not (self.selected_type and self.selected_reality)
-    
         await interaction.response.edit_message(view=self)
     
     async def next_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message(
-                "This isn't your session.", ephemeral=True
-            )
+            await interaction.response.send_message("This isn't your session.", ephemeral=True)
             return
-    
         if not (self.selected_type and self.selected_reality):
-            await interaction.response.send_message(
-                "Select both Reality and Type first.", ephemeral=True
-            )
+            await interaction.response.send_message("Select both Reality and Type first.", ephemeral=True)
             return
    
         haven_cog = interaction.client.get_cog("HavenSubmission")
-        HexKeypad = getattr(haven_cog, "HexKeypad", None)
+        HexKeypad_class = getattr(haven_cog, "HexKeypad", None)
     
         try:
-            view = HexKeypad(
-                api=self.api,
-                glyph_emojis=self.glyph_emojis,
-                owner_id=self.owner_id,
-                mode="discovery"
-            )
+            view = HexKeypad_class(api=self.api, glyph_emojis=self.glyph_emojis, owner_id=self.owner_id, mode="discovery")
             view.discovery_type = self.selected_type
             view.reality = self.selected_reality  
-    
-            embed = view.build_embed(
-                title=f"Submit Discovery: {self.selected_type}"
-            )
-    
-            await interaction.response.send_message(
-                embed=embed,
-                view=view,
-                ephemeral=True
-            )
-    
+            embed = view.build_embed(title=f"Submit Discovery: {self.selected_type}")
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             self.stop()
-    
         except Exception:
-            import traceback
             traceback.print_exc()
-    
-    # =========================
-    # DISCOVERY MODAL
-    # =========================
+
+
 class DiscoverySubmissionModal(discord.ui.Modal):
-    def __init__(self, glyph, user_id, api, discovery_type,
-                 system_exists=False,
-                 system_name=None,
-                 system_id=None,
-                 notes=None,
-                 reality=None):
+    def __init__(self, glyph, user_id, api, discovery_type, system_exists=False, system_name=None, system_id=None, notes=None, reality=None):
         super().__init__(title="Submit Discovery")
-    
         self.glyph = glyph
         self.user_id = user_id
         self.api = api
@@ -645,93 +504,41 @@ class DiscoverySubmissionModal(discord.ui.Modal):
         self.reality = reality
         self.prefill_notes = notes        
     
-        self.galaxy_name = TextInput(
-            label="Galaxy",
-            placeholder="Enter the galaxy name",
-            required=True,
-            max_length=100
-        )
+        self.galaxy_name = TextInput(label="Galaxy", placeholder="Enter the galaxy name", required=True, max_length=100)
         self.add_item(self.galaxy_name)
-            
-        self.system_name = TextInput(
-            label="System Name",
-            max_length=100,
-            required=not system_exists
-        )
+        self.system_name = TextInput(label="System Name", max_length=100, required=not system_exists)
         self.add_item(self.system_name)
-    
-        self.community_tag = TextInput(
-            label="Community Tag",
-            placeholder="Enter Civ Tag",
-            max_length=5,
-            required=True
-        )
+        self.community_tag = TextInput(label="Community Tag", placeholder="Enter Civ Tag", max_length=5, required=True)
         self.add_item(self.community_tag)
-            
         self.discovery_name = TextInput(label="Discovery Name", max_length=100)
         self.add_item(self.discovery_name)
-    
-        self.notes = TextInput(
-            label="Notes",
-            style=discord.TextStyle.paragraph,
-            required=False
-        )
+        self.notes = TextInput(label="Notes", style=discord.TextStyle.paragraph, required=False)
         self.add_item(self.notes)
     
     async def on_submit(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "This isn't your discovery session.", ephemeral=True
-            )
+            await interaction.response.send_message("This isn't your discovery session.", ephemeral=True)
             return
     
         view = DiscoveryConfirmView(
-            glyph=self.glyph,
-            user_id=self.user_id,
-            api=self.api,
-            discovery_type=self.dtype,
-            system_exists=self.system_exists,
-            galaxy_name=self.galaxy_name.value,
-            system_name=self.system_name.value,
-            system_id=self.system_id,
-            notes=self.notes.value,
-            discovery_name=self.discovery_name.value,
-            community_tag=self.community_tag.value    
+            glyph=self.glyph, user_id=self.user_id, api=self.api, discovery_type=self.dtype,
+            system_exists=self.system_exists, galaxy_name=self.galaxy_name.value, system_name=self.system_name.value,
+            system_id=self.system_id, notes=self.notes.value, discovery_name=self.discovery_name.value, community_tag=self.community_tag.value    
         )
     
-        embed = discord.Embed(
-            title="Confirm Discovery Submission",
-            color=0x00FFFF
-        )
+        embed = discord.Embed(title="Confirm Discovery Submission", color=0x00FFFF)
         embed.add_field(name="Name", value=self.discovery_name.value, inline=False)
         embed.add_field(name="Type", value=self.dtype, inline=True)
         embed.add_field(name="Glyph", value=self.glyph, inline=True)
-    
         if self.notes.value:
             embed.add_field(name="Notes", value=self.notes.value, inline=False)
     
-        await interaction.response.send_message(
-            embed=embed,
-            view=view,
-            ephemeral=True
-        )
-    
-    
-    # =========================
-    # XP HOOK
-    # =========================
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
 class DiscoveryConfirmView(discord.ui.View):
-    def __init__(self, glyph, user_id, api, discovery_type,
-                 system_exists=False,
-                 galaxy_name=None,
-                 system_name=None,
-                 system_id=None,
-                 notes=None,
-                 discovery_name=None,
-                 community_tag=None):
-
+    def __init__(self, glyph, user_id, api, discovery_type, system_exists=False, galaxy_name=None, system_name=None, system_id=None, notes=None, discovery_name=None, community_tag=None):
         super().__init__(timeout=60)
-
         self.glyph = glyph
         self.user_id = user_id
         self.api = api
@@ -743,31 +550,22 @@ class DiscoveryConfirmView(discord.ui.View):
         self.discovery_name = discovery_name
         self.community_tag = community_tag
         self.system_exists = system_exists
-        self.confirm_btn = discord.ui.Button(
-            label="Confirm Submit",
-            style=discord.ButtonStyle.green
-        )
+        
+        self.confirm_btn = discord.ui.Button(label="Confirm Submit", style=discord.ButtonStyle.green)
         self.confirm_btn.callback = self.confirm_callback
         self.add_item(self.confirm_btn)
 
     async def confirm_callback(self, interaction: discord.Interaction):
         try:
             if interaction.user.id != self.user_id:
-                await interaction.response.send_message(
-                    "This isn't your session.", ephemeral=True
-                )
+                await interaction.response.send_message("This isn't your session.", ephemeral=True)
                 return
 
-            discovery_name = (
-                self.discovery_name
-                or f"{self.discovery_type} {self.glyph}"
-            )
-
+            discovery_name = self.discovery_name or f"{self.discovery_type} {self.glyph}"
             await interaction.response.defer(ephemeral=True)
 
             system_result, system_id = await self.get_system()
             
-# ---------------- DISCOVERY SUBMISSION -----
             payload = {
                 "system_id": system_id,
                 "discovery_name": discovery_name,
@@ -778,15 +576,10 @@ class DiscoveryConfirmView(discord.ui.View):
                 "discord_tag": self.community_tag
             }
             
-            result = await self.api.submit_discovery(payload)
+            await self.api.submit_discovery(payload)
+            msg = f"✅ Discovery submitted!\nSystem: `{self.system_name or 'Unknown'}`\nDiscovery: `{discovery_name}`"
             
-            msg = (
-                f"✅ Discovery submitted!\n"
-                f"System: `{self.system_name or 'Unknown'}`\n"
-                f"Discovery: `{discovery_name}`"
-            )
-            
-            xp_gained = process_discovery_xp(
+            xp_gained = await process_discovery_xp(
                 user_id=self.user_id,
                 discovery_type=self.discovery_type,
                 channel_id=interaction.channel.id,
@@ -795,40 +588,21 @@ class DiscoveryConfirmView(discord.ui.View):
             if xp_gained:
                 msg += f"\n✨ +{xp_gained} XP earned"
             
-            try:
-                bonus_tip = get_bonus_tip(system_result)
-            
-                if bonus_tip:
-                    msg += f"\n\n💡 {bonus_tip}"
-            
-            except Exception:
-                logger.exception("Bonus hint failed")
-            
             await interaction.followup.send(msg, ephemeral=True)
-
         except Exception as e:
             logger.exception("Discovery submission failed")
-
-            await interaction.followup.send(
-                f"❌ Submission failed: {e}",
-                ephemeral=True
-            )                             
+            await interaction.followup.send(f"❌ Submission failed: {e}", ephemeral=True)                             
                      
-# ---------------- SYSTEM CREATION -----------
     async def get_system(self):
         if self.system_exists:
             if self.system_id:
                 return {"id": self.system_id}, self.system_id
-        
-            
             dup = await self.api.check_duplicate(self.glyph)
-        
             system_id = dup.get("system_id") or dup.get("id")
-        
             if not system_id:
                 raise Exception("System exists but API did not return system_id")
-        
             return {"id": system_id}, system_id                      
+
         system_payload = {
             "glyph_code": self.glyph,
             "system_name": self.system_name,
@@ -837,26 +611,18 @@ class DiscoveryConfirmView(discord.ui.View):
             "reality": getattr(self, "reality", "Normal"),
             "user_id": self.user_id
         }
-                    
         system_result = await self.api.submit_system(system_payload)
-                    
         if not system_result:
             raise Exception("System API returned empty response")
-                    
         system_id = (
-            system_result.get("system_id")
-            or system_result.get("submission_id")
-            or system_result.get("id")
-            or (system_result.get("system") or {}).get("id")
+            system_result.get("system_id") or system_result.get("submission_id")
+            or system_result.get("id") or (system_result.get("system") or {}).get("id")
         )
-                    
         if not system_id:
             raise Exception(f"System creation failed: {system_result}")
-                    
         return system_result, system_id
     
     
-# -------------------- HEX KEYBOARD VIEW ---
 class HexKeypad(discord.ui.View):
     def __init__(self, api, glyph_emojis, owner_id: int, mode="system"):
         super().__init__(timeout=None)
@@ -868,44 +634,19 @@ class HexKeypad(discord.ui.View):
         self.mode = mode
         self.discovery_type = None
 
-        self.error_triggered = {
-            "planet": False,
-            "system": False,
-            "yy": False,
-            "zzz": False,
-            "xxx": False,
-            "galactic_core": False
-        }
-
         hex_keys = [["0","1","2","3"],["4","5","6","7"],["8","9","A","B"],["C","D","E","F"]]
-
         for row_index, row in enumerate(hex_keys):
             for key in row:
                 emoji = glyph_emojis.get(key)
-                button = discord.ui.Button(
-                    style=discord.ButtonStyle.secondary,
-                    emoji=emoji,
-                    custom_id=f"hex_{key}_{owner_id}",
-                    row=row_index
-                )
+                button = discord.ui.Button(style=discord.ButtonStyle.secondary, emoji=emoji, custom_id=f"hex_{key}_{owner_id}", row=row_index)
                 button.callback = self.make_callback(key, emoji)
                 self.add_item(button)
 
-        back = discord.ui.Button(
-            label="←",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"hex_back_{owner_id}",
-            row=4
-        )
+        back = discord.ui.Button(label="←", style=discord.ButtonStyle.danger, custom_id=f"hex_back_{owner_id}", row=4)
         back.callback = self.backspace
         self.add_item(back)
 
-        reset = discord.ui.Button(
-            label="Reset",
-            style=discord.ButtonStyle.primary,
-            custom_id=f"hex_reset_{owner_id}",
-            row=4
-        )
+        reset = discord.ui.Button(label="Reset", style=discord.ButtonStyle.primary, custom_id=f"hex_reset_{owner_id}", row=4)
         reset.callback = self.reset
         self.add_item(reset)
 
@@ -918,55 +659,38 @@ class HexKeypad(discord.ui.View):
     def build_embed(self, title="Glyph Input"):
         embed = discord.Embed(title=title, color=0x00FFFF)
         embed.add_field(name="Current Input", value=f"`{self.input_string or ' '}`", inline=False)
-
         if self.emoji_sequence:
             embed.add_field(name="Preview", value=" ".join(self.emoji_sequence), inline=False)
-
         return embed
         
-# ---------------- CALLBACK FACTORY ---------
     def make_callback(self, key, emoji):
         async def callback(interaction: discord.Interaction):
             if len(self.input_string) >= 12:
                 return
-        
             self.input_string += key
             self.emoji_sequence.append(str(emoji))
-            await interaction.response.edit_message(
-                embed=self.build_embed(),
-                view=self
-            )
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
         
             if len(self.input_string) == 12:
                 glyph = self.input_string
-                self.emoji_sequence = self.emoji_sequence[:12]
-                
                 await interaction.followup.send("🔄 Validating glyph coordinate with Haven API...", ephemeral=True)
                 
                 try:
                     valid = await self.api.validate_glyph(glyph)
                     if not valid.get("valid"):
                         self.reset_state()
-                        await interaction.followup.send(
-                            "❌ Invalid glyph code sequence. Please check your coordinate and try again.",
-                            ephemeral=True
-                        )
+                        await interaction.followup.send("❌ Invalid glyph code sequence.", ephemeral=True)
                         return
                  
-                    api_generated_name = valid.get("system_name") or valid.get("generated_name") or valid.get("name") or "Unknown System"
-
+                    api_generated_name = valid.get("system_name") or valid.get("generated_name") or "Unknown System"
                     dup = await self.api.check_duplicate(glyph)
                     system_exists = dup.get("exists")
                     system_name = dup.get("system_name") or api_generated_name
                     system_id = dup.get("system_id")
 
                     if self.mode == "discovery":
-                        msg = (
-                            f"⚠️ System already exists: **{system_name}**"
-                            if system_exists
-                            else "❌ System doesn't exist.\nCreating discovery..."
-                        )
-
+                        msg = f"⚠️ System already exists: **{system_name}**" if system_exists else "❌ System doesn't exist.\nCreating discovery..."
+                        
                         class ContinueView(discord.ui.View):
                             def __init__(self, outer):
                                 super().__init__(timeout=60)
@@ -974,34 +698,20 @@ class HexKeypad(discord.ui.View):
 
                             @discord.ui.button(label="Continue", style=discord.ButtonStyle.green)
                             async def continue_btn(self, interaction2: discord.Interaction, button: discord.ui.Button):
-                                if interaction2.user.id != self.outer.owner_id:
-                                    await interaction2.response.send_message("Not your session.", ephemeral=True)
-                                    return
-
                                 modal = DiscoverySubmissionModal(
-                                    glyph=glyph,
-                                    user_id=interaction2.user.id,
-                                    api=self.outer.api,
-                                    discovery_type=self.outer.discovery_type,
-                                    system_exists=system_exists,
-                                    system_name=system_name,
-                                    system_id=system_id,
-                                    notes=None,
-                                    reality=self.outer.reality
+                                    glyph=glyph, user_id=interaction2.user.id, api=self.outer.api,
+                                    discovery_type=self.outer.discovery_type, system_exists=system_exists,
+                                    system_name=system_name, system_id=system_id, notes=None, reality=self.outer.reality
                                 )
                                 await interaction2.response.send_modal(modal)
                                 self.stop()
 
-                        view = ContinueView(self)
-                        await interaction.followup.send(msg, view=view, ephemeral=True)
+                        await interaction.followup.send(msg, view=ContinueView(self), ephemeral=True)
                         self.stop()
                         return
 
                     if system_exists:
-                        await interaction.followup.send(
-                            f"⚠️ This system has already been logged: **{system_name}**",
-                            ephemeral=True
-                        )
+                        await interaction.followup.send(f"⚠️ This system has already been logged: **{system_name}**", ephemeral=True)
                         self.reset_state()
                         self.stop()
                         return
@@ -1012,11 +722,9 @@ class HexKeypad(discord.ui.View):
                         ephemeral=True
                     )
                     self.stop()
-
                 except Exception as e:
-                    await interaction.followup.send(f"❌ An error occurred during verification: {e}", ephemeral=True)
+                    await interaction.followup.send(f"❌ Verification error: {e}", ephemeral=True)
                     self.reset_state()
-
         return callback
 
     def reset_state(self):
@@ -1026,39 +734,13 @@ class HexKeypad(discord.ui.View):
     async def backspace(self, interaction):
         self.input_string = self.input_string[:-1]
         self.emoji_sequence = self.emoji_sequence[:-1]
-
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.edit_message(
-                    embed=self.build_embed(),
-                    view=self
-                )
-            else:
-                await interaction.message.edit(
-                    embed=self.build_embed(),
-                    view=self
-                )
-        except:
-            await interaction.message.edit(embed=self.build_embed(), view=self)
+        await interaction.message.edit(embed=self.build_embed(), view=self)
 
     async def reset(self, interaction):
         self.reset_state()
+        await interaction.message.edit(embed=self.build_embed(), view=self)
 
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.edit_message(
-                    embed=self.build_embed(),
-                    view=self
-                )
-            else:
-                await interaction.message.edit(
-                    embed=self.build_embed(),
-                    view=self
-                )
-        except:
-            await interaction.message.edit(embed=self.build_embed(), view=self)
                 
-# ---------------- Hex Glyph Emojis ----------------
 glyph_emojis = {
     "0": discord.PartialEmoji(name="0", id=1487546589269463211),
     "1": discord.PartialEmoji(name="1", id=1487546881692405843),
@@ -1073,16 +755,13 @@ glyph_emojis = {
     "A": discord.PartialEmoji(name="A", id=1487547426406404126),
     "B": discord.PartialEmoji(name="B", id=1487547508065435728),
     "C": discord.PartialEmoji(name="C", id=1487547606140981379),
-     "D": discord.PartialEmoji(name="D", id=1487547687229198369),
+    "D": discord.PartialEmoji(name="D", id=1487547687229198369),
     "E": discord.PartialEmoji(name="E", id=1487547811003105300),
     "F": discord.PartialEmoji(name="F", id=1487547868922249479)  
 }
 
 
 #---------------MANUAL READER---------------
-import asyncio  
-import re
-
 class HavenScraperCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1090,7 +769,6 @@ class HavenScraperCog(commands.Cog):
         self.api = HavenAPI() 
 
     def parse_system_text(self, text: str) -> dict:
-        """Helper to extract system details from the main/starter text block."""
         def extract_field(pattern, source_text):
             match = re.search(pattern, source_text, re.IGNORECASE)
             return match.group(1).strip() if match else None
@@ -1122,7 +800,6 @@ class HavenScraperCog(commands.Cog):
         }
 
     def parse_planet_text(self, text: str) -> list:
-        """Helper to find and parse structured planet lists inside text segments."""
         planets = []
         planet_blocks = re.split(r"(?:\*\s+\*\*Planet Name\*\*|\bPlanet Name:)\s*(.*)", text)
         
@@ -1138,37 +815,26 @@ class HavenScraperCog(commands.Cog):
                 planets.append({
                     "name": p_name,
                     "biome": extract_subfield(r"(?:-\s*Type:|\bType:)\s*(.*)", p_body),
-                    "weather": extract_subfield(r"(?:\*\s*Weather:|\bWeather:)\s*(.*)", p_body),
-                    "age": extract_subfield(r"(?:\*\s*Age:|\bAge:)\s*(.*)", p_body),
-                    "atmosphere": extract_subfield(r"(?:\*\s*Atmosphere:|\bAtmosphere:)\s*(.*)", p_body),
-                    "primary_core_element": extract_subfield(r"(?:\*\s*Primary Core Element:|\bPrimary Core Element:)\s*(.*)", p_body),
-                    "sentinels": extract_subfield(r"(?:\*\s*Sentinels:|\bSentinels:)\s*(.*)", p_body),
-                    "flora": extract_subfield(r"(?:\*\s*Flora:|\bFlora:)\s*(.*)", p_body),
-                    "fauna": extract_subfield(r"(?:\*\s*Fauna:|\bFauna:)\s*(.*)", p_body),
-                    "resources": extract_subfield(r"(?:\*\s*Resources:|\bResources:)\s*(.*)", p_body),
-                    "outposts": extract_subfield(r"(?:\*\s*Outposts:|\bOutposts:)\s*(.*)", p_body),
-                    "other_notes": extract_subfield(r"(?:\*\s*Other Notes:|\bOther Notes:)\s*(.*)", p_body)
+                    "fauna": extract_subfield(r"(?:\*\s*Fauna:|\bFauna:)\s*(.*)", p_body)
                 })
         return planets
 
     async def build_full_payload(self, thread: discord.Thread, starter_message: discord.Message) -> dict:
-        """Combines system data from main post and scans comments for planet logs."""
         payload = self.parse_system_text(starter_message.content)
         if not payload:
             return None
 
         payload["planets"] = self.parse_planet_text(starter_message.content)
-
         try:
-            async for message in thread.history(limit=50, oldest_first=True):
+            async_history = thread.history(limit=50, oldest_first=True)
+            async for message in async_history:
                 if message.id == starter_message.id:
                     continue 
-                
                 discovered_planets = self.parse_planet_text(message.content)
                 if discovered_planets:
                     payload["planets"].extend(discovered_planets)
         except Exception as e:
-            print(f"Error parsing comment history in thread {thread.id}: {e}")
+            print(f"Error parsing history: {e}")
 
         payload["submitted_by"] = starter_message.author.name
         return payload
@@ -1176,10 +842,9 @@ class HavenScraperCog(commands.Cog):
     @commands.command(name="sync_forum")
     @commands.has_permissions(administrator=True)
     async def sync_forum(self, ctx: commands.Context):
-        """Command to manually trigger a sync of all existing historical posts."""
         channel = self.bot.get_channel(self.forum_channel_id)
         if not channel or not isinstance(channel, discord.ForumChannel):
-            await ctx.send("Target forum channel not found or invalid type.")
+            await ctx.send("Target forum channel invalid.")
             return
 
         await ctx.send("Starting forum map synchronization process...")
@@ -1203,23 +868,17 @@ class HavenScraperCog(commands.Cog):
                 await self.api.submit_system(payload)
                 success_count += 1
                 await starter_message.add_reaction("✅")
-            except Exception as e:
-                print(f"Failed to sync thread {thread.id}: {e}")
+            except Exception:
                 try:
                     await starter_message.add_reaction("❌")
                 except:
                     pass
 
-        await ctx.send(f"Sync complete! Successfully submitted {success_count} structured entries to the Haven Map API.")
+        await ctx.send(f"Sync complete! Submitted {success_count} entries.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Listens to comments posted in existing forum threads to update planet data."""
-        if not isinstance(message.channel, discord.Thread):
-            return
-        if message.channel.parent_id != self.forum_channel_id:
-            return
-        if message.author.bot:
+        if not isinstance(message.channel, discord.Thread) or message.channel.parent_id != self.forum_channel_id or message.author.bot:
             return
 
         if "Planet Name" in message.content or "Type:" in message.content:
@@ -1230,36 +889,24 @@ class HavenScraperCog(commands.Cog):
                     await self.api.submit_system(payload)
                     await message.add_reaction("✅")
             except Exception as e:
-                print(f"Failed processing planet comment in thread {message.channel.id}: {e}")
+                print(f"Failed processing planet: {e}")
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
-        """Automatically fires when a new thread post arrives."""
         if thread.parent_id != self.forum_channel_id:
             return
-
         await asyncio.sleep(4) 
-
         try:
             starter_message = thread.starter_message or await thread.fetch_message(thread.id)
-        except discord.HTTPException as e:
-            print(f"Failed to fetch live starter message {thread.id}: {e}")
-            return
+            payload = await self.build_full_payload(thread, starter_message)
+            if payload:
+                await self.api.submit_system(payload)
+                await starter_message.add_reaction("✅")
+        except Exception:
+            pass
 
-        payload = await self.build_full_payload(thread, starter_message)
-        if not payload:
-            return
 
-        try:
-            await self.api.submit_system(payload)
-            await starter_message.add_reaction("✅")
-        except Exception as e:
-            print(f"Failed to auto-submit live system {thread.id}: {e}")
-            try:
-                await starter_message.add_reaction("❌")
-            except:
-                pass
-    # -------------------- COG ----------------
+# -------------------- MAIN COG ----------------
 class HavenSubmission(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1268,7 +915,6 @@ class HavenSubmission(commands.Cog):
         self.glyph_emojis = glyph_emojis
         self.DiscoveryTypeSelect = DiscoveryTypeSelect
     
-    # -------------------- SETUP ----------------
 async def setup(bot):
     await bot.add_cog(HavenSubmission(bot)) 
     await bot.add_cog(HavenScraperCog(bot))  
