@@ -49,6 +49,20 @@ class HavenAPI:
                     }
     
                 return data
+    async def fetch_biome_adjectives(self):
+        """Fetches the curated list of biomes from the Haven option catalog."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.base}/api/option-catalog", headers=self.headers) as resp:
+                if resp.status != 200:
+                    logger.error(f"Failed to fetch option catalog: HTTP {resp.status}")
+                    return []
+                
+                try:
+                    data = await resp.json()
+                    return data.get("biomes", [])
+                except Exception as e:
+                    logger.error(f"Error parsing option catalog JSON: {e}")
+                    return []
     
     async def check_duplicate(self, glyph, galaxy="Euclid", reality="Normal"):
         async with aiohttp.ClientSession() as session:
@@ -345,27 +359,32 @@ class PlanetPromptView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
+        @discord.ui.button(label="Yes, add a planet", style=discord.ButtonStyle.primary)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if len(self.planets) >= 6:
             await interaction.response.send_message("❌ Maximum limit of 6 planets reached.", ephemeral=True)
             return
-
+9
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
             dynamic_biomes = await self.api.fetch_biome_adjectives() 
-            dynamic_biomes = dynamic_biomes[:25] if dynamic_biomes else ["Lush", "Desert", "Toxic"]
+            
+            if dynamic_biomes:
+                dynamic_biomes = dynamic_biomes[:25] 
+            else:
+                dynamic_biomes = ["Lush", "Desert", "Toxic", "Frozen", "Barren", "Exotic"]
 
             dropdown_view = BiomeDropdownView(self, dynamic_biomes)
 
             await interaction.followup.send(
-                content="Step 1: Select the planet's Biome Type from the Haven database:",
+                content="### 🪐 Add Planet: Step 1\nSelect a verified Biome Type adjective from the Haven database:",
                 view=dropdown_view,
                 ephemeral=True
             )
 
         except Exception as e:
+            logger.error(f"Failed to load Haven biomes: {e}")
             await interaction.followup.send(f"⚠️ Failed to load Haven biomes: {e}", ephemeral=True)
 
 
