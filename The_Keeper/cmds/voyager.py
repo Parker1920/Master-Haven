@@ -1,32 +1,3 @@
-"""
-Voyager poster slash commands.
-
-/fingerprint [user] [username]   — drops a Voyager Card into chat
-/atlas [galaxy]                  — drops a Galaxy Atlas into chat
-
-Both commands embed PNGs served by the Haven backend at:
-    {HAVEN_PUBLIC_URL}/api/posters/voyager_og/{username}.png
-    {HAVEN_PUBLIC_URL}/api/posters/atlas/{galaxy}.png
-
-The bot doesn't render anything itself — it's a thin client of the Haven
-backend's poster service. Same source of truth as Discord/Twitter link
-embeds, in-UI thumbnails, and direct shares.
-
-Three URL env vars matter here, and they have different audiences:
-  - HAVEN_API: the URL the bot uses to call the Haven backend itself.
-    On the Pi this is the internal docker network address
-    (http://haven:8005) because hairpin NAT means the public
-    https://havenmap.online doesn't resolve back to itself from inside
-    the Pi's LAN.
-  - HAVEN_PUBLIC_URL: the URL embedded in messages that get sent OUT to
-    Discord — image URLs, page links, anything Discord's CDN or the user's
-    browser will fetch from the public internet. Must be the public site
-    URL. Defaults to https://havenmap.online.
-  - HAVEN_URL: legacy variable used by other cogs (the Haven_stats button).
-    Kept as a fallback for HAVEN_PUBLIC_URL so single-host deploys can
-    still set just one variable.
-"""
-
 import os
 import re
 import logging
