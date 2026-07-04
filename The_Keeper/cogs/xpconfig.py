@@ -454,6 +454,8 @@ class XPConfigCog(commands.Cog, name="xp"):
         self.bot = bot
         self.gc = None
         self.spreadsheet = None
+        # In-memory cooldown tracking dictionary: {(guild_id, user_id): last_msg_timestamp}
+        self._cooldowns = {}
 
     def get_sheet(self, tab_name: str):
         if not self.spreadsheet:
@@ -465,6 +467,68 @@ class XPConfigCog(commands.Cog, name="xp"):
             return self.spreadsheet.worksheet(tab_name)
         except gspread.exceptions.WorksheetNotFound:
             return self.spreadsheet.add_worksheet(title=tab_name, rows="500", cols="20")
+
+    async def process_message_sheets_xp(self, message: discord.Message):
+        """Processes an incoming message, validates cooldowns, and awards XP via Google Sheets."""
+        # 1. Guard clauses: Ignore bots, system messages, and DMs
+        if message.author.bot or not message.guild:
+            return
+
+        guild_id = str(message.guild.id)
+        user_id = str(message.author.id)
+        now = asyncio.get_running_loop().time()
+
+        # 2. Fetch the guild config to determine XP payouts and cooldown lengths
+        loop = asyncio.get_running_loop()
+        def fetch_guild_config():
+            sheet = self.get_sheet("guilds")
+            rows = sheet.get_all_values()
+            return next((r for r in rows[1:] if r and r[0] == guild_id), None)
+
+        g_row = await loop.run_in_executor(None, fetch_guild_config)
+
+        # Parse settings or fall back to code defaults
+        xp_per_msg = int(g_row[1]) if g_row and len(g_row) > 1 and g_row[1].isdigit() else 1
+        cooldown_sec = float(g_row[4]) if g_row and len(g_row) > 4 and g_row[4].replace('.', '', 1).isdigit() else 5.0
+        msg_enabled = g_row[2] == "True" if g_row and len(g_row) > 2 else False
+        lvl_up_template = g_row[3] if g_row and len(g_row) > 3 and g_row[3] else "Congratulations {user}, you leveled up to {level}!"
+
+        # 3. Check Cooldowns
+        last_time = self._cooldowns.get((guild_id, user_id), 0)
+        if now - last_time < cooldown_sec:
+            return  # User is on cooldown, skip processing
+
+        # Update the cooldown timestamp immediately
+        self._cooldowns[(guild_id, user_id)] = now
+
+        # 4. Award XP (defaulting role context to 'GLOBAL' as built in CoreSettingsModal)
+        xp, level, leveled_up = await self.add_spreadsheet_xp(guild_id, user_id, "GLOBAL", xp_per_msg)
+
+        # 5. Handle Level-Up Notification if triggered
+        if leveled_up and msg_enabled:
+            # Check if there is a specific level-up channel saved in level_xp
+            def fetch_level_channel():
+                sheet = self.get_sheet("level_xp")
+                rows = sheet.get_all_values()
+                return next((r[4] for r in rows[1:] if r and r[0] == guild_id and r[1] == str(level) and len(r) > 4), "")
+
+            chan_id_str = await loop.run_in_executor(None, fetch_level_channel)
+            
+            # Target proper delivery channel
+            target_channel = None
+            if chan_id_str.isdigit():
+                target_channel = message.guild.get_channel(int(chan_id_str))
+            
+            # Fallback to the channel where the message was sent if dedicated channel is missing
+            if not target_channel:
+                target_channel = message.channel
+
+            formatted_msg = lvl_up_template.replace("{user}", message.author.mention).replace("{level}", str(level))
+            
+            try:
+                await target_channel.send(formatted_msg)
+            except discord.Forbidden:
+                pass  # Avoid crashing if the bot lacks permissions to write to that specific channel
 
     @app_commands.command(name="xp", description="Open the multi-interaction server XP configuration control panel.")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -585,7 +649,6 @@ class XPConfigCog(commands.Cog, name="xp"):
         guild_id = str(ctx.guild.id)
         user_id = str(member.id)
         
-        # FIX: Wrap the database fetching and embed creation inside the typing context manager
         async with ctx.typing():
             loop = asyncio.get_running_loop()
 
@@ -648,7 +711,145 @@ class XPConfigCog(commands.Cog, name="xp"):
 
             await ctx.send(embed=embed)        
 
-        # Admin layouts view stays outside the typing block
+        if is_first_use and ctx.author.guild_permissions.manage_guild:
+            prompt_view = CustomTrackerPromptView(self, guild_id)
+            await ctx.send(
+                "ℹ️ **Admin Notice:** Would you like to set up a custom layout for your server's level embeds?", 
+                view=prompt_view
+            )
+
+
+    # ------------------ STRUCTURAL SHEETS MAINTENANCE ENGINE ------------------
+    @commands.command(name="update")
+    @commands.has_permissions(manage_guild=True)
+    async def force_sheets_update(self, ctx: commands.Context):
+        """Classic prefix command to verify, fix, and update all database schema tables."""
+        await ctx.send("🔄 *Validating spreadsheet architecture and table tabs...*")
+        loop = asyncio.get_running_loop()
+
+        def sync_schema():
+            required_tables = {
+                "guilds": [
+                    "Guild ID", "XP Per Msg", "Msg Enabled", "Msg Text", "Cooldown", "Global XP", 
+                    "Custom Layout Enabled", "Embed Title", "Border Hex Color", "Filled Bar Emoji", "Empty Bar Emoji"
+                ],
+                "level_xp": ["Guild ID", "Level Num", "XP Required", "Level Name", "Level Up Channel ID"],
+                "server_roles": ["Guild ID", "Role Name", "Role ID", "Unused1", "Unused2", "Office Channel ID"],
+                "user_roles": ["Guild ID", "User ID", "Role ID", "Current XP", "Current Level"]
+            }
+            
+            self.get_sheet("guilds") 
+            
+            created_tabs = []
+            fixed_headers = []
+
+            for tab_name, headers in required_tables.items():
+                try:
+                    work_sheet = self.spreadsheet.worksheet(tab_name)
+                    existing_values = work_sheet.get_all_values()
+                    if not existing_values or not existing_values[0]:
+                        work_sheet.update(range_name="A1", values=[headers])
+                        fixed_headers.append(tab_name)
+                    else:
+                        current_headers = existing_values[0]
+                        if len(current_headers) < len(headers):
+                            work_sheet.update(range_name="A1", values=[headers])
+                            fixed_headers.append(f"{tab_name} (Updated Schema Columns)")
+                except gspread.exceptions.WorksheetNotFound:
+                    new_sheet = self.spreadsheet.add_worksheet(title=tab_name, rows="1000", cols="20")
+                    new_sheet.update(range_name="A1", values=[headers])
+                    created_tabs.append(tab_name)
+            
+            return created_tabs, fixed_headers
+
+        created, fixed = await loop.run_in_executor(None, sync_schema)
+
+        status_report = "📊 **Spreadsheet Synchronization Complete!**\n"
+        if not created and not fixed:
+            status_report += "✅ All required worksheets and column headers are valid and online."
+        else:
+            if created:
+                status_report += f"🛠️ **Created missing tabs:** {', '.join([f'`{c}`' for c in created])}\n"
+            if fixed:
+                status_report += f"📝 **Injected missing header columns into:** {', '.join([f'`{f}`' for f in fixed])}\n"
+            status_report += "🚀 System architecture updated successfully."
+
+        await ctx.send(status_report)
+
+    @commands.command(name="level")
+    async def show_level(self, ctx: commands.Context, member: discord.Member = None):
+        """Displays the user's current level, XP, and customizable progress bar."""
+        member = member or ctx.author
+        if member.bot:
+            await ctx.send("🤖 Bots don't have XP levels!")
+            return
+
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+        
+        # FIX: Wrap the database fetching and embed creation inside the typing context m
+        async with ctx.typing():
+            loop = asyncio.get_running_loop()
+
+            def fetch_guild_and_user_data():
+                g_sheet = self.get_sheet("guilds")
+                g_rows = g_sheet.get_all_values()
+                g_row = next((r for r in g_rows[1:] if r and r[0] == guild_id), None)
+                
+                custom_enabled = g_row[6] == "True" if g_row and len(g_row) > 6 else False
+                embed_title = g_row[7] if g_row and len(g_row) > 7 and g_row[7] else "✨ {name}'s Level Progress"
+                border_hex = g_row[8] if g_row and len(g_row) > 8 and g_row[8] else "purple"
+                filled_emoji = g_row[9] if g_row and len(g_row) > 9 and g_row[9] else "🟩"
+                empty_emoji = g_row[10] if g_row and len(g_row) > 10 and g_row[10] else "⬛"
+
+                is_first_use = g_row is None or len(g_row) <= 6 or g_row[6] == ""
+
+                user_sheet = self.get_sheet("user_roles")
+                user_records = user_sheet.get_all_values()
+                user_row = next((r for r in user_records[1:] if r and r[0] == guild_id and r[1] == user_id), None)
+                
+                current_xp = int(user_row[3]) if user_row and len(user_row) > 3 else 0
+                current_level = int(user_row[4]) if user_row and len(user_row) > 4 else 1
+                
+                curve_sheet = self.get_sheet("level_xp")
+                curves = {r[1]: int(r[2]) for r in curve_sheet.get_all_values()[1:] if r and r[0] == guild_id}
+                xp_needed_for_next = curves.get(str(current_level), 100)
+
+                return is_first_use, custom_enabled, embed_title, border_hex, filled_emoji, empty_emoji, current_xp, current_level, xp_needed_for_next
+
+            (is_first_use, custom_enabled, embed_title, border_hex, 
+             filled_emoji, empty_emoji, current_xp, current_level, xp_needed_for_next) = await loop.run_in_executor(None, fetch_guild_and_user_data)
+
+            if xp_needed_for_next <= 0:
+                xp_needed_for_next = 100
+            progress_ratio = min(current_xp / xp_needed_for_next, 1.0)
+            
+            bar_length = 10
+            filled_blocks = int(progress_ratio * bar_length)
+            empty_blocks = bar_length - filled_blocks
+            progress_bar = (filled_emoji * filled_blocks) + (empty_emoji * empty_blocks)
+            percentage = int(progress_ratio * 100)
+
+            embed_color = discord.Color.purple()
+            if custom_enabled:
+                try:
+                    if border_hex.startswith("#"):
+                        embed_color = discord.Color.from_str(border_hex)
+                    else:
+                        embed_color = getattr(discord.Color, border_hex.lower())()
+                except Exception:
+                    embed_color = discord.Color.purple()
+
+            formatted_title = embed_title.replace("{name}", member.display_name).replace("{level}", str(current_level))
+            embed = discord.Embed(title=formatted_title, color=embed_color)
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.add_field(name=" Level", value=f"`{current_level}`", inline=True)
+            embed.add_field(name=" Experience", value=f"`{current_xp} / {xp_needed_for_next} XP`", inline=True)
+            embed.add_field(name=f" Progress to Level {current_level + 1} ({percentage}%)", value=progress_bar, inline=False)
+            embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+
+            await ctx.send(embed=embed)        
+
         if is_first_use and ctx.author.guild_permissions.manage_guild:
             prompt_view = CustomTrackerPromptView(self, guild_id)
             await ctx.send(
