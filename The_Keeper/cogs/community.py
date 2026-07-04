@@ -465,6 +465,7 @@ class CommunityCog(commands.Cog):
             )
             return
 
+        # If it's only on Haven and no spreadsheet entry exists
         if not matches and haven_community_name:
             e = discord.Embed(
                 title=haven_community_name,
@@ -472,6 +473,19 @@ class CommunityCog(commands.Cog):
                 color=discord.Color.purple()
             )
             await interaction.edit_original_response(embed=e, view=None)
+
+            # Fire off the fingerprint image as a standalone follow-up message right after
+            import time
+            from urllib.parse import quote
+            cache_buster = int(time.time() // 60)
+            tag_slug = quote(clean_search)
+            
+            haven_public_url = (os.getenv("HAVEN_PUBLIC_URL") or "https://havenmap.online").rstrip("/")
+            if "://haven:" in haven_public_url:
+                haven_public_url = "https://havenmap.online"
+                
+            img_url = f"{haven_public_url}/api/posters/community/{tag_slug}.png?v={cache_buster}"
+            await interaction.followup.send(content=img_url, ephemeral=True)
             return
 
         async def build_embed(row, i):
@@ -535,6 +549,21 @@ class CommunityCog(commands.Cog):
             content=content,
             view=view
         )
+
+        first_row = matches[0]
+        tag_value = first_row.get("__tag_value", "").strip().upper()
+        if tag_value:
+            import time
+            from urllib.parse import quote
+            cache_buster = int(time.time() // 60)
+            tag_slug = quote(tag_value)
+            
+            haven_public_url = (os.getenv("HAVEN_PUBLIC_URL") or "https://havenmap.online").rstrip("/")
+            if "://haven:" in haven_public_url:
+                haven_public_url = "https://havenmap.online"
+                
+            img_url = f"{haven_public_url}/api/posters/community/{tag_slug}.png?v={cache_buster}"
+            await interaction.followup.send(content=img_url, ephemeral=True)
 
 
 # -------------------- SETUP --------------------
