@@ -7,6 +7,7 @@ from io import StringIO
 import asyncio
 import gspread
 
+
 # -------------------- PAGINATOR --------------------
 class SearchPaginator(discord.ui.View):
     def __init__(self, cog, results, embed_builder):
@@ -18,6 +19,7 @@ class SearchPaginator(discord.ui.View):
 
     async def build_page(self):
         row = self.results[self.index]
+        # Await the async embed builder
         embed = await self.embed_builder(row, self.index + 1)
 
         link = next((v for k, v in row.items() if "link" in k.lower()), None)
@@ -76,6 +78,7 @@ class SearchModal(discord.ui.Modal, title="Community Search"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Defer immediately to give fetch_invite time to run
         await interaction.response.defer(ephemeral=True)
         await self.cog.run_search(interaction, self.search.value)
 
@@ -100,7 +103,15 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         required=True
     )
     link = discord.ui.TextInput(label="Permanent Link", required=False)
-    glyph = discord.ui.TextInput(label="12-Hex Glyph Code (Optional)", max_length=12, required=False)
+    
+    # NEW: 2-5 Letter Tag Input linked to Column J
+    tag = discord.ui.TextInput(
+        label="Haven Tag (2-5 Letters)", 
+        min_length=2, 
+        max_length=5, 
+        required=False,
+        placeholder="e.g. ABC"
+    )
 
     def __init__(self, cog):
         super().__init__()
@@ -148,13 +159,17 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
+        # Read the entered tag and uppercase it cleanly
+        clean_tag = self.tag.value.strip().upper() if self.tag.value else ""
+
         def insert():
             next_row = len(self.cog.sheet.get_all_values()) + 1
             self.cog.sheet.update_cell(next_row, 1, self.name.value)
             self.cog.sheet.update_cell(next_row, 4, self.description.value)
             self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
-            if len(headers) >= 6:
-                self.cog.sheet.update_cell(next_row, 6, self.glyph.value or "")
+            
+            # Updates Column 10 (Column J) directly with the Tag
+            self.cog.sheet.update_cell(next_row, 10, clean_tag)
 
         await loop.run_in_executor(None, insert)
         await interaction.followup.send(
@@ -264,7 +279,7 @@ class CommunityCog(commands.Cog):
             return list(csv.reader(StringIO(text)))
 
     async def get_haven_preview(self, glyph: str, galaxy: str = "Euclid", reality: str = "Normal"):
-        """Fetches system stats metadata from the Haven backend preview API"""
+        """Queries the public Haven endpoint to retrieve deterministic community stats metadata"""
         try:
             params = {"glyph": glyph, "galaxy": galaxy, "reality": reality}
             async with self.session.get(f"{self.base_url}/api/glyph/preview", params=params, timeout=5) as resp:
@@ -329,18 +344,31 @@ class CommunityCog(commands.Cog):
 
         async def build_embed(row, i):
             community_name = row.get("Community", f"Result {i}")
+            
+            # Dynamic header lookup: reads Column J's header text or falls back safely
             community_tag = row.get("Haven Tag", row.get("Tag", "UNALIGNED"))
 
             e = discord.Embed(
                 title=str(community_name).strip(), 
                 color=discord.Color.purple()
             )
-            
-            description = row.get("Description")
-            if description and str(description).strip():
-                e.add_field(name="Description", value=description, inline=False)
 
-            # --- SYSTEMS LOGGING COUNT ONLY ---
+            allowed = ["Description", "perma-link"]
+            label_map = {                
+                "Description": "Description",
+                "perma-link": "Permanent Link"
+            }
+
+            for k in allowed:
+                value = row.get(k)
+                if value and str(value).strip():
+                    e.add_field(
+                        name=label_map.get(k, k),
+                        value=value,
+                        inline=False
+                    )          
+
+            # --- FETCH SYSTEMS LOGGED COUNT FROM ENDPOINT ---
             glyph_code = row.get("Glyph") or row.get("Glyph Code")
             galaxy_name = row.get("Galaxy", "Euclid")
             
@@ -350,11 +378,12 @@ class CommunityCog(commands.Cog):
                 if preview and preview != "503":
                     reg_status = preview.get("region_status", {})
                     sys_count = reg_status.get("system_count", 0)
-                    e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` systems mapping entries", inline=True)
+                    e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` community entries mapped", inline=True)
                 elif preview == "503":
-                    e.add_field(name="⚠️ Haven Status", value="Logging count service temporarily offline.", inline=False)
+                    e.add_field(name="⚠️ Haven Status", value="Logging stats service temporarily offline.", inline=False)
 
-            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
+            # Link with the newly extracted Haven Tag
+            e.add_field(name="Identity Tag", value=f"`[{community_tag if community_tag else 'UNALIGNED'}]`", inline=True)
 
             link = next(
                 (v for k, v in row.items() if "link" in k.lower() and v),
