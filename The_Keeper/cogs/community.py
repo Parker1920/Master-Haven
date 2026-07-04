@@ -8,7 +8,7 @@ import asyncio
 import gspread
 
 
-# -------------------- PAGINATOR -----------------
+# -------------------- PAGINATOR --------------------
 class SearchPaginator(discord.ui.View):
     def __init__(self, cog, results, embed_builder):
         super().__init__(timeout=120)
@@ -35,9 +35,7 @@ class SearchPaginator(discord.ui.View):
 
     @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
     async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
-
         await interaction.response.defer()
-
         try:
             if self.index > 0:
                 self.index -= 1
@@ -49,15 +47,12 @@ class SearchPaginator(discord.ui.View):
                 content=content,
                 view=self
             )
-
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-
         await interaction.response.defer()
-
         try:
             if self.index < len(self.results) - 1:
                 self.index += 1
@@ -69,9 +64,9 @@ class SearchPaginator(discord.ui.View):
                 content=content,
                 view=self
             )
-
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 # -------------------- SEARCH MODAL --------------------
 class SearchModal(discord.ui.Modal, title="Community Search"):
@@ -98,11 +93,9 @@ class SearchView(discord.ui.View):
 
 
 # -------------------- ADD CIV MODAL --------------------
-# -------------------- ADD CIV MODAL --------------------
 class AddCivModal(discord.ui.Modal, title="Add Entry"):
     name = discord.ui.TextInput(label="Community Name", required=True)
     
-    # Tag field enforcing 2-5 characters natively via Discord UI
     tag = discord.ui.TextInput(
         label="Tag (2-5 characters)", 
         min_length=2, 
@@ -157,7 +150,7 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                     view=EditConfirmView(
                         self.cog,
                         self.name.value,
-                        self.tag.value.upper(), # Pass updated tag down
+                        self.tag.value.upper(),
                         self.description.value,
                         self.link.value
                     ),
@@ -165,20 +158,19 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
-        # Ensure array is large enough to handle up to column 10 (J)
         num_columns = max(len(headers), 10)
         new_row = [""] * num_columns
         new_row[0] = self.name.value
         new_row[3] = self.description.value
         new_row[4] = self.link.value or ""
-        new_row[9] = self.tag.value.upper() # 0-indexed tracking array
+        new_row[9] = self.tag.value.upper()
 
         def insert():
             next_row = len(self.cog.sheet.get_all_values()) + 1
             self.cog.sheet.update_cell(next_row, 1, self.name.value)
             self.cog.sheet.update_cell(next_row, 4, self.description.value)
             self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
-            self.cog.sheet.update_cell(next_row, 10, self.tag.value.upper()) # Save tag to column 10 (J)
+            self.cog.sheet.update_cell(next_row, 10, self.tag.value.upper())
 
         await loop.run_in_executor(None, insert)
         await interaction.followup.send(
@@ -241,14 +233,9 @@ class EditConfirmView(discord.ui.View):
         )
 
 
-
 # -------------------- SHEET --------------------
 SHEET_ID = "1P1DvL7sm4qt3vKInWhkqVdKOl20ui_aVaCJNEHtQS64"
-
-SHEET_URL = (
-    f"https://docs.google.com/spreadsheets/d/"
-    f"{SHEET_ID}/export?format=csv"
-)
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 
 # -------------------- COG --------------------
@@ -267,17 +254,14 @@ class CommunityCog(commands.Cog):
             return
 
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-
         creds_path = os.getenv(
             "GOOGLE_APPLICATION_CREDENTIALS",
             "/app/creds.json"
         )
-
         self.gc = gspread.service_account(
             filename=creds_path,
             scopes=scopes
         )
-
         self.sheet = self.gc.open_by_key(SHEET_ID).sheet1
 
     async def fetch_sheet(self):
@@ -285,21 +269,21 @@ class CommunityCog(commands.Cog):
             text = await resp.text()
             return list(csv.reader(StringIO(text)))
 
-            async def run_search(self, interaction: discord.Interaction, search: str):
-        # 1. First, check if the search term looks like a community tag (2-5 letters)
+    async def run_search(self, interaction: discord.Interaction, search: str):
         clean_search = search.strip().upper()
         haven_community_name = None
 
+        # Fix: Pull base URL safely from env configuration specs
+        haven_api_url = os.getenv("HAVEN_API", "https://havenmap.online")
+
+        # Haven info will only fire and populate if the search value meets tag criteria
         if 2 <= len(clean_search) <= 5:
             try:
-                # Call Haven't discord_tags endpoint (using HAVEN_API from your config)
-                # HAVEN_API = os.getenv("HAVEN_API", "https://havenmap.online")
-                async with self.session.get(f"{self.cog.base_url}/api/discord_tags") as resp:
+                async with self.session.get(f"{haven_api_url}/api/discord_tags") as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         tags_list = data.get("tags", [])
                         
-                        # Look for a matching tag
                         for t in tags_list:
                             if t.get("tag", "").upper() == clean_search:
                                 haven_community_name = t.get("name")
@@ -307,7 +291,6 @@ class CommunityCog(commands.Cog):
             except Exception as e:
                 print(f"Failed to fetch tags from Haven: {e}")
 
-        # 2. Continue with your existing local Google Sheets search logic
         rows = await self.fetch_sheet()
 
         if not rows:
@@ -342,7 +325,6 @@ class CommunityCog(commands.Cog):
 
             score = sum(1 for w in search_words if w in name)
             
-            # Also score if the row's tag matches our search term
             if r.get("__tag_value", "").lower() == search.lower().strip():
                 score += 2
 
@@ -365,7 +347,6 @@ class CommunityCog(commands.Cog):
             )
             return
 
-        # If there are no sheet matches but Haven verified the tag, construct a basic info embed
         if not matches and haven_community_name:
             e = discord.Embed(
                 title=haven_community_name,
@@ -384,7 +365,7 @@ class CommunityCog(commands.Cog):
                 color=discord.Color.purple()
             )
             
-            # Injecting verified Haven name info if it matches this row
+            # Haven info will only display if a valid tag is active on this row
             if tag_value:
                 if tag_value.upper() == clean_search and haven_community_name:
                     e.description = f"**Tag:** `{tag_value.upper()}`\n**Haven Verified Name:** {haven_community_name}"
@@ -437,6 +418,7 @@ class CommunityCog(commands.Cog):
             content=content,
             view=view
         )
+
 
 # -------------------- SETUP --------------------
 async def setup(bot: commands.Bot):
