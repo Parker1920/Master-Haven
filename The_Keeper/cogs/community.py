@@ -1,5 +1,4 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
 import aiohttp
 import csv
@@ -7,19 +6,6 @@ import os
 from io import StringIO
 import asyncio
 import gspread
-import time
-from urllib.parse import quote
-
-# Ensure we have the user-facing public asset domain for images
-HAVEN_PUBLIC_URL = (
-    os.getenv("HAVEN_PUBLIC_URL")
-    or os.getenv("HAVEN_URL")
-    or "https://havenmap.online"
-).rstrip("/")
-
-if HAVEN_PUBLIC_URL.startswith("http://haven:") or "://haven:" in HAVEN_PUBLIC_URL:
-    HAVEN_PUBLIC_URL = "https://havenmap.online"
-
 
 # -------------------- PAGINATOR --------------------
 class SearchPaginator(discord.ui.View):
@@ -108,21 +94,13 @@ class SearchView(discord.ui.View):
 # -------------------- ADD CIV MODAL --------------------
 class AddCivModal(discord.ui.Modal, title="Add Entry"):
     name = discord.ui.TextInput(label="Community Name", required=True)
-    
-    tag = discord.ui.TextInput(
-        label="Tag (2-5 characters)", 
-        min_length=2, 
-        max_length=5, 
-        required=True,
-        placeholder="e.g., CIV, USA, ROME"
-    )
-    
     description = discord.ui.TextInput(
         label="Description",
         style=discord.TextStyle.paragraph,
         required=True
     )
     link = discord.ui.TextInput(label="Permanent Link", required=False)
+    glyph = discord.ui.TextInput(label="12-Hex Glyph Code (Optional)", max_length=12, required=False)
 
     def __init__(self, cog):
         super().__init__()
@@ -163,7 +141,6 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                     view=EditConfirmView(
                         self.cog,
                         self.name.value,
-                        self.tag.value.upper(),
                         self.description.value,
                         self.link.value
                     ),
@@ -171,28 +148,22 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
-        num_columns = max(len(headers), 10)
-        new_row = [""] * num_columns
-        new_row[0] = self.name.value
-        new_row[3] = self.description.value
-        new_row[4] = self.link.value or ""
-        new_row[9] = self.tag.value.upper()
-
         def insert():
             next_row = len(self.cog.sheet.get_all_values()) + 1
             self.cog.sheet.update_cell(next_row, 1, self.name.value)
             self.cog.sheet.update_cell(next_row, 4, self.description.value)
             self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
-            self.cog.sheet.update_cell(next_row, 10, self.tag.value.upper())
+            if len(headers) >= 6:
+                self.cog.sheet.update_cell(next_row, 6, self.glyph.value or "")
 
         await loop.run_in_executor(None, insert)
         await interaction.followup.send(
-            f"✅ Entry for **{self.name.value} [{self.tag.value.upper()}]** added successfully!",
+            "✅ Entry added successfully!",
             ephemeral=True
         )
 
 
-# -------------------- ADD CIV VIEW --------------------
+# -------------------- VIEW --------------------
 class AddCivView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=120)
@@ -205,11 +176,10 @@ class AddCivView(discord.ui.View):
 
 # -------------------- EDIT CONFIRM VIEW --------------------
 class EditConfirmView(discord.ui.View):
-    def __init__(self, cog, name, tag, description, link):
+    def __init__(self, cog, name, description, link):
         super().__init__(timeout=60)
         self.cog = cog
         self.name = name
-        self.tag = tag
         self.description = description
         self.link = link
 
@@ -241,7 +211,6 @@ class EditConfirmView(discord.ui.View):
         def update():
             self.cog.sheet.update_cell(target_row, 4, self.description)
             self.cog.sheet.update_cell(target_row, 5, self.link or "")
-            self.cog.sheet.update_cell(target_row, 10, self.tag)
 
         await loop.run_in_executor(None, update)
         await interaction.followup.send(
@@ -267,6 +236,7 @@ class CommunityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.session = aiohttp.ClientSession()
+        self.base_url = os.getenv("HAVEN_API", "https://havenmap.online")
         self.gc = None
         self.sheet = None
 
@@ -293,122 +263,19 @@ class CommunityCog(commands.Cog):
             text = await resp.text()
             return list(csv.reader(StringIO(text)))
 
-    # ============================================================
-    # NEW: /communitycard COMMAND
-    # ============================================================
-    @app_commands.command(
-        name="communitycard",
-        description="Show a Community Card — Upload metrics and info for an identity tag.",
-    )
-    @app_commands.describe(tag="The community tag to check (e.g., CIV, USA, ROME)")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
-    async def communitycard(
-        self,
-        interaction: discord.Interaction,
-        tag: str
-    ):
-        clean_tag = tag.strip().upper()
-        if not (2 <= len(clean_tag) <= 5):
-            await interaction.response.send_message(
-                "⚠️ Tags must be between 2 and 5 characters long.",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
-
-        haven_api_url = os.getenv("HAVEN_API", "https://havenmap.online")
-        haven_community_name = None
-
-        # Call Haven't backend endpoint to verify tag mapping status
+    async def get_haven_preview(self, glyph: str, galaxy: str = "Euclid", reality: str = "Normal"):
+        """Fetches system stats metadata from the Haven backend preview API"""
         try:
-            async with self.session.get(f"{haven_api_url}/api/discord_tags") as resp:
+            params = {"glyph": glyph, "galaxy": galaxy, "reality": reality}
+            async with self.session.get(f"{self.base_url}/api/glyph/preview", params=params, timeout=5) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    tags_list = data.get("tags", [])
-                    for t in tags_list:
-                        if t.get("tag", "").upper() == clean_tag:
-                            haven_community_name = t.get("name")
-                            break
-        except Exception as e:
-            print(f"Failed to fetch tags from Haven: {e}")
+                    return await resp.json()
+                elif resp.status == 503:
+                    return "503"
+        except Exception:
+            return None
 
-        # Fallback tracking lookup check against your Google Sheet
-        sheet_name = None
-        try:
-            rows = await self.fetch_sheet()
-            if rows and len(rows) > 1:
-                headers = [h.strip() for h in rows[0]]
-                for r in rows[1:]:
-                    if len(r) > 9 and r[9].strip().upper() == clean_tag:
-                        sheet_name = r[0].strip()
-                        break
-        except Exception as e:
-            print(f"Sheet fallback error: {e}")
-
-        display_name = haven_community_name or sheet_name
-        if not display_name:
-            await interaction.followup.send(
-                f"❌ No matching log found for tag `[{clean_tag}]`.",
-                ephemeral=True
-            )
-            return
-
-        # Follow your cache-busting logic blueprint exactly
-        cache_buster = int(time.time() // 60)
-        tag_slug = quote(clean_tag)
-        
-        # Constructs poster URLs pulling dynamically from Haven assets
-        png_url = f"{HAVEN_PUBLIC_URL}/api/posters/community/{tag_slug}.png?v={cache_buster}"
-        page_url = f"{HAVEN_PUBLIC_URL}/communities/{tag_slug}"
-
-        embed = discord.Embed(
-            title=f"{display_name} [{clean_tag}] · Identity Card",
-            description=f"Community space metrics and exploration log.",
-            color=0x00C2B3,
-            url=page_url,
-        )
-        embed.set_image(url=png_url)
-        embed.set_footer(text="Voyager's Haven · live data")
-        await interaction.followup.send(embed=embed)
-
-    @communitycard.error
-    async def communitycard_error(self, interaction, error):
-        if isinstance(error, app_commands.CommandOnCooldown):
-            await interaction.response.send_message(
-                f"Slow down, voyager. Try again in {error.retry_after:.0f}s.",
-                ephemeral=True,
-            )
-        else:
-            try:
-                await interaction.followup.send(
-                    "Something went wrong looking up that community card.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-
-    # -------------------- RUN SEARCH --------------------
     async def run_search(self, interaction: discord.Interaction, search: str):
-        clean_search = search.strip().upper()
-        haven_community_name = None
-
-        haven_api_url = os.getenv("HAVEN_API", "https://havenmap.online")
-
-        if 2 <= len(clean_search) <= 5:
-            try:
-                async with self.session.get(f"{haven_api_url}/api/discord_tags") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        tags_list = data.get("tags", [])
-                        
-                        for t in tags_list:
-                            if t.get("tag", "").upper() == clean_search:
-                                haven_community_name = t.get("name")
-                                break
-            except Exception as e:
-                print(f"Failed to fetch tags from Haven: {e}")
-
         rows = await self.fetch_sheet()
 
         if not rows:
@@ -429,7 +296,6 @@ class CommunityCog(commands.Cog):
                 headers[i]: (r[i] if i < len(r) else "")
                 for i in range(len(headers))
             }
-            row_dict["__tag_value"] = r[9] if len(r) > 9 else ""
             data.append(row_dict)
 
         search_words = search.lower().strip().split()
@@ -442,10 +308,6 @@ class CommunityCog(commands.Cog):
                 continue
 
             score = sum(1 for w in search_words if w in name)
-            
-            if r.get("__tag_value", "").lower() == search.lower().strip():
-                score += 2
-
             if score > 0:
                 scored.append((score, r))
 
@@ -457,7 +319,7 @@ class CommunityCog(commands.Cog):
             )
         ][:10]
 
-        if not matches and not haven_community_name:
+        if not matches:
             await interaction.edit_original_response(
                 content="No match found (try more specific terms).",
                 embed=None,
@@ -465,58 +327,34 @@ class CommunityCog(commands.Cog):
             )
             return
 
-        # If it's only on Haven and no spreadsheet entry exists
-        if not matches and haven_community_name:
-            e = discord.Embed(
-                title=haven_community_name,
-                description=f"**Tag:** `{clean_search}`\n\n*This community is registered on Haven, but has no local spreadsheet log yet.*",
-                color=discord.Color.purple()
-            )
-            await interaction.edit_original_response(embed=e, view=None)
-
-            # Fire off the fingerprint image as a standalone follow-up message right after
-            import time
-            from urllib.parse import quote
-            cache_buster = int(time.time() // 60)
-            tag_slug = quote(clean_search)
-            
-            haven_public_url = (os.getenv("HAVEN_PUBLIC_URL") or "https://havenmap.online").rstrip("/")
-            if "://haven:" in haven_public_url:
-                haven_public_url = "https://havenmap.online"
-                
-            img_url = f"{haven_public_url}/api/posters/community/{tag_slug}.png?v={cache_buster}"
-            await interaction.followup.send(content=img_url, ephemeral=True)
-            return
-
         async def build_embed(row, i):
             community_name = row.get("Community", f"Result {i}")
-            tag_value = row.get("__tag_value", "").strip()
+            community_tag = row.get("Haven Tag", row.get("Tag", "UNALIGNED"))
 
             e = discord.Embed(
                 title=str(community_name).strip(), 
                 color=discord.Color.purple()
             )
             
-            if tag_value:
-                if tag_value.upper() == clean_search and haven_community_name:
-                    e.description = f"**Tag:** `{tag_value.upper()}`\n**Haven Verified Name:** {haven_community_name}"
-                else:
-                    e.description = f"**Tag:** `{tag_value.upper()}`"
+            description = row.get("Description")
+            if description and str(description).strip():
+                e.add_field(name="Description", value=description, inline=False)
 
-            allowed = ["Description", "perma-link"]
-            label_map = {                
-                "Description": "Description",
-                "perma-link": "Permanent Link"
-            }
+            # --- SYSTEMS LOGGING COUNT ONLY ---
+            glyph_code = row.get("Glyph") or row.get("Glyph Code")
+            galaxy_name = row.get("Galaxy", "Euclid")
+            
+            if glyph_code and len(str(glyph_code).strip()) == 12:
+                preview = await self.get_haven_preview(str(glyph_code).strip(), galaxy=galaxy_name)
+                
+                if preview and preview != "503":
+                    reg_status = preview.get("region_status", {})
+                    sys_count = reg_status.get("system_count", 0)
+                    e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` systems mapping entries", inline=True)
+                elif preview == "503":
+                    e.add_field(name="⚠️ Haven Status", value="Logging count service temporarily offline.", inline=False)
 
-            for k in allowed:
-                value = row.get(k)
-                if value and str(value).strip():
-                    e.add_field(
-                        name=label_map.get(k, k),
-                        value=value,
-                        inline=False
-                    )          
+            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
 
             link = next(
                 (v for k, v in row.items() if "link" in k.lower() and v),
@@ -549,21 +387,6 @@ class CommunityCog(commands.Cog):
             content=content,
             view=view
         )
-
-        first_row = matches[0]
-        tag_value = first_row.get("__tag_value", "").strip().upper()
-        if tag_value:
-            import time
-            from urllib.parse import quote
-            cache_buster = int(time.time() // 60)
-            tag_slug = quote(tag_value)
-            
-            haven_public_url = (os.getenv("HAVEN_PUBLIC_URL") or "https://havenmap.online").rstrip("/")
-            if "://haven:" in haven_public_url:
-                haven_public_url = "https://havenmap.online"
-                
-            img_url = f"{haven_public_url}/api/posters/community/{tag_slug}.png?v={cache_buster}"
-            await interaction.followup.send(content=img_url, ephemeral=True)
 
 
 # -------------------- SETUP --------------------
