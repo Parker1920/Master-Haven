@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import aiohttp
 import csv
@@ -6,6 +7,18 @@ import os
 from io import StringIO
 import asyncio
 import gspread
+import time
+from urllib.parse import quote
+
+# Ensure we have the user-facing public asset domain for images
+HAVEN_PUBLIC_URL = (
+    os.getenv("HAVEN_PUBLIC_URL")
+    or os.getenv("HAVEN_URL")
+    or "https://havenmap.online"
+).rstrip("/")
+
+if HAVEN_PUBLIC_URL.startswith("http://haven:") or "://haven:" in HAVEN_PUBLIC_URL:
+    HAVEN_PUBLIC_URL = "https://havenmap.online"
 
 
 # -------------------- PAGINATOR --------------------
@@ -179,7 +192,7 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         )
 
 
-# -------------------- ADD CIV VIEW (RESTORED) --------------------
+# -------------------- ADD CIV VIEW --------------------
 class AddCivView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=120)
@@ -280,6 +293,102 @@ class CommunityCog(commands.Cog):
             text = await resp.text()
             return list(csv.reader(StringIO(text)))
 
+    # ============================================================
+    # NEW: /communitycard COMMAND
+    # ============================================================
+    @app_commands.command(
+        name="communitycard",
+        description="Show a Community Card — Upload metrics and info for an identity tag.",
+    )
+    @app_commands.describe(tag="The community tag to check (e.g., CIV, USA, ROME)")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    async def communitycard(
+        self,
+        interaction: discord.Interaction,
+        tag: str
+    ):
+        clean_tag = tag.strip().upper()
+        if not (2 <= len(clean_tag) <= 5):
+            await interaction.response.send_message(
+                "⚠️ Tags must be between 2 and 5 characters long.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+
+        haven_api_url = os.getenv("HAVEN_API", "https://havenmap.online")
+        haven_community_name = None
+
+        # Call Haven't backend endpoint to verify tag mapping status
+        try:
+            async with self.session.get(f"{haven_api_url}/api/discord_tags") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    tags_list = data.get("tags", [])
+                    for t in tags_list:
+                        if t.get("tag", "").upper() == clean_tag:
+                            haven_community_name = t.get("name")
+                            break
+        except Exception as e:
+            print(f"Failed to fetch tags from Haven: {e}")
+
+        # Fallback tracking lookup check against your Google Sheet
+        sheet_name = None
+        try:
+            rows = await self.fetch_sheet()
+            if rows and len(rows) > 1:
+                headers = [h.strip() for h in rows[0]]
+                for r in rows[1:]:
+                    if len(r) > 9 and r[9].strip().upper() == clean_tag:
+                        sheet_name = r[0].strip()
+                        break
+        except Exception as e:
+            print(f"Sheet fallback error: {e}")
+
+        display_name = haven_community_name or sheet_name
+        if not display_name:
+            await interaction.followup.send(
+                f"❌ No matching log found for tag `[{clean_tag}]`.",
+                ephemeral=True
+            )
+            return
+
+        # Follow your cache-busting logic blueprint exactly
+        cache_buster = int(time.time() // 60)
+        tag_slug = quote(clean_tag)
+        
+        # Constructs poster URLs pulling dynamically from Haven assets
+        png_url = f"{HAVEN_PUBLIC_URL}/api/posters/community/{tag_slug}.png?v={cache_buster}"
+        page_url = f"{HAVEN_PUBLIC_URL}/communities/{tag_slug}"
+
+        embed = discord.Embed(
+            title=f"{display_name} [{clean_tag}] · Identity Card",
+            description=f"Community space metrics and exploration log.",
+            color=0x00C2B3,
+            url=page_url,
+        )
+        embed.set_image(url=png_url)
+        embed.set_footer(text="Voyager's Haven · live data")
+        await interaction.followup.send(embed=embed)
+
+    @communitycard.error
+    async def communitycard_error(self, interaction, error):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(
+                f"Slow down, voyager. Try again in {error.retry_after:.0f}s.",
+                ephemeral=True,
+            )
+        else:
+            try:
+                await interaction.followup.send(
+                    "Something went wrong looking up that community card.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    # -------------------- RUN SEARCH --------------------
     async def run_search(self, interaction: discord.Interaction, search: str):
         clean_search = search.strip().upper()
         haven_community_name = None
