@@ -179,6 +179,17 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         )
 
 
+# -------------------- ADD CIV VIEW (RESTORED) --------------------
+class AddCivView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=120)
+        self.cog = cog
+
+    @discord.ui.button(label="Create Entry", style=discord.ButtonStyle.success)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddCivModal(self.cog))
+
+
 # -------------------- EDIT CONFIRM VIEW --------------------
 class EditConfirmView(discord.ui.View):
     def __init__(self, cog, name, tag, description, link):
@@ -273,10 +284,8 @@ class CommunityCog(commands.Cog):
         clean_search = search.strip().upper()
         haven_community_name = None
 
-        # Fix: Pull base URL safely from env configuration specs
         haven_api_url = os.getenv("HAVEN_API", "https://havenmap.online")
 
-        # Haven info will only fire and populate if the search value meets tag criteria
         if 2 <= len(clean_search) <= 5:
             try:
                 async with self.session.get(f"{haven_api_url}/api/discord_tags") as resp:
@@ -365,7 +374,6 @@ class CommunityCog(commands.Cog):
                 color=discord.Color.purple()
             )
             
-            # Haven info will only display if a valid tag is active on this row
             if tag_value:
                 if tag_value.upper() == clean_search and haven_community_name:
                     e.description = f"**Tag:** `{tag_value.upper()}`\n**Haven Verified Name:** {haven_community_name}"
