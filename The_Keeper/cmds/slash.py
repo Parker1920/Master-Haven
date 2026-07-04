@@ -44,7 +44,8 @@ class CommandsCog(commands.Cog):
             f"Sent to {channel.mention}",
             ephemeral=True
         )
-#---------------say------------
+
+    #---------------say------------
     @app_commands.command(name="say", description="Send a message")
     @app_commands.describe(
         channel="Channel to send to",
@@ -57,9 +58,9 @@ class CommandsCog(commands.Cog):
         message: str
     ):
         await channel.send(message)
-        await     interaction.response.send_message("Sent.", ephemeral=True)
+        await interaction.response.send_message("Sent.", ephemeral=True)
 
-#-------------send--------------------
+    #-------------send--------------------
     @app_commands.command(name="send", description="Send a styled embed message")
     @app_commands.describe(
         channel="Channel to send to",
@@ -85,31 +86,45 @@ class CommandsCog(commands.Cog):
     
         await channel.send(embed=embed)
         await interaction.response.send_message("Sent.", ephemeral=True)
+
     # ---------------- COMMUNITY ----------------
     @app_commands.command(name="community", description="Look up a civ/community")
+    @app_commands.describe(search="Optional name or keyword to search directly")
     async def community(
         self,
         interaction: discord.Interaction,
         search: str | None = None
     ):
-        
         community_cog = self.bot.get_cog("CommunityCog")
 
         if not community_cog:
-            return await interaction.response.send_message("Community system not loaded.")
-            
-            await interaction.response.defer(thinking=True)
-            view = SearchView(community_cog)
-
-        await interaction.response.send_message("Open search:", view=SearchView(community_cog))
+            return await interaction.response.send_message(
+                "⚠️ Community system cog is not loaded.", 
+                ephemeral=True
+            )
 
         if search:
+            # Match the modal submit flow: defer immediately, then search
+            await interaction.response.defer(ephemeral=True)
             await community_cog.run_search(interaction, search)
+        else:
+            # Show the base view with the search button
+            await interaction.response.send_message(
+                "Open search:", 
+                view=SearchView(community_cog), 
+                ephemeral=True
+            )
 
     # ---------------- ADD CIV ----------------
     @app_commands.command(name="addciv", description="Add a civ/community")
     async def addciv(self, interaction: discord.Interaction):
         cog = self.bot.get_cog("CommunityCog")
+        
+        if not cog:
+            return await interaction.response.send_message(
+                "⚠️ Community system cog is not loaded.", 
+                ephemeral=True
+            )
 
         embed = discord.Embed(
             title="Add Entry",
@@ -117,9 +132,13 @@ class CommandsCog(commands.Cog):
             color=discord.Color.green()
         )
 
-        await interaction.response.send_message(embed=embed, view=AddCivView(cog))
+        await interaction.response.send_message(
+            embed=embed, 
+            view=AddCivView(cog), 
+            ephemeral=True
+        )
 
-# ---------------- Systems ----------------
+    # ---------------- Systems ----------------
     @app_commands.command(name="newsystem", description="Upload a star system directly from the server")
     async def addlog(self, interaction: discord.Interaction):
         haven_cog = self.bot.get_cog("HavenSubmission")
@@ -147,7 +166,6 @@ class CommandsCog(commands.Cog):
         )
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        
         view.message = await interaction.original_response()
 
 
