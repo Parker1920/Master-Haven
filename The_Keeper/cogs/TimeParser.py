@@ -8,11 +8,15 @@ class TimeParser(commands.Cog):
         self.bot = bot
 
         self.time_pattern = re.compile(
-            r"Time:\s*"                                
-            r"(\d{1,2}/\d{1,2}/(?:\d{2}|\d{4}))"     
-            r"\s+"                                      
-            r"(\d{1,2}:\d{2})\s*([ap]m)",               
-            re.IGNORECASE
+            r"""
+            Time:\s* # Matches "Time:" followed by optional spaces
+            (\d{1,2}/\d{1,2}/(?:\d{2}|\d{4}))       # Group 1: Date (M/D/Y or D/M/Y)
+            \s+                                     # Matches one or more spaces
+            (\d{1,2}:\d{2})                         # Group 2: Time (H:MM)
+            \s* # Optional spaces before AM/PM
+            ([ap]m)                                 # Group 3: AM/PM
+            """, 
+            re.IGNORECASE | re.VERBOSE
         )
 
     @commands.Cog.listener()
@@ -41,7 +45,7 @@ class TimeParser(commands.Cog):
             dt = dt.replace(tzinfo=timezone.utc)
             unix_timestamp = int(dt.timestamp())
 
-
+            
             await message.channel.send(
                 f"UTC Timestamp: <t:{unix_timestamp}:F>\n"
                 f"Raw: `{unix_timestamp}`"
@@ -49,7 +53,7 @@ class TimeParser(commands.Cog):
 
         except ValueError:
             await message.channel.send(
-                "Invalid date/time format. Example: `Time: 1/1/26 4:00pm`"
+                "Invalid date/time values. Note: Use `MM/DD/YY` format. Example: `Time: 1/1/26 4:00pm`"
             )
 
 async def setup(bot):
