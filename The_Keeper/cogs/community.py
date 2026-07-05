@@ -9,33 +9,6 @@ import gspread
 from typing import Optional, Dict, Any
 
 
-# ====================================================================
-#                          HAVEN API LAYER
-# ====================================================================
-class HavenAPIClient:
-    """
-    Dedicated API layer handling communication with the Haven backend.
-    Separates endpoint layout details from the Discord interface code.
-    """
-    def __init__(self, session: aiohttp.ClientSession, base_url: Optional[str] = None):
-        self.session = session
-        self.base_url = base_url or os.getenv("HAVEN_API", "https://havenmap.online")
-
-    async def get_glyph_preview(self, glyph: str, galaxy: str = "Euclid", reality: str = "Normal") -> Optional[Dict[str, Any]]:
-        """Queries the public Haven preview endpoint to fetch community mapping metrics."""
-        url = f"{self.base_url}/api/glyph/preview"
-        params = {"glyph": glyph, "galaxy": galaxy, "reality": reality}
-        try:
-            async with self.session.get(url, params=params, timeout=5) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                elif resp.status == 503:
-                    return {"status_override": "503"}
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            return None
-        return None
-
-
 # -------------------- PAGINATOR --------------------
 class SearchPaginator(discord.ui.View):
     def __init__(self, cog, results, embed_builder):
@@ -272,7 +245,7 @@ class CommunityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.session = aiohttp.ClientSession()
-        self.api = HavenAPIClient(self.session)
+        self.base_url = os.getenv("HAVEN_API", "https://havenmap.online")
         self.gc = None
         self.sheet = None
 
@@ -299,9 +272,22 @@ class CommunityCog(commands.Cog):
             text = await resp.text()
             return list(csv.reader(StringIO(text)))
 
-    async def get_haven_preview(self, glyph: str, galaxy: str = "Euclid", reality: str = "Normal"):
-        """Queries the public Haven endpoint to retrieve deterministic community stats metadata"""
-        return await self.api.get_glyph_preview(glyph, galaxy, reality)
+    async def get_haven_community_stats(self, tag: str) -> Optional[Dict[str, Any]]:
+        """Queries the public community overview endpoint and matches tracking against the given tag."""
+        try:
+            async with self.session.get(f"{self.base_url}/api/public/community-overview", timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    communities = data.get("communities", [])
+                    # Find matching community by its case-insensitive discord_tag
+                    for item in communities:
+                        if item.get("discord_tag", "").strip().upper() == tag.strip().upper():
+                            return item
+                elif resp.status == 503:
+                    return {"status_override": "503"}
+        except Exception:
+            return None
+        return None
 
     async def run_search(self, interaction: discord.Interaction, search: str):
         rows = await self.fetch_sheet()
@@ -391,21 +377,18 @@ class CommunityCog(commands.Cog):
             # 2. Add Identity Tag and Stats Fields Second (Bottom of Embed)
             e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
 
-            glyph_code = row.get("Glyph") or row.get("Glyph Code")
-            galaxy_name = row.get("Galaxy", "Euclid")
-            
-            if glyph_code and len(str(glyph_code).strip()) == 12:
-                preview = await self.get_haven_preview(str(glyph_code).strip(), galaxy=galaxy_name)
+            # Look up live tracking statistics using the verified Community Tag
+            if community_tag != "UNALIGNED":
+                stats = await self.get_haven_community_stats(community_tag)
                 
-                if preview:
-                    if preview.get("status_override") == "503":
+                if stats:
+                    if stats.get("status_override") == "503":
                         e.add_field(name="⚠️ Haven Status", value="Logging stats service temporarily offline.", inline=False)
                     else:
-                        reg_status = preview.get("region_status", {})
-                        sys_count = reg_status.get("system_count", 0)
-                        disc_count = reg_status.get("discovery_count", 0)
+                        sys_count = stats.get("total_systems", 0)
+                        disc_count = stats.get("total_discoveries", 0)
                         
-                        # Render inline fields contextually if logs exist
+                        # Dynamically generate tracking metrics side-by-side if they have logged entries
                         if sys_count > 0:
                             e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` mapped", inline=True)
                         if disc_count > 0:
