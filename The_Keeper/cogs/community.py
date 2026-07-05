@@ -304,7 +304,6 @@ class CommunityCog(commands.Cog):
                 headers[i]: (r[i] if i < len(r) else "")
                 for i in range(len(headers))
             }
-            # Keep track of both the dictionary map and raw row array list
             data.append((row_dict, r))
 
         search_words = search.lower().strip().split()
@@ -339,7 +338,7 @@ class CommunityCog(commands.Cog):
         async def build_embed(row, raw_row, i):
             community_name = row.get("Community", f"Result {i}")
             
-            # Direct static fallback: Reads index 9 (Column 10/J) cleanly if dictionary lookup misses
+            # Reads index 9 (Column 10/J) cleanly if dictionary lookup misses
             community_tag = "UNALIGNED"
             if len(raw_row) >= 10 and raw_row[9].strip():
                 community_tag = raw_row[9].strip().upper()
@@ -353,6 +352,7 @@ class CommunityCog(commands.Cog):
                 color=discord.Color.purple()
             )
 
+            # 1. Add Text Fields First (Description, Permanent Link)
             allowed = ["Description", "perma-link"]
             label_map = {                
                 "Description": "Description",
@@ -368,7 +368,9 @@ class CommunityCog(commands.Cog):
                         inline=False
                     )          
 
-            # --- FETCH SYSTEMS LOGGED COUNT FROM ENDPOINT ---
+            # 2. Add Identity Tag and Stats Fields Second (Bottom of Embed)
+            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
+
             glyph_code = row.get("Glyph") or row.get("Glyph Code")
             galaxy_name = row.get("Galaxy", "Euclid")
             
@@ -381,9 +383,6 @@ class CommunityCog(commands.Cog):
                     e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` community entries mapped", inline=True)
                 elif preview == "503":
                     e.add_field(name="⚠️ Haven Status", value="Logging stats service temporarily offline.", inline=False)
-
-            # Link with the newly extracted physical Column J Haven Tag
-            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
 
             link = next(
                 (v for k, v in row.items() if "link" in k.lower() and v),
