@@ -312,7 +312,8 @@ class CommunityCog(commands.Cog):
             }
             data.append((row_dict, r))
 
-        search_words = search.lower().strip().split()
+        clean_search = search.lower().strip()
+        search_words = clean_search.split()
         scored = []
 
         for r_dict, r_list in data:
@@ -321,14 +322,28 @@ class CommunityCog(commands.Cog):
             if not name:
                 continue
 
-            score = sum(1 for w in search_words if w in name)
-            if score > 0:
-                scored.append((score, (r_dict, r_list)))
+            # Calculate primary matching word count
+            word_match_score = sum(1 for w in search_words if w in name)
+            
+            if word_match_score > 0:
+                # 1. Exact Name Match Bonus (Highest Sorting Weight)
+                is_exact_match = 1 if name == clean_search else 0
+                
+                # 2. Length Penalty (Shorter names get sorted higher on ties)
+                name_length = len(name)
+                
+                # Tuple format: (Word Score, Exact Bonus, Shorter Name Priority)
+                # Shorter name length is inverted so higher number = better/shorter string length
+                scored.append((
+                    (word_match_score, is_exact_match, -name_length), 
+                    (r_dict, r_list)
+                ))
 
+        # Sort dynamically using multiple criteria to bubble closest match directly to index 0
         matches = [
             pair for _, pair in sorted(
                 scored,
-                key=lambda x: x[0],
+                key=lambda x: (x[0][0], x[0][1], x[0][2]),
                 reverse=True
             )
         ][:10]
