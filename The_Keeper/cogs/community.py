@@ -301,7 +301,6 @@ class CommunityCog(commands.Cog):
 
     async def get_haven_preview(self, glyph: str, galaxy: str = "Euclid", reality: str = "Normal"):
         """Queries the public Haven endpoint to retrieve deterministic community stats metadata"""
-        # Routed internally directly through the api layer object
         return await self.api.get_glyph_preview(glyph, galaxy, reality)
 
     async def run_search(self, interaction: discord.Interaction, search: str):
