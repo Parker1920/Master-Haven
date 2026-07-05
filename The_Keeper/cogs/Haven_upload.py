@@ -19,7 +19,7 @@ API_KEY = os.getenv("HAVEN_API_KEY")
 if not API_KEY:
     raise RuntimeError("HAVEN_API_KEY must be set in .env")
     
-# -------------------- API LAYER (FIXED INDENTATION) ----------------
+# -------------------- API LAYER ----------------
 class HavenAPI:
     def __init__(self):
         self.base = BASE_URL
@@ -477,34 +477,34 @@ class DiscoveryTypeSelect(discord.ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("This isn't your session.", ephemeral=True)
             return
-        
+            
         self.selected_class = self.class_dropdown.values[0]
         for option in self.class_dropdown.options:
             option.default = (option.value == self.selected_class)
             
         await interaction.response.defer()
-        
-        async def next_callback(self, interaction: discord.Interaction):
-            if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("This isn't your session.", ephemeral=True)
-                return
-            if not (self.selected_type and self.selected_reality):
-                await interaction.response.send_message("Select both Reality and Type first.", ephemeral=True)
-                return
-       
-            haven_cog = interaction.client.get_cog("HavenSubmission")
-            HexKeypad_class = getattr(haven_cog, "HexKeypad", None)
-        
-            try:
-                view = HexKeypad_class(api=self.api, glyph_emojis=self.glyph_emojis, owner_id=self.owner_id, mode="discovery")
-                view.discovery_type = self.selected_type
-                view.reality = self.selected_reality  
-                view.selected_class = self.selected_class
-                embed = view.build_embed(title=f"Submit Discovery: {self.selected_type}")
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-                self.stop()
-            except Exception:
-                traceback.print_exc()
+    
+    async def next_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This isn't your session.", ephemeral=True)
+            return
+        if not (self.selected_type and self.selected_reality):
+            await interaction.response.send_message("Select both Reality and Type first.", ephemeral=True)
+            return
+   
+        haven_cog = interaction.client.get_cog("HavenSubmission")
+        HexKeypad_class = getattr(haven_cog, "HexKeypad", None)
+    
+        try:
+            view = HexKeypad_class(api=self.api, glyph_emojis=self.glyph_emojis, owner_id=self.owner_id, mode="discovery")
+            view.discovery_type = self.selected_type
+            view.reality = self.selected_reality  
+            view.selected_class = self.selected_class
+            embed = view.build_embed(title=f"Submit Discovery: {self.selected_type}")
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            self.stop()
+        except Exception:
+            traceback.print_exc()
 
 class DiscoverySubmissionModal(discord.ui.Modal):
     def __init__(self, glyph, user_id, api, discovery_type, system_exists=False, system_name=None, system_id=None, notes=None, reality=None):
@@ -573,11 +573,11 @@ class DiscoveryConfirmView(discord.ui.View):
             msg = f"✅ Discovery submitted!\nSystem: `{self.system_name or 'Unknown'}`\nDiscovery: `{discovery_name}`"
             
             xp_gained = await process_discovery_xp(
-    bot=interaction.client, 
-    user_id=self.user_id,
-    discovery_type=self.discovery_type,
-    channel_id=interaction.channel.id,
-)
+                bot=interaction.client, 
+                user_id=self.user_id,
+                discovery_type=self.discovery_type,
+                channel_id=interaction.channel.id,
+            )
             
             if xp_gained:
                 msg += f"\n✨ +{xp_gained} XP earned"
@@ -697,7 +697,7 @@ class HexKeypad(discord.ui.View):
                                 modal = DiscoverySubmissionModal(
                                     glyph=glyph, user_id=interaction2.user.id, api=self.outer.api,
                                     discovery_type=self.outer.discovery_type, system_exists=system_exists,
-                                    system_name=system_name, system_id=system_id, notes=None, reality=self.outer.reality
+                                    system_name=system_name, system_id=system_id, notes=initial_notes, reality=self.outer.reality
                                 )
                                 await interaction2.response.send_modal(modal)
                                 self.stop()
@@ -913,4 +913,4 @@ class HavenSubmission(commands.Cog):
     
 async def setup(bot):
     await bot.add_cog(HavenSubmission(bot)) 
-    await bot.add_cog(HavenScraperCog(bot))  
+    await bot.add_cog(HavenScraperCog(bot))
