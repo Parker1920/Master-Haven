@@ -18,11 +18,11 @@ class SearchPaginator(discord.ui.View):
         self.index = 0
 
     async def build_page(self):
-        row = self.results[self.index]
+        row_dict, row_list = self.results[self.index]
         # Await the async embed builder
-        embed = await self.embed_builder(row, self.index + 1)
+        embed = await self.embed_builder(row_dict, row_list, self.index + 1)
 
-        link = next((v for k, v in row.items() if "link" in k.lower()), None)
+        link = next((v for k, v in row_dict.items() if "link" in k.lower()), None)
 
         if link:
             link = str(link).strip()
@@ -104,7 +104,7 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
     )
     link = discord.ui.TextInput(label="Permanent Link", required=False)
     
-    # NEW: 2-5 Letter Tag Input linked to Column J
+    # 2-5 Letter Tag Input linked to Column J
     tag = discord.ui.TextInput(
         label="Haven Tag (2-5 Letters)", 
         min_length=2, 
@@ -131,12 +131,6 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
             )
             return
 
-        headers = await loop.run_in_executor(
-            None,
-            self.cog.sheet.row_values,
-            1
-        )
-
         existing_values = await loop.run_in_executor(
             None,
             self.cog.sheet.get_all_values
@@ -159,7 +153,6 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
-        # Read the entered tag and uppercase it cleanly
         clean_tag = self.tag.value.strip().upper() if self.tag.value else ""
 
         def insert():
@@ -311,23 +304,24 @@ class CommunityCog(commands.Cog):
                 headers[i]: (r[i] if i < len(r) else "")
                 for i in range(len(headers))
             }
-            data.append(row_dict)
+            # Keep track of both the dictionary map and raw row array list
+            data.append((row_dict, r))
 
         search_words = search.lower().strip().split()
         scored = []
 
-        for r in data:
-            row_values = list(r.values())
+        for r_dict, r_list in data:
+            row_values = list(r_dict.values())
             name = str(row_values[0]).strip().lower() if row_values else ""
             if not name:
                 continue
 
             score = sum(1 for w in search_words if w in name)
             if score > 0:
-                scored.append((score, r))
+                scored.append((score, (r_dict, r_list)))
 
         matches = [
-            r for _, r in sorted(
+            pair for _, pair in sorted(
                 scored,
                 key=lambda x: x[0],
                 reverse=True
@@ -342,11 +336,17 @@ class CommunityCog(commands.Cog):
             )
             return
 
-        async def build_embed(row, i):
+        async def build_embed(row, raw_row, i):
             community_name = row.get("Community", f"Result {i}")
             
-            # Dynamic header lookup: reads Column J's header text or falls back safely
-            community_tag = row.get("Haven Tag", row.get("Tag", "UNALIGNED"))
+            # Direct static fallback: Reads index 9 (Column 10/J) cleanly if dictionary lookup misses
+            community_tag = "UNALIGNED"
+            if len(raw_row) >= 10 and raw_row[9].strip():
+                community_tag = raw_row[9].strip().upper()
+            else:
+                fallback = row.get("Haven Tag", row.get("Tag", ""))
+                if fallback.strip():
+                    community_tag = fallback.strip().upper()
 
             e = discord.Embed(
                 title=str(community_name).strip(), 
@@ -382,8 +382,8 @@ class CommunityCog(commands.Cog):
                 elif preview == "503":
                     e.add_field(name="⚠️ Haven Status", value="Logging stats service temporarily offline.", inline=False)
 
-            # Link with the newly extracted Haven Tag
-            e.add_field(name="Identity Tag", value=f"`[{community_tag if community_tag else 'UNALIGNED'}]`", inline=True)
+            # Link with the newly extracted physical Column J Haven Tag
+            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
 
             link = next(
                 (v for k, v in row.items() if "link" in k.lower() and v),
