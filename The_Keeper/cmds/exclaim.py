@@ -2,18 +2,19 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import aiosqlite
+
 import sys, os
 import json
 from difflib import get_close_matches
-import aiohttp
+import aiohttp, aiosqlite
 import traceback
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(BASE_DIR, "cogs", "Data"))
+sys.path.insert(0, BASE_DIR)
 
 sys.path.append(os.path.join(BASE_DIR, "cogs"))
 
-from cogs import xp_system, personality, Haven_stats, Haven_upload, featured, community
+from cogs import xp_system, ask, Haven_stats, Haven_upload, featured, community
 from cogs.xp_cog import DepartmentView
 from cogs.xp_system import get_user, get_level_from_xp, make_progress_bar, get_rank, xp_needed
 from cogs.community import SearchView, AddCivView
@@ -44,30 +45,24 @@ class CommandsRouter(commands.Cog):
         
 # ---------------- XP ----------------
     @commands.command(name="xp", help="check rank and level progress")
-    async def xp(self, ctx, member: discord.Member = None):
-    
+    async def xp(self, ctx, member: discord.Member = None):        
         member = member or ctx.author
-    
-        
-        await ensure_user(member.id)
-    
-        async with aiosqlite.connect(DB_PATH) as db:
-    
             
+        await ensure_user(member.id)
+        
+        async with aiosqlite.connect(DB_PATH) as db:
             cur = await db.execute(
                 "SELECT primary_role FROM users WHERE user_id=?",
                 (member.id,)
             )
             row = await cur.fetchone()
             await cur.close()
-    
+        
         if not row or not row[0]:
             await ctx.send(f"{member.display_name} has no primary role assigned.")
             return
-    
+        
         primary = row[0].lower()
-    
-        # embed colors
         ROLE_COLORS = {
             "architect": discord.Color.blue(),
             "cartographer": discord.Color.purple(),
@@ -76,80 +71,46 @@ class CommandsRouter(commands.Cog):
             "engineer": discord.Color.orange(),
             "historian": discord.Color.gold()
         }
-    
+        
         color = ROLE_COLORS.get(primary, discord.Color.green())
-    
-        # ---------------- ROLE XP ----------------
+        
+# ---------------- ROLE XP ----------------
         role_xp = await get_xp(member.id, primary)
-        level = int(await get_level(member.id, primary))
-    
-        # find rank + xp requirement safely
+        level = await get_level(member.id, primary)
+        ranks_list = CONFIG.get("ranks", [])
+        current_level = int(level)    
         rank = next(
-            r for r in CONFIG["ranks"]
-            if r["min_level"] <= level <= r["max_level"]
-        )
-
-    
+            (r for r in ranks_list if int(r.get("min_level", 1)) <= current_level <= int(r.get("max_level", 1))),
+            None
+         )
+       
         if not rank:
             rank = {"name": "Unknown", "xp_per_level": 100}
-    
-        xp_for_level = rank.get("xp_per_level", 100)
-    
+        
+        xp_for_level = rank.get("xp_per_level") or rank.get("xp_required", 100)
+        
         xp_into_level = role_xp % xp_for_level if xp_for_level else role_xp
-    
+        
         bar = make_progress_bar(xp_into_level, xp_for_level, role=primary)
-    
-        # ---------------- EMBED ----------------
+        
+# ---------------- EMBED ----------------
         embed = discord.Embed(
-            title=f"{member.display_name}'s XP",
+            title=f"{member.display_name}'s XP Status",
             color=color
         )
-    
+        
         embed.add_field(
-            name=f"{primary.capitalize()} (Primary)",
+            name=f"{primary.capitalize()} Department",
             value=(
-                f"Role XP: {role_xp}\n"
-                f"Level: {level}\n"
-                f"Rank: {rank['name']}\n"
+                f"**Role XP:** {role_xp}\n"
+                f"**Level:** {level}\n"
+                f"**Rank:** {rank['name']}\n"
                 f"{bar}"
-            ),
+           ),
             inline=False
         )
-    
+        
         await ctx.send(embed=embed)
-
-
-# ---------------- Systems ----------------
-    @commands.command(name="newsystem", help="upload a system directly from the server")
-    async def addlog(self, ctx):
-        
-        haven_cog = self.bot.get_cog("HavenSubmission")
-        if not haven_cog:
-            await ctx.send("⚠️ HavenSubmission cog is not loaded.")
-            return
-        
-        api = getattr(haven_cog, "api", None)
-        if api is None:
-            await ctx.send("⚠️ HavenSubmission cog does not have an API instance.")
-            return
-
-        glyph_emojis = getattr(haven_cog, "glyph_emojis", {})
-        HexKeypad = getattr(haven_cog, "HexKeypad", None)
-        if HexKeypad is None:
-            await ctx.send("⚠️ HavenSubmission cog does not have HexKeypad defined.")
-            return
-
-        view = HexKeypad(api=api, glyph_emojis=glyph_emojis, owner_id=ctx.author.id)
-        self.bot.add_view(view)
-
-        embed = discord.Embed(
-            title="🖋 Submit System Log",
-            description="Press 12 glyphs to generate your system code.",
-            color=0x00FFFF
-        )
-
-        message = await ctx.send(embed=embed, view=view)
-        view.message = message
 
 # ---------------- Discoveries ----------------
     @commands.command(name="discovery", help="upload a discovery directly from the server")

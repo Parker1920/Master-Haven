@@ -2,150 +2,103 @@ import discord
 from discord.ext import commands
 
 
-class HelpPagination(discord.ui.View):
-    def __init__(self, ctx, commands_list):
-        super().__init__(timeout=120)
-        self.ctx = ctx
+class EmbedPaginator(discord.ui.View):
+    """A simple UI view to handle multi-page embeds using buttons."""
+    def __init__(self, pages: list[discord.Embed], author_id: int):
+        super().__init__(timeout=60.0)  # Buttons expire after 60 seconds of inactivity
+        self.pages = pages
+        self.author_id = author_id
+        self.current_page = 0
+        self.update_buttons()
 
-        cmd_map = {
-            c.name: c
-            for c in commands_list
-            if not getattr(c, "hidden", False)
-        }
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page == len(self.pages) - 1
 
-        PAGE_MAP = {
-            0: {
-                "title": "🧭 Help and Library Commands",
-                "commands": ["addciv", "community", "list", "map", "partners", "hexkey"]
-            },
-            1: {
-                "title": "📊 XP System",
-                "commands": ["xp", "department"]
-            },
-            2: {
-                "title": "📡 Stats",
-                "commands": ["stats", "best", "planets", "systems"]
-            },
-            3: {
-                "title": "💾 Upload",
-                "commands": ["newsystem", "discovery"],
-                "note": "Uploads will not work outside of the correct discovery thread. Find threads in: <#1432875487503585290> category."
-            }
-        }
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("This menu isn't for you!", ephemeral=True)
+            return False
+        return True
 
-        self.pages = self.build_pages(cmd_map, PAGE_MAP)
-        self.page = 0
-        self.max_page = len(self.pages) - 1
-        self.message = None
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.blurple)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
-    def build_pages(self, cmd_map, page_map):
-        pages = []
-
-        for i in sorted(page_map.keys()):
-            page_data = page_map[i]
-
-            cmds = [
-                cmd_map[name]
-                for name in page_data["commands"]
-                if name in cmd_map
-            ]
-
-            pages.append({
-                "title": page_data["title"],
-                "commands": cmds,
-                "note": page_data.get("note")
-            })
-
-        return pages
-
-    def build_embed(self):
-        page = self.pages[self.page]
-        chunk = page["commands"]
-
-        embed = discord.Embed(
-            title=page["title"],
-            description=f"Page {self.page + 1}/{self.max_page + 1}",
-            color=0x8A00C4
-        )
-
-        # Optional page note (Upload warning)
-        if page.get("note"):
-            embed.add_field(
-                name="⚠️ Notice",
-                value=page["note"],
-                inline=False
-            )
-
-        # XP channel hint (kept from previous fix)
-        if "XP System" in page["title"]:
-            embed.description += "\nLive XP Tracking: <#1434695249510400020>"
-
-        for command in chunk:
-            description = (
-                getattr(command, "short_doc", None)
-                or getattr(command, "help", None)
-                or getattr(command, "description", None)
-                or "No description provided."
-            )
-
-            embed.add_field(
-                name=f"`!{command.name}`",
-                value=description,
-                inline=False
-            )
-
-        return embed
-
-    async def update(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(
-            embed=self.build_embed(),
-            view=self
-        )
-
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
-    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.ctx.author.id:
-            return await interaction.response.defer()
-
-        if self.page > 0:
-            self.page -= 1
-            await self.update(interaction)
-        else:
-            await interaction.response.defer()
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.ctx.author.id:
-            return await interaction.response.defer()
-
-        if self.page < self.max_page:
-            self.page += 1
-            await self.update(interaction)
-        else:
-            await interaction.response.defer()
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-
-        if self.message:
-            try:
-                await self.message.edit(view=self)
-            except:
-                pass
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.blurple)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
 
 class HelpSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="list")
+    @commands.command(name="cmds")
     async def help_command(self, ctx):
-        commands_list = list(self.bot.commands)
+        all_fields = []
 
-        view = HelpPagination(ctx, commands_list)
-        msg = await ctx.send(embed=view.build_embed(), view=view)
-        view.message = msg
+        # Gather Prefix Commands
+        for command in self.bot.commands:
+            if getattr(command, "hidden", False):
+                continue
+            description = (
+                getattr(command, "short_doc", None)
+                or getattr(command, "help", None)
+                or getattr(command, "description", None)
+                or "No description provided."
+            )
+            all_fields.append({
+                "name": f"`!{command.name}` (Prefix)",
+                "value": description
+            })
+
+        # Gather Slash Commands
+        slash_commands = self.bot.tree.get_commands()
+        for command in slash_commands:
+            description = getattr(command, "description", None) or "No description provided."
+            all_fields.append({
+                "name": f"`/{command.name}` (Slash)",
+                "value": description
+            })
+
+        if not all_fields:
+            embed = discord.Embed(
+                title="All Bot Commands",
+                description="No commands were found.",
+                color=0x8A00C4
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Split into chunks of 10
+        fields_per_page = 10
+        chunks = [all_fields[i:i + fields_per_page] for i in range(0, len(all_fields), fields_per_page)]
+        
+        pages = []
+        for index, chunk in enumerate(chunks):
+            embed = discord.Embed(
+                title="All Bot Commands",
+                description="A complete list of all prefix and slash commands.",
+                color=0x8A00C4
+            )
+            for field in chunk:
+                embed.add_field(name=field["name"], value=field["value"], inline=False)
+            
+            embed.set_footer(text=f"Page {index + 1} of {len(chunks)}")
+            pages.append(embed)
+
+        if len(pages) == 1:
+            await ctx.send(embed=pages[0])
+        else:
+            view = EmbedPaginator(pages, ctx.author.id)
+            await ctx.send(embed=pages[0], view=view)
 
 
 async def setup(bot):

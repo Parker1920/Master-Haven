@@ -6,6 +6,7 @@ import os
 from io import StringIO
 import asyncio
 import gspread
+from typing import Optional, Dict, Any
 
 
 # -------------------- PAGINATOR --------------------
@@ -18,11 +19,11 @@ class SearchPaginator(discord.ui.View):
         self.index = 0
 
     async def build_page(self):
-        row = self.results[self.index]
+        row_dict, row_list = self.results[self.index]
         # Await the async embed builder
-        embed = await self.embed_builder(row, self.index + 1)
+        embed = await self.embed_builder(row_dict, row_list, self.index + 1)
 
-        link = next((v for k, v in row.items() if "link" in k.lower()), None)
+        link = next((v for k, v in row_dict.items() if "link" in k.lower()), None)
 
         if link:
             link = str(link).strip()
@@ -103,6 +104,15 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
         required=True
     )
     link = discord.ui.TextInput(label="Permanent Link", required=False)
+    
+    # 2-5 Letter Tag Input linked to Column J
+    tag = discord.ui.TextInput(
+        label="Haven Tag (2-5 Letters)", 
+        min_length=2, 
+        max_length=5, 
+        required=False,
+        placeholder="e.g. ABC"
+    )
 
     def __init__(self, cog):
         super().__init__()
@@ -121,12 +131,6 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 ephemeral=True,
             )
             return
-
-        headers = await loop.run_in_executor(
-            None,
-            self.cog.sheet.row_values,
-            1
-        )
 
         existing_values = await loop.run_in_executor(
             None,
@@ -150,16 +154,16 @@ class AddCivModal(discord.ui.Modal, title="Add Entry"):
                 )
                 return
 
-        new_row = [""] * len(headers)
-        new_row[0] = self.name.value
-        new_row[3] = self.description.value
-        new_row[4] = self.link.value or ""
+        clean_tag = self.tag.value.strip().upper() if self.tag.value else ""
 
         def insert():
             next_row = len(self.cog.sheet.get_all_values()) + 1
             self.cog.sheet.update_cell(next_row, 1, self.name.value)
             self.cog.sheet.update_cell(next_row, 4, self.description.value)
             self.cog.sheet.update_cell(next_row, 5, self.link.value or "")
+            
+            # Updates Column 10 (Column J) directly with the Tag
+            self.cog.sheet.update_cell(next_row, 10, clean_tag)
 
         await loop.run_in_executor(None, insert)
         await interaction.followup.send(
@@ -241,6 +245,7 @@ class CommunityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.session = aiohttp.ClientSession()
+        self.base_url = os.getenv("HAVEN_API", "https://havenmap.online")
         self.gc = None
         self.sheet = None
 
@@ -267,6 +272,23 @@ class CommunityCog(commands.Cog):
             text = await resp.text()
             return list(csv.reader(StringIO(text)))
 
+    async def get_haven_community_stats(self, tag: str) -> Optional[Dict[str, Any]]:
+        """Queries the public community overview endpoint and matches tracking against the given tag."""
+        try:
+            async with self.session.get(f"{self.base_url}/api/public/community-overview", timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    communities = data.get("communities", [])
+                    # Find matching community by its case-insensitive discord_tag
+                    for item in communities:
+                        if item.get("discord_tag", "").strip().upper() == tag.strip().upper():
+                            return item
+                elif resp.status == 503:
+                    return {"status_override": "503"}
+        except Exception:
+            return None
+        return None
+
     async def run_search(self, interaction: discord.Interaction, search: str):
         rows = await self.fetch_sheet()
 
@@ -288,25 +310,40 @@ class CommunityCog(commands.Cog):
                 headers[i]: (r[i] if i < len(r) else "")
                 for i in range(len(headers))
             }
-            data.append(row_dict)
+            data.append((row_dict, r))
 
-        search_words = search.lower().strip().split()
+        clean_search = search.lower().strip()
+        search_words = clean_search.split()
         scored = []
 
-        for r in data:
-            row_values = list(r.values())
+        for r_dict, r_list in data:
+            row_values = list(r_dict.values())
             name = str(row_values[0]).strip().lower() if row_values else ""
             if not name:
                 continue
 
-            score = sum(1 for w in search_words if w in name)
-            if score > 0:
-                scored.append((score, r))
+            # Calculate primary matching word count
+            word_match_score = sum(1 for w in search_words if w in name)
+            
+            if word_match_score > 0:
+                # 1. Exact Name Match Bonus (Highest Sorting Weight)
+                is_exact_match = 1 if name == clean_search else 0
+                
+                # 2. Length Penalty (Shorter names get sorted higher on ties)
+                name_length = len(name)
+                
+                # Tuple format: (Word Score, Exact Bonus, Shorter Name Priority)
+                # Shorter name length is inverted so higher number = better/shorter string length
+                scored.append((
+                    (word_match_score, is_exact_match, -name_length), 
+                    (r_dict, r_list)
+                ))
 
+        # Sort dynamically using multiple criteria to bubble closest match directly to index 0
         matches = [
-            r for _, r in sorted(
+            pair for _, pair in sorted(
                 scored,
-                key=lambda x: x[0],
+                key=lambda x: (x[0][0], x[0][1], x[0][2]),
                 reverse=True
             )
         ][:10]
@@ -319,15 +356,24 @@ class CommunityCog(commands.Cog):
             )
             return
 
-        # Fixed indentation, changed to async def, added API invite counter
-        async def build_embed(row, i):
+        async def build_embed(row, raw_row, i):
             community_name = row.get("Community", f"Result {i}")
+            
+            # Reads index 9 (Column 10/J) cleanly if dictionary lookup misses
+            community_tag = "UNALIGNED"
+            if len(raw_row) >= 10 and raw_row[9].strip():
+                community_tag = raw_row[9].strip().upper()
+            else:
+                fallback = row.get("Haven Tag", row.get("Tag", ""))
+                if fallback.strip():
+                    community_tag = fallback.strip().upper()
 
             e = discord.Embed(
                 title=str(community_name).strip(), 
                 color=discord.Color.purple()
             )
 
+            # 1. Add Text Fields First (Description, Permanent Link)
             allowed = ["Description", "perma-link"]
             label_map = {                
                 "Description": "Description",
@@ -342,6 +388,26 @@ class CommunityCog(commands.Cog):
                         value=value,
                         inline=False
                     )          
+
+            # 2. Add Identity Tag and Stats Fields Second (Bottom of Embed)
+            e.add_field(name="Identity Tag", value=f"`[{community_tag}]`", inline=True)
+
+            # Look up live tracking statistics using the verified Community Tag
+            if community_tag != "UNALIGNED":
+                stats = await self.get_haven_community_stats(community_tag)
+                
+                if stats:
+                    if stats.get("status_override") == "503":
+                        e.add_field(name="⚠️ Haven Status", value="Logging stats service temporarily offline.", inline=False)
+                    else:
+                        sys_count = stats.get("total_systems", 0)
+                        disc_count = stats.get("total_discoveries", 0)
+                        
+                        # Dynamically generate tracking metrics side-by-side if they have logged entries
+                        if sys_count > 0:
+                            e.add_field(name="📊 Systems Logged", value=f"`{sys_count}` mapped", inline=True)
+                        if disc_count > 0:
+                            e.add_field(name="🚀 Discoveries", value=f"`{disc_count}` logged", inline=True)
 
             link = next(
                 (v for k, v in row.items() if "link" in k.lower() and v),
