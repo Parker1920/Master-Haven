@@ -267,14 +267,28 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
             curve_sheet = self.cog.get_sheet("level_xp")
             existing_curves = curve_sheet.get_all_values()
             
-            if self.level_up_msg.value:
-                guild_sheet = self.cog.get_sheet("guilds")
-                g_rows = guild_sheet.get_all_values()
-                g_target = next((i for i, r in enumerate(g_rows[1:], start=2) if r and r[0] == self.guild_id), None)
-                if g_target:
-                    guild_sheet.update_cell(g_target, 3, "True")
-                    guild_sheet.update_cell(g_target, 4, self.level_up_msg.value)
+            # --- FIXED GUILD TABLE SYNC FOR LEVEL UP MESSAGES ---
+            guild_sheet = self.cog.get_sheet("guilds")
+            g_rows = guild_sheet.get_all_values()
+            g_target = next((i for i, r in enumerate(g_rows[1:], start=2) if r and r[0] == self.guild_id), None)
+            
+            msg_text = self.level_up_msg.value if self.level_up_msg.value else "Congratulations {user}, you leveled up to {level}!"
+            
+            if g_target:
+                # Pad out the existing data if it's too short before updating
+                current_row_data = g_rows[g_target - 1]
+                while len(current_row_data) < 6:
+                    current_row_data.append("")
+                
+                # Directly update column 3 (Msg Enabled) and column 4 (Msg Text)
+                guild_sheet.update_cell(g_target, 3, "True")
+                guild_sheet.update_cell(g_target, 4, msg_text)
+            else:
+                # If the guild wasn't initialized yet, create it with messaging turned ON
+                default_row = [self.guild_id, "1", "True", msg_text, "5", "True"]
+                guild_sheet.append_row(default_row)
 
+            # --- RETAINED INDIVIDUAL TIERS BLOCK ---
             for level_idx in range(1, total_levels + 1):
                 level_str = str(level_idx)
                 level_name = names_list[level_idx - 1]
@@ -294,11 +308,10 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
         
         prompt_view = LevelUpChannelPromptView(self.cog, self.guild_id, total_levels)
         await interaction.followup.send(
-            content=f"✅ Successfully initialized **{total_levels}** custom layout levels in your system!\n\n**Would you like to add a level up channel?**",
+            content=f"✅ Successfully initialized **{total_levels}** custom layout levels in your system and activated level-up notices!\n\n**Would you like to designate a specific channel for these level up announcements?**",
             view=prompt_view,
             ephemeral=True
         )
-
 
 class LevelUpChannelPromptView(discord.ui.View):
     def __init__(self, cog, guild_id: str, total_levels: int):
@@ -410,14 +423,12 @@ class CustomLayoutModal(discord.ui.Modal, title="Customize Level Embed Theme"):
     filled_bar = discord.ui.TextInput(
         label="Filled Progress Bar Emoji", 
         default="🟩", 
-        max_length=2, 
-        placeholder="Paste a single emoji icon character"
+        placeholder="Standard emoji OR custom server emoji string"
     )
     empty_bar = discord.ui.TextInput(
         label="Empty Progress Bar Emoji", 
         default="⬛", 
-        max_length=2, 
-        placeholder="Paste a single emoji icon character"
+        placeholder="Standard emoji OR custom server emoji string"
     )
 
     def __init__(self, cog, guild_id: str):
@@ -450,16 +461,14 @@ class CustomLayoutModal(discord.ui.Modal, title="Customize Level Embed Theme"):
                 sheet.update(range_name=f"A{target_row}:K{target_row}", values=[updated_row])
 
         await loop.run_in_executor(None, save_custom_design_specs)
-        await interaction.followup.send(" Custom theme configuration saved successfully! Run `!level` again to see it.", ephemeral=True)
+        await interaction.followup.send("✨ Custom theme configuration saved successfully! Run `!level` again to see it.", ephemeral=True)
 
-
-# -------------------- MAIN COG & TRACKING LOGIC --------------------
+# -------MAIN COG & TRACKING LOGIC -------
 class XPConfigCog(commands.Cog, name="xp"):
     def __init__(self, bot):
         self.bot = bot
         self.gc = None
         self.spreadsheet = None
-        # In-memory cooldown tracking dictionary: {(guild_id, user_id): last_msg_timestamp}
         self._cooldowns = {}
 
     def get_sheet(self, tab_name: str):
