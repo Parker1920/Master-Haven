@@ -22,13 +22,14 @@ class XPSetupPromptView(discord.ui.View):
         loop = asyncio.get_running_loop()
 
         def initialize_or_update_guild():
+            # This creates the tab dynamically if missing and injects the 19 headers
             sheet = self.cog.get_guild_tab(self.guild_id)
             rows = sheet.get_all_values()
             
             # If configuration row 2 elements are blank, inject standard defaults
             if len(rows) < 2 or len(rows[1]) < 7 or rows[1][6] == "":
                 config_defaults = [
-                    "", "", "", "", "", "",                               # Pad Columns A-F
+                    "", "", "", "", "", "",                               # Pad Columns A-F (Blanks for row 2 users)
                     "1",                                                   # G: XP Per Msg
                     "True",                                                # H: Msg Enabled
                     "Congratulations {user}, you leveled up to {level}!",  # I: Msg Text
@@ -41,7 +42,7 @@ class XPSetupPromptView(discord.ui.View):
                     "⬛",                                                  # P: Empty Bar Emoji
                     "10",                                                  # Q: Max Level Tiers
                     "100,200,300,400,500,600,700,800,900,1000",            # R: Custom XP brackets list
-                    "Level 1,Level 2,Level 3,Level 4,Level 5,Level 6,Level 7,Level 8,Level 9,Level 10" # S: Level Names
+                    "Level 1,Level 2,Level 3,Level 4,Level 5,Level 6,Level 7,Level 8,Level 9,Level 10" # S: Level Names List
                 ]
                 sheet.update(range_name="A2:S2", values=[config_defaults])
 
@@ -150,7 +151,7 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
         # Generate linear progression multiplier thresholds
         brackets_list = [str(base_xp * idx) for idx in range(1, total_levels + 1)]
 
-        # Consolidate back into clean strings to fill exactly inside columns Q, R, and S
+        # Consolidate back into clean strings to fill exactly inside columns Q, R, and S of the local tab
         final_max_tiers = str(total_levels)
         final_brackets = ",".join(brackets_list)
         final_names = ",".join(names_list)
@@ -385,7 +386,6 @@ class XPConfigCog(commands.Cog, name="xp"):
                 except Exception:
                     embed_color = discord.Color.purple()
 
-            # Dynamically grab custom display name if it exists inside column S index
             tier_display_title = f"Level {current_level}"
             if names_lookup and len(names_lookup) >= current_level:
                 tier_display_title = f"{names_lookup[current_level - 1]} (Lvl {current_level})"
