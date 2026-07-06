@@ -177,8 +177,8 @@ COGS = [
     "cogs.announcements",
     "cogs.hex",
     "cogs.friend",
-    "cogs.TimeParser",
     "cogs.transfer",
+    "cogs.TimeParser",
     "cmds.exclaim",
     "cmds.list",
     "cmds.slash",
@@ -259,47 +259,49 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author.bot or not message.guild:
         return 
 
-    allowed_channels = []
-    for item in bot.XP_ENABLED_CHANNELS:
-        if isinstance(item, list):
-            allowed_channels.extend(item)
-        else:
-            allowed_channels.append(item)
-
-    if message.channel.id in allowed_channels:
-        if check_cooldown(message.author.id, "primary_xp", CONFIG["xp"]["primary_cooldown"]):
-            
-            if message.channel.id == 1423941006142996523:
-                user_role = "voyager"
-                amount = CONFIG["xp"]["primary_per_message"]
-            else:
-                user_role = "voyager"
-                with get_conn() as conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT primary_role FROM users WHERE user_id = ?", (message.author.id,))
-                    row = cur.fetchone()
-                    if row and row[0]:
-                        user_role = row[0]
-
-                office_channel_id = CONFIG["roles"].get(user_role, {}).get("office_channel")
-                if office_channel_id and message.channel.id == office_channel_id:
-                    amount = CONFIG["xp"]["office_xp"]
-                else:
-                    amount = CONFIG["xp"]["primary_per_message"]
-
-      
-            await add_xp(message.author.id, user_role, amount)
-
     ctx = await bot.get_context(message)
-    if not ctx.valid and message.guild: 
-        google_xp_cog = bot.get_cog("xp")  
-        if google_xp_cog:
-            asyncio.create_task(google_xp_cog.process_message_sheets_xp(message))
-        
     await bot.process_commands(message)
+
+    SPECIFIC_LOCAL_GUILD_ID = 1423941004230135851 
+
+    if message.guild.id == SPECIFIC_LOCAL_GUILD_ID:
+        allowed_channels = []
+        for item in bot.XP_ENABLED_CHANNELS:
+            if isinstance(item, list):
+                allowed_channels.extend(item)
+            else:
+                allowed_channels.append(item)
+
+        if message.channel.id in allowed_channels:
+            if check_cooldown(message.author.id, "primary_xp", CONFIG["xp"]["primary_cooldown"]):
+                user_role = "voyager"
+                
+                if message.channel.id == 1423941006142996523:
+                    amount = CONFIG["xp"]["primary_per_message"]
+                else:
+                    with get_conn() as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT primary_role FROM users WHERE user_id = ?", (message.author.id,))
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            user_role = row[0]
+
+                    office_channel_id = CONFIG["roles"].get(user_role, {}).get("office_channel")
+                    if office_channel_id and message.channel.id == office_channel_id:
+                        amount = CONFIG["xp"]["office_xp"]
+                    else:
+                        amount = CONFIG["xp"]["primary_per_message"]
+
+                await add_xp(message.author.id, user_role, amount)
+
+    else:
+        if not ctx.valid: 
+            google_xp_cog = bot.get_cog("xp")  
+            if google_xp_cog:
+                asyncio.create_task(google_xp_cog.process_message_sheets_xp(message))
 
 
 @bot.event
