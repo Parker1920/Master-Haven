@@ -181,13 +181,17 @@ def engagement_documents(engagement_id: int, session: Session = Depends(get_sess
         .order_by(DocumentGenerated.id)
     ).all()
     required = session.exec(select(RequiredDoc)).all()
-    from ..services.docgen import DOC_LABELS
+    from ..services.docgen import DOC_FIELDS, DOC_LABELS
     return {
         "documents": docs,
         "required": required,
         "missing": _missing_docs(session, engagement_id),
-        # every type docgen can produce, lifecycle-ordered (Generate picker)
-        "generatable": [{"doc_type": k, "label": v} for k, v in DOC_LABELS.items()],
+        # every type docgen can produce, lifecycle-ordered (Generate picker),
+        # with the optional per-type fields the sheet collects
+        "generatable": [
+            {"doc_type": k, "label": v, "fields": DOC_FIELDS.get(k, [])}
+            for k, v in DOC_LABELS.items()
+        ],
     }
 
 

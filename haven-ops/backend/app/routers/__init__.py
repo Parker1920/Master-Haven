@@ -2,6 +2,7 @@
 auth seam (Depends(require_user), a Phase 1 no-op)."""
 from ..models import (Account, Asset, Client, ComplianceItem, EnvironmentItem,
                       Flag, Initiative, Person, Task, Template, Transaction)
+from .activity import router as activity_router
 from .company import router as company_router
 from .crud import crud_router
 from .documents import assets_router as asset_files_router
@@ -9,6 +10,7 @@ from .documents import router as documents_router
 from .emit import router as emit_router
 from .engagements import router as engagements_router
 from .hooks import router as hooks_router
+from .library import router as library_router
 
 all_routers = [
     company_router,
@@ -17,6 +19,8 @@ all_routers = [
     asset_files_router,  # POST /api/assets/{id}/receipt (upload)
     hooks_router,        # site → Ops relays, gated by OPS_SERVICE_TOKEN
     emit_router,
+    library_router,      # template library: catalogue + specimen previews
+    activity_router,     # Bridge feed: read side of activity_log
     crud_router(Person, prefix="people", entity="person", order_attr="sort"),
     crud_router(Initiative, prefix="initiatives", entity="initiative", order_attr="sort"),
     crud_router(EnvironmentItem, prefix="environment", entity="environment_item", order_attr="sort"),

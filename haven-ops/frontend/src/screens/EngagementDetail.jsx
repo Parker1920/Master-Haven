@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, money } from '../api'
 import AttachButton from '../components/AttachButton.jsx'
 import FormModal from '../components/FormModal.jsx'
+import GenerateModal from '../components/GenerateModal.jsx'
 import { useFetch } from '../hooks'
 import { useToast } from '../toast.jsx'
 import { Badge, Card, DocActions, EditBtn, KV, STAGES, StageBar, stateLabel } from '../ui.jsx'
@@ -13,6 +14,7 @@ export default function EngagementDetail({ nav, engagementId }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [sheet, setSheet] = useState(null) // 'note' | 'generate' | 'upload' | 'edit' | 'client'
+  const [genType, setGenType] = useState('') // preselected type for the Generate sheet
 
   const e = engagement.data
   if (!e) return <p className="screen-sub">{engagement.error ? String(engagement.error.message) : 'Loading…'}</p>
@@ -24,16 +26,17 @@ export default function EngagementDetail({ nav, engagementId }) {
 
   const nextStage = e.state !== 'closed' ? STAGES[STAGES.indexOf(e.state) + 1] : null
 
-  const generate = (docType) => {
-    if (busy) return
-    setBusy(true)
-    api.post(`/engagements/${engagementId}/documents`, { doc_type: docType })
-      .then((res) => {
-        toast(`${requiredLabels[docType] || docType} v${res.document.version} generated & frozen${res.signature_stamped ? ' · signature stamped' : ''}`)
-        reloadAll()
-      })
-      .catch((err) => toast(`Generation failed: ${err.message}`))
-      .finally(() => setBusy(false))
+  // Open the Generate sheet — per-type fields, optionally preselected.
+  const openGenerate = (docType = '') => {
+    setGenType(docType)
+    setSheet('generate')
+  }
+
+  const doGenerate = async (docType, fields) => {
+    const body = fields ? { doc_type: docType, fields } : { doc_type: docType }
+    const res = await api.post(`/engagements/${engagementId}/documents`, body)
+    toast(`${requiredLabels[docType] || docType} v${res.document.version} generated & frozen${res.signature_stamped ? ' · signature stamped' : ''}`)
+    reloadAll()
   }
 
   const advance = () => {
@@ -81,7 +84,7 @@ export default function EngagementDetail({ nav, engagementId }) {
             a PDF and appends to the papertrail.
           </p>
           {missing.map((m) => (
-            <button key={m} type="button" disabled={busy} onClick={() => generate(m)}>
+            <button key={m} type="button" disabled={busy} onClick={() => openGenerate(m)}>
               Generate &amp; send {requiredLabels[m] || m}
             </button>
           ))}
@@ -118,7 +121,7 @@ export default function EngagementDetail({ nav, engagementId }) {
         action={
           <span className="acts">
             <button className="link" type="button" onClick={() => setSheet('upload')}>Upload</button>
-            <button className="link" type="button" onClick={() => setSheet('generate')}>Generate</button>
+            <button className="link" type="button" onClick={() => openGenerate()}>Generate</button>
           </span>
         }>
         {(docs.data?.documents || []).map((d) => (
@@ -174,13 +177,10 @@ export default function EngagementDetail({ nav, engagementId }) {
       )}
 
       {sheet === 'generate' && (
-        <FormModal title="Generate document" submitLabel="Generate & freeze"
-          fields={[
-            { name: 'doc_type', label: 'Document type', type: 'select', required: true,
-              options: (docs.data?.generatable || docs.data?.required || []).map((r) => [r.doc_type, r.label]),
-              hint: 'lifecycle order — an existing type re-issues as a new version, nothing is overwritten' },
-          ]}
-          onSubmit={async ({ doc_type }) => generate(doc_type)}
+        <GenerateModal
+          generatable={docs.data?.generatable || []}
+          initialType={genType}
+          onGenerate={doGenerate}
           onClose={() => setSheet(null)} />
       )}
 

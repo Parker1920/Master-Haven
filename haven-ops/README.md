@@ -76,6 +76,9 @@ an `activity_log` row that commits atomically with the change.
 | `POST /api/assets/{id}/receipt` | multipart: receipt scan → linked to the asset (the Itemize workflow) |
 | `POST /api/engagements/{id}/advance` | forward-only stage move; appends the papertrail event, stamps closed_at |
 | `GET /api/emit/project-instructions` | Part A (durable) + Part B (live from tables), `text/markdown` |
+| `GET /api/activity?limit=N` | newest activity_log rows — the Bridge feed (read-only; the log has no update/delete) |
+| `GET /api/template-library` | docgen catalogue: label, purpose, per-type generation fields, signature policy, usage count |
+| `GET /api/template-library/{kind}/preview` | SPECIMEN PDF — sample data, watermarked, conformed /s/ only (never the signature image), never recorded |
 | `POST /api/hooks/inquiry` · `POST /api/hooks/payment` | **site → Ops relays** (voyagershaven.online backend only): inquiry → client + engagement + frozen intake; settled payment → ledger transaction + auto-receipt when the invoice number names a `VHAV-C-` code. Gated by `X-Ops-Token` = `OPS_SERVICE_TOKEN` (unset = 503) |
 
 ## Run bare (no Docker, for backend iteration)
@@ -106,6 +109,10 @@ reuses that script's `$BACKUP_DIR`/`$DATE` and its 7-day `*.db` retention.
 4. `docker compose up -d --build` — startup migrates + seeds an empty DB
    automatically; check `docker logs haven-ops` for the `[migrate]`/`[seed]`
    lines and `docker ps` for `(healthy)`.
+   *(Deployed 2026-07-06: host port is `8095` on the Pi — 8090/8091 were
+   already taken by nms10-frontend/viobot-dashboard — set via
+   `HAVEN_OPS_PORT` in the Pi's `.env`. The container-internal port for the
+   site relay remains 8090.)*
 5. **Do NOT add an NPM/Cloudflare route** — port 8090 stays tailnet-internal;
    the tailnet is the security perimeter (auth tiers come post-Phase-1).
 6. Append [deploy/backup-haven-ops.snippet.sh](deploy/backup-haven-ops.snippet.sh)
@@ -131,4 +138,5 @@ reuses that script's `$BACKUP_DIR`/`$DATE` and its 7-day `*.db` retention.
 | 2 | API + doc generation (freeze) + emit | ✅ |
 | 3 | Frontend port of mockup v0.7, wired to API | ✅ |
 | 4 | Compose polish, backup, run notes | ✅ — Phase 1 complete |
-| 1.5 | Iterations 1+2: documents real (upload/attach/view), every register editable, lifecycle + ledger ops | ✅ this commit |
+| 1.5 | Iterations 1+2: documents real (upload/attach/view), every register editable, lifecycle + ledger ops | ✅ |
+| 1.6 | Iteration 3: Registry folders + search, viewable template library (specimen previews + per-type fields), Generate sheet collects per-type fields, Bridge activity feed | ✅ this commit |

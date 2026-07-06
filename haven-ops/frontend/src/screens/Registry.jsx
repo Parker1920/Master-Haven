@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { api } from '../api'
 import AttachButton from '../components/AttachButton.jsx'
 import FormModal from '../components/FormModal.jsx'
 import { useFetch } from '../hooks'
 import { useToast } from '../toast.jsx'
-import { Badge, Card, DocActions, Row } from '../ui.jsx'
+import { Badge, Card, DocActions, Row, stateLabel } from '../ui.jsx'
 
 // Governance doc types (migration 003) → registry badge + icon.
 const GOV_META = {
@@ -18,18 +18,59 @@ const GOV_META = {
 export default function Registry() {
   const documents = useFetch('/documents')
   const flags = useFetch('/flags')
-  const templates = useFetch('/templates')
+  const library = useFetch('/template-library')
   const engagements = useFetch('/engagements')
   const toast = useToast()
-  const [filter, setFilter] = useState('all')
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(() => new Set())
+  const [tplOpen, setTplOpen] = useState(null)
   const [uploadOpen, setUploadOpen] = useState(false)
-
-  const docCat = (d) => (d.engagement_id ? 'contract' : 'gov')
-  const visible = (cat) => filter === 'all' || filter === cat
 
   // Receipt scans live on their assets (Ledger) — keep the registry index clean.
   const docs = (documents.data || []).filter((d) => d.doc_type !== 'receipt_scan')
   const actionFlags = (flags.data || []).filter((f) => f.status === 'open' && f.category === 'compliance')
+  const engMap = Object.fromEntries((engagements.data || []).map((e) => [e.id, e]))
+
+  // ── Folders: Governance & Company + one per engagement ────────────────────
+  const folders = useMemo(() => {
+    const gov = docs.filter((d) => d.engagement_id == null)
+    const byEng = new Map()
+    for (const d of docs) {
+      if (d.engagement_id == null) continue
+      if (!byEng.has(d.engagement_id)) byEng.set(d.engagement_id, [])
+      byEng.get(d.engagement_id).push(d)
+    }
+    const engFolders = [...byEng.entries()].map(([id, list]) => {
+      const e = engMap[id]
+      return {
+        key: `eng-${id}`,
+        icon: '📁',
+        name: e?.code || list[0].engagement_code || `Engagement ${id}`,
+        meta: e
+          ? [e.client?.name, e.title, stateLabel(e.state)].filter(Boolean).join(' · ')
+          : 'engagement',
+        docs: list,
+      }
+    }).sort((a, b) => b.name.localeCompare(a.name)) // newest code first
+    return [
+      { key: 'gov', icon: '🏛️', name: 'Governance & Company',
+        meta: 'formation · agreements · tax · reference', docs: gov },
+      ...engFolders,
+    ]
+  }, [documents.data, engagements.data]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggle = (key) => setOpen((s) => {
+    const next = new Set(s)
+    next.has(key) ? next.delete(key) : next.add(key)
+    return next
+  })
+
+  // ── Search: flat matches across every folder ──────────────────────────────
+  const ql = q.trim().toLowerCase()
+  const hits = ql
+    ? docs.filter((d) => [d.title, d.doc_type, d.engagement_code, d.filename]
+        .some((s) => s && s.toLowerCase().includes(ql)))
+    : []
 
   const removeUploaded = async (d) => {
     if (!window.confirm(`Delete uploaded document "${d.title}"?`)) return
@@ -40,67 +81,130 @@ export default function Registry() {
     } catch (e) { toast(e.message) }
   }
 
+  const DocRow = ({ d }) => {
+    const gov = GOV_META[d.doc_type]
+    return (
+      <Row icon={gov?.icon || (d.origin === 'uploaded' ? '📎' : '📄')}
+        name={d.title || d.doc_type}
+        meta={gov
+          ? `${gov.kind} · ${d.generated_at ? String(d.generated_at).slice(0, 10) : 'on file'}${d.has_file ? '' : ' · no file yet'}`
+          : `${d.origin === 'uploaded' ? 'Uploaded' : 'Generated'} · ${d.engagement_code || '—'} · v${d.version}${d.generated_at ? ' · ' + String(d.generated_at).slice(0, 10) : ''}`}
+        right={
+          <span className="acts">
+            {d.has_file
+              ? <DocActions doc={d} />
+              : <AttachButton path={`/documents/${d.id}/file`} onDone={documents.reload} />}
+            {!d.has_file && gov && <Badge tone="ok">{gov.badge}</Badge>}
+            {!d.has_file && !gov && <Badge tone="mute">{d.engagement_state === 'closed' ? 'Closed' : 'On file'}</Badge>}
+            {d.origin === 'uploaded' && (
+              <button type="button" className="mini" aria-label="Delete" onClick={() => removeUploaded(d)}>✕</button>
+            )}
+          </span>
+        } />
+    )
+  }
+
   return (
     <>
       <h1 className="screen-title">Registry</h1>
-      <p className="screen-sub">Every LLC document, indexed — plus the templates that spawn them</p>
+      <p className="screen-sub">Every LLC document, foldered — plus the templates that spawn them</p>
 
-      <div className="chips">
-        {[['all', 'All'], ['gov', 'Governance'], ['contract', 'Contracts'], ['flag', 'Needs action']].map(([key, label]) => (
-          <button key={key} type="button" className={`chip${filter === key ? ' on' : ''}`} onClick={() => setFilter(key)}>
-            {label}
-          </button>
-        ))}
+      <div className="searchbar">
+        <input type="search" placeholder="Search documents — title, type, engagement code…"
+          value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      <Card title="Documents"
-        action={<button className="link" type="button" onClick={() => setUploadOpen(true)}>Upload</button>}>
-        {docs.map((d) => {
-          const cat = docCat(d)
-          if (!visible(cat)) return null
-          const gov = GOV_META[d.doc_type]
-          return (
-            <Row key={d.id} icon={gov?.icon || (d.origin === 'uploaded' ? '📎' : '📄')}
-              name={d.title || d.doc_type}
-              meta={gov
-                ? `${gov.kind} · ${d.generated_at ? String(d.generated_at).slice(0, 10) : 'on file'}${d.has_file ? '' : ' · no file yet'}`
-                : `${d.origin === 'uploaded' ? 'Uploaded' : 'Contract'} · ${d.engagement_code || '—'} · v${d.version}${d.generated_at ? ' · ' + String(d.generated_at).slice(0, 10) : ''}`}
-              right={
-                <span className="acts">
-                  {d.has_file
-                    ? <DocActions doc={d} />
-                    : <AttachButton path={`/documents/${d.id}/file`} onDone={documents.reload} />}
-                  {!d.has_file && gov && <Badge tone="ok">{gov.badge}</Badge>}
-                  {!d.has_file && !gov && <Badge tone="mute">{d.engagement_state === 'closed' ? 'Closed' : 'On file'}</Badge>}
-                  {d.origin === 'uploaded' && (
-                    <button type="button" className="mini" aria-label="Delete" onClick={() => removeUploaded(d)}>✕</button>
-                  )}
-                </span>
-              } />
-          )
-        })}
-        {visible('flag') && actionFlags.map((f) => (
-          <Row key={`flag-${f.id}`} icon="⚠️" name={f.title.split('—')[0].trim()}
-            meta={`Compliance · ${f.title.includes('—') ? f.title.split('—')[1].trim() : 'unresolved'}`}
-            right={<Badge tone="bad">Verify</Badge>} />
-        ))}
-      </Card>
+      {actionFlags.length > 0 && !ql && (
+        <Card title="Needs action">
+          {actionFlags.map((f) => (
+            <Row key={f.id} icon="⚠️" name={f.title.split('—')[0].trim()}
+              meta={`Compliance · ${f.title.includes('—') ? f.title.split('—')[1].trim() : 'unresolved'}`}
+              right={<Badge tone="bad">Verify</Badge>} />
+          ))}
+        </Card>
+      )}
+
+      {ql ? (
+        <Card title={`Search — ${hits.length} match${hits.length === 1 ? '' : 'es'}`}
+          action={<button className="link" type="button" onClick={() => setQ('')}>Clear</button>}>
+          {hits.map((d) => <DocRow key={d.id} d={d} />)}
+          {hits.length === 0 && (
+            <div className="empty"><b>No matches</b>Nothing in the registry matches “{q}”.</div>
+          )}
+        </Card>
+      ) : (
+        <Card title="Document folders"
+          action={<button className="link" type="button" onClick={() => setUploadOpen(true)}>Upload</button>}>
+          {folders.map((f) => {
+            const isOpen = open.has(f.key)
+            const withFile = f.docs.filter((d) => d.has_file).length
+            return (
+              <div key={f.key}>
+                <button type="button" className={`folder${isOpen ? ' open' : ''}`} onClick={() => toggle(f.key)}>
+                  <span className="fic">{isOpen ? '📂' : f.icon}</span>
+                  <span className="grow">
+                    <span className="fn">{f.name}</span>
+                    <span className="fm">{f.meta}</span>
+                  </span>
+                  <Badge tone={withFile === f.docs.length ? 'ok' : 'mute'}>
+                    {withFile === f.docs.length ? f.docs.length : `${withFile}/${f.docs.length}`} 📄
+                  </Badge>
+                  <span className="chev">▶</span>
+                </button>
+                {isOpen && (
+                  <div className="folder-docs">
+                    {f.docs.map((d) => <DocRow key={d.id} d={d} />)}
+                    {f.docs.length === 0 && (
+                      <div className="empty"><b>Empty folder</b>No documents filed here yet.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </Card>
+      )}
 
       <Card title="Template library">
-        {(templates.data || []).map((t) => (
-          <div className="tpl" key={t.id}>
-            <span className="grow">
-              <span className="tn">{t.name}</span>
-              <span className="td">{t.status === 'ready' ? 'Ready · generates from an engagement' : 'Not built yet'}</span>
-            </span>
-            <button type="button" className={`btn-sm${t.status === 'ready' ? '' : ' ghost'}`}
-              onClick={() => toast(t.status === 'ready'
-                ? 'Generate from an engagement — Work → engagement → Documents'
-                : `${t.name} template lands in a later dispatch`)}>
-              {t.status === 'ready' ? 'New' : 'Build'}
-            </button>
-          </div>
-        ))}
+        {(library.data || []).map((t) => {
+          const expanded = tplOpen === t.doc_type
+          return (
+            <div className="tpl-wrap" key={t.doc_type}>
+              <div className="tpl">
+                <span className="grow">
+                  <span className="tn">{t.label}{t.signed ? ' ✍' : ''}</span>
+                  <span className="td">{t.description}</span>
+                </span>
+                <span className="acts">
+                  <a className="mini teal" href={t.preview} target="_blank" rel="noreferrer">Preview</a>
+                  <button type="button" className="mini" aria-label="Details"
+                    onClick={() => setTplOpen(expanded ? null : t.doc_type)}>
+                    {expanded ? '▴' : 'ⓘ'}
+                  </button>
+                </span>
+              </div>
+              {expanded && (
+                <div className="tpl-detail">
+                  <div className="fh">Generation fields — all optional, defaults fill the gaps</div>
+                  {t.fields.length
+                    ? t.fields.map((f) => (
+                        <div className="fld" key={f.name}>
+                          <b>{f.label}</b>{f.hint && <small> — {f.hint}</small>}
+                        </div>
+                      ))
+                    : <div className="fld"><small>None — generates entirely from the engagement record.</small></div>}
+                  <div className="fh">Record facts</div>
+                  <div className="fld"><small>
+                    {t.signed ? 'Carries the e-signature when generated' : 'Unsigned by design'} ·
+                    generated {t.generated_count}× so far · Preview renders a watermarked specimen
+                    with sample data (never a record) · generate the real thing from
+                    Work → engagement → Documents
+                  </small></div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </Card>
 
       {uploadOpen && (

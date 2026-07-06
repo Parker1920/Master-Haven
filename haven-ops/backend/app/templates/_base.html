@@ -46,9 +46,14 @@
                    vertical-align: top; }
   table.items tr.total td { border-bottom: 0; border-top: 2px solid #16202b;
                             font-weight: 700; font-size: 10.5pt; }
+  /* Template-library previews only (render_specimen) — repeats on every page */
+  .specimen-wm { position: fixed; top: 42%; left: 0; right: 0; text-align: center;
+                 transform: rotate(-24deg); font-size: 52pt; font-weight: 700;
+                 letter-spacing: .18em; color: rgba(180, 30, 30, .13); z-index: 99; }
 </style>
 </head>
 <body>
+  {% if specimen %}<div class="specimen-wm">SPECIMEN</div>{% endif %}
   <div class="letterhead">
     <!-- brand banner (assets/haven-banner.jpg, resolved via docgen's base_url);
          the meta line keeps the legal identifiers the banner doesn't carry -->
@@ -59,8 +64,13 @@
   {% block body %}{% endblock %}
 
   <footer>
+    {% if specimen %}
+    {{ company.legal_name }} · {{ doc_label }} · SPECIMEN — template preview rendered by
+    Haven Ops, not a record; sample data throughout, no signature carried
+    {% else %}
     {{ company.legal_name }} · {{ e.code }} · {{ doc_label }} v{{ version }} ·
     generated {{ generated_at }} by Haven Ops · frozen record — reissues are new versions
+    {% endif %}
   </footer>
 </body>
 </html>

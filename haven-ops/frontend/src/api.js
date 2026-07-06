@@ -43,6 +43,19 @@ export function money(cents) {
   return `${sign}$${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`
 }
 
+// ISO timestamp → compact relative label for the Bridge activity feed.
+export function timeAgo(iso) {
+  if (!iso) return '—'
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return String(iso).slice(0, 10)
+  const s = Math.floor((Date.now() - t) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`
+  return shortDate(iso)
+}
+
 // ISO date → short label for the calendar/when columns.
 export function shortDate(iso) {
   if (!iso) return '—'

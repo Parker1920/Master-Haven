@@ -1,7 +1,24 @@
-import { api, money, shortDate } from '../api'
+import { api, money, shortDate, timeAgo } from '../api'
 import { useFetch } from '../hooks'
 import { useToast } from '../toast.jsx'
-import { Badge, Card, Gauge, Row, Todo } from '../ui.jsx'
+import { Badge, Cal, Card, Gauge, Row, Todo } from '../ui.jsx'
+
+// Activity feed dressing — icon per entity, verb per action.
+const FEED_ICONS = {
+  document: '📄', engagement: '📁', engagement_event: '🧾', transaction: '💸',
+  asset: '🖥️', client: '👤', task: '☑️', flag: '⚠️', template: '🧩',
+  company: '🏛️', account: '🏦', compliance_item: '📅', person: '👤',
+  initiative: '🚀', environment_item: '🧭',
+}
+const FEED_VERBS = {
+  create: 'created', update: 'updated', delete: 'deleted', generate: 'generated',
+  attach: 'file attached', upload: 'uploaded', advance: 'advanced', note: 'noted',
+}
+const feedTitle = (a) => {
+  const entity = (a.entity || 'record').replace(/_/g, ' ')
+  const verb = FEED_VERBS[a.action] || a.action
+  return `${entity[0].toUpperCase()}${entity.slice(1)} ${verb}`
+}
 
 // Bridge home — the whole company, one glance. All gauges are computed live.
 export default function Overview({ nav }) {
@@ -11,6 +28,7 @@ export default function Overview({ nav }) {
   const engagements = useFetch('/engagements')
   const compliance = useFetch('/compliance')
   const transactions = useFetch('/transactions')
+  const activity = useFetch('/activity?limit=10')
   const toast = useToast()
 
   const today = new Date()
@@ -102,6 +120,22 @@ export default function Overview({ nav }) {
             </span>
           </div>
         ))}
+      </Card>
+
+      <Card title="Recent activity" action={<Badge tone="mute">Audit log</Badge>}>
+        <div className="feed">
+          {(activity.data || []).map((a) => (
+            <Cal key={a.id} when={timeAgo(a.ts)}
+              title={<>
+                {FEED_ICONS[a.entity] || '•'} {feedTitle(a)}
+                {a.actor && a.actor !== 'parker' && <span className="actor"> · {a.actor}</span>}
+              </>}
+              detail={a.detail} />
+          ))}
+          {activity.data && activity.data.length === 0 && (
+            <div className="empty"><b>No activity yet</b>Every change lands here as it happens.</div>
+          )}
+        </div>
       </Card>
     </>
   )
