@@ -27,7 +27,7 @@ class XPSetupPromptView(discord.ui.View):
             
             if len(rows) < 2 or len(rows[1]) < 7 or rows[1][6] == "":
                 config_defaults = [
-                    "", "", "", "", "", "",                               # Pad Columns A-F (Blanks for row 2 users)
+                    "", "", "", "", "", "",                               # Pad Columns A-F
                     "1",                                                   # G: XP Per Msg
                     "True",                                                # H: Msg Enabled
                     "Congratulations {user}, you leveled up to {level}!",  # I: Msg Text
@@ -216,7 +216,7 @@ class XPConfigCog(commands.Cog, name="xp"):
             return new_tab
 
     async def process_message_sheets_xp(self, message: discord.Message):
-        """Processes an incoming message, validates cooldowns, and awards XP live per message."""
+        """Processes live messaging data, tracks cooldown parameters, and appends XP details."""
         guild_id = str(message.guild.id)
         user_id = str(message.author.id)
         now = asyncio.get_running_loop().time()
