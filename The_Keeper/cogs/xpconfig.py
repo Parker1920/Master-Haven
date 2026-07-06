@@ -22,26 +22,28 @@ class XPSetupPromptView(discord.ui.View):
         loop = asyncio.get_running_loop()
 
         def initialize_or_update_guild():
-            # Automatically grabs or generates the tab + pushes row 1 headers if missing
             sheet = self.cog.get_guild_tab(self.guild_id)
-            row_2 = sheet.row_values(2)
+            rows = sheet.get_all_values()
             
-            # If columns G through P are missing, inject standard production defaults
-            if len(row_2) < 7 or row_2[6] == "":
+            # If configuration row 2 elements are blank, inject standard defaults
+            if len(rows) < 2 or len(rows[1]) < 7 or rows[1][6] == "":
                 config_defaults = [
-                    "", "", "", "", "", "",  # Pad Columns A-F with blanks
-                    "1",                                              # G: XP Per Msg
-                    "False",                                          # H: Msg Enabled
-                    "Congratulations {user}, you leveled up to {level}!", # I: Msg Text
-                    "5",                                              # J: Cooldown Sec
-                    "True",                                           # K: Global Track Enabled
-                    "False",                                          # L: Custom Theme Enabled
-                    "✨ {name}'s Level Progress",                      # M: Embed Title Template
-                    "#99cc00",                                        # N: Border Hex Color
-                    "🟩",                                             # O: Filled Bar Emoji
-                    "⬛"                                              # P: Empty Bar Emoji
+                    "", "", "", "", "", "",                               # Pad Columns A-F
+                    "1",                                                   # G: XP Per Msg
+                    "True",                                                # H: Msg Enabled
+                    "Congratulations {user}, you leveled up to {level}!",  # I: Msg Text
+                    "5",                                                   # J: Cooldown Sec
+                    "True",                                                # K: Global Track Enabled
+                    "False",                                               # L: Custom Theme Enabled
+                    "✨ {name}'s Level Progress",                           # M: Embed Title Template
+                    "#99cc00",                                             # N: Border Hex Color
+                    "🟩",                                                  # O: Filled Bar Emoji
+                    "⬛",                                                  # P: Empty Bar Emoji
+                    "10",                                                  # Q: Max Level Tiers
+                    "100,200,300,400,500,600,700,800,900,1000",            # R: Custom XP brackets list
+                    "Level 1,Level 2,Level 3,Level 4,Level 5,Level 6,Level 7,Level 8,Level 9,Level 10" # S: Level Names
                 ]
-                sheet.update(range_name="A2:P2", values=[config_defaults])
+                sheet.update(range_name="A2:S2", values=[config_defaults])
 
         await loop.run_in_executor(None, initialize_or_update_guild)
 
@@ -50,6 +52,7 @@ class XPSetupPromptView(discord.ui.View):
             description=(
                 f"This guild's database environment is completely locked to Sheet Tab: `{self.guild_id}`.\n\n"
                 "**⚙️ Core Settings** — Change XP payout numbers, chat cooldown rules, and level alerts.\n"
+                "**🚀 Quick Level Setup** — Configuration for bulk milestone thresholds and custom tier titles.\n"
                 "**🎨 Customize Layout** — Set structural hex card colors, bar assets, and text naming templates."
             ),
             color=discord.Color.brand_green()
@@ -74,6 +77,10 @@ class XPConfigWizard(discord.ui.View):
     async def core_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(CoreSettingsModal(self.cog, self.guild_id))
 
+    @discord.ui.button(label="🚀 Quick Level Setup", style=discord.ButtonStyle.success, row=0)
+    async def quick_level_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(LevelOnboardingModal(self.cog, self.guild_id))
+
     @discord.ui.button(label="🎨 Customize Layout", style=discord.ButtonStyle.success, row=0)
     async def customize_layout(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(CustomLayoutModal(self.cog, self.guild_id))
@@ -97,7 +104,6 @@ class CoreSettingsModal(discord.ui.Modal, title="Configure Core XP Parameters"):
 
         def save_core():
             sheet = self.cog.get_guild_tab(self.guild_id)
-            # Strictly maps to structural design range G2:K2
             sheet.update(range_name="G2:K2", values=[[
                 self.per_message.value.strip(),
                 self.msg_enabled.value.strip().capitalize(),
@@ -108,6 +114,53 @@ class CoreSettingsModal(discord.ui.Modal, title="Configure Core XP Parameters"):
 
         await loop.run_in_executor(None, save_core)
         await interaction.followup.send("✅ Server runtime mechanics written successfully to Row 2!", ephemeral=True)
+
+
+class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
+    num_levels = discord.ui.TextInput(label="Number of Levels", placeholder="e.g., 5", max_length=2)
+    level_names = discord.ui.TextInput(
+        label="Level Names (separate by comma)", 
+        placeholder="Bronze, Silver, Gold, Platinum, Diamond", 
+        style=discord.TextStyle.paragraph
+    )
+    xp_per_level = discord.ui.TextInput(label="XP Required Per Level", placeholder="e.g., 500", max_length=5)
+
+    def __init__(self, cog, guild_id: str):
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        loop = asyncio.get_running_loop()
+
+        try:
+            total_levels = int(self.num_levels.value.strip())
+            base_xp = int(self.xp_per_level.value.strip())
+        except ValueError:
+            await interaction.followup.send("❌ Error: Number of levels and XP must be valid numbers!", ephemeral=True)
+            return
+
+        # Clean individual name items from comma split array
+        names_list = [name.strip() for name in self.level_names.value.split(",") if name.strip()]
+        while len(names_list) < total_levels:
+            names_list.append(f"Level {len(names_list) + 1}")
+        names_list = names_list[:total_levels]
+
+        # Generate linear progression multiplier thresholds
+        brackets_list = [str(base_xp * idx) for idx in range(1, total_levels + 1)]
+
+        # Consolidate back into clean strings to fill exactly inside columns Q, R, and S
+        final_max_tiers = str(total_levels)
+        final_brackets = ",".join(brackets_list)
+        final_names = ",".join(names_list)
+
+        def save_bulk_levels():
+            sheet = self.cog.get_guild_tab(self.guild_id)
+            sheet.update(range_name="Q2:S2", values=[[final_max_tiers, final_brackets, final_names]])
+
+        await loop.run_in_executor(None, save_bulk_levels)
+        await interaction.followup.send(f"🚀 Successfully initialized **{total_levels}** tiers! Configurations saved into Row 2 (Columns Q, R, S).", ephemeral=True)
 
 
 class CustomLayoutModal(discord.ui.Modal, title="Customize Card UI Styles"):
@@ -127,7 +180,6 @@ class CustomLayoutModal(discord.ui.Modal, title="Customize Card UI Styles"):
 
         def save_layout():
             sheet = self.cog.get_guild_tab(self.guild_id)
-            # Strictly maps to structural design range L2:P2
             sheet.update(range_name="L2:P2", values=[[
                 "True",
                 self.embed_title.value.strip(),
@@ -157,19 +209,18 @@ class XPConfigCog(commands.Cog, name="xp"):
         try:
             return self.spreadsheet.worksheet(guild_id)
         except gspread.exceptions.WorksheetNotFound:
-            # Create a completely blank tab layout dynamically named after the server ID
             new_tab = self.spreadsheet.add_worksheet(title=guild_id, rows="1000", cols="20")
             headers = [
                 "User ID", "XP Track", "Current XP", "Level", "Last Msg Timestamp", "", 
                 "XP Per Msg", "Msg Enabled", "Msg Text", "Cooldown Sec", "Global Track Enabled",
-                "Custom Theme Enabled", "Embed Title Template", "Border Hex Color", "Filled Bar Emoji", "Empty Bar Emoji"
+                "Custom Theme Enabled", "Embed Title Template", "Border Hex Color", "Filled Bar Emoji", "Empty Bar Emoji",
+                "Level Curve Max Total Tiers", "Level Curve Brackets", "Level Names List"
             ]
-            new_tab.update(range_name="A1:P1", values=[headers])
+            new_tab.update(range_name="A1:S1", values=[headers])
             return new_tab
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Monitors and updates progression targets entirely inside the guild's local tab boundaries."""
         if message.author.bot or not message.guild:
             return
 
@@ -181,7 +232,6 @@ class XPConfigCog(commands.Cog, name="xp"):
         sheet = await loop.run_in_executor(None, self.get_guild_tab, guild_id)
         rows = await loop.run_in_executor(None, sheet.get_all_values)
         
-        # Stop processing if configuration row 2 has not been established yet
         if len(rows) < 2 or len(rows[1]) < 10 or rows[1][6] == "":
             return 
 
@@ -190,11 +240,19 @@ class XPConfigCog(commands.Cog, name="xp"):
         msg_enabled = config_row[7] == "True"
         lvl_up_template = config_row[8] if config_row[8] else "Congratulations {user}, you leveled up to {level}!"
         cooldown_sec = float(config_row[9]) if config_row[9].replace('.', '', 1).isdigit() else 5.0
-
+        
+        max_level = int(config_row[16]) if len(config_row) > 16 and config_row[16].isdigit() else 10
+        raw_curves = config_row[17] if len(config_row) > 17 and config_row[17] else ""
+        
+        curves = {}
+        if raw_curves:
+            split_brackets = [x.strip() for x in raw_curves.split(",") if x.strip().isdigit()]
+            for lvl_idx, xp_val in enumerate(split_brackets, start=1):
+                curves[str(lvl_idx)] = int(xp_val)
+                
         user_row_idx = None
         current_xp, current_level, last_timestamp = 0, 1, 0.0
 
-        # Fast scan only Column A within this single guild's tab to find user records
         for idx, row in enumerate(rows[1:], start=2):
             if row and row[0] == user_id:
                 user_row_idx = idx
@@ -206,12 +264,13 @@ class XPConfigCog(commands.Cog, name="xp"):
         if now - last_timestamp < cooldown_sec:
             return
 
-        # Core mathematical scaling: (Current Level * 100 XP) to rank up
-        xp_needed = current_level * 100
         current_xp += xp_per_msg
         leveled_up = False
 
-        if current_xp >= xp_needed:
+        while current_level < max_level:
+            xp_needed = curves.get(str(current_level), 100)
+            if current_xp < xp_needed:
+                break
             current_xp -= xp_needed
             current_level += 1
             leveled_up = True
@@ -236,7 +295,6 @@ class XPConfigCog(commands.Cog, name="xp"):
     @app_commands.command(name="xp", description="Manage settings for this server's dedicated tracking tab.")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def xp_dashboard(self, interaction: discord.Interaction):
-        """Slash command dashboard entrypoint."""
         await interaction.response.defer(ephemeral=True)
         guild_id = str(interaction.guild_id)
         
@@ -258,7 +316,6 @@ class XPConfigCog(commands.Cog, name="xp"):
 
     @commands.command(name="level")
     async def show_level(self, ctx: commands.Context, member: discord.Member = None):
-        """Displays target stats queried strictly inside this server's specific tab instance."""
         member = member or ctx.author
         if member.bot:
             return
@@ -276,6 +333,8 @@ class XPConfigCog(commands.Cog, name="xp"):
             border_hex = "purple"
             filled_emoji = "🟩"
             empty_emoji = "⬛"
+            raw_curves = ""
+            raw_names = ""
             
             if len(rows) >= 2:
                 config = rows[1]
@@ -284,6 +343,18 @@ class XPConfigCog(commands.Cog, name="xp"):
                 if len(config) > 13 and config[13]: border_hex = config[13]
                 if len(config) > 14 and config[14]: filled_emoji = config[14]
                 if len(config) > 15 and config[15]: empty_emoji = config[15]
+                if len(config) > 17 and config[17]: raw_curves = config[17]
+                if len(config) > 18 and config[18]: raw_names = config[18]
+
+            curves = {}
+            if raw_curves:
+                split_brackets = [x.strip() for x in raw_curves.split(",") if x.strip().isdigit()]
+                for lvl_idx, xp_val in enumerate(split_brackets, start=1):
+                    curves[str(lvl_idx)] = int(xp_val)
+
+            names_lookup = []
+            if raw_names:
+                names_lookup = [n.strip() for n in raw_names.split(",")]
 
             current_xp, current_level = 0, 1
             for row in rows[1:]:
@@ -292,8 +363,12 @@ class XPConfigCog(commands.Cog, name="xp"):
                     current_level = int(row[3]) if len(row) > 3 and row[3].isdigit() else 1
                     break
 
-            xp_needed = current_level * 100
+            xp_needed = curves.get(str(current_level), 100)
+            if xp_needed <= 0:
+                xp_needed = 100
+                
             progress_ratio = min(current_xp / xp_needed, 1.0)
+            percentage = int(progress_ratio * 100)
             
             bar_length = 10
             filled_blocks = int(progress_ratio * bar_length)
@@ -303,16 +378,24 @@ class XPConfigCog(commands.Cog, name="xp"):
             embed_color = discord.Color.purple()
             if custom_enabled:
                 try:
-                    embed_color = discord.Color.from_str(border_hex) if border_hex.startswith("#") else getattr(discord.Color, border_hex.lower())()
+                    if border_hex.startswith("#"):
+                        embed_color = discord.Color.from_str(border_hex)
+                    else:
+                        embed_color = getattr(discord.Color, border_hex.lower())()
                 except Exception:
-                    pass
+                    embed_color = discord.Color.purple()
+
+            # Dynamically grab custom display name if it exists inside column S index
+            tier_display_title = f"Level {current_level}"
+            if names_lookup and len(names_lookup) >= current_level:
+                tier_display_title = f"{names_lookup[current_level - 1]} (Lvl {current_level})"
 
             formatted_title = embed_title.replace("{name}", member.display_name).replace("{level}", str(current_level))
             embed = discord.Embed(title=formatted_title, color=embed_color)
             embed.set_thumbnail(url=member.display_avatar.url)
-            embed.add_field(name=" Level", value=f"`{current_level}`", inline=True)
+            embed.add_field(name=" Rank / Tier", value=f"`{tier_display_title}`", inline=True)
             embed.add_field(name=" Experience", value=f"`{current_xp} / {xp_needed} XP`", inline=True)
-            embed.add_field(name=f" Progress to Level {current_level + 1}", value=progress_bar, inline=False)
+            embed.add_field(name=f" Progress to Next Tier ({percentage}%)", value=progress_bar, inline=False)
             embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
 
             await ctx.send(embed=embed)
