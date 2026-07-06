@@ -22,11 +22,9 @@ class XPSetupPromptView(discord.ui.View):
         loop = asyncio.get_running_loop()
 
         def initialize_or_update_guild():
-            # This creates the tab dynamically if missing and injects the 19 headers
             sheet = self.cog.get_guild_tab(self.guild_id)
             rows = sheet.get_all_values()
             
-            # If configuration row 2 elements are blank, inject standard defaults
             if len(rows) < 2 or len(rows[1]) < 7 or rows[1][6] == "":
                 config_defaults = [
                     "", "", "", "", "", "",                               # Pad Columns A-F (Blanks for row 2 users)
@@ -142,16 +140,13 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
             await interaction.followup.send("❌ Error: Number of levels and XP must be valid numbers!", ephemeral=True)
             return
 
-        # Clean individual name items from comma split array
         names_list = [name.strip() for name in self.level_names.value.split(",") if name.strip()]
         while len(names_list) < total_levels:
             names_list.append(f"Level {len(names_list) + 1}")
         names_list = names_list[:total_levels]
 
-        # Generate linear progression multiplier thresholds
         brackets_list = [str(base_xp * idx) for idx in range(1, total_levels + 1)]
 
-        # Consolidate back into clean strings to fill exactly inside columns Q, R, and S of the local tab
         final_max_tiers = str(total_levels)
         final_brackets = ",".join(brackets_list)
         final_names = ",".join(names_list)
@@ -220,11 +215,8 @@ class XPConfigCog(commands.Cog, name="xp"):
             new_tab.update(range_name="A1:S1", values=[headers])
             return new_tab
 
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
-            return
-
+    async def process_message_sheets_xp(self, message: discord.Message):
+        """Processes an incoming message, validates cooldowns, and awards XP live per message."""
         guild_id = str(message.guild.id)
         user_id = str(message.author.id)
         now = asyncio.get_running_loop().time()
