@@ -1,6 +1,6 @@
-# Viobot Dashboard — Pi deployment (Phase 1 testing).
+# Viobot Dashboard — Pi deployment.
 # Run from this folder on the Pi:  docker compose up -d --build
-# Reach it at http://<pi>:8091  (direct port; NPM proxy host + domain come later).
+# Reach it at http://<pi>:8091 direct, or live via NPM at https://viobot.havenmap.online.
 
 services:
   viobot-dashboard:
@@ -11,8 +11,9 @@ services:
     container_name: viobot-dashboard
     env_file: ./.env
     volumes:
-      # The LIVE Viobot DB. Mounted read-WRITE so WAL shared-memory works for readers; the app holds
-      # PRAGMA query_only=ON (VIOBOT_DB_READONLY=true) in Phase 1, so it can READ but never writes.
+      # The LIVE Viobot DB. Mounted read-WRITE — the dashboard is a live config editor: writes persist
+      # here (backup-before-write + optimistic concurrency), and the bot picks them up within ~30s.
+      # Set VIOBOT_DB_READONLY=true in .env as an optional kill-switch to make write endpoints 403.
       - /home/pi8gb/docker/viobot-data/db:/app/data
       # Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
       - /home/pi8gb/docker/viobot-dashboard-data:/app/dashboard-data

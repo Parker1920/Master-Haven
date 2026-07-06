@@ -12,11 +12,11 @@ effect for the bot — in the manner of Carl-bot's dashboard.
 | Phase | Scope | State |
 |------:|-------|-------|
 | 0 | Discovery & dependency intake (Viobot repo, OAuth creds, DB access, safe-transfer workflow, topology) | ⏳ depends on client deliverables — see [`docs/INTEGRATION-SPEC.md`](docs/INTEGRATION-SPEC.md) |
-| **1** | **Framework + Discord OAuth2 login + admin-scoped guild access** | 🔨 **in progress (this scaffold)** |
-| 2 | Per-server config view/change/create on `config_json` + safe SQLite writes | ⬜ |
-| 3 | Modular config registry + alias & variable management + read-only mod log | ⬜ |
-| 4 | Customization / theming layer | ⬜ |
-| 5 | Handoff + deploy on Pi | ⬜ |
+| 1 | Framework + Discord OAuth2 login + admin-scoped guild access | ✅ done |
+| 2 | Per-server config view/change/create on `config_json` + safe SQLite writes | ✅ done |
+| 3 | Modular config registry + alias & variable management + read-only mod log | ✅ done |
+| 4 | Customization / theming layer | ✅ done |
+| 5 | Handoff + deploy on Pi | 🔨 deployed & live at `viobot.havenmap.online`; final handoff docs in progress |
 
 Full plan: [`docs/PHASE-PLAN.md`](docs/PHASE-PLAN.md).
 
@@ -37,12 +37,14 @@ server/src/
 
 - **Backend:** Node.js + Fastify + `better-sqlite3` (same language as Viobot; transactional SQLite).
 - **Frontend:** React + Vite.
-- **DB model:** the dashboard runs **co-located** with Viobot and reads/writes the **same SQLite file**.
-  Phase 1 opens the DB **read-only**. Writes (Phase 2) use WAL + `busy_timeout`, atomic
-  read-modify-write of `config_json` with optimistic concurrency, and **backup-before-write** per the
-  agreed sqlite3 safe-transfer workflow.
+- **DB model:** the dashboard runs **co-located** with Viobot and reads/**writes** the **same SQLite file**.
+  Writes use WAL + `busy_timeout`, atomic read-modify-write of `config_json` with optimistic concurrency,
+  and **backup-before-write** per the agreed sqlite3 safe-transfer workflow. Config changes apply
+  automatically within ~30 seconds — the bot re-reads config from the DB (30s cache TTL + `forceReload`
+  on most operations), so no reload hook is required. An optional `VIOBOT_DB_READONLY` kill-switch makes
+  the write endpoints refuse with HTTP 403 (a safety switch, not the normal mode).
 
-## Run it (Phase 1)
+## Run it
 
 Two processes. From `Viobot-Dashboard/`:
 

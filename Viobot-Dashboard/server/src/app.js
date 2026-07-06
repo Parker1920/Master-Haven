@@ -63,7 +63,7 @@ export async function buildApp(opts = {}) {
     if (origin && origin === env.webOrigin) {
       reply.header('Access-Control-Allow-Origin', origin);
       reply.header('Access-Control-Allow-Credentials', 'true');
-      reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
       reply.header('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.method === 'OPTIONS') return reply.code(204).send();
@@ -71,16 +71,18 @@ export async function buildApp(opts = {}) {
 
   const serveStatic = Boolean(env.webDist && fs.existsSync(env.webDist));
 
+  // Public, unauthenticated — keep it minimal. Only what the login screen needs (OAuth readiness, dev
+  // login visibility, and a live DB connection check). Do NOT expose the DB path / table list / journal
+  // mode here; that detail is available to admins via dbInfo() behind the admin routes.
   app.get('/api/health', async () => {
     let db;
     try {
-      db = dbInfo();
+      db = { registeredGuilds: dbInfo().registeredGuilds };
     } catch (e) {
       db = { error: String(e.message) };
     }
     return {
       ok: true,
-      phase: 1,
       oauthConfigured: oauthConfigured(),
       devLogin: env.devLogin,
       serveStatic,

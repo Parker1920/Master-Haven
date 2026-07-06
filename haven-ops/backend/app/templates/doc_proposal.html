@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks, reftable %}
+{% block body %}
+<div class="legal">
+<h1>Proposal</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p>Prepared by <strong>{{ company.legal_name }}</strong> ("Provider") for
+<strong>{{ client.name }}</strong>{% if client.contact %} ("{{ client.contact }}"){% endif %}{% if client.entity %},
+of {{ client.entity }}{% endif %} ("Client").</p>
+
+<h2>1. Understanding</h2>
+<p>{{ extra.get('background', 'Client has requested the work summarized below; this Proposal
+sets out the scope and fixed price under which Provider offers to perform it.') }}</p>
+
+<h2>2. Proposed scope</h2>
+<p>{{ e.title }}{% if e.note %} — {{ e.note }}{% endif %}</p>
+{% if extra.get('scope') %}<p>{{ extra.get('scope') }}</p>{% endif %}
+
+<h2>3. Price</h2>
+<p class="amount-line">{{ amount }} — fixed price</p>
+<p>{{ extra.get('payment_terms', 'Invoiced at delivery unless the Statement of Work states
+otherwise; payment due on receipt.') }}</p>
+
+<h2>4. Assumptions & exclusions</h2>
+<ol class="sub">
+  <li>Work is performed under Provider's Master Services Agreement and a Statement
+  of Work referencing engagement {{ e.code }}.</li>
+  <li>Anything outside the scope above is handled by a signed Change Order.</li>
+  <li>Client provides timely access, information, and feedback needed to perform.</li>
+  {% if extra.get('assumptions') %}<li>{{ extra.get('assumptions') }}</li>{% endif %}
+</ol>
+
+<h2>5. Validity & acceptance</h2>
+<p>This Proposal is open for acceptance for {{ extra.get('validity_days', '30') }} days
+from its date. Acceptance is by execution of the Statement of Work for
+{{ e.code }} — this Proposal itself creates no binding obligation on either party.</p>
+
+<p><strong>Offered by:</strong></p>
+{{ sigblocks(company, client, signature_uri, company_only=True) }}
+</div>
+{% endblock %}

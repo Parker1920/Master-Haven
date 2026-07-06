@@ -29,6 +29,13 @@ MAX_AMOUNT_CENTS = 5_000_000    # $50,000 ceiling (invoice safety cap)
 # Public contact address (also the mailto target on the Contact page).
 CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "ekimo.vhav@gmail.com")
 
+# --- Haven Ops relay (LLC internal records; both optional / off until set) ---
+# Inquiries open an engagement papertrail; settled payments land as ledger
+# transactions (+ auto receipt). URL is the internal docker-network address in
+# production (Haven Ops is tailnet-internal, never public).
+HAVEN_OPS_URL = os.environ.get("HAVEN_OPS_URL", "").rstrip("/")
+HAVEN_OPS_TOKEN = os.environ.get("HAVEN_OPS_TOKEN", "")
+
 # --- New-inquiry notifications (all optional / off until configured) ---
 # Discord: set INQUIRY_WEBHOOK_URL to a channel webhook.
 INQUIRY_WEBHOOK_URL = os.environ.get("INQUIRY_WEBHOOK_URL", "")

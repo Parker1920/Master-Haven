@@ -1,0 +1,38 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import reftable %}
+{% block body %}
+<div class="legal">
+<h1>Invoice</h1>
+<p class="code">invoice {{ e.code }}-INV-{{ version }} · issued {{ display_date }}</p>
+
+{{ reftable([
+  ("Bill to", client.name ~ (' ("' ~ client.contact ~ '")' if client.contact else '') ~
+              (' · ' ~ client.entity if client.entity else '')),
+  ("Billing address / contact", client.bill_to or "on file"),
+  ("Engagement", e.code ~ " — " ~ e.title),
+  ("Terms", extra.get('terms', 'Due on receipt')),
+  ("Payment method", extra.get('payment', 'per agreed rail — reference ' ~ e.code ~ ' with payment')),
+]) }}
+
+<table class="items">
+  <tr><th>Description</th><th class="num">Amount</th></tr>
+  <tr>
+    <td>{{ extra.get('line_description', e.title) }}
+        {% if e.note %}<br><span style="color:#5a6675; font-size:8.5pt">{{ e.note }}</span>{% endif %}</td>
+    <td class="num">{{ amount }}</td>
+  </tr>
+  {% if extra.get('line2_description') %}
+  <tr><td>{{ extra.get('line2_description') }}</td><td class="num">{{ extra.get('line2_amount', '') }}</td></tr>
+  {% endif %}
+  <tr class="total"><td>Total due</td><td class="num">{{ extra.get('total', amount) }}</td></tr>
+</table>
+
+<p>Amounts unpaid thirty (30) days after this invoice may accrue interest at 1.5%
+per month or the maximum rate permitted by law, whichever is less, per the
+governing agreement for {{ e.code }}.</p>
+
+<p class="note">Issued by {{ company.legal_name }} · EIN {{ company.ein }}. This
+invoice is generated and frozen by Haven Ops — any correction issues as a new
+version, never an edit. Please reference {{ e.code }} with payment.</p>
+</div>
+{% endblock %}

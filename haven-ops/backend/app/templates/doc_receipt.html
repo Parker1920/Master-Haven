@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks, reftable %}
+{% block body %}
+<div class="legal">
+<h1>Receipt</h1>
+<p class="code">receipt {{ e.code }}-RCT-{{ version }} · issued {{ display_date }}</p>
+
+<p><strong>{{ company.legal_name }}</strong> acknowledges receipt of payment as
+follows:</p>
+
+{{ reftable([
+  ("Received from", client.name ~ (' ("' ~ client.contact ~ '")' if client.contact else '')),
+  ("Amount received", extra.get('amount_received', amount)),
+  ("Payment date", extra.get('paid_date', 'on file')),
+  ("Method / rail", extra.get('rail', 'on file')),
+  ("Applied to", e.code ~ " — " ~ e.title),
+  ("Balance on engagement", extra.get('balance', 'PAID IN FULL')),
+]) }}
+
+<p>This receipt {{ extra.get('closing_note', 'closes the payment record for the engagement above and
+forms the final page of its papertrail, alongside the Completion Certificate.') }}</p>
+
+<p class="note">This receipt is generated and frozen by Haven Ops; the engagement's
+full documentation trail — intake through receipt — is retained as immutable,
+versioned records.</p>
+
+{{ sigblocks(company, client, signature_uri, company_only=True) }}
+</div>
+{% endblock %}

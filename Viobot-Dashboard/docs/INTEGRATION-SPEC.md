@@ -23,11 +23,11 @@ docs; **to be confirmed against the live Viobot repo** once art3mis grants acces
   `identify`+`guilds`, and bot-presence comes from our DB (§2), so it need not be Viobot's app.
   Result goes into `server/.env` (`DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_REDIRECT_URI`).
 
-**STILL NEEDED — from art3mis (small, real):**
-- **A config-reload hook in Viobot's code.** The bot caches config in memory (§4), so a direct DB write
-  won't take effect live until the bot reloads that guild. The trigger must land in **art3mis's repo**
-  (the Pi auto-pulls the bot from his GitHub via the cron updater, so a Pi-only edit would be overwritten).
-  In-scope "integration" work, but it needs his repo.
+**NO LONGER NEEDED — config-reload hook (resolved):**
+- **A bot-side config-reload hook is NOT required.** Verified: the bot re-reads config from the DB via a
+  ~30s cache TTL plus pervasive `forceReload` on most operations, so a dashboard DB write takes effect
+  automatically within ~30 seconds — no upstream change in art3mis's repo needed. The dashboard's
+  "Restart Viobot" button is an optional force-now convenience, not a requirement.
 
 **STILL NEEDED — scoping answers:**
 - **v1 config scope** (proposed: full `config_json` v1 — §3).
@@ -72,7 +72,7 @@ picker**, **boolean**.
 **Proposed MVP (Phase 2) config scope:** the full `config_json` v1 above (roles, channels, features).
 Aliases + variables + the mod-log viewer follow in Phase 3.
 
-## 4. Write protocol (Phase 2 — to confirm)
+## 4. Write protocol (implemented)
 
 - Connection: WAL mode, `busy_timeout`, opened against the **same file** the bot uses.
 - Update = read `config_json` → mutate the targeted path → bump `meta.updatedAt` + row `updated_at` →
@@ -80,12 +80,13 @@ Aliases + variables + the mod-log viewer follow in Phase 3.
 - **Optimistic concurrency:** reject the write if `updated_at` changed since the client loaded it (so a
   dashboard write never silently clobbers a write the bot made in between).
 - **Backup-before-write** per the agreed workflow.
-- **Cache invalidation — CONFIRMED REQUIRED.** The bot caches config in memory (`ConfigManager.cache`,
-  filled on `load()`, cleared only via `reload()`/`invalidate()`). A dashboard DB write alone will NOT
-  take effect for an already-cached guild. Phase 2 must signal the bot to reload the guild after a write —
-  a small upstream hook in art3mis's repo (e.g. the dashboard writes a `config_reload` signal row or pings
-  a local socket → bot calls `configManager.reload(guild)`). The live DB is already WAL, so concurrent
-  dashboard reads + the bot are safe; writes serialize via `busy_timeout`.
+- **Cache invalidation — no bot-side hook needed (verified).** The bot re-reads config from the DB via a
+  ~30s cache TTL plus pervasive `forceReload` on most operations, so a dashboard DB write takes effect
+  automatically within ~30 seconds — no upstream change in art3mis's repo. The dashboard's "Restart
+  Viobot" button is an optional force-now convenience. The live DB is already WAL, so concurrent dashboard
+  reads + the bot are safe; writes serialize via `busy_timeout`.
+- **Optional `VIOBOT_DB_READONLY` kill-switch:** when enabled, the write endpoints refuse with HTTP 403
+  (a safety switch, not the normal mode).
 
 ## 5. Auth & access (Phase 1 — implemented)
 

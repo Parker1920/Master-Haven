@@ -19,8 +19,10 @@ services:
     build: .
     container_name: voyagers-haven
     restart: unless-stopped
-    ports:
-      - "8090:8000"
+    # No host port published — Nginx Proxy Manager reaches this by container
+    # name on docker_default (voyagers-haven:8000), same as the other Haven
+    # services (haven, exchange). Avoids host-port collisions on the Pi.
+    # (For local dev, run uvicorn directly per the README, not this compose.)
     volumes:
       - "${VH_DATA_DIR:-./data-local}:/data"
     environment:
@@ -42,6 +44,12 @@ services:
       - SMTP_USER=${VH_SMTP_USER:-}
       - SMTP_PASSWORD=${VH_SMTP_PASSWORD:-}
       - SMTP_FROM=${VH_SMTP_FROM:-}
+      # Haven Ops relay (LLC internal records): inquiries open an engagement
+      # papertrail; settled payments land as ledger transactions + receipts.
+      # On the Pi both containers share docker_default, so the URL is the
+      # internal container address — Haven Ops itself stays tailnet-only.
+      - HAVEN_OPS_URL=${HAVEN_OPS_URL:-}
+      - HAVEN_OPS_TOKEN=${HAVEN_OPS_TOKEN:-}
     # Nginx Proxy Manager (the `npm` container) proxies voyagershaven.online to
     # this service BY CONTAINER NAME, so both must share a docker network. NPM
     # lives on `docker_default`. Without this, a `docker compose up --build`

@@ -1,0 +1,35 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import reftable %}
+{% block body %}
+<div class="legal">
+<h1>Inquiry / Intake Record</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }} · internal record</p>
+
+<p>This record opens engagement {{ e.code }} and anchors its papertrail. It is an
+internal memorandum, not an offer or agreement — no commitment exists until a
+Proposal is accepted and a Statement of Work is executed.</p>
+
+<h2>1. Inquiry</h2>
+{{ reftable([
+  ("Received", extra.get('received', e.opened_at or display_date)),
+  ("Channel", extra.get('channel', 'on file')),
+  ("Prospective client", client.name ~ (' ("' ~ client.contact ~ '")' if client.contact else '')),
+  ("Entity / upstream", client.entity or "—"),
+]) }}
+
+<h2>2. Request as understood</h2>
+<p>{{ e.title }}{% if e.note %} — {{ e.note }}{% endif %}</p>
+{% if extra.get('request') %}<p>{{ extra.get('request') }}</p>{% endif %}
+
+<h2>3. Preliminary assessment</h2>
+<p>Fit against {{ company.legal_name }}'s service lines (NAICS {{ company.naics }}):
+{{ extra.get('assessment', 'within scope — custom software / systems work.') }}</p>
+<p>Rough size: {{ extra.get('size', 'to be established at Proposal.') }}</p>
+
+<h2>4. Disposition</h2>
+<p>{{ extra.get('disposition', 'Proceed — Proposal to follow under this engagement code. All
+documents issued for this engagement are versioned and frozen at issue.') }}</p>
+
+<p class="note">Recorded for {{ company.legal_name }} by Parker Stouffer via Haven Ops.</p>
+</div>
+{% endblock %}

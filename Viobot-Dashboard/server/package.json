@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "node --test test/guildAccess.test.js"
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src test"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -18,5 +19,10 @@
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0"
   }
 }

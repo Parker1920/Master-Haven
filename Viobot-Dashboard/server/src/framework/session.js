@@ -5,7 +5,9 @@ import { env } from '../env.js';
  * Minimal server-side session store keyed by a signed session-id cookie.
  *
  * In-memory (single instance) — fine for the Pi's single dashboard container and for dev.
- * Swap for a persistent store (e.g. a sessions table) if the dashboard ever scales horizontally.
+ * OPERATIONAL NOTE: sessions live only in this process, so every restart / redeploy / reimage clears
+ * them and all users must log in again. Acceptable on one container; move to a persistent store
+ * (e.g. a SQLite sessions table) before any multi-instance / zero-downtime-deploy setup.
  * Reusable framework; not Viobot-specific.
  */
 const store = new Map(); // sid -> { data, expiresAt }

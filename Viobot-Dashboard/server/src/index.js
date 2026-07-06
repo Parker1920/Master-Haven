@@ -1,5 +1,7 @@
 import { buildApp } from './app.js';
-import { env } from './env.js';
+import { env, assertProductionEnv } from './env.js';
+
+assertProductionEnv(); // refuse to boot production with insecure defaults (no-op in dev)
 
 const app = await buildApp();
 

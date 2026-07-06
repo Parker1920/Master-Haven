@@ -17,7 +17,9 @@ export default function AvatarEditor({ guildId }) {
     api.getAvatar(guildId).then(setData).catch((e) => setError(String(e.message || e)));
   }, [guildId]);
 
-  if (error) return null;
+  if (error) {
+    return <section className="config-card"><h3 className="config-group-title">Server avatar</h3><p className="notice error">Couldn't load avatar: {error}</p></section>;
+  }
   if (data === undefined) {
     return <section className="config-card"><h3 className="config-group-title">Server avatar</h3><p className="muted">Loading…</p></section>;
   }

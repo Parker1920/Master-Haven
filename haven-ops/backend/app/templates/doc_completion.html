@@ -1,0 +1,34 @@
+{% extends "_base.html" %}
+{% block body %}
+<h1>Certificate of Completion</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p>{{ company.legal_name }} certifies that the work described below, performed under
+engagement {{ e.code }}, has been completed and delivered in full.</p>
+
+<table class="kv">
+  <tr><td class="k">Client</td>
+      <td>{{ client.name }} ("{{ client.contact }}"){% if client.entity %} · {{ client.entity }}{% endif %}</td></tr>
+  <tr><td class="k">Work</td><td>{{ e.title }}</td></tr>
+  <tr><td class="k">Contract value</td><td>{{ amount }}</td></tr>
+  <tr><td class="k">Opened</td><td>{{ e.opened_at or "on file" }}</td></tr>
+</table>
+
+<p><strong>Acceptance.</strong> By signing below, the client confirms that the deliverables
+under {{ e.code }} have been received, reviewed, and accepted, and that this engagement
+is complete. This certificate seals the engagement record.</p>
+
+<div class="sigrow">
+  <div class="sigblock">
+    <div class="line">
+      {% if signature_uri %}<img src="{{ signature_uri }}" alt="signature">
+      {% else %}<span class="conformed">/s/ Parker Stouffer</span>{% endif %}
+    </div>
+    <div class="who">Parker Stouffer — {{ company.legal_name }}</div>
+  </div>
+  <div class="sigblock">
+    <div class="line">&nbsp;</div>
+    <div class="who">{{ client.contact }} ({{ client.name }}) — client acceptance · date</div>
+  </div>
+</div>
+{% endblock %}

@@ -7,6 +7,10 @@ import { isDashboardAdmin } from '../dashboard/store.js';
 
 const STATE_COOKIE = 'vbd_oauth_state';
 
+// CSRF posture: the session cookie is httpOnly + signed + SameSite=Lax. Lax blocks cross-site
+// POST/PUT/DELETE (all mutating endpoints), and no GET endpoint mutates state, so no separate CSRF
+// token is required. OAuth login CSRF is covered by the signed `state` cookie checked in /callback.
+// (If a mutating GET is ever added, switch to SameSite=Strict or add a CSRF token.)
 function setSessionCookie(reply, sid) {
   reply.setCookie(env.session.cookieName, sid, {
     httpOnly: true, sameSite: 'lax', secure: env.session.secure, signed: true, path: '/',

@@ -67,9 +67,27 @@ export default function RegistryEditor() {
                 {f.type === 'select' && (
                   <input
                     className="cfg-input"
-                    placeholder="options: a, b, c"
-                    value={(f.options || []).map((o) => (o && typeof o === 'object' ? o.value : o)).join(', ')}
-                    onChange={(e) => updateField(gi, fi, { options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                    placeholder="options: value|Label, value2|Label 2"
+                    value={(f.options || [])
+                      .map((o) => {
+                        const value = o && typeof o === 'object' ? o.value : o;
+                        const label = o && typeof o === 'object' ? o.label : o;
+                        return label != null && String(label) !== String(value) ? `${value}|${label}` : String(value ?? '');
+                      })
+                      .join(', ')}
+                    onChange={(e) => updateField(gi, fi, {
+                      options: e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                        .map((s) => {
+                          const idx = s.indexOf('|');
+                          if (idx === -1) return { value: s, label: s };
+                          const value = s.slice(0, idx).trim();
+                          const label = s.slice(idx + 1).trim();
+                          return { value, label: label || value };
+                        }),
+                    })}
                   />
                 )}
                 <label className="reg-testing" title="Only dashboard admins see this field — stage it before the public does">

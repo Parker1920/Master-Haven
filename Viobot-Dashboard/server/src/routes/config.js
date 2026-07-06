@@ -12,6 +12,7 @@ import { readAnnouncements, addAnnouncement, deleteAnnouncement } from '../viobo
 import { readAvatar, setAvatar, resetAvatar } from '../viobot/avatar.js';
 import { registryForViewer, isDashboardAdmin } from '../dashboard/store.js';
 import { memberHoldsModeratorRole } from '../viobot/moderatorAccess.js';
+import { env } from '../env.js';
 
 /**
  * Resolve the requested guild ONLY if the caller may configure it:
@@ -53,6 +54,18 @@ async function resolveAccessibleGuild(req, guildId) {
 }
 
 export default async function configRoutes(app) {
+  // Write kill-switch: when VIOBOT_DB_READONLY is set, refuse every Viobot-DB mutation on this plugin's
+  // routes (config/variables/aliases/announcements/avatar) with a clean 403. GET reads still work; the
+  // dashboard-store admin writes (appearance/registry/admins) live in a separate plugin and are unaffected.
+  app.addHook('preHandler', async (req, reply) => {
+    if (env.dbReadonly && (req.method === 'PUT' || req.method === 'POST' || req.method === 'DELETE')) {
+      return reply.code(403).send({
+        error: 'read_only',
+        message: 'The dashboard is in read-only mode (VIOBOT_DB_READONLY=true). Set it to false to enable edits.',
+      });
+    }
+  });
+
   // Live config for one server + the role/channel lists the dropdowns render from.
   app.get('/api/guilds/:id/config', async (req, reply) => {
     const guildId = String(req.params.id);
@@ -62,7 +75,13 @@ export default async function configRoutes(app) {
       return reply.code(r.error).send({ error: msg });
     }
 
-    const { config, updatedAt } = readGuildConfig(guildId);
+    let config, updatedAt;
+    try {
+      ({ config, updatedAt } = readGuildConfig(guildId));
+    } catch (e) {
+      req.log.error({ err: String(e.message || e) }, 'config read failed');
+      return reply.code(500).send({ error: 'read_failed' });
+    }
 
     let roles = [];
     let channels = [];
@@ -74,7 +93,16 @@ export default async function configRoutes(app) {
       req.log.warn({ err: lookupError }, 'roles/channels fetch failed');
     }
 
-    return { guild: r.guild, config, updatedAt, registry: registryForViewer(r.isAdmin), roles, channels, lookupError };
+    // Config-embedded gated features (so the editor can lock the right controls). Currently just custom
+    // contact categories (Plus/Beta). Fails closed (locked) if the entitlement check can't complete.
+    let features = { custom_contact_categories: false };
+    try {
+      features = { custom_contact_categories: await hasFeature(guildId, 'custom_contact_categories') };
+    } catch (e) {
+      req.log.warn({ err: String(e.message || e) }, 'feature access check failed');
+    }
+
+    return { guild: r.guild, config, updatedAt, registry: registryForViewer(r.isAdmin), roles, channels, lookupError, features };
   });
 
   // Save a server's config (validated, optimistic-concurrency, backup-before-write).
@@ -89,6 +117,15 @@ export default async function configRoutes(app) {
     const body = req.body || {};
     if (!body.config || typeof body.config !== 'object') {
       return reply.code(400).send({ error: 'invalid_body' });
+    }
+
+    // Custom contact categories are a Plus/Beta feature — strip them from a non-entitled guild's write
+    // so a crafted request can't set inert categories (the bot ignores them regardless). Preserves the
+    // stored value: writeGuildConfig only overwrites customContactCategories when it's present here.
+    if (body.config.tickets && Array.isArray(body.config.tickets.customContactCategories)) {
+      let allowed = false;
+      try { allowed = await hasFeature(guildId, 'custom_contact_categories'); } catch { allowed = false; }
+      if (!allowed) delete body.config.tickets.customContactCategories;
     }
 
     let roles = [];

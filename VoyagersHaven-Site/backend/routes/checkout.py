@@ -15,12 +15,15 @@ floor/ceiling in config so a bad or hostile amount can never reach a provider.
 import secrets
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import config
 from ..db import get_db
 from ..ratelimit import check_rate_limit
+from ..services.havenops import relay_payment
+from ..services.notify import notify_new_order
+from ..services.orders import insert_order
 
 router = APIRouter()
 
@@ -125,7 +128,8 @@ def create_checkout(
 
 
 @router.post("/checkout/{reference}/complete")
-def complete_simulated(reference: str, conn: sqlite3.Connection = Depends(get_db)):
+def complete_simulated(reference: str, background: BackgroundTasks,
+                       conn: sqlite3.Connection = Depends(get_db)):
     """Mark a SIMULATED payment paid. Real (stripe) rows are settled by the
     webhook and reject this call so the mock path can't spoof a live payment."""
     row = _payment_row(conn, reference)
@@ -140,6 +144,14 @@ def complete_simulated(reference: str, conn: sqlite3.Connection = Depends(get_db
             (reference,),
         )
         row = _payment_row(conn, reference)
+        # Relay to Haven Ops too (flagged as simulated there) so the whole
+        # pipeline is testable end-to-end without real money.
+        background.add_task(relay_payment, {
+            "amount_cents": row["amount_cents"], "reference": reference,
+            "kind": row["kind"], "provider": "simulated",
+            "paid_at": row["paid_at"], "email": row["email"],
+            "invoice_number": row["invoice_number"],
+        })
     return _receipt(row)
 
 
@@ -192,7 +204,7 @@ def _create_stripe_session(req: CheckoutRequest, amount_cents: int, reference: s
 
 
 @router.post("/stripe/webhook")
-async def stripe_webhook(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def stripe_webhook(request: Request, background: BackgroundTasks, conn: sqlite3.Connection = Depends(get_db)):
     """Stripe settles a live payment here. Verifies the signature, then marks the
     matching payment row paid on `checkout.session.completed`. Only active in
     live mode (simulated payments settle via /checkout/{ref}/complete)."""
@@ -212,7 +224,8 @@ async def stripe_webhook(request: Request, conn: sqlite3.Connection = Depends(ge
     except Exception as exc:  # noqa: BLE001 - includes signature failures
         raise HTTPException(status_code=400, detail="Invalid webhook signature.") from exc
 
-    if event.get("type") == "checkout.session.completed":
+    etype = event.get("type")
+    if etype == "checkout.session.completed":
         sess = event["data"]["object"]
         reference = sess.get("client_reference_id") or (sess.get("metadata") or {}).get("reference")
         if reference:
@@ -222,4 +235,70 @@ async def stripe_webhook(request: Request, conn: sqlite3.Connection = Depends(ge
                    WHERE reference = ? AND status != 'paid'""",
                 (sess.get("id"), reference),
             )
+            row = conn.execute("SELECT * FROM payments WHERE reference = ?", (reference,)).fetchone()
+            if row:
+                # Haven Ops ledger: transaction (+ receipt when the invoice
+                # number names a VHAV engagement). Best-effort, post-response.
+                cd = sess.get("customer_details") or {}
+                background.add_task(relay_payment, {
+                    "amount_cents": row["amount_cents"], "reference": reference,
+                    "kind": row["kind"], "provider": "stripe",
+                    "paid_at": row["paid_at"],
+                    "email": row["email"] or cd.get("email"),
+                    "invoice_number": row["invoice_number"],
+                    "description": row["item_label"] if "item_label" in row.keys() else None,
+                })
+            already = conn.execute("SELECT id FROM orders WHERE payment_reference = ?", (reference,)).fetchone()
+            if row and row["kind"] == "merch" and not already:
+                cd = sess.get("customer_details") or {}
+                sd = sess.get("shipping_details") or sess.get("shipping") or {}
+                addr = sd.get("address") or {}
+                order = insert_order(
+                    conn, reference=reference, item_label=row["item_label"] or "Order",
+                    amount_cents=row["amount_cents"], currency=row["currency"],
+                    customer={"name": sd.get("name") or cd.get("name"), "email": cd.get("email"), "phone": cd.get("phone")},
+                    shipping={"line1": addr.get("line1"), "line2": addr.get("line2"), "city": addr.get("city"),
+                              "state": addr.get("state"), "postal": addr.get("postal_code"), "country": addr.get("country")},
+                )
+                background.add_task(notify_new_order, order)
+    elif etype in ("invoice.paid", "invoice.payment_succeeded"):
+        inv = event["data"]["object"]
+        # Grab the payment receipt URL so the admin pipeline can show "with this receipt".
+        receipt_url = None
+        charge_id = inv.get("charge")
+        if charge_id:
+            try:
+                receipt_url = stripe.Charge.retrieve(charge_id).get("receipt_url")
+            except Exception:  # noqa: BLE001 - receipt is a nicety; never fail the webhook
+                receipt_url = None
+        conn.execute(
+            "UPDATE invoices SET status = 'paid', paid_at = datetime('now'), "
+            "receipt_url = COALESCE(?, receipt_url) WHERE stripe_invoice_id = ?",
+            (receipt_url, inv.get("id")),
+        )
+        inv_row = conn.execute(
+            "SELECT * FROM invoices WHERE stripe_invoice_id = ?", (inv.get("id"),)
+        ).fetchone()
+        if inv_row:
+            # Stripe-hosted invoice settled → Haven Ops transaction + receipt.
+            background.add_task(relay_payment, {
+                "amount_cents": inv_row["amount_cents"],
+                "reference": inv_row["number"] or inv.get("id"),
+                "kind": "invoice", "provider": "stripe",
+                "paid_at": inv_row["paid_at"],
+                "email": inv_row["customer_email"],
+                "invoice_number": inv_row["number"],
+                "description": inv_row["description"],
+                "receipt_url": receipt_url,
+            })
+    elif etype in ("invoice.finalized", "invoice.sent"):
+        inv = event["data"]["object"]
+        conn.execute(
+            "UPDATE invoices SET status = 'open', hosted_invoice_url = ?, pdf_url = ? "
+            "WHERE stripe_invoice_id = ? AND status != 'paid'",
+            (inv.get("hosted_invoice_url"), inv.get("invoice_pdf"), inv.get("id")),
+        )
+    elif etype in ("invoice.voided", "invoice.marked_uncollectible"):
+        inv = event["data"]["object"]
+        conn.execute("UPDATE invoices SET status = 'void' WHERE stripe_invoice_id = ?", (inv.get("id"),))
     return {"received": True}

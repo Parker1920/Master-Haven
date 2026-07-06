@@ -5,7 +5,7 @@ import { brandName, guidesUrl, guidesLabel, guidesEnabled } from '../appearance.
 // Shared app header used by every page. Left slot is either a `back` button (config/admin pages)
 // or the brand (optionally clickable via `onHome`). Right cluster: Guides → ⚙ Admin → user → Log out.
 // `user` may be null (e.g. the public Guides view before login) — then a Log in action is shown.
-export default function TopBar({ appearance, user, isAdmin, back, onHome, onGuides, onAdmin, onLogout, guidesActive }) {
+export default function TopBar({ appearance, user, isAdmin, back, onHome, onGuides, onAdmin, onLogout }) {
   const showGuides = guidesEnabled(appearance) && guidesUrl(appearance) && typeof onGuides === 'function';
   const avatar = user ? userAvatarUrl(user) : null;
   const displayName = user ? (user.global_name || user.username) : null;
@@ -29,7 +29,7 @@ export default function TopBar({ appearance, user, isAdmin, back, onHome, onGuid
 
       <div className="user">
         {showGuides && (
-          <button className={`btn btn-ghost ${guidesActive ? 'is-active' : ''}`} onClick={onGuides}>
+          <button className="btn btn-ghost" onClick={onGuides}>
             {guidesLabel(appearance)}
           </button>
         )}

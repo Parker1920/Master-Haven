@@ -1,0 +1,23 @@
+# ── never commit: data, secrets, signature ──────────────────────────────────
+*.db
+*.db-wal
+*.db-shm
+haven-ops-data/
+.env
+signature.png
+*.png-sig
+uploads/
+
+# ── python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── node / build output ──────────────────────────────────────────────────────
+node_modules/
+dist/
+
+# ── misc ─────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

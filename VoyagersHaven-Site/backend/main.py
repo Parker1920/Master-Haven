@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import APP_NAME, APP_VERSION
 from .db import init_db
-from .routes import admin, checkout, inquiries, public
+from .routes import admin, checkout, inquiries, invoice_pay, public, shop
 
 mimetypes.add_type("image/webp", ".webp")
 
@@ -34,6 +34,8 @@ app = FastAPI(title=f"{APP_NAME} API", version=APP_VERSION, lifespan=lifespan)
 app.include_router(public.router, prefix="/api", tags=["public"])
 app.include_router(checkout.router, prefix="/api", tags=["checkout"])
 app.include_router(inquiries.router, prefix="/api", tags=["inquiries"])
+app.include_router(shop.router, prefix="/api", tags=["shop"])
+app.include_router(invoice_pay.router, prefix="/api", tags=["invoice-pay"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 
 

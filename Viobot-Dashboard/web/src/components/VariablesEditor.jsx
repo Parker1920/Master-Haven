@@ -18,6 +18,8 @@ export default function VariablesEditor({ guildId }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
 
+  const dirtyRef = useRef(false);
+
   function load() {
     setRows(null);
     setError(null);
@@ -31,9 +33,22 @@ export default function VariablesEditor({ guildId }) {
       })
       .catch((e) => setError(String(e.message || e)));
   }
-  useEffect(load, [guildId]);
+  // Switching servers reloads this editor — confirm before discarding unsaved edits.
+  useEffect(() => {
+    if (dirtyRef.current && !window.confirm('You have unsaved variable changes. Discard them?')) return;
+    load();
+  }, [guildId]);
 
   const dirty = useMemo(() => rows && original !== null && JSON.stringify(rows) !== original, [rows, original]);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
+  // Warn before a full-page unload (refresh / close / external nav) while there are unsaved edits.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
 
   const nameError = (name, i) => {
     const n = (name || '').trim().toLowerCase();

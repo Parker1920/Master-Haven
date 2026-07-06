@@ -27,7 +27,7 @@ const slugifyCategoryId = (input) =>
 const sanitizeCategoryText = (input, max = 100) =>
   String(input || '').replace(/@everyone/gi, '').replace(/@here/gi, '').replace(/[<>]/g, '').trim().slice(0, max);
 
-function sanitizeCategories(incoming, actorId, existing) {
+export function sanitizeCategories(incoming, actorId, existing) {
   const now = new Date().toISOString();
   const prev = new Map((Array.isArray(existing) ? existing : []).map((c) => [c.id, c]));
   const out = [];
@@ -54,7 +54,7 @@ function sanitizeCategories(incoming, actorId, existing) {
   return out;
 }
 
-function applyManaged(base, incoming, roles, channels, actorIsAdmin) {
+export function applyManaged(base, incoming, roles, channels, actorIsAdmin) {
   const roleIds = new Set(roles.map((r) => r.id));
   const chanIds = new Set(channels.map((c) => c.id));
   for (const group of getRegistry().groups) {

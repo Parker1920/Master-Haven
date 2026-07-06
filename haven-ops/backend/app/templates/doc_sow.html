@@ -1,0 +1,35 @@
+{% extends "_base.html" %}
+{% block body %}
+<h1>Statement of Work</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p>This Statement of Work ("SOW") is entered into between {{ company.legal_name }}
+("Provider") and {{ client.name }} ("{{ client.contact }}", "Client"){% if client.entity %},
+of {{ client.entity }}{% endif %}.</p>
+
+<table class="kv">
+  <tr><td class="k">Engagement</td><td>{{ e.code }}</td></tr>
+  <tr><td class="k">Scope of work</td><td>{{ e.title }}{% if e.note %} — {{ e.note }}{% endif %}</td></tr>
+  <tr><td class="k">Fixed price</td><td>{{ amount }}</td></tr>
+  <tr><td class="k">Opened</td><td>{{ e.opened_at or "on file" }}</td></tr>
+  <tr><td class="k">Bill to</td><td>{{ client.bill_to or "captured at contract" }}</td></tr>
+</table>
+
+<p>Deliverables are accepted via a signed Completion Certificate. Payment is due on
+invoice. Each generated document in this engagement is frozen at issue; any change
+is a new version.</p>
+
+<div class="sigrow">
+  <div class="sigblock">
+    <div class="line">
+      {% if signature_uri %}<img src="{{ signature_uri }}" alt="signature">
+      {% else %}<span class="conformed">/s/ Parker Stouffer</span>{% endif %}
+    </div>
+    <div class="who">Parker Stouffer — {{ company.legal_name }}</div>
+  </div>
+  <div class="sigblock">
+    <div class="line">&nbsp;</div>
+    <div class="who">{{ client.contact }} ({{ client.name }}) — client · date</div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks, reftable %}
+{% block body %}
+<div class="legal">
+<h1>Change Order</h1>
+<p class="code">{{ e.code }} · change order v{{ version }} · {{ display_date }}</p>
+
+<p>This Change Order modifies the Statement of Work for engagement
+<strong>{{ e.code }}</strong> ({{ e.title }}) between
+<strong>{{ company.legal_name }}</strong> ("Provider") and
+<strong>{{ client.name }}</strong>{% if client.contact %} ("{{ client.contact }}"){% endif %}
+("Client"). On execution by both parties it is incorporated into that Statement
+of Work and its governing Master Services Agreement.</p>
+
+<h2>1. Description of change</h2>
+{% if extra.get('change') %}
+<p>{{ extra.get('change') }}</p>
+{% else %}
+<span class="fill">&nbsp;</span>
+<span class="fill">&nbsp;</span>
+<span class="fill">&nbsp;</span>
+{% endif %}
+
+<h2>2. Price adjustment</h2>
+{{ reftable([
+  ("Price before this change", amount),
+  ("Adjustment", extra.get('adjustment', 'to be entered')),
+  ("Price after this change", extra.get('new_total', 'to be entered')),
+]) }}
+
+<h2>3. Schedule impact</h2>
+<p>{{ extra.get('schedule', 'No change to schedule.') }}</p>
+
+<h2>4. No other changes</h2>
+<p>Except as expressly stated here, all terms of the Statement of Work and the
+Master Services Agreement remain in full force. This Change Order is versioned
+and frozen at issue; any further change requires a new Change Order.</p>
+
+<p><strong>Agreed and accepted:</strong></p>
+{{ sigblocks(company, client, signature_uri) }}
+</div>
+{% endblock %}

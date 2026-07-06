@@ -1,0 +1,28 @@
+services:
+  haven-ops:
+    build: .
+    container_name: haven-ops
+    ports:
+      # Tailscale-internal on the Pi — never exposed via NPM/Cloudflare.
+      # Host port defaults to the locked 8090; overridable via .env for local
+      # dev (Parker's desktop runs the VoyagersHaven-Site dev server on 8090).
+      - "${HAVEN_OPS_PORT:-8090}:8090"
+    environment:
+      DATA_DIR: /data
+      # shared secret for /api/hooks/* (site → Ops relays); set in .env
+      OPS_SERVICE_TOKEN: ${OPS_SERVICE_TOKEN:-}
+    volumes:
+      # Pi layout: ~/docker/haven-ops (repo) and ~/docker/haven-ops-data (data)
+      # are siblings, so the default relative path is correct there.
+      # Local dev: set HAVEN_OPS_DATA in .env (see .env.example) to e.g.
+      # C:/Users/parke/docker/haven-ops-data so data never lands in a repo tree.
+      - ${HAVEN_OPS_DATA:-../haven-ops-data}:/data
+    restart: unless-stopped
+    healthcheck:
+      # python is already in the image; curl is not
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8090/api/health', timeout=3)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

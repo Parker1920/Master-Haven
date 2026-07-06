@@ -10,11 +10,12 @@ let _writeDb = null;
  * Open the Viobot SQLite DB.
  *
  * The LIVE db is in WAL mode. A WAL *reader* must be able to write the -shm lock slots, so a read-only
- * filesystem mount breaks reads. We therefore open read-write (so shm works) and enforce read-only at
- * the SQL layer with PRAGMA query_only=ON — any write attempt is rejected by SQLite. WAL also allows
- * many concurrent readers alongside the bot's single writer, so this is safe against the running bot.
+ * filesystem mount breaks reads. We therefore open read-write (so shm works). WAL also allows many
+ * concurrent readers alongside the bot's single writer, so this is safe against the running bot.
  *
- * Phase 2 will set VIOBOT_DB_READONLY=false to enable config writes (with backup-before-write).
+ * The dashboard normally performs guarded writes (backup-before-write + optimistic concurrency).
+ * VIOBOT_DB_READONLY is an optional kill-switch: when set, this READ connection is pinned query_only=ON
+ * and the write path (getWriteDb + the config write routes) refuses. Default off.
  */
 export function getDb() {
   if (_db) return _db;
@@ -36,6 +37,13 @@ export function getDb() {
  * WAL allows this alongside the bot's own writer; busy_timeout serializes contention.
  */
 export function getWriteDb() {
+  // Kill-switch backstop: when VIOBOT_DB_READONLY is set, refuse to hand out a write connection. The
+  // write routes (routes/config.js) check this first and return a clean 403; this guards any other path.
+  if (env.dbReadonly) {
+    const e = new Error('Dashboard is in read-only mode (VIOBOT_DB_READONLY=true).');
+    e.code = 'READONLY';
+    throw e;
+  }
   if (_writeDb) return _writeDb;
   if (!env.viobotDbPath) throw new Error('VIOBOT_DB_PATH is not set.');
   _writeDb = new Database(env.viobotDbPath, { fileMustExist: true });

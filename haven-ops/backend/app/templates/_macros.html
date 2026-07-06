@@ -1,0 +1,31 @@
+{# Shared building blocks for generated documents. #}
+
+{# Signature blocks. company_only=True renders just the provider side.
+   The provider side stamps the e-signature image when on file, else a
+   conformed /s/ — identical convention across every signed doc type. #}
+{% macro sigblocks(company, client, signature_uri, company_only=False, client_caption=None) %}
+<div class="sigrow">
+  <div class="sigblock">
+    <div class="line">
+      {% if signature_uri %}<img src="{{ signature_uri }}" alt="signature">
+      {% else %}<span class="conformed">/s/ Parker Stouffer</span>{% endif %}
+    </div>
+    <div class="who">Parker Stouffer, Member — {{ company.legal_name }} · date</div>
+  </div>
+  {% if not company_only %}
+  <div class="sigblock">
+    <div class="line">&nbsp;</div>
+    <div class="who">{{ client_caption or (client.contact ~ " (" ~ client.name ~ ") — " ~ "signature · date") }}</div>
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# Reference strip: engagement + parties, used at the top of lifecycle docs. #}
+{% macro reftable(rows) %}
+<table class="kv">
+  {% for k, v in rows %}
+  <tr><td class="k">{{ k }}</td><td>{{ v }}</td></tr>
+  {% endfor %}
+</table>
+{% endmacro %}

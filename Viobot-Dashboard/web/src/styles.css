@@ -399,8 +399,21 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   .var-val { width: 100%; }
   .var-del { align-self: flex-end; margin-top: 0; }
   .alias-help { display: none; }
-  .reg-field .cfg-input { min-width: 0; }
   .ann-row { flex-direction: column; }
   .ann-form-top { flex-direction: column; }
   .ann-form-top .cfg-select { min-width: 0; width: 100%; }
+
+  /* admin logs viewer: shrink the box, keep it scrollable, and wrap long unbroken tokens
+     (container names/ids, URLs) so nothing overflows the narrow viewport */
+  .logs-box { height: 50vh; padding: 8px 10px; font-size: 11px; overflow-wrap: anywhere; }
+  .logs-head { flex-direction: column; align-items: stretch; }
+  .logs-controls { flex-wrap: wrap; }
+  .logs-controls .cfg-select-sm { flex: 1; min-width: 0; }
+
+  /* registry field rows: stack the inline inputs full-width on narrow screens */
+  .reg-field { flex-direction: column; align-items: stretch; }
+  .reg-field .cfg-input,
+  .reg-field .reg-help,
+  .reg-field .cfg-select-sm { flex: none; width: 100%; min-width: 0; }
+  .reg-field .reg-actions { margin-left: 0; justify-content: flex-end; }
 }

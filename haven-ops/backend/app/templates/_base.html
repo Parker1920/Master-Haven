@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* WeasyPrint print styles — DejaVu ships in the image (fonts-dejavu-core). */
+  @page {
+    size: Letter; margin: 24mm 22mm;
+    @bottom-right { content: counter(page) " of " counter(pages); font-size: 8pt; color: #8a97a8; }
+  }
+  body { font-family: "DejaVu Sans", sans-serif; color: #16202b; font-size: 10.5pt;
+         line-height: 1.55; margin: 0; }
+  .letterhead { border-bottom: 2px solid #16202b; padding-bottom: 10px; margin-bottom: 26px; }
+  .letterhead .brand { width: 78mm; height: auto; display: block; }
+  .letterhead .meta { font-size: 8.5pt; color: #5a6675; margin-top: 6px; }
+  h1 { font-size: 15pt; letter-spacing: .02em; margin: 0 0 2px; }
+  .code { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; color: #5a6675;
+          margin: 0 0 18px; }
+  table.kv { border-collapse: collapse; width: 100%; margin: 14px 0 18px; }
+  table.kv td { border: 1px solid #c9d2dc; padding: 7px 10px; font-size: 9.5pt;
+                vertical-align: top; }
+  table.kv td.k { width: 32%; color: #5a6675; background: #f2f5f8; }
+  .sigrow { margin-top: 38px; }
+  .sigblock { display: inline-block; width: 46%; vertical-align: bottom; margin-right: 4%; }
+  .sigblock .line { border-bottom: 1px solid #16202b; padding-bottom: 4px; min-height: 46px; }
+  .sigblock img { max-height: 42px; }
+  .sigblock .conformed { font-family: "DejaVu Sans Mono", monospace; font-size: 10.5pt; }
+  .sigblock .who { font-size: 8.5pt; color: #5a6675; margin-top: 4px; }
+  .note { font-size: 8.5pt; color: #5a6675; margin-top: 22px; }
+  footer { margin-top: 34px; padding-top: 8px; border-top: 1px solid #c9d2dc;
+           font-size: 8pt; color: #8a97a8; }
+  /* Legal-document sections (MSA / NDA / lifecycle docs) */
+  .legal h2 { font-size: 11pt; margin: 16px 0 5px; letter-spacing: .01em; }
+  .legal p, .legal li { font-size: 9.5pt; line-height: 1.55; margin: 5px 0; }
+  .legal ol.sub { padding-left: 18px; }
+  .legal ol.sub > li { margin: 4px 0; }
+  .fill { border-bottom: 1px solid #9aa7b4; min-height: 15pt; display: block;
+          margin: 6px 0; }
+  .amount-line { font-size: 12pt; font-weight: 700; margin: 12px 0; }
+  table.items { border-collapse: collapse; width: 100%; margin: 14px 0 6px; }
+  table.items th { text-align: left; font-size: 8.5pt; letter-spacing: .08em;
+                   text-transform: uppercase; color: #5a6675; border-bottom: 2px solid #16202b;
+                   padding: 6px 8px; }
+  table.items th.num, table.items td.num { text-align: right; }
+  table.items td { border-bottom: 1px solid #c9d2dc; padding: 8px; font-size: 9.5pt;
+                   vertical-align: top; }
+  table.items tr.total td { border-bottom: 0; border-top: 2px solid #16202b;
+                            font-weight: 700; font-size: 10.5pt; }
+</style>
+</head>
+<body>
+  <div class="letterhead">
+    <!-- brand banner (assets/haven-banner.jpg, resolved via docgen's base_url);
+         the meta line keeps the legal identifiers the banner doesn't carry -->
+    <img class="brand" src="assets/haven-banner.jpg" alt="{{ company.legal_name }}">
+    <div class="meta">{{ company.legal_name }} · {{ company.office }} · EIN {{ company.ein }} · Entity # {{ company.entity_no }}</div>
+  </div>
+
+  {% block body %}{% endblock %}
+
+  <footer>
+    {{ company.legal_name }} · {{ e.code }} · {{ doc_label }} v{{ version }} ·
+    generated {{ generated_at }} by Haven Ops · frozen record — reissues are new versions
+  </footer>
+</body>
+</html>

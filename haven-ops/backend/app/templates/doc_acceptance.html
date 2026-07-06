@@ -1,0 +1,37 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks, reftable %}
+{% block body %}
+<div class="legal">
+<h1>Delivery &amp; Acceptance</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p><strong>{{ company.legal_name }}</strong> ("Provider") certifies delivery of the
+deliverables below to <strong>{{ client.name }}</strong>{% if client.contact %}
+("{{ client.contact }}"){% endif %} ("Client") under engagement {{ e.code }} and its
+Statement of Work.</p>
+
+<h2>1. Deliverables</h2>
+<p>{{ e.title }}{% if e.note %} — {{ e.note }}{% endif %}</p>
+{% if extra.get('deliverables') %}<p>{{ extra.get('deliverables') }}</p>{% endif %}
+
+<h2>2. Delivery</h2>
+{{ reftable([
+  ("Delivered on", extra.get('delivered_on', display_date)),
+  ("Method", extra.get('method', 'as agreed (deployment / handoff on file)')),
+]) }}
+
+<h2>3. Review & acceptance</h2>
+<p>Client has {{ extra.get('review_days', '5') }} business days from delivery to
+report any material nonconformity with the Statement of Work in writing. Absent
+such a report within that period, the deliverables are deemed accepted. Client's
+signature below constitutes acceptance as of the date signed. Acceptance does not
+waive warranty rights under the Master Services Agreement.</p>
+
+<h2>4. Record</h2>
+<p>This certificate is versioned and frozen at issue in Provider's engagement
+papertrail. Final invoicing and the engagement receipt follow acceptance.</p>
+
+{{ sigblocks(company, client, signature_uri,
+             client_caption=client.contact ~ " (" ~ client.name ~ ") — accepted · date") }}
+</div>
+{% endblock %}

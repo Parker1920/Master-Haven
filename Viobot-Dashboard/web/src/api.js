@@ -81,9 +81,15 @@ export const api = {
     fetch('/api/admin/registry', { method: 'PUT', ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ registry }) })
       .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
   adminBotStatus: () => getJson('/api/admin/bot-status'),
-  adminBotAction: (action) =>
-    fetch(`/api/admin/${action === 'restart' ? 'restart-bot' : `bot/${action}`}`, { method: 'POST', ...opts })
-      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; }),
+  // Maps each control action to its server route (see server/src/routes/admin.js):
+  // restart → POST /api/admin/restart-bot ; start/stop/reimage → POST /api/admin/bot/<action>.
+  adminBotAction: (action) => {
+    const routes = { restart: 'restart-bot', start: 'bot/start', stop: 'bot/stop', reimage: 'bot/reimage' };
+    const path = routes[action];
+    if (!path) return Promise.reject(new Error(`unknown bot action: ${action}`));
+    return fetch(`/api/admin/${path}`, { method: 'POST', ...opts })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || d.error || `failed (${r.status})`); return d; });
+  },
   adminRestartBot: () => api.adminBotAction('restart'),
   adminGetAdmins: () => getJson('/api/admin/admins'),
   adminSaveAdmins: (admins) =>

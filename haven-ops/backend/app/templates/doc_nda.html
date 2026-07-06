@@ -1,0 +1,75 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks %}
+{% block body %}
+<div class="legal">
+<h1>Mutual Non-Disclosure Agreement</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p>This Mutual Non-Disclosure Agreement (the "Agreement") is entered into as of
+{{ extra.get('effective_date', display_date) }} between
+<strong>{{ company.legal_name }}</strong>, a {{ company.entity_type or 'Pennsylvania limited liability company' }}
+with its principal office in {{ company.office }}, and
+<strong>{{ client.name }}</strong>{% if client.contact %} ("{{ client.contact }}"){% endif %}{% if client.entity %},
+of {{ client.entity }}{% endif %} (each a "Party"), to protect information exchanged
+while evaluating and performing work together (the "Purpose").</p>
+
+<h2>1. Confidential Information</h2>
+<p>"Confidential Information" means non-public information a Party (the
+"Discloser") makes available to the other (the "Recipient") in any form that is
+marked confidential or that a reasonable person would understand to be
+confidential — including business plans, client and community data, financial
+information, credentials, source code, infrastructure details, and unreleased
+product work.</p>
+
+<h2>2. Exclusions</h2>
+<p>Confidential Information does not include information that: (a) is or becomes
+publicly available through no fault of the Recipient; (b) was rightfully known to
+the Recipient before disclosure; (c) is rightfully received from a third party
+without duty of confidentiality; or (d) is independently developed without use of
+the Discloser's Confidential Information.</p>
+
+<h2>3. Obligations</h2>
+<p>The Recipient will: (a) use Confidential Information only for the Purpose;
+(b) protect it with at least the care it uses for its own confidential
+information, and no less than reasonable care; (c) not disclose it except to
+personnel or advisors with a need to know who are bound by obligations at least
+as protective; and (d) notify the Discloser promptly of any unauthorized use or
+disclosure it becomes aware of.</p>
+
+<h2>4. Compelled Disclosure</h2>
+<p>The Recipient may disclose Confidential Information to the extent required by
+law or court order, provided it gives the Discloser prompt notice (where legally
+permitted) and reasonable cooperation to seek protective treatment, and discloses
+only what is required.</p>
+
+<h2>5. Term; Return</h2>
+<p>This Agreement applies to disclosures made within two (2) years of the
+effective date. Obligations for each disclosure survive for three (3) years from
+that disclosure; trade secrets remain protected for as long as they qualify as
+such. On the Discloser's written request, the Recipient will return or destroy
+Confidential Information and certify destruction, except archival copies retained
+under standard backup practices, which remain subject to this Agreement.</p>
+
+<h2>6. No License; No Obligation</h2>
+<p>No license or other right is granted by disclosure. Nothing in this Agreement
+obligates either Party to proceed with any transaction or engagement, or restricts
+either Party from independently developing similar work without use of the other's
+Confidential Information.</p>
+
+<h2>7. Remedies</h2>
+<p>Unauthorized use or disclosure may cause irreparable harm; the Discloser is
+entitled to seek injunctive relief in addition to any other remedies at law or in
+equity.</p>
+
+<h2>8. General</h2>
+<p>This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
+with exclusive venue in the state and federal courts covering Cumberland County,
+Pennsylvania. It is the entire agreement between the Parties on this subject and
+may be amended only in a writing signed by both Parties. Electronic signatures
+(including conformed "/s/" signatures and stamped signature images) are valid and
+binding.</p>
+
+<p><strong>Agreed and accepted:</strong></p>
+{{ sigblocks(company, client, signature_uri) }}
+</div>
+{% endblock %}

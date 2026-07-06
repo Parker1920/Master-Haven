@@ -443,5 +443,126 @@ input,textarea,select{font-family:var(--body)}
 .inq-toggle:hover{border-color:var(--teal);color:var(--text)}
 .inq-card.done{opacity:.62}
 .inq-card.done .inq-msg{color:var(--faint)}
+/* linked invoices under an inquiry (the pipeline trail) */
+.inq-invoices{margin:10px 0 4px;padding:10px 12px;border:1px solid var(--line-2);border-radius:9px;
+  background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:8px}
+.inq-inv-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px}
+.inq-inv-num{font-family:var(--mono);color:var(--text)}
+.inq-inv-amt{color:var(--teal);font-weight:600}
+.inq-inv-paid{font-family:var(--mono);font-size:11.5px;color:var(--ok,#3ecf8e)}
+
+/* receipt page (public, printable) */
+.receipt-page{max-width:640px}
+.receipt-doc{border:1px solid var(--line-2);border-radius:16px;padding:32px 34px;background:var(--bg-2)}
+.receipt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.receipt-brand{font-size:20px;font-weight:700;letter-spacing:.2px}
+.receipt-brand span{color:var(--teal)}
+.receipt-sub{font-size:12.5px;color:var(--faint);margin-top:3px}
+.receipt-stamp{font-family:var(--mono);font-size:12px;letter-spacing:2px;color:var(--ok,#3ecf8e);
+  border:1.5px solid var(--ok,#3ecf8e);border-radius:7px;padding:5px 11px;transform:rotate(3deg)}
+.receipt-title{font-family:var(--display,serif);font-size:30px;margin:22px 0 18px}
+.receipt-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-bottom:22px}
+.receipt-grid>div{display:flex;flex-direction:column;gap:2px}
+.receipt-grid span{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint)}
+.receipt-grid b{font-size:14px;color:var(--text);font-weight:600}
+.receipt-line{display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:14px 0;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}
+.receipt-desc{color:var(--dim)}
+.receipt-amt{font-family:var(--mono);color:var(--text)}
+.receipt-total{display:flex;justify-content:space-between;align-items:center;padding:16px 0 4px}
+.receipt-total span{color:var(--dim)}
+.receipt-total b{font-size:22px;color:var(--teal)}
+.receipt-foot{margin-top:20px;font-size:12.5px;color:var(--faint)}
+.receipt-links{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px}
+.receipt-print{margin-top:18px;padding:12px 22px;width:auto}
+@media print{
+  nav,footer,.receipt-print,.receipt-links{display:none !important}
+  body,main{background:#fff !important}
+  .receipt-doc{border-color:#ddd;background:#fff;color:#111}
+  .receipt-doc *{color:#111 !important}
+  .receipt-stamp{color:#0a7d55 !important;border-color:#0a7d55 !important}
+  .receipt-total b,.receipt-brand span{color:#0a7d55 !important}
+}
+
+/* ---------------------------------------------------------------- SHOP */
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.product{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  display:flex;flex-direction:column;transition:border-color .2s,transform .2s}
+.product:hover{border-color:var(--line-2);transform:translateY(-2px)}
+.product-media{position:relative;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.product-media img{width:100%;height:100%;object-fit:cover}
+.product-media-mark{font-size:44px;color:rgba(232,236,245,.22)}
+.product-badge{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;background:rgba(96,165,250,.14);color:#7db6ff;border:1px solid rgba(96,165,250,.3);
+  padding:3px 9px;border-radius:999px}
+.product-body{padding:18px;display:flex;flex-direction:column;gap:8px;flex:1}
+.product-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.product-top h3{font-size:16px;font-weight:600;line-height:1.25}
+.product-price{font-family:var(--mono);font-size:15px;font-weight:500;color:var(--teal-bright);white-space:nowrap}
+.product-desc{font-size:13px;color:var(--dim);line-height:1.5;flex:1}
+.product-buy{width:100%;justify-content:center;margin-top:4px}
+
+/* ---------------------------------------------------------------- ADMIN MERCH */
+.merch-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.merch-list{display:flex;flex-direction:column;gap:10px}
+.merch-row{display:grid;grid-template-columns:52px 1fr auto auto;align-items:center;gap:14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.merch-row.off{opacity:.55}
+.merch-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;display:flex;align-items:center;justify-content:center;flex:none}
+.merch-thumb img{width:100%;height:100%;object-fit:cover}
+.merch-thumb span{color:rgba(232,236,245,.4);font-size:22px}
+.merch-info{min-width:0}
+.merch-name{font-size:15px;font-weight:600;display:flex;align-items:center;flex-wrap:wrap}
+.merch-sub{font-size:12.5px;color:var(--dim);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46ch}
+.merch-price{font-family:var(--mono);font-size:15px;color:var(--teal-bright);white-space:nowrap}
+.merch-actions{display:flex;gap:8px}
+.merch-toggles{display:flex;flex-direction:column;gap:10px;margin:8px 0 16px}
+.chk{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--dim);cursor:pointer}
+.chk input{accent-color:var(--teal);width:16px;height:16px}
+@media(max-width:560px){
+  .merch-row{grid-template-columns:44px 1fr auto;grid-template-areas:"thumb info price" "thumb actions actions";row-gap:8px}
+  .merch-thumb{grid-area:thumb;width:44px;height:44px}
+  .merch-info{grid-area:info}
+  .merch-price{grid-area:price}
+  .merch-actions{grid-area:actions;justify-content:flex-start}
+  .merch-sub{max-width:none;white-space:normal}
+}
+
+/* ---------------------------------------------------------------- SHOP CHECKOUT FORM (inside the white modal) */
+.co-section{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#697386;margin:16px 0 8px}
+.co-input{width:100%;background:#f6f8fa;border:1px solid #e3e8ee;border-radius:8px;padding:10px 12px;font-size:13.5px;
+  color:#0a2540;margin-bottom:8px;outline:none;font-family:var(--body)}
+.co-input:focus{border-color:#635bff}
+.co-input::placeholder{color:#8792a2}
+.co-row{display:flex;gap:8px}
+.co-row .co-input{flex:1}
+
+/* ---------------------------------------------------------------- ADMIN ORDERS */
+.orders-list{display:flex;flex-direction:column;gap:12px}
+.order-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.order-card.done{opacity:.6}
+.order-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.order-item{font-size:15px;font-weight:700}
+.order-amt{font-family:var(--mono);font-size:13.5px;color:var(--teal-bright);margin-left:10px}
+.order-body{font-size:13.5px;color:var(--dim);line-height:1.7;margin-bottom:12px}
+.order-ship{font-family:var(--mono);font-size:12.5px;color:var(--text);margin-top:2px}
+
+/* ---------------------------------------------------------------- ADMIN INVOICES */
+.inv-form-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
+.inv-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+/* ---------------------------------------------------------------- PAY AN INVOICE */
+.inv-lookup-row{display:flex;gap:10px}
+.inv-lookup-row input{flex:1}
+.inv-lookup-row .btn{white-space:nowrap;padding:13px 20px}
+.inv-detail{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;margin-top:16px}
+.inv-detail-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.inv-detail-num{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--text)}
+.inv-detail-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--dim)}
+.inv-detail-row:last-of-type{border-bottom:none}
+.inv-detail-row b{color:var(--text);text-align:right}
+.inv-amt{font-family:var(--mono);color:var(--teal-bright)!important;font-size:16px}
+.inv-paid-note{color:var(--ok);font-size:14px;margin-top:16px}
+.inv-void-note{color:var(--dim);font-size:14px;margin-top:16px}
 
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto}}

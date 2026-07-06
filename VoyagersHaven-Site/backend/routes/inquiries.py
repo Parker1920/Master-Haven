@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..db import get_db
 from ..ratelimit import check_rate_limit
+from ..services.havenops import relay_inquiry
 from ..services.notify import notify_new_inquiry
 
 router = APIRouter()
@@ -48,15 +49,16 @@ def create_inquiry(
     )
     inquiry_id = cur.lastrowid
 
-    background.add_task(
-        notify_new_inquiry,
-        {
-            "id": inquiry_id,
-            "name": req.name,
-            "email": req.email.strip(),
-            "project_type": req.project_type,
-            "budget": req.budget,
-            "message": req.message,
-        },
-    )
+    payload = {
+        "id": inquiry_id,
+        "name": req.name,
+        "email": req.email.strip(),
+        "project_type": req.project_type,
+        "budget": req.budget,
+        "message": req.message,
+    }
+    background.add_task(notify_new_inquiry, payload)
+    # Haven Ops opens the engagement papertrail (client + engagement + frozen
+    # intake record). Best-effort — never blocks or fails the visitor's form.
+    background.add_task(relay_inquiry, payload)
     return {"ok": True, "id": inquiry_id}

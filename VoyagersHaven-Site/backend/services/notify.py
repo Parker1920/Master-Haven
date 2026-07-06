@@ -77,3 +77,28 @@ def _notify_email(inq: dict) -> None:
                 s.send_message(msg)
     except Exception as e:  # noqa: BLE001 - best-effort
         log.warning("inquiry email notify failed: %s", e)
+
+
+def notify_new_order(order: dict) -> None:
+    """Ping Discord on a new paid merch order (reuses the inquiry webhook)."""
+    url = config.INQUIRY_WEBHOOK_URL
+    if not url:
+        return
+    c = order.get("customer") or {}
+    s = order.get("shipping") or {}
+    ship = ", ".join(filter(None, [s.get("line1"), s.get("city"), s.get("state"), s.get("postal")]))
+    content = (
+        f"**🛒 New order** — {order.get('item_label')}\n"
+        f"{c.get('name') or '—'} <{c.get('email') or '—'}>"
+        + (f" · {c.get('phone')}" if c.get("phone") else "")
+        + (f"\nShip to: {ship}" if ship else "")
+    )
+    try:
+        data = json.dumps({"content": content, "username": "Voyager's Haven"}).encode("utf-8")
+        r = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json", "User-Agent": "VoyagersHaven/1.0"},
+        )
+        urllib.request.urlopen(r, timeout=10)
+    except Exception as e:  # noqa: BLE001
+        log.warning("order Discord notify failed: %s", e)

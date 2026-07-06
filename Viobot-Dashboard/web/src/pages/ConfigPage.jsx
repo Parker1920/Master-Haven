@@ -112,16 +112,18 @@ function FieldEditor({ field, value, roles, channels, onChange }) {
   }
 }
 
-function CategoryEditor({ categories, onChange }) {
+function CategoryEditor({ categories, onChange, allowed = false }) {
   const cats = Array.isArray(categories) ? categories : [];
   const setCat = (i, patch) => onChange(cats.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   return (
     <section className="config-card">
       <div className="vars-head">
         <h3 className="config-group-title">Custom Contact-Us categories</h3>
-        <button className="btn btn-ghost btn-sm" onClick={() => onChange([...cats, { label: '', description: '', enabled: true }])} disabled={cats.length >= 10}>
-          + Add category
-        </button>
+        {allowed && (
+          <button className="btn btn-ghost btn-sm" onClick={() => onChange([...cats, { label: '', description: '', enabled: true }])} disabled={cats.length >= 10}>
+            + Add category
+          </button>
+        )}
       </div>
       <p className="config-help" style={{ padding: '0 0 8px' }}>
         Extra options in the Contact Us menu (max 10). The ticket system itself is toggled in <b>Settings</b>. These two defaults always exist:
@@ -132,27 +134,36 @@ function CategoryEditor({ categories, onChange }) {
         ))}
       </div>
 
-      {cats.length === 0 && <p className="val-empty" style={{ padding: '10px 0' }}>No custom categories yet.</p>}
+      {!allowed ? (
+        <p className="muted small" style={{ padding: '10px 0 0' }}>
+          Adding your own categories requires <b>Plus</b> or <b>Beta</b> access for this server. The two defaults above are always available.
+          {cats.length > 0 && ` (${cats.length} saved custom ${cats.length === 1 ? 'category is' : 'categories are'} inactive until this server has the feature.)`}
+        </p>
+      ) : (
+        <>
+          {cats.length === 0 && <p className="val-empty" style={{ padding: '10px 0' }}>No custom categories yet.</p>}
 
-      <div className="cat-rows">
-        {cats.map((c, i) => {
-          const id = c.id || slugify(c.label);
-          const bad = id && RESERVED_CAT.has(id);
-          return (
-            <div key={i} className="cat-row">
-              <div className="cat-fields">
-                <input className="cfg-input" placeholder="Label (e.g. Event Help)" value={c.label || ''} onChange={(e) => setCat(i, { label: e.target.value })} />
-                <input className="cfg-input" placeholder="Description (optional)" value={c.description || ''} onChange={(e) => setCat(i, { description: e.target.value })} />
-              </div>
-              <div className="cat-meta">
-                <span className={`mono cat-id ${bad ? 'cat-id-bad' : ''}`}>{id || '—'}{bad ? ' · reserved' : ''}</span>
-                <Toggle sm on={c.enabled !== false} onChange={(v) => setCat(i, { enabled: v })} />
-                <button className="chip-x" title="Remove" onClick={() => onChange(cats.filter((_, j) => j !== i))}>×</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+          <div className="cat-rows">
+            {cats.map((c, i) => {
+              const id = c.id || slugify(c.label);
+              const bad = id && RESERVED_CAT.has(id);
+              return (
+                <div key={i} className="cat-row">
+                  <div className="cat-fields">
+                    <input className="cfg-input" placeholder="Label (e.g. Event Help)" value={c.label || ''} onChange={(e) => setCat(i, { label: e.target.value })} />
+                    <input className="cfg-input" placeholder="Description (optional)" value={c.description || ''} onChange={(e) => setCat(i, { description: e.target.value })} />
+                  </div>
+                  <div className="cat-meta">
+                    <span className={`mono cat-id ${bad ? 'cat-id-bad' : ''}`}>{id || '—'}{bad ? ' · reserved' : ''}</span>
+                    <Toggle sm on={c.enabled !== false} onChange={(v) => setCat(i, { enabled: v })} />
+                    <button className="chip-x" title="Remove" onClick={() => onChange(cats.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -180,6 +191,21 @@ export default function ConfigPage({ user, guild, appearance, isAdmin, onBack, o
 
   const dirty = useMemo(() => data && draft && JSON.stringify(draft) !== JSON.stringify(data.config), [data, draft]);
   const update = (path, v) => { setDraft((d) => setPath(d, path, v)); setSaveMsg(null); };
+
+  // Warn before a full-page unload (refresh / close / external nav) while there are unsaved edits.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  // In-app navigation away from an unsaved config: confirm first, then run the action.
+  const confirmDiscard = () => !dirty || window.confirm('You have unsaved changes. Discard them?');
+  const switchTab = (id) => { if (id !== tab && confirmDiscard()) setTab(id); };
+  const guardedBack = () => { if (confirmDiscard()) onBack(); };
+  const guardedGuides = typeof onGuides === 'function' ? () => { if (confirmDiscard()) onGuides(); } : onGuides;
+  const guardedLogout = () => { if (confirmDiscard()) onLogout(); };
 
   async function save() {
     setSaving(true);
@@ -209,9 +235,9 @@ export default function ConfigPage({ user, guild, appearance, isAdmin, onBack, o
         appearance={appearance}
         user={user}
         isAdmin={isAdmin}
-        back={{ label: '‹ Servers', onClick: onBack }}
-        onGuides={onGuides}
-        onLogout={onLogout}
+        back={{ label: '‹ Servers', onClick: guardedBack }}
+        onGuides={guardedGuides}
+        onLogout={guardedLogout}
       />
 
       <main className="container">
@@ -236,7 +262,7 @@ export default function ConfigPage({ user, guild, appearance, isAdmin, onBack, o
           <>
             <div className="config-tabs">
               {tabs.map((t) => (
-                <button key={t.id} className={`config-tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+                <button key={t.id} className={`config-tab ${tab === t.id ? 'active' : ''}`} onClick={() => switchTab(t.id)}>{t.label}</button>
               ))}
             </div>
 
@@ -274,6 +300,7 @@ export default function ConfigPage({ user, guild, appearance, isAdmin, onBack, o
               <CategoryEditor
                 categories={getPath(draft, 'tickets.customContactCategories')}
                 onChange={(next) => update('tickets.customContactCategories', next)}
+                allowed={data?.features?.custom_contact_categories === true}
               />
             )}
 

@@ -1,0 +1,19 @@
+# Pi-only override — place next to docker-compose.yml ON THE PI as
+# `docker-compose.override.yml` (compose merges it automatically).
+#
+# Joins haven-ops to the shared docker_default network so the
+# voyagers-haven container can relay site events to
+# http://haven-ops:8090/api/hooks/* server-to-server. Haven Ops still
+# publishes only its tailnet-internal host port — NPM must NEVER route to it.
+#
+# Not applied on the desktop: docker_default doesn't exist there, and local
+# dev uses HAVEN_OPS_URL=http://localhost:8091 instead.
+services:
+  haven-ops:
+    networks:
+      - default
+      - docker_default
+
+networks:
+  docker_default:
+    external: true

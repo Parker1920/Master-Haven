@@ -5,6 +5,12 @@ import { env } from '../env.js';
 
 // Talks to the Docker Engine API over the host socket. HARD-restricted to the containers below —
 // the dashboard can never touch anything else, even though the socket itself is privileged.
+//
+// SECURITY NOTE: the mounted docker.sock grants full host Docker control; the ONLY thing scoping it to
+// `viobot` is this app-level ALLOWED set. Any RCE/logic bug in the dashboard would inherit that power.
+// Endpoints here are admin-gated. Hardening path (future): front the socket with a scoped
+// docker-socket-proxy limiting to this container + these actions, or route all actions through the
+// host-cron flag-file pattern already used for reimage.
 const SOCKET = '/var/run/docker.sock';
 const ALLOWED = new Set(['viobot']);
 

@@ -42,9 +42,11 @@ export const env = {
   plusSkuId: process.env.VIOBOT_PLUS_SKU_ID ?? '',
 
   viobotDbPath: process.env.VIOBOT_DB_PATH ?? '',
-  // Phase 1 reads only. The connection is opened read-write (so WAL shared-memory works against the
-  // LIVE db) but PRAGMA query_only=ON guarantees no data writes. Flip to false only in Phase 2.
-  dbReadonly: bool(process.env.VIOBOT_DB_READONLY, true),
+  // Optional WRITE KILL-SWITCH (default OFF — the dashboard performs guarded writes by design:
+  // backup-before-write + optimistic concurrency against the live Viobot DB). When VIOBOT_DB_READONLY=true,
+  // the read connection is opened PRAGMA query_only=ON AND every Viobot-DB write endpoint refuses with
+  // HTTP 403 (enforced in db.getWriteDb + routes/config.js). A safety switch, not the normal mode.
+  dbReadonly: bool(process.env.VIOBOT_DB_READONLY, false),
 
   // Dashboard's own editable store (registry / admins / appearance) — separate from Viobot's DB.
   dataDir: process.env.DASHBOARD_DATA_DIR ?? '/app/dashboard-data',
@@ -58,3 +60,23 @@ export const env = {
 
 export const oauthConfigured = () => Boolean(env.discord.clientId && env.discord.clientSecret);
 export const redirectTo = (p = '/') => `${env.webOrigin || ''}${p}`;
+
+// Startup safety guard: refuse to boot a PRODUCTION process with insecure defaults. Called from
+// index.js (NOT at import) so tests/tooling can import this module freely; only the real server boot
+// enforces it. In development it is a no-op.
+export function assertProductionEnv() {
+  if (env.nodeEnv !== 'production') return;
+  const problems = [];
+  if (!process.env.SESSION_SECRET || env.session.secret === 'dev-insecure-session-secret-change-me') {
+    problems.push('SESSION_SECRET must be a strong random value (refusing to run with the committed default).');
+  }
+  if (env.devLogin) {
+    problems.push('DEV_LOGIN must be OFF in production (it grants admin of every bot-present guild).');
+  }
+  if (!env.session.secure) {
+    problems.push('SESSION_SECURE must be true in production (secure cookies over HTTPS).');
+  }
+  if (problems.length) {
+    throw new Error('Refusing to start in production:\n  - ' + problems.join('\n  - '));
+  }
+}

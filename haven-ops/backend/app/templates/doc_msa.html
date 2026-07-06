@@ -1,0 +1,113 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import sigblocks, reftable %}
+{% block body %}
+<div class="legal">
+<h1>Master Services Agreement</h1>
+<p class="code">{{ e.code }} · version {{ version }} · {{ display_date }}</p>
+
+<p>This Master Services Agreement (the "Agreement") is entered into as of
+{{ extra.get('effective_date', display_date) }} (the "Effective Date") between
+<strong>{{ company.legal_name }}</strong>, a {{ company.entity_type or 'Pennsylvania limited liability company' }}
+with its principal office in {{ company.office }} ("Provider"), and
+<strong>{{ client.name }}</strong>{% if client.contact %} ("{{ client.contact }}"){% endif %}{% if client.entity %},
+of {{ client.entity }}{% endif %} ("Client"). Provider and Client are each a "Party"
+and together the "Parties".</p>
+
+<h2>1. Services; Statements of Work</h2>
+<p>Provider will perform the services described in one or more Statements of Work
+referencing this Agreement (each an "SOW"). Each SOW is incorporated into this
+Agreement on execution. If an SOW conflicts with this Agreement, the SOW controls
+for that engagement only. Provider tracks each engagement under a unique code
+(e.g., {{ e.code }}); every document issued under an engagement is versioned and
+frozen at issue in Provider's records.</p>
+
+<h2>2. Fees; Invoicing; Payment</h2>
+<p>Client will pay the fees stated in the applicable SOW. Unless the SOW states
+otherwise: (a) invoices are due on receipt; (b) amounts unpaid thirty (30) days
+after invoice may accrue interest at 1.5% per month or the maximum rate permitted
+by law, whichever is less; (c) fees are exclusive of taxes, which are Client's
+responsibility (excluding taxes on Provider's income); and (d) pre-approved,
+documented out-of-pocket expenses are reimbursable at cost.</p>
+
+<h2>3. Term; Termination</h2>
+<p>This Agreement runs from the Effective Date until terminated. Either Party may
+terminate: (a) for convenience on thirty (30) days' written notice, in which case
+any SOW then in progress continues under this Agreement until completed or wound
+down by mutual agreement; or (b) for material breach not cured within ten (10)
+days of written notice. On any termination, Client pays for all services performed
+and expenses incurred through the effective date of termination.</p>
+
+<h2>4. Intellectual Property</h2>
+<ol class="sub">
+  <li><strong>Pre-existing IP.</strong> Each Party retains all rights in materials
+  it owned or developed outside this Agreement.</li>
+  <li><strong>Client Deliverables.</strong> Upon Provider's receipt of full payment
+  under an SOW, Provider assigns to Client all right, title, and interest in the
+  client-specific deliverables identified in that SOW.</li>
+  <li><strong>Provider Frameworks.</strong> Reusable software, libraries, tooling,
+  templates, and know-how that Provider develops or uses across engagements
+  ("Provider Frameworks") remain Provider's sole property. To the extent Provider
+  Frameworks are embedded in a deliverable, Provider grants Client a non-exclusive,
+  perpetual, royalty-free license to use them as part of that deliverable.</li>
+  <li><strong>Open source.</strong> Deliverables may incorporate open-source
+  components identified in the SOW or its documentation, licensed under their own
+  terms.</li>
+</ol>
+
+<h2>5. Confidentiality</h2>
+<p>Each Party will protect the other's non-public information received under this
+Agreement with at least reasonable care, use it only to perform under this
+Agreement, and disclose it only to those with a need to know who are bound by
+comparable obligations. This Section does not apply to information that is or
+becomes public through no fault of the recipient, was rightfully known or received
+without duty of confidentiality, or is independently developed. If the Parties
+have executed a separate non-disclosure agreement, its terms control over this
+Section. These obligations survive termination for three (3) years; trade secrets
+remain protected for as long as they qualify as such.</p>
+
+<h2>6. Independent Contractor</h2>
+<p>Provider is an independent contractor. Nothing in this Agreement creates an
+employment, agency, partnership, or joint-venture relationship, and neither Party
+may bind the other.</p>
+
+<h2>7. Warranties; Disclaimer</h2>
+<p>Provider warrants that services will be performed in a professional and
+workmanlike manner consistent with industry standards. Client's exclusive remedy
+for breach of this warranty is re-performance of the nonconforming services
+reported within thirty (30) days of delivery. EXCEPT AS STATED IN THIS SECTION,
+SERVICES AND DELIVERABLES ARE PROVIDED "AS IS" AND PROVIDER DISCLAIMS ALL OTHER
+WARRANTIES, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NON-INFRINGEMENT.</p>
+
+<h2>8. Limitation of Liability</h2>
+<p>NEITHER PARTY IS LIABLE FOR INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL
+DAMAGES, OR LOST PROFITS OR DATA. EACH PARTY'S TOTAL LIABILITY UNDER AN SOW IS
+CAPPED AT THE FEES PAID OR PAYABLE UNDER THAT SOW IN THE TWELVE (12) MONTHS BEFORE
+THE CLAIM AROSE. THESE LIMITS DO NOT APPLY TO BREACHES OF SECTION 5
+(CONFIDENTIALITY), A PARTY'S INDEMNIFICATION OBLIGATIONS, OR WILLFUL MISCONDUCT.</p>
+
+<h2>9. Indemnification</h2>
+<p>Each Party will defend and indemnify the other against third-party claims to
+the extent arising from the indemnifying Party's material breach of this
+Agreement, negligence, or willful misconduct, provided the indemnified Party gives
+prompt notice and reasonable cooperation.</p>
+
+<h2>10. General</h2>
+<p>This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
+without regard to conflicts rules; the Parties consent to exclusive venue in the
+state and federal courts covering Cumberland County, Pennsylvania. Notices must be
+in writing and are effective when delivered to the addresses or electronic
+channels each Party designates. Neither Party may assign this Agreement without
+the other's consent, except to a successor in a merger or sale of substantially
+all assets. Neither Party is liable for delay caused by events beyond its
+reasonable control. If a provision is unenforceable, the remainder stands. This
+Agreement plus its SOWs and change orders are the entire agreement and supersede
+prior discussions; amendments must be in a writing signed by both Parties.
+Electronic signatures (including conformed "/s/" signatures and stamped signature
+images) are valid and binding. Sections 4, 5, 7, 8, 9, and 10 survive
+termination.</p>
+
+<p><strong>Agreed and accepted</strong> as of the Effective Date:</p>
+{{ sigblocks(company, client, signature_uri) }}
+</div>
+{% endblock %}

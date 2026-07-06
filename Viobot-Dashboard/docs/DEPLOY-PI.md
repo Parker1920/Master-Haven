@@ -1,16 +1,17 @@
-# Viobot Dashboard — Pi deploy (Phase 1 testing)
+# Viobot Dashboard — Pi deploy
 
-Goal: stand the dashboard up next to `viobot` on the Pi, reading the **live** Viobot DB, so we can test
-against real Haven servers — **before** any Discord OAuth app or art3mis change.
+Goal: run the dashboard next to `viobot` on the Pi, reading and **writing** the **live** Viobot DB, so
+server admins manage real Haven-server config through it.
 
 ## How it runs
 - One container (`viobot-dashboard`): the Node API also serves the built React SPA (same origin).
 - Mounts the live DB volume `/home/pi8gb/docker/viobot-data/db` → `/app/data` (the same file the bot uses).
-- **Read-only in Phase 1:** the connection runs `PRAGMA query_only=ON`, so it can read the live config but
-  physically cannot write. (The mount is read-write only because WAL *readers* must write the `-shm` lock
-  slots; the SQL-layer guard is what guarantees no data changes.)
-- **Login:** `DEV_LOGIN=1` enables a testing bypass (no Discord app) — the session is treated as admin of
-  every server Viobot is in, so the full server list + config are visible. Turn this off before real launch.
+- **Live read-WRITE:** the dashboard is a full config editor. Writes persist to Viobot's SQLite DB with
+  backup-before-write + optimistic concurrency (WAL + `busy_timeout`). Config changes apply automatically
+  within ~30 seconds because the bot re-reads config from the DB (30s cache TTL + `forceReload`) — no
+  reload hook needed. Set `VIOBOT_DB_READONLY=true` as an optional kill-switch to make write endpoints 403.
+- **Login:** in the normal deploy this is real Discord OAuth. `DEV_LOGIN=1` is a dev-only bypass (no Discord
+  app) that treats the session as admin of every server Viobot is in — keep it off for any real launch.
 
 ## Steps (on the Pi, after `git pull`)
 The code lives in the Master-Haven clone after you pull. From the `Viobot-Dashboard/deploy/` folder there:
@@ -33,11 +34,11 @@ Click **Dev login (testing)** → you should see every server Viobot is in, read
 ## Health check
 `GET http://<pi>:8091/api/health` →
 ```json
-{ "ok": true, "phase": 1, "oauthConfigured": false, "devLogin": true, "serveStatic": true,
-  "db": { "queryOnly": true, "journalMode": "wal", "registeredGuilds": 19, ... } }
+{ "ok": true, "oauthConfigured": true, "devLogin": false, "serveStatic": true,
+  "db": { "queryOnly": false, "journalMode": "wal", "registeredGuilds": 19, ... } }
 ```
+(`queryOnly` is `true` only when the `VIOBOT_DB_READONLY` kill-switch is enabled.)
 
-## Later (not now)
-- **Real login:** set `DISCORD_CLIENT_ID/SECRET/REDIRECT_URI`, set `DEV_LOGIN=false`, register the redirect
-  URI on the Discord app, put it behind NPM + a domain, set `SESSION_SECURE=true`.
-- **Writes (Phase 2):** set `VIOBOT_DB_READONLY=false` + add backup-before-write + the bot-side reload hook.
+## Real login (normal deploy)
+- Set `DISCORD_CLIENT_ID/SECRET/REDIRECT_URI`, set `DEV_LOGIN=0`, register the redirect URI on the Discord
+  app, put it behind NPM + a domain, set `SESSION_SECURE=true`. (Live at `viobot.havenmap.online`.)

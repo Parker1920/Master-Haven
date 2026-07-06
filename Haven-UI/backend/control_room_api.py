@@ -2780,6 +2780,16 @@ async def save_system(payload: dict, session: Optional[str] = Cookie(None)):
     conn = None
     try:
         conn = get_db_connection()
+        # This endpoint rebuilds a system's bodies via `DELETE FROM planets` and
+        # relies on the moons.planet_id ON DELETE CASCADE (and discoveries
+        # ON DELETE SET NULL) FKs firing. The module-level get_db_connection()
+        # in THIS file omits `PRAGMA foreign_keys=ON` (unlike db.py's), so without
+        # this line the moons are NOT cascade-deleted — and the id-reuse re-insert
+        # (Fix B) then collides with `UNIQUE constraint failed: moons.id` on any
+        # system that has moons, while discoveries silently orphan. Enable FK
+        # enforcement for this rebuild transaction to match db.py and what the
+        # capture/restore_discovery_links + id-reuse machinery already assume.
+        conn.execute('PRAGMA foreign_keys=ON')
         cursor = conn.cursor()
 
         # Event participation (opt-in competition). The wizard's EventPicker
