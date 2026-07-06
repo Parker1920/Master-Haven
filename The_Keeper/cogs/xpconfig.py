@@ -25,24 +25,28 @@ class XPSetupPromptView(discord.ui.View):
             sheet = self.cog.get_guild_tab(self.guild_id)
             rows = sheet.get_all_values()
             
-            if len(rows) < 2 or len(rows[1]) < 7 or rows[1][6] == "":
-                config_defaults = [
-                    "", "", "", "", "", "",                               # Pad Columns A-F
-                    "1",                                                   # G: XP Per Msg
-                    "True",                                                # H: Msg Enabled
-                    "Congratulations {user}, you leveled up to {level}!",  # I: Msg Text
-                    "5",                                                   # J: Cooldown Sec
-                    "True",                                                # K: Global Track Enabled
-                    "False",                                               # L: Custom Theme Enabled
-                    "✨ {name}'s Level Progress",                           # M: Embed Title Template
-                    "#99cc00",                                             # N: Border Hex Color
-                    "🟩",                                                  # O: Filled Bar Emoji
-                    "⬛",                                                  # P: Empty Bar Emoji
-                    "10",                                                  # Q: Max Level Tiers
-                    "100,200,300,400,500,600,700,800,900,1000",            # R: Custom XP brackets list
-                    "Level 1,Level 2,Level 3,Level 4,Level 5,Level 6,Level 7,Level 8,Level 9,Level 10" # S: Level Names List
-                ]
-                sheet.update(range_name="A2:S2", values=[config_defaults])
+            # Use append_row if row 2 doesn't exist yet, or update if it does
+            config_defaults = [
+                "N/A", "GLOBAL", "0", "1", "0.0", "",                  # Pad Columns A-F
+                "1",                                                   # G: XP Per Msg
+                "True",                                                # H: Msg Enabled
+                "Congratulations {user}, you leveled up to {level}!",  # I: Msg Text
+                "5",                                                   # J: Cooldown Sec
+                "True",                                                # K: Global Track Enabled
+                "False",                                               # L: Custom Theme Enabled
+                "✨ {name}'s Level Progress",                           # M: Embed Title Template
+                "#99cc00",                                             # N: Border Hex Color
+                "🟩",                                                  # O: Filled Bar Emoji
+                "⬛",                                                  # P: Empty Bar Emoji
+                "10",                                                  # Q: Max Level Tiers
+                "100,200,300,400,500,600,700,800,900,1000",            # R: Custom XP brackets list
+                "Level 1,Level 2,Level 3,Level 4,Level 5,Level 6,Level 7,Level 8,Level 9,Level 10" # S: Level Names List
+            ]
+            
+            if len(rows) < 2:
+                sheet.append_row(config_defaults, value_input_option="USER_ENTERED")
+            else:
+                sheet.update(range_name="A2:S2", values=[config_defaults], value_input_option="USER_ENTERED")
 
         await loop.run_in_executor(None, initialize_or_update_guild)
 
@@ -109,7 +113,7 @@ class CoreSettingsModal(discord.ui.Modal, title="Configure Core XP Parameters"):
                 self.level_up_msg.value,
                 self.cooldown.value.strip(),
                 "True"
-            ]])
+            ]], value_input_option="USER_ENTERED")
 
         await loop.run_in_executor(None, save_core)
         await interaction.followup.send("✅ Server runtime mechanics written successfully to Row 2!", ephemeral=True)
@@ -153,7 +157,7 @@ class LevelOnboardingModal(discord.ui.Modal, title="Bulk Level Setup Wizard"):
 
         def save_bulk_levels():
             sheet = self.cog.get_guild_tab(self.guild_id)
-            sheet.update(range_name="Q2:S2", values=[[final_max_tiers, final_brackets, final_names]])
+            sheet.update(range_name="Q2:S2", values=[[final_max_tiers, final_brackets, final_names]], value_input_option="USER_ENTERED")
 
         await loop.run_in_executor(None, save_bulk_levels)
         await interaction.followup.send(f"🚀 Successfully initialized **{total_levels}** tiers! Configurations saved into Row 2 (Columns Q, R, S).", ephemeral=True)
@@ -182,7 +186,7 @@ class CustomLayoutModal(discord.ui.Modal, title="Customize Card UI Styles"):
                 self.border_color.value.strip(),
                 self.filled_bar.value.strip(),
                 self.empty_bar.value.strip()
-            ]])
+            ]], value_input_option="USER_ENTERED")
 
         await loop.run_in_executor(None, save_layout)
         await interaction.followup.send("✨ Theme layout assets updated successfully inside row 2!", ephemeral=True)
@@ -212,7 +216,7 @@ class XPConfigCog(commands.Cog, name="xp"):
                 "Custom Theme Enabled", "Embed Title Template", "Border Hex Color", "Filled Bar Emoji", "Empty Bar Emoji",
                 "Level Curve Max Total Tiers", "Level Curve Brackets", "Level Names List"
             ]
-            new_tab.update(range_name="A1:S1", values=[headers])
+            new_tab.append_row(headers, value_input_option="USER_ENTERED")
             return new_tab
 
     async def process_message_sheets_xp(self, message: discord.Message):
@@ -272,9 +276,9 @@ class XPConfigCog(commands.Cog, name="xp"):
 
         def save_user_record():
             if user_row_idx:
-                sheet.update(range_name=f"A{user_row_idx}:E{user_row_idx}", values=[user_payload])
+                sheet.update(range_name=f"A{user_row_idx}:E{user_row_idx}", values=[user_payload], value_input_option="USER_ENTERED")
             else:
-                sheet.append_row(user_payload)
+                sheet.append_row(user_payload, value_input_option="USER_ENTERED")
 
         await loop.run_in_executor(None, save_user_record)
 
