@@ -54,7 +54,7 @@ set "HELPER=%~dp0_haven_updater_helper.py"
 if not exist "%HELPER%" (
     echo ERROR: _haven_updater_helper.py not found alongside this .bat.
     echo Re-download the latest UPDATE_HAVEN_EXTRACTOR.bat and the helper file from:
-    echo   https://github.com/Parker1920/Master-Haven/releases/latest
+    echo   https://github.com/Voyagers-Haven-LLC/nms-haven-extractor/releases/latest
     pause
     exit /b 1
 )
@@ -79,7 +79,7 @@ REM ============================================================
 set "RELEASE_JSON=%TEMP%\haven_release.json"
 if exist "!RELEASE_JSON!" del /f /q "!RELEASE_JSON!"
 
-curl.exe -sS -L --max-time 20 -H "User-Agent: HavenExtractor-Updater" "https://api.github.com/repos/Parker1920/Master-Haven/releases/latest" -o "!RELEASE_JSON!"
+curl.exe -sS -L --max-time 20 -H "User-Agent: HavenExtractor-Updater" "https://api.github.com/repos/Voyagers-Haven-LLC/nms-haven-extractor/releases/latest" -o "!RELEASE_JSON!"
 if errorlevel 1 (
     echo ERROR: Could not reach GitHub.
     echo Check your internet connection and try again.

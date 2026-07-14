@@ -902,8 +902,8 @@ GAME_MODE_TO_DIFFICULTY_INDEX = {
 
 class HavenExtractorMod(Mod):
     __author__ = "Voyagers Haven"
-    __version__ = "1.10.5"
-    __description__ = "Fixes a long-standing config bug where pymhf's DearPyGUI sometimes round-tripped the RealityMode / CommunityTag enum gui_variables back as their Python repr string (\"RealityMode.Normal\") instead of as enum instances. The old setter fallback `str(value)` persisted that bad string verbatim into config.json and into every submission's `reality` field, which produced a phantom \"RealityMode.Normal\" reality on the Haven dashboard (50 prod rows as of 2026-05-12). Adds `_normalize_reality()` / `_normalize_community_tag()` helpers, applies them in both setters, and scrubs the values at module-init when loading config.json so any pre-existing bad config self-heals."
+    __version__ = "1.10.6"
+    __description__ = "Releases have moved from Parker1920/Master-Haven to Voyagers-Haven-LLC/nms-haven-extractor. The updater (UPDATE_HAVEN_EXTRACTOR.bat) can only replace files inside mod/, so it can never fix its own release URL — instead the mod rewrites the sibling .bat at startup (_repoint_updater_bat) if it still points at the old repo. No extraction/gameplay changes."
 
     # ==========================================================================
     # VALID ADJECTIVE LISTS FROM adjectives.js
@@ -1150,8 +1150,31 @@ class HavenExtractorMod(Mod):
         # Load adjective cache from disk (if exists)
         self._load_adjective_cache()
 
+        # v1.10.6: migrate installs whose updater still fetches from the old repo
+        self._repoint_updater_bat()
+
         logger.info(f"Haven Extractor v{self.__version__} ready")
         logger.info("  Warp to systems → data captured automatically → Export when ready")
+
+
+    def _repoint_updater_bat(self):
+        """One-time migration (v1.10.6): releases moved from Parker1920/Master-Haven
+        to Voyagers-Haven-LLC/nms-haven-extractor. UPDATE_HAVEN_EXTRACTOR.bat lives
+        one level ABOVE mod/ and the update zip only ever overwrites mod/, so the
+        .bat can't fix itself — rewrite its release URLs from here instead.
+        Binary read/write so line endings and encoding pass through untouched."""
+        try:
+            bat = Path(__file__).resolve().parent.parent / "UPDATE_HAVEN_EXTRACTOR.bat"
+            if not bat.is_file():
+                return
+            data = bat.read_bytes()
+            if b"Parker1920/Master-Haven" not in data:
+                return
+            bat.write_bytes(data.replace(b"Parker1920/Master-Haven",
+                                         b"Voyagers-Haven-LLC/nms-haven-extractor"))
+            logger.info("[UPDATER] Repointed UPDATE_HAVEN_EXTRACTOR.bat to Voyagers-Haven-LLC/nms-haven-extractor")
+        except Exception as e:
+            logger.warning(f"[UPDATER] Could not repoint UPDATE_HAVEN_EXTRACTOR.bat: {e}")
 
 
     # =========================================================================
